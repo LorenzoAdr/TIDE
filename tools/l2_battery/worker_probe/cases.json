@@ -1,0 +1,93 @@
+{
+  "cards_root": ".tuide/ai/l2_explore_battery/round_atlas20_pilot_workers2",
+  "cases": [
+    {
+      "id": "cubre_gold_rich",
+      "kind": "cubre",
+      "case_id": "17_ai_spinner_stuck",
+      "stem": "busy_strip",
+      "question": "¿es busy_strip el objeto de la consulta?",
+      "trap": false,
+      "thin": false,
+      "require_tool": false,
+      "expect": { "verdict": ["cubre"] }
+    },
+    {
+      "id": "cubre_trap",
+      "kind": "cubre",
+      "case_id": "04_ai_thinking_status_bar",
+      "stem": "console_panel",
+      "question": "¿es console_panel el objeto de la consulta?",
+      "trap": true,
+      "thin": false,
+      "require_tool": false,
+      "expect": { "verdict": ["no_cubre"] }
+    },
+    {
+      "id": "cubre_thin",
+      "kind": "cubre",
+      "case_id": "06_quit_unsaved_warning",
+      "stem": "",
+      "question": "",
+      "trap": false,
+      "thin": true,
+      "require_tool": true,
+      "expect": { "verdict": ["cubre", "no_cubre"] }
+    },
+    {
+      "id": "como_mech",
+      "kind": "como",
+      "case_id": "20_cancel_ai_generation",
+      "stem": "ai_controller",
+      "question": "¿quién cancela o limpia la generación en ai_controller?",
+      "trap": false,
+      "thin": false,
+      "require_tool": true,
+      "expect": { "verdict": ["chain"] }
+    },
+    {
+      "id": "como_latch",
+      "kind": "como",
+      "case_id": "17_ai_spinner_stuck",
+      "stem": "busy_strip",
+      "question": "¿quién pone o limpia el estado de carga en busy_strip?",
+      "trap": false,
+      "thin": false,
+      "require_tool": true,
+      "expect": { "verdict": ["chain"] }
+    },
+    {
+      "id": "como_overlay",
+      "kind": "como",
+      "case_id": "17_ai_spinner_stuck",
+      "stem": "console_panel",
+      "question": "¿quién controla el estado de carga del chat en este stem?",
+      "trap": false,
+      "thin": false,
+      "require_tool": true,
+      "expect": { "verdict": ["chain", "no_cubre"] }
+    },
+    {
+      "id": "gap_port",
+      "kind": "gap",
+      "case_id": "17_ai_spinner_stuck",
+      "stem": "busy_strip",
+      "question": "¿qué eslabón falta en busy_strip para explicar la consulta?",
+      "trap": false,
+      "thin": false,
+      "require_tool": true,
+      "expect": { "verdict": ["missing", "found"], "prefer_follow": true }
+    },
+    {
+      "id": "gap_same",
+      "kind": "gap",
+      "case_id": "20_cancel_ai_generation",
+      "stem": "ai_controller",
+      "question": "¿qué eslabón falta en ai_controller para cancelar en limpio?",
+      "trap": false,
+      "thin": false,
+      "require_tool": true,
+      "expect": { "verdict": ["missing", "found"], "prefer_follow": true }
+    }
+  ]
+}

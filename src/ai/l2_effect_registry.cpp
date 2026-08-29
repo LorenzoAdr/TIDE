@@ -6771,7 +6771,112 @@ std::string causal_symbol_of(const std::string& target) {
   return colon == std::string::npos ? target : target.substr(colon + 1);
 }
 
+bool causal_token_is_stop(const std::string& t) {
+  static const std::unordered_set<std::string> kStop = {
+      "el",     "la",     "lo",     "los",    "las",    "un",     "una",    "unos",   "unas",
+      "de",     "del",    "al",     "a",      "en",     "y",      "o",      "u",      "que",
+      "se",     "su",     "sus",    "es",     "son",    "ser",    "fue",    "por",    "para",
+      "con",    "sin",    "sobre",  "entre",  "hasta",  "desde",  "como",   "cuando", "donde",
+      "quien",  "cual",   "cuales", "este",   "esta",   "estos",  "estas",  "eso",    "esa",
+      "no",     "si",     "mas",    "muy",    "ya",     "hay",    "the",    "of",     "to",
+      "in",     "on",     "for",    "and",    "or",     "is",     "are",    "be",     "was",
+      "with",   "from",   "as",     "at",     "it",     "an",     "quiero", "necesito",
+      "entender","modifica","modificar","añade","anade","añadir","anadir","cambia","muestrame",
+      "mostrar","dentro","cuando","usuario","tambien","despues","antes","tiene","hacer"};
+  return kStop.count(t) != 0;
+}
+
+void causal_push_tokens(const std::string& raw, std::vector<std::string>* out) {
+  const std::string s = causal_lower(raw);
+  std::string cur;
+  auto flush = [&]() {
+    if (cur.size() >= 3 && !causal_token_is_stop(cur)) {
+      out->push_back(cur);
+    }
+    cur.clear();
+  };
+  for (unsigned char c : s) {
+    if (std::isalnum(c) || c >= 0x80) {
+      cur.push_back(static_cast<char>(c));
+    } else {
+      flush();
+    }
+  }
+  flush();
+}
+
+bool causal_tokens_match(const std::string& a, const std::string& b) {
+  if (a == b) {
+    return true;
+  }
+  if (a.size() < 4 || b.size() < 4) {
+    return false;
+  }
+  return a.find(b) == 0 || b.find(a) == 0 || a.find(b) != std::string::npos ||
+         b.find(a) != std::string::npos;
+}
+
+int causal_token_overlap_score(const std::vector<std::string>& query_toks,
+                               const std::vector<std::string>& hay_toks) {
+  int score = 0;
+  for (const auto& qt : query_toks) {
+    int best = 0;
+    for (const auto& ht : hay_toks) {
+      if (causal_tokens_match(qt, ht)) {
+        best = std::max(best, static_cast<int>(std::min(qt.size(), ht.size())));
+      }
+    }
+    score += best;
+  }
+  return score;
+}
+
+std::string causal_zone_overlap_hay(const nlohmann::json& zone) {
+  std::string hay;
+  auto add = [&](const std::string& s) {
+    if (!s.empty()) {
+      hay += " ";
+      hay += s;
+    }
+  };
+  for (const char* key : {"primary_stems", "core_stems", "context_stems"}) {
+    for (const auto& s : zone.value(key, nlohmann::json::array())) {
+      if (s.is_string()) {
+        add(s.get<std::string>());
+      }
+    }
+  }
+  add(zone.value("id", ""));
+  for (const auto& card : zone.value("representatives", nlohmann::json::array())) {
+    add(card.value("target", ""));
+  }
+  const auto roles = zone.value("roles", nlohmann::json::object());
+  for (const auto& writer : roles.value("writers", nlohmann::json::array())) {
+    add(writer.value("target", ""));
+  }
+  for (const auto& nucleus : zone.value("nuclei", nlohmann::json::array())) {
+    add(nucleus.value("state", ""));
+  }
+  return hay;
+}
+
 }  // namespace
+
+int registry_causal_query_zone_overlap(const std::string& query, const nlohmann::json& zone) {
+  std::vector<std::string> qtoks;
+  std::vector<std::string> htoks;
+  causal_push_tokens(query, &qtoks);
+  causal_push_tokens(causal_zone_overlap_hay(zone), &htoks);
+  return causal_token_overlap_score(qtoks, htoks);
+}
+
+int registry_causal_query_hay_overlap(const std::string& query, const std::string& hay) {
+  std::vector<std::string> qtoks;
+  std::vector<std::string> htoks;
+  causal_push_tokens(query, &qtoks);
+  causal_push_tokens(hay, &htoks);
+  return causal_token_overlap_score(qtoks, htoks);
+}
 
 namespace {
 
@@ -7016,6 +7121,64 @@ void registry_atlas_fill_expand_from(const nlohmann::json& payload,
   }
 }
 
+nlohmann::json registry_atlas_overlap_add_ids(const nlohmann::json& payload,
+                                            const std::string& query,
+                                            const std::vector<std::string>& opened_ids) {
+  nlohmann::json out = nlohmann::json::array();
+  if (query.empty()) {
+    return out;
+  }
+  const auto zones = payload.value("zones", nlohmann::json::array());
+  std::unordered_set<std::string> opened(opened_ids.begin(), opened_ids.end());
+  int max_opened = 0;
+  for (const auto& zone : zones) {
+    const std::string id = zone.value("id", "");
+    if (id.empty() || opened.count(id) == 0) {
+      continue;
+    }
+    max_opened = std::max(max_opened, registry_causal_query_zone_overlap(query, zone));
+  }
+  int best_closed = 0;
+  std::string best_id;
+  for (const auto& zone : zones) {
+    const std::string id = zone.value("id", "");
+    if (id.empty() || opened.count(id) != 0) {
+      continue;
+    }
+    const int ov = registry_causal_query_zone_overlap(query, zone);
+    if (ov > best_closed) {
+      best_closed = ov;
+      best_id = id;
+    }
+  }
+  if (best_closed > max_opened && !best_id.empty()) {
+    out.push_back(best_id);
+  }
+  return out;
+}
+
+std::string registry_causal_zone_id_for_stem(const nlohmann::json& payload,
+                                            const std::string& stem) {
+  if (stem.empty()) {
+    return "";
+  }
+  const std::string needle = causal_lower(stem);
+  const auto zones = payload.value("zones", nlohmann::json::array());
+  for (const auto& zone : zones) {
+    if (causal_lower(zone.value("stem", "")) == needle) {
+      return zone.value("id", "");
+    }
+    for (const char* key : {"primary_stems", "core_stems", "context_stems"}) {
+      for (const auto& s : zone.value(key, nlohmann::json::array())) {
+        if (s.is_string() && causal_lower(s.get<std::string>()) == needle) {
+          return zone.value("id", "");
+        }
+      }
+    }
+  }
+  return "";
+}
+
 std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
                                           const std::string& consulta) {
   std::ostringstream out;
@@ -7037,7 +7200,11 @@ std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
     if (!pstem.empty()) {
       auto it = stem_first_id.find(causal_lower(pstem));
       if (it != stem_first_id.end()) {
-        out << "\n" << id << "  same=" << it->second << "  kind=" << kind << "  stems: " << pstem
+        out << "\n" << id << "  same=" << it->second << "  kind=" << kind;
+        if (!consulta.empty()) {
+          out << "  ov=" << registry_causal_query_zone_overlap(consulta, zone);
+        }
+        out << "  stems: " << pstem
             << "\n";
         const auto peeks = atlas_diverse_peeks(zone);
         if (!peeks.empty()) {
@@ -7047,7 +7214,11 @@ std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
       }
       stem_first_id.emplace(causal_lower(pstem), id);
     }
-    out << "\n" << id << "  kind=" << kind << "  stems:";
+    out << "\n" << id << "  kind=" << kind;
+    if (!consulta.empty()) {
+      out << "  ov=" << registry_causal_query_zone_overlap(consulta, zone);
+    }
+    out << "  stems:";
     int stem_n = 0;
     for (const char* key : {"primary_stems", "core_stems"}) {
       for (const auto& stem : zone.value(key, nlohmann::json::array())) {
@@ -7170,6 +7341,78 @@ std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
   return out.str();
 }
 
+std::string registry_causal_pilot_opened_pack(const nlohmann::json& payload,
+                                             const std::vector<std::string>& ids,
+                                             const std::string& query) {
+  std::ostringstream out;
+  out << "# pilot_opened_v1\n";
+  out << "n=" << ids.size() << "  (owns+nucleus+peek+port; sin inspect gordo)\n";
+  std::unordered_map<std::string, nlohmann::json> by_id;
+  for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
+    const std::string id = zone.value("id", "");
+    if (!id.empty()) {
+      by_id[id] = zone;
+    }
+  }
+  for (const auto& want : ids) {
+    auto it = by_id.find(want);
+    if (it == by_id.end()) {
+      out << "\n" << want << "  (id no está en el pack)\n";
+      continue;
+    }
+    const auto& zone = it->second;
+    const std::string kind = registry_causal_zone_kind(zone);
+    const std::string pstem = atlas_primary_stem(zone);
+    out << "\n" << want << "  kind=" << kind;
+    if (!query.empty()) {
+      out << "  ov=" << registry_causal_query_zone_overlap(query, zone);
+    }
+    out << "\n";
+    const std::string owns = atlas_owns_caption(zone);
+    out << "    owns: " << (owns.empty() ? (pstem.empty() ? "?" : pstem) : owns) << "\n";
+    const std::string not_cap = atlas_not_caption(zone, kind);
+    if (!not_cap.empty()) {
+      out << "    not: " << not_cap << "\n";
+    }
+    std::string nucleus;
+    for (const auto& item : zone.value("nuclei", nlohmann::json::array())) {
+      const std::string state = item.value("state", "");
+      if (state.empty()) {
+        continue;
+      }
+      if (!nucleus.empty()) {
+        nucleus += ", ";
+      }
+      nucleus += state;
+      if (nucleus.size() > 72) {
+        break;
+      }
+    }
+    if (!nucleus.empty()) {
+      out << "    nucleus: " << nucleus << "\n";
+    }
+    const auto peeks = atlas_diverse_peeks(zone);
+    if (!peeks.empty()) {
+      out << "    peek:";
+      for (std::size_t i = 0; i < peeks.size() && i < 2; ++i) {
+        if (i) {
+          out << ",";
+        }
+        out << " " << peeks[i];
+      }
+      out << "\n";
+    }
+    const auto ports = zone.value("ports", nlohmann::json::array());
+    if (!ports.empty()) {
+      const auto& edge = ports.front();
+      out << "    port: " << causal_short_target(edge.value("from", "?")) << " -"
+          << edge.value("kind", "?") << "-> " << causal_short_target(edge.value("to", "?"))
+          << "\n";
+    }
+  }
+  return out.str();
+}
+
 std::string registry_causal_pack_markdown(const nlohmann::json& payload, GraphViewLevel level) {
   switch (level) {
     case GraphViewLevel::Atlas:
@@ -7188,7 +7431,8 @@ El atlas es un esquema: owns = objeto que posee la zona; not = lo que NO es; sam
 No corones ancla ni des f1_done. search: son términos de retrieval, NO módulos.
 
 Elige 1–2 M* cuyo owns cubra el OBJETO de la consulta (modal, panel, latch, entrypoint):
-- Prefiere kind=object o kind=latch. Si hay same=M1, inspecciona M1 no el clon.
+- Prefiere el owns/peek que más solape con la consulta. kind=object/latch es desempate, no el criterio.
+- Si hay same=M1, inspecciona M1 no el clon.
 - No sustituyas el objeto por un vecino (download, hover, ai_trace, bindings path, recording).
 - Un 3º id solo si es hilo rival (latch vs caller). PROHIBIDO 3 hilos "por si acaso".
 - kind=chrome NO explica drag-drop, compile, settings ni LSP.
@@ -7201,7 +7445,7 @@ También vale inspect como objetos {id,need}. Máximo 3 ids. Solo ids que aparec
 
 std::string registry_causal_atlas_survey_user_prompt(const std::string& atlas_markdown) {
   std::ostringstream out;
-  out << "Cubre el objeto de la consulta usando owns/not (no search). "
+  out << "Cubre el objeto de la consulta usando owns/not y el ov= (solape). "
          "Si same=M*, elige el primero. No inventes ids.\n\n"
       << atlas_markdown;
   return out.str();
@@ -7217,6 +7461,7 @@ Reglas:
 - Hover no cubre drag-drop. SHA256 no cubre toolpacks. Recording/bindings.json no cubre
   abrir settings. Highlight scheduler no cubre "animación al aplicar un edit" si hay editor_panel.
 - Resaltado que tarda: visual_highlight SÍ puede cubrir si no hay mejor owns de editor.
+- Si un Restante tiene ov= mayor que lo abierto (owns/peek vs consulta), add ese id.
 - add: 1–2 ids de Ids restantes (3 si no hay ninguna abierta). Vacío si covers=true.
 - Si el objeto no está en el atlas: add=[] (no inventes ids).
 
@@ -7253,7 +7498,8 @@ std::string registry_causal_atlas_cover_user_prompt(const std::string& atlas_mar
     }
     out << "\n";
   }
-  out << "¿Cubren el objeto (owns) de la consulta? Si no, add de Ids restantes. No inventes ids.\n\n"
+  out << "¿Cubren el objeto (owns) de la consulta? Si un Restante solapa más (ov=), add. "
+         "No inventes ids.\n\n"
       << atlas_markdown;
   if (!inspect_markdown.empty()) {
     out << "\n\nFichas ya ampliadas:\n";
@@ -7390,33 +7636,37 @@ int registry_atlas_merge_inspect_ids(RegistryCausalTriageDecision* decision,
 
 std::string registry_causal_zone_hyp_system_prompt() {
   return R"(Eres un formulador de HIPÓTESIS DE FALLO sobre código, no un ranking ni un juez final.
-Recibes la consulta del usuario y fichas INSPECT (zonas ya ampliadas). Tu trabajo es escribir
-1–2 hipótesis en el schema de ancla: elemento afectado, control, trigger y cleanup.
+Recibes fichas INSPECT. NO te autoevalúes con un número de confianza: o anclas al objeto
+o pides ampliar fichas. Una hyp rellena sobre un vecino con más "mechanism" no vale.
 
 Reglas:
-- owns: de cada ficha es el objeto que posee. Si coincide con la consulta, ancla AHÍ (affected).
-  El vecino con más "mechanism" no gana: es 2ª hyp rival, no el affected de la 1ª.
-- Cada slot cita un stem o path_symbol VISIBLE en owns/stems/peeks. null si esa pieza no aparece.
-- path_symbol puede ser el peek corto (file::symbol) o el target path:symbol de la ficha.
-- Prohibido usar glosa de la consulta como stem (p.ej. "pestaña about") si no está en las fichas.
-- gap = el eslabón que FALTA o falla (trigger|control|cleanup|affected|consumer).
-- anchor_role = por dónde cazar primero (affected o el gap).
-- Chrome hover no explica un spinner stuck. Hueco real: slots null y gap=affected.
-- Si las fichas no cubren el objeto de la consulta, no inventes un fallo en un vecino
-  (hover ≠ drag-drop, highlight debounce ≠ editor hole, sha256 ≠ toolpacks).
-- La 2ª hyp SOLO si es un mecanismo rival distinto. No dupliques el vecino como affected.
+- owns: de cada ficha es el objeto. Si coincide con la consulta, ancla AHÍ (affected).
+- Cada slot cita stem/path_symbol VISIBLE en owns/stems/peeks. null si no aparece.
+- Prohibido glosa de la consulta como stem. Prohibido copiar ejemplos de este prompt.
+- Si el pack NO cubre el objeto, o te falta el eslabón: need_more (NO rellenes un vecino).
+  add = ids de la lista Restantes; view=deep para ahondar las fichas ya abiertas;
+  expand_from = peeks de la ficha del hueco.
+- La 2ª hyp SOLO si es un mecanismo rival. Chrome hover ≠ drag-drop; highlight ≠ editor hole.
 
-Devuelve SOLO este JSON:
-{"action":"causal_zone_hyp_v1","hypotheses":[{"claim":"el latch no se limpia al terminar el modelo","slots":{"affected":{"stem":"busy_strip","path_symbol":"busy_strip::clear_busy"},"control":{"stem":"ai_controller","path_symbol":null},"trigger":null,"cleanup":{"stem":"busy_strip","path_symbol":"busy_strip::clear_busy"}},"gap":"cleanup","anchor_role":"affected","falsify_by":"si clear_busy corre al terminar, hyp muere","why":"M6 posee spinner_frame y writers set/clear"}],"why":"razón concreta"}
+Devuelve SOLO uno de estos JSON:
+{"action":"causal_zone_hyp_v1","hypotheses":[{"claim":"el objeto X no hace Y al evento Z","slots":{"affected":{"stem":"STEM_DE_OWNS","path_symbol":"file::entry"},"control":null,"trigger":null,"cleanup":null},"gap":"trigger","anchor_role":"affected","falsify_by":"si entry corre al evento, hyp muere","why":"M* posee STEM_DE_OWNS"}],"why":"objeto y eslabón visibles"}
+{"action":"causal_zone_hyp_v1","need_more":true,"add":["M3"],"view":"deep","expand_from":[],"hypotheses":[],"why":"las fichas abiertas no cubren el objeto de la consulta"}
 Máximo 2 hyps. claim/why/falsify_by: 12–160 caracteres.)";
 }
 
-std::string registry_causal_zone_hyp_user_prompt(const std::string& inspect_markdown) {
+std::string registry_causal_zone_hyp_user_prompt(const std::string& inspect_markdown,
+                                                 const std::vector<std::string>& remaining_ids) {
   std::ostringstream out;
-  out << "Con estas fichas ampliadas, formula la hipótesis de fallo (elemento afectado, etc.).\n"
-         "owns gana si coincide con la consulta; un vecino 'más mecanismo' es 2ª hyp rival, no el ancla.\n"
-         "No uses glosa del prompt como stem. Si el pack no cubre el objeto: null + gap=affected.\n\n"
-      << inspect_markdown;
+  out << "Con estas fichas, o anclas una hyp al owns del objeto, o pides need_more.\n"
+         "No rellenes un vecino 'más mecanismo'. No copies el ejemplo del sistema.\n";
+  if (!remaining_ids.empty()) {
+    out << "Ids restantes para add:";
+    for (const auto& id : remaining_ids) {
+      out << " " << id;
+    }
+    out << "\n";
+  }
+  out << "\n" << inspect_markdown;
   return out.str();
 }
 
@@ -7539,10 +7789,149 @@ bool hyp_fill_slot(HypSlotLocus* slot, const nlohmann::json& item, const std::st
   return true;
 }
 
+bool hyp_kind_objectish(const std::string& kind) {
+  return kind == "object" || kind == "latch" || kind == "hole";
+}
+
+int hyp_count_grounded(const AnchorHypothesis& h) {
+  int n = 0;
+  auto filled = [](const HypSlotLocus& s) { return !s.stem.empty() || !s.path_symbol.empty(); };
+  if (filled(h.affected)) {
+    ++n;
+  }
+  if (filled(h.control)) {
+    ++n;
+  }
+  if (filled(h.trigger)) {
+    ++n;
+  }
+  if (filled(h.cleanup)) {
+    ++n;
+  }
+  return n;
+}
+
+std::string hyp_anchor_stem(const AnchorHypothesis& h) {
+  if (!h.affected.stem.empty()) {
+    return h.affected.stem;
+  }
+  if (!h.control.stem.empty()) {
+    return h.control.stem;
+  }
+  if (!h.trigger.stem.empty()) {
+    return h.trigger.stem;
+  }
+  return h.cleanup.stem;
+}
+
+bool hyp_zone_has_stem(const nlohmann::json& zone, const std::string& stem) {
+  const std::string needle = causal_lower(stem);
+  if (needle.empty()) {
+    return false;
+  }
+  auto hit = [&](const std::string& s) {
+    const std::string l = causal_lower(s);
+    return !l.empty() && (l == needle || l.find(needle) != std::string::npos ||
+                          needle.find(l) != std::string::npos);
+  };
+  for (const char* key : {"primary_stems", "core_stems"}) {
+    for (const auto& s : zone.value(key, nlohmann::json::array())) {
+      if (s.is_string() && hit(s.get<std::string>())) {
+        return true;
+      }
+    }
+  }
+  return hit(atlas_primary_stem(zone)) || hit(atlas_owns_caption(zone));
+}
+
+RegistryCausalHypMass hyp_score_one(const AnchorHypothesis& h, const nlohmann::json& payload) {
+  RegistryCausalHypMass m;
+  m.grounded_slots = hyp_count_grounded(h);
+  m.honest_gap = m.grounded_slots == 0 && (h.gap == "affected" || h.gap == "consumer");
+  const std::string anchor = hyp_anchor_stem(h);
+  bool has_objectish_other = false;
+  for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
+    const std::string kind = registry_causal_zone_kind(zone);
+    const bool mine = !anchor.empty() && hyp_zone_has_stem(zone, anchor);
+    if (hyp_kind_objectish(kind) && mine) {
+      m.owns_ok = true;
+    }
+    if (hyp_kind_objectish(kind) && !mine) {
+      has_objectish_other = true;
+    }
+  }
+  m.neighbor_fill = !anchor.empty() && has_objectish_other && !m.owns_ok;
+  float s = 0.12f * static_cast<float>(m.grounded_slots);
+  if (m.owns_ok) {
+    s += 0.50f;
+  }
+  if (m.neighbor_fill) {
+    s = std::min(s, 0.45f);
+  }
+  if (m.honest_gap) {
+    s = std::min(s, 0.22f);
+  }
+  m.score = std::max(0.f, std::min(1.f, s));
+  if (m.owns_ok && m.grounded_slots >= 1 && !m.neighbor_fill && m.score >= 0.55f) {
+    m.band = "high";
+  } else if (m.score >= 0.28f || m.grounded_slots >= 2) {
+    m.band = "medium";
+  } else {
+    m.band = "low";
+  }
+  if (m.honest_gap) {
+    m.why = "hueco declarado sin slots grounded";
+  } else if (m.neighbor_fill) {
+    m.why = "ancla en vecino; el pack ya tiene un objeto/latch/hueco distinto";
+  } else if (m.owns_ok) {
+    m.why = "ancla en objeto/latch/hueco de las fichas";
+  } else {
+    m.why = "ancla sin owns objectish";
+  }
+  return m;
+}
+
+void hyp_score_decision(RegistryCausalHypDecision* out, const nlohmann::json& inspect_payload) {
+  if (out == nullptr) {
+    return;
+  }
+  out->masses.clear();
+  out->mass = 0.f;
+  out->mass_band = "low";
+  bool any_high = false;
+  for (const auto& h : out->hypotheses) {
+    auto m = hyp_score_one(h, inspect_payload);
+    if (m.score > out->mass) {
+      out->mass = m.score;
+      out->mass_band = m.band;
+    } else if (m.score == out->mass && m.band == "high") {
+      out->mass_band = "high";
+    }
+    if (m.band == "high") {
+      any_high = true;
+    }
+    out->masses.push_back(std::move(m));
+  }
+  if (any_high) {
+    out->mass_band = "high";
+    out->ok = out->parsed;
+    out->need_more = false;
+  } else {
+    out->ok = false;
+    if (out->parsed) {
+      out->need_more = true;
+      if (out->why.size() < 8) {
+        out->why = "masa insuficiente: ampliar fichas";
+      }
+    }
+  }
+}
+
 }  // namespace
 
-RegistryCausalHypDecision registry_parse_causal_zone_hyp(const std::string& raw,
-                                                         const nlohmann::json& inspect_payload) {
+RegistryCausalHypDecision registry_parse_causal_zone_hyp(
+    const std::string& raw, const nlohmann::json& inspect_payload,
+    const std::vector<std::string>& atlas_zone_ids) {
   RegistryCausalHypDecision out;
   out.raw = raw;
   out.action = "causal_zone_hyp_v1";
@@ -7559,14 +7948,69 @@ RegistryCausalHypDecision registry_parse_causal_zone_hyp(const std::string& raw,
     out.error = std::string("JSON hyp inválido: ") + e.what();
     return out;
   }
-  if (j.value("action", "") != "causal_zone_hyp_v1") {
+  const std::string action = j.value("action", "");
+  if (action != "causal_zone_hyp_v1" && action != "causal_zone_hyp_need_more_v1") {
     out.error = "contrato causal_zone_hyp_v1 inválido";
     return out;
+  }
+  out.need_more = j.value("need_more", false) || action == "causal_zone_hyp_need_more_v1";
+  out.view = causal_lower(hyp_json_string(j, "view"));
+  if (out.view != "inspect" && out.view != "deep") {
+    out.view.clear();
+  }
+  std::unordered_set<std::string> allowed_ids;
+  for (const auto& id : atlas_zone_ids) {
+    if (!id.empty()) {
+      allowed_ids.insert(id);
+    }
+  }
+  for (const auto& zone : inspect_payload.value("zones", nlohmann::json::array())) {
+    const std::string id = zone.value("id", "");
+    if (!id.empty()) {
+      allowed_ids.insert(id);
+    }
+  }
+  if (j.contains("add") && j["add"].is_array()) {
+    for (const auto& id : j["add"]) {
+      if (!id.is_string()) {
+        continue;
+      }
+      const std::string s = id.get<std::string>();
+      if (allowed_ids.empty() || allowed_ids.count(s)) {
+        if (std::find(out.add.begin(), out.add.end(), s) == out.add.end()) {
+          out.add.push_back(s);
+        }
+      }
+    }
+    if (out.add.size() > 2) {
+      out.add.resize(2);
+    }
   }
   std::unordered_set<std::string> stems;
   std::unordered_set<std::string> targets;
   std::unordered_map<std::string, std::string> short_to_full;
   hyp_collect_menu(inspect_payload, &stems, &targets, &short_to_full);
+  if (j.contains("expand_from") && j["expand_from"].is_array()) {
+    for (const auto& t : j["expand_from"]) {
+      if (!t.is_string()) {
+        continue;
+      }
+      std::string s = t.get<std::string>();
+      auto it = short_to_full.find(s);
+      if (it != short_to_full.end()) {
+        s = it->second;
+      }
+      if (targets.count(s) || allowed_ids.empty()) {
+        if (std::find(out.expand_from.begin(), out.expand_from.end(), s) ==
+            out.expand_from.end()) {
+          out.expand_from.push_back(s);
+        }
+      }
+      if (out.expand_from.size() >= 3) {
+        break;
+      }
+    }
+  }
   static const std::unordered_set<std::string> kRoles = {
       "trigger", "control", "cleanup", "affected", "consumer", "state"};
   nlohmann::json items = nlohmann::json::array();
@@ -7644,20 +8088,71 @@ RegistryCausalHypDecision registry_parse_causal_zone_hyp(const std::string& raw,
     out.hypotheses.push_back(std::move(hyp));
   }
   out.why = hyp_json_string(j, "why");
-  if (out.why.size() < 8 && !out.hypotheses.empty()) {
-    out.why = "hipótesis anclada a fichas inspect";
-  }
-  if (out.hypotheses.empty() || out.why.size() < 8 || out.why.size() > 240) {
+  if (out.hypotheses.empty() && !out.need_more) {
     out.error = "resultado de hyp no accionable";
     return out;
   }
-  out.ok = true;
+  if (out.why.size() < 8 && !out.hypotheses.empty()) {
+    out.why = "hipótesis anclada a fichas inspect";
+  }
+  if (out.why.size() < 8 || out.why.size() > 240) {
+    out.error = "resultado de hyp no accionable";
+    return out;
+  }
+  out.parsed = true;
+  hyp_score_decision(&out, inspect_payload);
+  if (j.value("need_more", false) || action == "causal_zone_hyp_need_more_v1") {
+    out.need_more = true;
+    out.ok = false;
+  }
+  return out;
+}
+
+void registry_score_causal_zone_hyp(RegistryCausalHypDecision* decision,
+                                    const nlohmann::json& inspect_payload) {
+  hyp_score_decision(decision, inspect_payload);
+}
+
+std::vector<std::string> registry_atlas_suggest_cover_ids(const nlohmann::json& atlas_payload,
+                                                         const std::vector<std::string>& opened,
+                                                         int max_n) {
+  std::unordered_set<std::string> have(opened.begin(), opened.end());
+  std::vector<std::string> object_ids;
+  std::vector<std::string> latch_ids;
+  std::vector<std::string> hole_ids;
+  for (const auto& zone : atlas_payload.value("zones", nlohmann::json::array())) {
+    const std::string id = zone.value("id", "");
+    if (id.empty() || have.count(id)) {
+      continue;
+    }
+    const std::string kind = registry_causal_zone_kind(zone);
+    if (kind == "object") {
+      object_ids.push_back(id);
+    } else if (kind == "latch") {
+      latch_ids.push_back(id);
+    } else if (kind == "hole") {
+      hole_ids.push_back(id);
+    }
+  }
+  std::vector<std::string> out;
+  auto take = [&](const std::vector<std::string>& ids) {
+    for (const auto& id : ids) {
+      if (static_cast<int>(out.size()) >= max_n) {
+        return;
+      }
+      out.push_back(id);
+    }
+  };
+  take(object_ids);
+  take(latch_ids);
+  take(hole_ids);
   return out;
 }
 
 nlohmann::json registry_causal_hyp_decision_to_json(const RegistryCausalHypDecision& decision) {
   nlohmann::json hyps = nlohmann::json::array();
-  for (const auto& h : decision.hypotheses) {
+  for (size_t i = 0; i < decision.hypotheses.size(); ++i) {
+    const auto& h = decision.hypotheses[i];
     auto slot = [](const HypSlotLocus& s) -> nlohmann::json {
       if (s.stem.empty() && s.path_symbol.empty() && s.from_map <= 0) {
         return nullptr;
@@ -7674,23 +8169,1495 @@ nlohmann::json registry_causal_hyp_decision_to_json(const RegistryCausalHypDecis
       }
       return o;
     };
-    hyps.push_back({{"claim", h.claim},
-                    {"why", h.why},
-                    {"falsify_by", h.falsify_by},
-                    {"gap", h.gap},
-                    {"anchor_role", h.anchor_role},
-                    {"search_terms", h.search_terms},
-                    {"slots",
-                     {{"affected", slot(h.affected)},
-                      {"control", slot(h.control)},
-                      {"trigger", slot(h.trigger)},
-                      {"cleanup", slot(h.cleanup)}}}});
+    nlohmann::json row = {{"claim", h.claim},
+                          {"why", h.why},
+                          {"falsify_by", h.falsify_by},
+                          {"gap", h.gap},
+                          {"anchor_role", h.anchor_role},
+                          {"search_terms", h.search_terms},
+                          {"slots",
+                           {{"affected", slot(h.affected)},
+                            {"control", slot(h.control)},
+                            {"trigger", slot(h.trigger)},
+                            {"cleanup", slot(h.cleanup)}}}};
+    if (i < decision.masses.size()) {
+      const auto& m = decision.masses[i];
+      row["mass"] = m.score;
+      row["mass_band"] = m.band;
+      row["owns_ok"] = m.owns_ok;
+      row["neighbor_fill"] = m.neighbor_fill;
+      row["grounded_slots"] = m.grounded_slots;
+      row["mass_why"] = m.why;
+    }
+    hyps.push_back(std::move(row));
   }
   return {{"action", decision.action.empty() ? "causal_zone_hyp_v1" : decision.action},
           {"ok", decision.ok},
+          {"parsed", decision.parsed},
+          {"need_more", decision.need_more},
+          {"view", decision.view},
+          {"add", decision.add},
+          {"expand_from", decision.expand_from},
+          {"mass", decision.mass},
+          {"mass_band", decision.mass_band},
           {"hypotheses", hyps},
           {"why", decision.why},
           {"error", decision.error}};
+}
+
+std::string registry_causal_pilot_plan_system_prompt(bool allow_need_more) {
+  std::string out = R"(Eres el PILOTO. NO formulas hipótesis de fallo. NO lees cuerpos de código.
+Recibes el atlas de todas las zonas y fichas compactas (owns/nucleus/peek/port) de las ya abiertas.
+Los trabajadores sordos leerán el inspect gordo. Tú solo eliges M* y verbos.
+
+Si ya cubre el objeto, planifica encargos:
+1. cubre — el ABIERTO cuyo owns/nucleus/peek es el objeto (object/latch/hole; NO chrome).
+   Nucleus/peek mandan sobre ov= alto. Un hole de overlay/wizard no gana a un latch de spinner.
+2. cubre — otro owns distinto (rival o Restante con peek que solape).
+3. como — el barrio de plaza 1 (el objeto), no el chrome ni el hole vecino.
+4. opcional: gap en un abierto, o un cubre de Restantes. NUNCA como/gap fuera de Abiertos.
+
+question de cubre: sí/no y nombra el owns. question de como: quién + verbo de código.
+PROHIBIDO: cómo/qué en cubre; dos cubre al mismo owns; chrome en plaza 1.
+No copies frases de este contrato.
+)";
+  if (allow_need_more) {
+    out += R"(
+Si el OBJETO (modal, panel, latch, entrypoint) NO está en Abiertos y SÍ en el atlas:
+una sola ampliación. add = 1–2 ids de Restantes. why nombra el owns que falta. PROHIBIDO inventar ids.
+
+UNO de estos JSON:
+{"action":"causal_pilot_plan_v1","tasks":[{"kind":"cubre","zone":"M1","stem":"","question":"…"}],"why":"…"}
+{"action":"causal_pilot_need_more","add":["M?"],"why":"owns X de Restantes cubre el objeto"}
+)";
+  } else {
+    out += R"(
+Ya se amplió una vez. PROHIBIDO ampliar otra vez. Devuelve SOLO el plan.
+
+JSON:
+{"action":"causal_pilot_plan_v1","tasks":[{"kind":"cubre","zone":"M1","stem":"","question":"…"}],"why":"…"}
+)";
+  }
+  return out;
+}
+
+std::string registry_causal_pilot_plan_user_prompt(
+    const std::string& atlas_markdown, const std::string& opened_pack,
+    const std::vector<std::string>& remaining_ids,
+    const std::vector<std::string>& overlap_suggest, bool allow_need_more) {
+  std::ostringstream out;
+  if (allow_need_more) {
+    out << "Elige plan o una ampliación. Plaza 1 = objeto de la consulta según owns/nucleus/peek "
+           "(no el ov más alto). No copies plantillas.\n\n";
+  } else {
+    out << "Ya se amplió. PROHIBIDO add. Plaza 1 = objeto según owns/nucleus/peek "
+           "(no el ov más alto). Planifica ahora. No copies plantillas.\n\n";
+  }
+  out << "## Atlas (todas las zonas; add solo Ids restantes)\n";
+  out << (atlas_markdown.empty() ? "(vacío)\n" : atlas_markdown);
+  out << "\n## Abiertos (fichas compactas ya ampliadas)\n";
+  out << (opened_pack.empty() ? "(ninguno)\n" : opened_pack);
+  if (allow_need_more) {
+    out << "\n## Ids restantes (SOLO estos en add):";
+  } else {
+    out << "\n## Ids restantes (no add; cubre opcional si peek solapa):";
+  }
+  if (remaining_ids.empty()) {
+    out << " (ninguno)\n";
+  } else {
+    for (const auto& id : remaining_ids) {
+      out << " " << id;
+    }
+    out << "\n";
+  }
+  if (!overlap_suggest.empty()) {
+    out << "solape_sugerido:";
+    for (const auto& id : overlap_suggest) {
+      out << " " << id;
+    }
+    out << "  (candidato; no está abierto hasta que lo pidas en add)\n";
+  }
+  return out.str();
+}
+
+namespace {
+
+std::string pilot_zone_primary_stem(const nlohmann::json& zone) {
+  for (const char* key : {"primary_stems", "core_stems"}) {
+    for (const auto& s : zone.value(key, nlohmann::json::array())) {
+      if (s.is_string() && !s.get<std::string>().empty()) {
+        return s.get<std::string>();
+      }
+    }
+  }
+  return {};
+}
+
+bool pilot_zone_has_stem(const nlohmann::json& zone, const std::string& stem) {
+  const std::string needle = causal_lower(stem);
+  if (needle.empty()) {
+    return false;
+  }
+  for (const char* key : {"primary_stems", "core_stems", "context_stems"}) {
+    for (const auto& s : zone.value(key, nlohmann::json::array())) {
+      if (s.is_string() && causal_lower(s.get<std::string>()) == needle) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool pilot_question_is_template(const std::string& q) {
+  const std::string l = causal_lower(q);
+  return l.find("este owns") != std::string::npos ||
+         l.find("x en este") != std::string::npos ||
+         l.find("este stem") != std::string::npos;
+}
+
+bool pilot_question_is_como_shaped(const std::string& q) {
+  const std::string l = causal_lower(q);
+  return l.find("como se") != std::string::npos || l.find("cómo") != std::string::npos ||
+         l.find("c\xc3\xb3mo") != std::string::npos || l.find("que codigo") != std::string::npos ||
+         l.find("qué código") != std::string::npos || l.find("que controla") != std::string::npos ||
+         l.find("qué controla") != std::string::npos || l.find("como abrir") != std::string::npos ||
+         l.find("como escribir") != std::string::npos || l.find("como mostrar") != std::string::npos;
+}
+
+bool pilot_question_is_yesno(const std::string& q) {
+  const std::string l = causal_lower(q);
+  return l.find("¿es ") != std::string::npos || l.find("es ") == 0 ||
+         l.find(" el objeto") != std::string::npos || l.find("es este") != std::string::npos;
+}
+
+int pilot_kind_rank(const std::string& kind) {
+  if (kind == "object") {
+    return 0;
+  }
+  if (kind == "latch") {
+    return 1;
+  }
+  if (kind == "hole") {
+    return 2;
+  }
+  if (kind == "other") {
+    return 3;
+  }
+  if (kind == "caller") {
+    return 4;
+  }
+  return 5;
+}
+
+std::string pilot_specialize_question(const std::string& kind, const std::string& stem) {
+  if (kind == "cubre") {
+    return "¿es " + stem + " el objeto de la consulta?";
+  }
+  if (kind == "como") {
+    return "¿quién escribe, limpia o dispara la acción en " + stem + "?";
+  }
+  return "¿qué eslabón falta en " + stem + " para explicar la consulta?";
+}
+
+std::string pilot_normalize_question(const std::string& kind, const std::string& stem,
+                                     std::string question) {
+  if (pilot_question_is_template(question) || question.size() < 12 || question.size() > 160) {
+    return pilot_specialize_question(kind, stem);
+  }
+  const std::string l = causal_lower(question);
+  const bool names_stem = l.find(causal_lower(stem)) != std::string::npos;
+  if (kind == "cubre") {
+    if (pilot_question_is_como_shaped(question) || !pilot_question_is_yesno(question) ||
+        !names_stem) {
+      return pilot_specialize_question(kind, stem);
+    }
+    return question;
+  }
+  if (kind == "como") {
+    const bool has_quien = l.find("quién") != std::string::npos ||
+                           l.find("quien") != std::string::npos ||
+                           l.find("qui\xc3\xa9n") != std::string::npos;
+    if (pilot_question_is_yesno(question) || !has_quien || !names_stem) {
+      return pilot_specialize_question(kind, stem);
+    }
+    return question;
+  }
+  return question;
+}
+
+}  // namespace
+
+std::string registry_causal_pilot_barrio_menu(const nlohmann::json& payload,
+                                              const std::vector<std::string>& ids,
+                                              const std::string& query) {
+  std::unordered_map<std::string, std::string> stem_first;
+  for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
+    const std::string id = zone.value("id", "");
+    const std::string st = causal_lower(pilot_zone_primary_stem(zone));
+    if (id.empty() || st.empty() || stem_first.count(st)) {
+      continue;
+    }
+    stem_first[st] = id;
+  }
+  struct Row {
+    std::string line;
+    int overlap = 0;
+    int rank = 0;
+    int idx = 0;
+  };
+  std::vector<Row> rows;
+  int idx = 0;
+  for (const auto& want : ids) {
+    for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
+      if (zone.value("id", "") != want) {
+        continue;
+      }
+      const std::string st = pilot_zone_primary_stem(zone);
+      const std::string kind = registry_causal_zone_kind(zone);
+      const int ov = query.empty() ? 0 : registry_causal_query_zone_overlap(query, zone);
+      std::ostringstream line;
+      line << want << "  kind=" << kind << "  owns=" << (st.empty() ? "?" : st);
+      if (!query.empty()) {
+        line << "  ov=" << ov;
+      }
+      auto it = stem_first.find(causal_lower(st));
+      const bool clone = it != stem_first.end() && it->second != want;
+      if (clone) {
+        line << "  same=" << it->second << " (clon, no encargar)";
+      }
+      line << "\n";
+      Row row;
+      row.line = line.str();
+      row.overlap = ov;
+      row.rank = pilot_kind_rank(kind) + (clone ? 10 : 0);
+      row.idx = idx++;
+      rows.push_back(std::move(row));
+      break;
+    }
+  }
+  std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+    if (a.overlap != b.overlap) {
+      return a.overlap > b.overlap;
+    }
+    if (a.rank != b.rank) {
+      return a.rank < b.rank;
+    }
+    return a.idx < b.idx;
+  });
+  std::ostringstream out;
+  for (const auto& row : rows) {
+    out << row.line;
+  }
+  return out.str();
+}
+
+RegistryCausalPilotPlan registry_parse_causal_pilot_plan(
+    const std::string& raw, const nlohmann::json& atlas_payload,
+    const std::vector<std::string>& atlas_zone_ids, const std::vector<std::string>& opened_ids,
+    const std::string& query, bool allow_need_more) {
+  RegistryCausalPilotPlan out;
+  out.raw = raw;
+  out.action = "causal_pilot_plan_v1";
+  const auto begin = raw.find('{');
+  const auto end = raw.rfind('}');
+  if (begin == std::string::npos || end == std::string::npos || end <= begin) {
+    out.error = "plan sin objeto JSON";
+    return out;
+  }
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(raw.substr(begin, end - begin + 1));
+  } catch (const std::exception& e) {
+    out.error = std::string("JSON plan inválido: ") + e.what();
+    return out;
+  }
+  const std::string action = j.value("action", "");
+  if (action == "causal_pilot_need_more") {
+    out.action = action;
+    out.need_more = true;
+    if (!allow_need_more) {
+      out.error = "need_more no permitido en este pase";
+      return out;
+    }
+    std::unordered_set<std::string> allowed;
+    std::unordered_set<std::string> opened(opened_ids.begin(), opened_ids.end());
+    for (const auto& zone : atlas_payload.value("zones", nlohmann::json::array())) {
+      const std::string id = zone.value("id", "");
+      if (!id.empty()) {
+        allowed.insert(id);
+      }
+    }
+    for (const auto& id : atlas_zone_ids) {
+      if (!id.empty()) {
+        allowed.insert(id);
+      }
+    }
+    const int room = std::max(0, 4 - static_cast<int>(opened.size()));
+    const int max_add = std::min(2, room);
+    if (j.contains("add") && j["add"].is_array() && max_add > 0) {
+      for (const auto& item : j["add"]) {
+        std::string id;
+        if (item.is_string()) {
+          id = item.get<std::string>();
+        } else if (item.is_object()) {
+          id = item.value("id", "");
+        }
+        if (id.empty() || !allowed.count(id) || opened.count(id)) {
+          continue;
+        }
+        if (std::find(out.add.begin(), out.add.end(), id) != out.add.end()) {
+          continue;
+        }
+        out.add.push_back(id);
+        if (static_cast<int>(out.add.size()) >= max_add) {
+          break;
+        }
+      }
+    }
+    out.why = hyp_json_string(j, "why");
+    if (out.why.size() < 8) {
+      out.why = "ampliar zona cuyo owns cubre el objeto";
+    }
+    if (out.why.size() > 240) {
+      out.why.resize(240);
+    }
+    if (out.add.empty()) {
+      out.error = "need_more sin ids restantes";
+      return out;
+    }
+    out.ok = true;
+    return out;
+  }
+  if (action != "causal_pilot_plan_v1") {
+    out.error = "contrato causal_pilot_plan_v1 inválido";
+    return out;
+  }
+  std::unordered_map<std::string, nlohmann::json> zones_by_id;
+  std::unordered_set<std::string> allowed;
+  std::unordered_map<std::string, std::string> stem_first_id;
+  for (const auto& zone : atlas_payload.value("zones", nlohmann::json::array())) {
+    const std::string id = zone.value("id", "");
+    if (id.empty()) {
+      continue;
+    }
+    allowed.insert(id);
+    zones_by_id[id] = zone;
+    const std::string st = causal_lower(pilot_zone_primary_stem(zone));
+    if (!st.empty() && stem_first_id.find(st) == stem_first_id.end()) {
+      stem_first_id[st] = id;
+    }
+  }
+  for (const auto& id : atlas_zone_ids) {
+    if (!id.empty()) {
+      allowed.insert(id);
+    }
+  }
+  std::unordered_set<std::string> opened(opened_ids.begin(), opened_ids.end());
+  const bool restrict_open = !opened.empty();
+  static const std::unordered_set<std::string> kKinds = {"cubre", "como", "gap"};
+  nlohmann::json items = nlohmann::json::array();
+  if (j.contains("tasks") && j["tasks"].is_array()) {
+    items = j["tasks"];
+  }
+  std::unordered_set<std::string> used_stem_kind;
+  std::unordered_set<std::string> used_questions;
+  int remaining_cubre = 0;
+  for (const auto& item : items) {
+    if (!item.is_object() || static_cast<int>(out.tasks.size()) >= 4) {
+      continue;
+    }
+    RegistryCausalPilotTask t;
+    t.kind = causal_lower(hyp_json_string(item, "kind"));
+    t.zone = item.value("zone", item.value("id", std::string{}));
+    t.stem = hyp_json_string(item, "stem");
+    t.question = hyp_json_string(item, "question");
+    if (t.question.empty()) {
+      t.question = hyp_json_string(item, "ask");
+    }
+    if (kKinds.count(t.kind) == 0 || t.zone.empty() || !allowed.count(t.zone)) {
+      continue;
+    }
+    auto zit = zones_by_id.find(t.zone);
+    if (zit != zones_by_id.end()) {
+      if (t.stem.empty() || !pilot_zone_has_stem(zit->second, t.stem)) {
+        t.stem = pilot_zone_primary_stem(zit->second);
+      }
+    }
+    if (t.stem.empty()) {
+      continue;
+    }
+    if (t.question.size() < 12 || t.question.size() > 160 ||
+        pilot_question_is_template(t.question)) {
+      t.question = pilot_specialize_question(t.kind, t.stem);
+    } else {
+      t.question = pilot_normalize_question(t.kind, t.stem, t.question);
+    }
+    std::string qkey = causal_lower(t.question);
+    if (!used_questions.insert(qkey).second) {
+      t.question = pilot_specialize_question(t.kind, t.stem);
+      qkey = causal_lower(t.question);
+      if (!used_questions.insert(qkey).second) {
+        continue;
+      }
+    }
+    const bool is_open = !restrict_open || opened.count(t.zone);
+    if (!is_open) {
+      if (t.kind != "cubre" || remaining_cubre >= 1) {
+        continue;
+      }
+      if (!query.empty()) {
+        auto zit_ov = zones_by_id.find(t.zone);
+        if (zit_ov == zones_by_id.end() ||
+            registry_causal_query_zone_overlap(query, zit_ov->second) <= 0) {
+          continue;
+        }
+      }
+      ++remaining_cubre;
+    }
+    const std::string stl = causal_lower(t.stem);
+    auto first = stem_first_id.find(stl);
+    if (first != stem_first_id.end() && first->second != t.zone && t.kind == "cubre") {
+      continue;
+    }
+    const std::string sk = stl + "|" + t.kind;
+    if (!used_stem_kind.insert(sk).second) {
+      continue;
+    }
+    out.tasks.push_back(std::move(t));
+  }
+  {
+    int best_rank = 99;
+    std::string best_zone;
+    std::string best_stem;
+    for (const auto& t : out.tasks) {
+      if (t.kind != "cubre") {
+        continue;
+      }
+      auto zit = zones_by_id.find(t.zone);
+      const int rank =
+          zit == zones_by_id.end() ? 5 : pilot_kind_rank(registry_causal_zone_kind(zit->second));
+      if (rank < best_rank) {
+        best_rank = rank;
+        best_zone = t.zone;
+        best_stem = t.stem;
+      }
+    }
+    std::unordered_set<std::string> como_stems;
+    for (auto& t : out.tasks) {
+      if (t.kind != "como") {
+        continue;
+      }
+      auto zit = zones_by_id.find(t.zone);
+      const int rank =
+          zit == zones_by_id.end() ? 5 : pilot_kind_rank(registry_causal_zone_kind(zit->second));
+      if (rank >= 4 && best_rank <= 1 && !best_zone.empty() &&
+          causal_lower(t.stem) != causal_lower(best_stem)) {
+        t.zone = best_zone;
+        t.stem = best_stem;
+        t.question = pilot_specialize_question("como", best_stem);
+      }
+      como_stems.insert(causal_lower(t.stem));
+    }
+    (void)como_stems;
+  }
+  out.why = hyp_json_string(j, "why");
+  if (out.why.size() < 8 && !out.tasks.empty()) {
+    out.why = "plan de encargos sobre fichas inspect";
+  }
+  if (out.why.size() > 240) {
+    out.why.resize(240);
+  }
+  std::unordered_set<std::string> stems;
+  for (const auto& t : out.tasks) {
+    stems.insert(causal_lower(t.stem));
+    if (t.kind == "cubre") {
+      ++out.n_cubre;
+    } else if (t.kind == "como") {
+      out.has_como = true;
+    } else if (t.kind == "gap") {
+      out.has_gap = true;
+    }
+  }
+  out.unique_stems = static_cast<int>(stems.size());
+  if (out.tasks.size() < 2 || out.why.size() < 8) {
+    out.error = "plan de piloto no accionable";
+    return out;
+  }
+  out.ok = true;
+  return out;
+}
+
+nlohmann::json registry_causal_pilot_plan_to_json(const RegistryCausalPilotPlan& plan) {
+  nlohmann::json tasks = nlohmann::json::array();
+  for (const auto& t : plan.tasks) {
+    tasks.push_back(
+        {{"kind", t.kind}, {"zone", t.zone}, {"stem", t.stem}, {"question", t.question}});
+  }
+  return {{"action", plan.action.empty() ? "causal_pilot_plan_v1" : plan.action},
+          {"ok", plan.ok},
+          {"need_more", plan.need_more},
+          {"add", plan.add},
+          {"tasks", tasks},
+          {"unique_stems", plan.unique_stems},
+          {"n_cubre", plan.n_cubre},
+          {"has_como", plan.has_como},
+          {"has_gap", plan.has_gap},
+          {"why", plan.why},
+          {"error", plan.error}};
+}
+
+std::string registry_causal_pilot_plan_markdown(const RegistryCausalPilotPlan& plan) {
+  std::ostringstream out;
+  out << "# " << (plan.action.empty() ? "causal_pilot_plan_v1" : plan.action) << "\n";
+  out << "ok=" << (plan.ok ? "yes" : "no") << " need_more=" << (plan.need_more ? "yes" : "no")
+      << " n=" << plan.tasks.size() << " stems=" << plan.unique_stems << " cubre=" << plan.n_cubre
+      << " como=" << (plan.has_como ? "yes" : "no") << " gap=" << (plan.has_gap ? "yes" : "no")
+      << "\n";
+  if (!plan.why.empty()) {
+    out << "why: " << plan.why << "\n";
+  }
+  if (!plan.error.empty()) {
+    out << "error: " << plan.error << "\n";
+  }
+  if (!plan.add.empty()) {
+    out << "add:";
+    for (const auto& id : plan.add) {
+      out << " " << id;
+    }
+    out << "\n";
+  }
+  int i = 0;
+  for (const auto& t : plan.tasks) {
+    out << "\n" << ++i << ". [" << t.kind << "] " << t.zone << "  stem=" << t.stem << "\n";
+    out << "   " << t.question << "\n";
+  }
+  return out.str();
+}
+
+nlohmann::json registry_causal_payload_filter_zones(const nlohmann::json& payload,
+                                                    const std::vector<std::string>& ids) {
+  nlohmann::json out = payload;
+  std::unordered_set<std::string> want(ids.begin(), ids.end());
+  nlohmann::json zones = nlohmann::json::array();
+  for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
+    if (want.count(zone.value("id", ""))) {
+      zones.push_back(zone);
+    }
+  }
+  out["zones"] = zones;
+  return out;
+}
+
+bool registry_causal_pilot_target_in_stem(const std::string& target, const std::string& stem) {
+  if (target.empty() || stem.empty()) {
+    return false;
+  }
+  std::string path = target;
+  const auto slash = path.find_last_of("/\\");
+  const auto colon = path.rfind(':');
+  if (colon != std::string::npos && slash != std::string::npos && colon > slash) {
+    path = path.substr(0, colon);
+  }
+  return causal_lower(registry_stem_of(path)) == causal_lower(stem);
+}
+
+namespace {
+
+std::string pilot_target_path(const std::string& target) {
+  std::string path = target;
+  const auto slash = path.find_last_of("/\\");
+  const auto colon = path.rfind(':');
+  if (colon != std::string::npos && (slash == std::string::npos || colon > slash)) {
+    path = path.substr(0, colon);
+  }
+  return path;
+}
+
+bool pilot_targets_match(const std::string& a, const std::string& b) {
+  const std::string la = causal_lower(a);
+  const std::string lb = causal_lower(b);
+  if (la.empty() || lb.empty()) {
+    return false;
+  }
+  if (la == lb) {
+    return true;
+  }
+  auto symbol_of = [](const std::string& s) {
+    const auto col = s.rfind(':');
+    if (col == std::string::npos || col + 1 >= s.size()) {
+      return s;
+    }
+    const auto slash = s.find_last_of("/\\");
+    if (slash != std::string::npos && col < slash) {
+      return s;
+    }
+    return s.substr(col + 1);
+  };
+  const std::string sa = symbol_of(la);
+  const std::string sb = symbol_of(lb);
+  if (sa.size() >= 4 && sa == sb) {
+    return true;
+  }
+  return false;
+}
+
+void pilot_notebook_push(RegistryCausalPilotWorkerNotebook* nb, const std::string& target) {
+  if (nb == nullptr || target.empty()) {
+    return;
+  }
+  for (const auto& have : nb->allowed_targets) {
+    if (pilot_targets_match(have, target)) {
+      return;
+    }
+  }
+  nb->allowed_targets.push_back(target);
+  const std::string path = pilot_target_path(target);
+  if (!path.empty() && path.find('/') != std::string::npos) {
+    if (std::find(nb->allowed_paths.begin(), nb->allowed_paths.end(), path) ==
+        nb->allowed_paths.end()) {
+      nb->allowed_paths.push_back(path);
+    }
+  }
+}
+
+void pilot_collect_json_target(RegistryCausalPilotWorkerNotebook* nb, const nlohmann::json& j) {
+  if (nb == nullptr) {
+    return;
+  }
+  if (j.is_string()) {
+    pilot_notebook_push(nb, j.get<std::string>());
+    return;
+  }
+  if (!j.is_object()) {
+    return;
+  }
+  for (const char* key : {"target", "from", "to", "path_symbol", "symbol"}) {
+    const std::string s = j.value(key, "");
+    if (!s.empty()) {
+      pilot_notebook_push(nb, s);
+    }
+  }
+}
+
+bool pilot_text_is_brief(const std::string& s) {
+  return s.size() >= 24 && s.find(' ') != std::string::npos;
+}
+
+bool pilot_why_cites_targets(const std::string& why,
+                             const std::vector<std::string>& allowed) {
+  const std::string hay = causal_lower(why);
+  if (hay.size() < 4) {
+    return false;
+  }
+  for (const auto& t : allowed) {
+    std::string needle = causal_lower(t);
+    const auto col = needle.rfind("::");
+    if (col != std::string::npos) {
+      needle = needle.substr(col + 2);
+    }
+    const auto c2 = needle.rfind(':');
+    if (c2 != std::string::npos) {
+      needle = needle.substr(c2 + 1);
+    }
+    if (needle.size() >= 4 && hay.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool pilot_notes_have_tool_result(const std::string& notes) {
+  return notes.find("----- follow ") != std::string::npos ||
+         notes.find("----- need_code ") != std::string::npos ||
+         notes.find("----- outline ") != std::string::npos;
+}
+
+int pilot_notes_unique_code_targets(const std::string& notes) {
+  std::unordered_set<std::string> keys;
+  auto take = [&](const char* hdr) {
+    const std::string prefix = hdr;
+    std::size_t pos = 0;
+    while (true) {
+      const auto hit = notes.find(prefix, pos);
+      if (hit == std::string::npos) {
+        return;
+      }
+      std::size_t i = hit + prefix.size();
+      while (i < notes.size() && (notes[i] == ' ' || notes[i] == '\t')) {
+        ++i;
+      }
+      const auto end = notes.find_first_of(" \t\n", i);
+      const std::string target =
+          notes.substr(i, end == std::string::npos ? std::string::npos : end - i);
+      std::string key = causal_lower(target);
+      const auto col = key.rfind(':');
+      if (col != std::string::npos && col + 1 < key.size() && key.find('/') < col) {
+        key = key.substr(col + 1);
+      }
+      if (key.size() >= 4) {
+        keys.insert(key);
+      }
+      pos = hit + 1;
+    }
+  };
+  take("----- follow ");
+  take("----- need_code ");
+  return static_cast<int>(keys.size());
+}
+
+}  // namespace
+
+void registry_causal_pilot_notebook_add_target(RegistryCausalPilotWorkerNotebook* nb,
+                                               const std::string& target) {
+  pilot_notebook_push(nb, target);
+}
+
+bool registry_causal_pilot_target_in_notebook(const std::string& target,
+                                              const RegistryCausalPilotWorkerNotebook& nb) {
+  if (target.empty()) {
+    return false;
+  }
+  for (const auto& have : nb.allowed_targets) {
+    if (pilot_targets_match(target, have)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void registry_causal_pilot_notebook_from_payload(const nlohmann::json& payload,
+                                                 const std::string& stem,
+                                                 RegistryCausalPilotWorkerNotebook* nb) {
+  if (nb == nullptr) {
+    return;
+  }
+  auto walk_zone = [&](const nlohmann::json& zone) {
+    for (const auto& r : zone.value("representatives", nlohmann::json::array())) {
+      pilot_collect_json_target(nb, r);
+    }
+    for (const auto& e : zone.value("edges", nlohmann::json::array())) {
+      pilot_collect_json_target(nb, e);
+    }
+    for (const auto& e : zone.value("ports", nlohmann::json::array())) {
+      pilot_collect_json_target(nb, e);
+    }
+    const auto mech = zone.value("mechanism", nlohmann::json::object());
+    for (const char* slot : {"trigger", "state", "effect"}) {
+      if (mech.contains(slot)) {
+        pilot_collect_json_target(nb, mech[slot]);
+      }
+    }
+    for (const auto& group : zone.value("anchors", nlohmann::json::array())) {
+      if (group.is_array()) {
+        for (const auto& a : group) {
+          pilot_collect_json_target(nb, a);
+        }
+      } else {
+        pilot_collect_json_target(nb, group);
+      }
+    }
+    for (const auto& trail : zone.value("trails", nlohmann::json::array())) {
+      for (const auto& step : trail.value("path", nlohmann::json::array())) {
+        pilot_collect_json_target(nb, step);
+      }
+    }
+    for (const auto& role_key : {"writers", "readers", "controls"}) {
+      const auto roles = zone.value("roles", nlohmann::json::object());
+      if (roles.contains(role_key)) {
+        for (const auto& item : roles[role_key]) {
+          if (item.is_string()) {
+            pilot_notebook_push(nb, item.get<std::string>());
+          }
+        }
+      }
+    }
+  };
+  auto zone_has_stem = [&](const nlohmann::json& zone) {
+    if (stem.empty()) {
+      return true;
+    }
+    const std::string want = causal_lower(stem);
+    if (causal_lower(zone.value("id", "")) == want ||
+        causal_lower(zone.value("owns", "")) == want) {
+      return true;
+    }
+    for (const char* key : {"primary_stems", "core_stems", "context_stems"}) {
+      for (const auto& s : zone.value(key, nlohmann::json::array())) {
+        if (s.is_string() && causal_lower(s.get<std::string>()) == want) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+  if (payload.contains("zones") && payload["zones"].is_array()) {
+    bool any = false;
+    for (const auto& zone : payload["zones"]) {
+      if (!zone_has_stem(zone)) {
+        continue;
+      }
+      walk_zone(zone);
+      any = true;
+    }
+    if (!any) {
+      for (const auto& zone : payload["zones"]) {
+        walk_zone(zone);
+      }
+    }
+  } else {
+    walk_zone(payload);
+  }
+}
+
+std::string registry_causal_pilot_allowed_markdown(const RegistryCausalPilotWorkerNotebook& nb) {
+  std::ostringstream out;
+  out << "## Símbolos permitidos (ficha + tools)\n";
+  int n = 0;
+  for (const auto& t : nb.allowed_targets) {
+    if (n >= 24) {
+      out << "- …\n";
+      break;
+    }
+    out << "- " << t << "\n";
+    ++n;
+  }
+  if (n == 0) {
+    out << "(ninguno: usa outline del archivo del stem)\n";
+  }
+  return out.str();
+}
+
+std::string registry_causal_pilot_follow_markdown(const nlohmann::json& payload,
+                                                  const std::string& target,
+                                                  const std::string& direction,
+                                                  const std::string& stem,
+                                                  std::vector<std::string>* new_targets,
+                                                  std::string* port_to) {
+  const bool incoming = causal_lower(direction) == "incoming";
+  std::ostringstream out;
+  out << "follow " << (incoming ? "incoming" : "outgoing") << " " << target << "\n";
+  int hits = 0;
+  auto consider = [&](const std::string& from, const std::string& to, const std::string& kind) {
+    const std::string focus = incoming ? to : from;
+    const std::string other = incoming ? from : to;
+    if (other.empty() || !pilot_targets_match(focus, target)) {
+      return;
+    }
+    ++hits;
+    out << "- " << from << " -" << kind << "-> " << to << "\n";
+    if (new_targets != nullptr) {
+      new_targets->push_back(other);
+    }
+    if (port_to != nullptr && !other.empty() && !stem.empty()) {
+      const std::string ost = causal_lower(registry_stem_of(pilot_target_path(other).empty()
+                                                               ? other
+                                                               : pilot_target_path(other)));
+      const std::string ost2 = causal_lower(registry_stem_of(other));
+      const std::string want = causal_lower(stem);
+      if (!ost.empty() && ost != want && ost.find('.') == std::string::npos) {
+        *port_to = registry_stem_of(other);
+      } else if (!ost2.empty() && ost2 != want && other.find("::") != std::string::npos) {
+        const auto col = other.find("::");
+        *port_to = other.substr(0, col);
+      }
+    }
+  };
+  auto walk_zone = [&](const nlohmann::json& zone) {
+    for (const auto& e : zone.value("edges", nlohmann::json::array())) {
+      consider(e.value("from", ""), e.value("to", ""), e.value("kind", "call"));
+    }
+    for (const auto& e : zone.value("ports", nlohmann::json::array())) {
+      consider(e.value("from", ""), e.value("to", ""), e.value("kind", "port"));
+    }
+    const auto mech = zone.value("mechanism", nlohmann::json::object());
+    for (const char* slot : {"trigger", "state", "effect"}) {
+      if (!mech.contains(slot) || !mech[slot].is_object()) {
+        continue;
+      }
+      consider(mech[slot].value("from", ""), mech[slot].value("to", ""), slot);
+    }
+  };
+  if (payload.contains("zones") && payload["zones"].is_array()) {
+    for (const auto& zone : payload["zones"]) {
+      walk_zone(zone);
+    }
+  } else {
+    walk_zone(payload);
+  }
+  if (hits == 0) {
+    out << "(sin hops en la ficha para ese símbolo)\n";
+  }
+  return out.str();
+}
+
+std::string registry_causal_pilot_worker_system_prompt(const std::string& kind,
+                                                       const std::string& stem) {
+  std::ostringstream out;
+  out << "Eres un TRABAJADOR SORDO. No ves otros barrios ni al piloto. Solo el stem `" << stem
+      << "`.\n";
+  out << "El owns de la ficha NO es la respuesta. Compara con la CONSULTA DEL USUARIO.\n";
+  out << "Si un call sale de este stem, cítalo en port_to y PARA.\n";
+  out << "Catálogo (target DEBE estar en ## Símbolos permitidos o en ## Notas):\n";
+  out << "{\"action\":\"causal_pilot_need_code\",\"target\":\"path.cpp:Symbol\"}\n";
+  out << "{\"action\":\"causal_pilot_outline\",\"target\":\"path.cpp\"}\n";
+  out << "{\"action\":\"causal_pilot_follow\",\"target\":\"path.cpp:Symbol\","
+         "\"direction\":\"outgoing\"}\n";
+  out << "PROHIBIDO inventar símbolos. PROHIBIDO informar con why de plantilla.\n";
+  out << "El informe lleva brief: 2 frases para el PILOTO (qué hace este barrio, qué símbolo, "
+         "qué falta). No basta el veredicto ni un símbolo suelto.\n\n";
+  if (kind == "cubre") {
+    out << "cubre: ¿el objeto de ## Consulta del usuario está EN este stem? Máx. 1 outline o 1 "
+           "need_code. No follow. why=símbolo de ficha/Notas, nunca solo el nombre del stem.\n";
+    out << "Si la ficha no tiene símbolos, outline o need_code ANTES del informe.\n";
+    out << "Informe: {\"action\":\"causal_pilot_worker_v1\",\"kind\":\"cubre\","
+           "\"verdict\":\"cubre|no_cubre\",\"owns\":\""
+        << stem << "\",\"why\":\"…símbolo…\",\"brief\":\"2 frases para el piloto\"}\n";
+    out << "El encargo nombra este stem a propósito: eso NO es cubre. Tokens temáticos "
+           "(asistente, chat, panel, IA) no bastan. Si la ficha es otro objeto, "
+           "verdict=no_cubre y why=un símbolo de la ficha.\n";
+  } else if (kind == "como") {
+    out << "como: ¿quién escribe/limpia/dispara el acto EN este stem?\n";
+    out << "chain y why citan símbolos de ficha/Notas. direction: outgoing o incoming.\n";
+    out << "Informe: {\"action\":\"causal_pilot_worker_v1\",\"kind\":\"como\","
+           "\"verdict\":\"chain|no_cubre\",\"path_symbol\":\"…\","
+           "\"chain\":\"…símbolo…\",\"port_to\":\"\",\"why\":\"…símbolo…\","
+           "\"brief\":\"2 frases para el piloto\"}\n";
+    out << "Sin resultado de tool (----- follow/need_code): pide tool. Una ----- nota ----- "
+           "de árbitro NO cuenta. Tras un follow: informe worker_v1 con verdict chain o "
+           "no_cubre (nunca need_code en verdict). Follow sin hops: NO es no_cubre. "
+           "outline del archivo del stem o follow/need_code de OTRO símbolo; chain si el "
+           "símbolo ES el acto.\n";
+  } else {
+    out << "gap: follow outgoing de un símbolo de la ficha. Si el call sale, port_to y PARA.\n";
+    out << "Informe: {\"action\":\"causal_pilot_worker_v1\",\"kind\":\"gap\","
+           "\"verdict\":\"missing|found\",\"port_to\":\"\",\"why\":\"…símbolo…\","
+           "\"brief\":\"2 frases para el piloto\"}\n";
+    out << "Sin resultado de follow/need_code: el JSON causal_pilot_follow del catálogo, con "
+           "target de ## Símbolos permitidos. Una ----- nota ----- no basta. Con resultado de "
+           "tool: informe worker_v1. why cita un símbolo.\n";
+  }
+  out << "Responde SOLO JSON.";
+  return out.str();
+}
+
+std::string registry_causal_pilot_worker_user_prompt(const std::string& kind,
+                                                     const std::string& question,
+                                                     const std::string& zone_markdown,
+                                                     const std::string& notes,
+                                                     const std::string& allowed_markdown) {
+  std::ostringstream out;
+  if (kind == "cubre") {
+    out << "kind=cubre\nDecide cubre/no_cubre por ## Consulta del usuario, no por el nombre "
+           "del stem. El informe incluye brief de 2 frases para el piloto.\n\n";
+  } else if (kind == "como" || kind == "gap") {
+    const bool have_tool = pilot_notes_have_tool_result(notes);
+    if (!have_tool) {
+      out << "kind=" << kind
+          << "\nAún no hay resultado de tool. Responde SOLO follow o need_code con target de "
+             "## Símbolos permitidos. Una nota de árbitro no cuenta.\n\n";
+    } else if (kind == "como" && notes.find("sin hops") != std::string::npos &&
+               pilot_notes_unique_code_targets(notes) <= 1) {
+      out << "kind=como\nEse follow no tenía hops. Responde SOLO JSON: "
+             "causal_pilot_outline del archivo .cpp, o causal_pilot_follow/need_code de OTRO "
+             "símbolo de ## Símbolos permitidos, o causal_pilot_worker_v1 con verdict=chain. "
+             "PROHIBIDO verdict=no_cubre. PROHIBIDO repetir el mismo target.\n\n";
+    } else if (kind == "como") {
+      out << "kind=como\nYa hay resultado de tool. Emite causal_pilot_worker_v1 con verdict "
+             "chain o no_cubre (nunca need_code) y brief de 2 frases. No pidas otra tool.\n\n";
+    } else {
+      out << "kind=gap\nYa hay resultado de tool. Emite causal_pilot_worker_v1 con verdict "
+             "missing o found y brief de 2 frases. No pidas otra tool.\n\n";
+    }
+  } else {
+    out << "kind=" << kind << "\npregunta: " << question << "\n\n";
+  }
+  if (!allowed_markdown.empty()) {
+    out << allowed_markdown << "\n";
+  }
+  out << "## Ficha del barrio\n" << zone_markdown;
+  if (!notes.empty()) {
+    out << "\n\n## Notas (acumulado)\n" << notes;
+  }
+  return out.str();
+}
+
+RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
+    const std::string& raw, const std::string& expected_kind, const std::string& expected_stem,
+    const std::string& query, const RegistryCausalPilotWorkerNotebook* notebook) {
+  (void)query;
+  RegistryCausalPilotWorkerReport out;
+  out.raw = raw;
+  out.kind = causal_lower(expected_kind);
+  out.stem = expected_stem;
+  out.owns = expected_stem;
+  const auto begin = raw.find('{');
+  const auto end = raw.rfind('}');
+  if (begin == std::string::npos || end == std::string::npos || end <= begin) {
+    out.error = "worker sin objeto JSON";
+    return out;
+  }
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(raw.substr(begin, end - begin + 1));
+  } catch (const std::exception& e) {
+    out.error = std::string("JSON worker inválido: ") + e.what();
+    return out;
+  }
+  out.action = j.value("action", "");
+  if (out.action == "need_code" || out.action == "causal_pilot_need_code") {
+    out.action = "causal_pilot_need_code";
+  } else if (out.action == "outline" || out.action == "causal_pilot_outline") {
+    out.action = "causal_pilot_outline";
+  } else if (out.action == "follow" || out.action == "causal_pilot_follow") {
+    out.action = "causal_pilot_follow";
+  } else if (out.action == "worker_v1" || out.action == "causal_pilot_worker" ||
+             out.action == "causal_pilot_worker_v1") {
+    out.action = "causal_pilot_worker_v1";
+  }
+  auto finish_tool = [&](const std::string& tool, const std::string& err_empty) {
+    out.tool = tool;
+    out.is_tool = true;
+    out.need_code = tool == "need_code";
+    if (out.target.size() < 4) {
+      out.error = err_empty;
+      out.is_tool = false;
+      out.need_code = false;
+      return false;
+    }
+    return true;
+  };
+  auto cubre_tool_budget = [&]() {
+    return notebook != nullptr && out.kind == "cubre" &&
+           (notebook->n_need_code + notebook->n_outline) >= 1;
+  };
+  if (out.action == "causal_pilot_need_code") {
+    out.target = hyp_json_string(j, "target");
+    if (out.target.empty()) {
+      out.target = hyp_json_string(j, "path_symbol");
+    }
+    if (!finish_tool("need_code", "need_code sin target")) {
+      return out;
+    }
+    if (out.kind == "cubre" && cubre_tool_budget()) {
+      out.error = "cubre: presupuesto de tools agotado";
+      out.is_tool = false;
+      out.need_code = false;
+      return out;
+    }
+    if (!registry_causal_pilot_target_in_stem(out.target, expected_stem)) {
+      out.error = "need_code fuera del stem";
+      out.is_tool = false;
+      out.need_code = false;
+      return out;
+    }
+    if (notebook != nullptr && !notebook->allowed_targets.empty() &&
+        !registry_causal_pilot_target_in_notebook(out.target, *notebook)) {
+      out.error = "need_code no está en la ficha";
+      out.is_tool = false;
+      out.need_code = false;
+      return out;
+    }
+    out.ok = true;
+    return out;
+  }
+  if (out.action == "causal_pilot_outline") {
+    out.target = hyp_json_string(j, "target");
+    if (out.target.empty()) {
+      out.target = hyp_json_string(j, "path");
+    }
+    if (!finish_tool("outline", "outline sin target")) {
+      return out;
+    }
+    if (out.kind == "cubre" && cubre_tool_budget()) {
+      out.error = "cubre: presupuesto de tools agotado";
+      out.is_tool = false;
+      out.need_code = false;
+      return out;
+    }
+    if (!registry_causal_pilot_target_in_stem(out.target, expected_stem)) {
+      out.error = "outline fuera del stem";
+      out.is_tool = false;
+      out.need_code = false;
+      return out;
+    }
+    out.ok = true;
+    return out;
+  }
+  if (out.action == "causal_pilot_follow") {
+    if (out.kind == "cubre") {
+      out.error = "cubre no usa follow";
+      return out;
+    }
+    out.target = hyp_json_string(j, "target");
+    if (out.target.empty()) {
+      out.target = hyp_json_string(j, "path_symbol");
+    }
+    out.direction = causal_lower(hyp_json_string(j, "direction"));
+    if (out.direction != "incoming") {
+      out.direction = "outgoing";
+    }
+    if (!finish_tool("follow", "follow sin target")) {
+      return out;
+    }
+    if (notebook != nullptr && !notebook->allowed_targets.empty()) {
+      if (!registry_causal_pilot_target_in_notebook(out.target, *notebook)) {
+        out.error = "follow no está en la ficha";
+        out.is_tool = false;
+        out.need_code = false;
+        return out;
+      }
+    } else if (!registry_causal_pilot_target_in_stem(out.target, expected_stem)) {
+      out.error = "follow fuera del stem";
+      out.is_tool = false;
+      out.need_code = false;
+      return out;
+    }
+    out.ok = true;
+    return out;
+  }
+  if (out.action != "causal_pilot_worker_v1") {
+    out.error = "contrato causal_pilot_worker_v1 inválido";
+    return out;
+  }
+  const std::string kind = causal_lower(hyp_json_string(j, "kind"));
+  if (!kind.empty() && kind != out.kind) {
+    out.kind = kind;
+  }
+  out.verdict = causal_lower(hyp_json_string(j, "verdict"));
+  {
+    const auto bar = out.verdict.find('|');
+    if (bar != std::string::npos) {
+      out.verdict = out.verdict.substr(0, bar);
+    }
+  }
+  out.owns = hyp_json_string(j, "owns");
+  if (out.owns.empty()) {
+    out.owns = expected_stem;
+  }
+  out.why = hyp_json_string(j, "why");
+  if (out.why.size() > 240) {
+    out.why.resize(240);
+  }
+  out.brief = hyp_json_string(j, "brief");
+  if (out.brief.empty()) {
+    out.brief = hyp_json_string(j, "summary");
+  }
+  if (out.brief.empty() && pilot_text_is_brief(out.why)) {
+    out.brief = out.why;
+  }
+  if (out.brief.size() > 400) {
+    out.brief.resize(400);
+  }
+  out.chain = hyp_json_string(j, "chain");
+  if (out.chain == "trigger→estado→efecto" || out.chain == "trigger->estado->efecto") {
+    out.chain.clear();
+  }
+  out.path_symbol = hyp_json_string(j, "path_symbol");
+  if (out.path_symbol == "path.cpp:fn" || out.path_symbol == "src/foo.cpp:Symbol" ||
+      (out.path_symbol.size() >= 3 &&
+       out.path_symbol.compare(out.path_symbol.size() - 3, 3, ":Fn") == 0) ||
+      out.path_symbol.find("append_top_level_tabs_header") != std::string::npos) {
+    out.path_symbol.clear();
+  }
+  if (out.chain.size() < 8 && out.why.size() >= 12) {
+    out.chain = out.why;
+  }
+  out.port_to = hyp_json_string(j, "port_to");
+  {
+    const std::string pl = causal_lower(out.port_to);
+    if (pl.empty() || pl == "stem_vecino" || pl == "vecino" || pl == "none" || pl == "n/a" ||
+        pl.find(' ') != std::string::npos) {
+      out.port_to.clear();
+    }
+  }
+  if (notebook != nullptr) {
+    if (out.kind == "cubre" && notebook->allowed_targets.empty() && !notebook->used_tool()) {
+      out.error = "ficha vacía: pide outline o need_code";
+      return out;
+    }
+    if (out.kind == "como" && !notebook->used_code_or_follow()) {
+      out.error = "como sin need_code/follow";
+      return out;
+    }
+    if (out.kind == "gap" && !notebook->used_code_or_follow()) {
+      out.error = "gap sin follow/need_code";
+      return out;
+    }
+    if (!notebook->allowed_targets.empty() &&
+        !pilot_why_cites_targets(out.why + " " + out.brief, notebook->allowed_targets) &&
+        (out.chain.empty() || !pilot_why_cites_targets(out.chain + " " + out.path_symbol,
+                                                       notebook->allowed_targets))) {
+      out.error = "why no cita un símbolo de la ficha";
+      return out;
+    }
+    if (!pilot_text_is_brief(out.brief)) {
+      out.error = "brief corto: 2 frases para el piloto";
+      return out;
+    }
+  }
+  if (out.kind == "cubre") {
+    if (out.verdict != "cubre" && out.verdict != "no_cubre") {
+      out.error = "verdict cubre inválido";
+      return out;
+    }
+    out.covers = out.verdict == "cubre";
+  } else if (out.kind == "como") {
+    if (out.verdict != "chain" && out.verdict != "no_cubre") {
+      out.error = "verdict como inválido";
+      return out;
+    }
+    out.covers = out.verdict == "chain";
+    if (out.chain.size() < 8 && out.verdict == "chain") {
+      out.error = "chain demasiado corta";
+      return out;
+    }
+    if (out.verdict == "no_cubre" && notebook != nullptr &&
+        notebook->notes.find("sin hops") != std::string::npos &&
+        pilot_notes_unique_code_targets(notebook->notes) <= 1) {
+      out.error = "follow vacío no es no_cubre";
+      out.covers = false;
+      return out;
+    }
+  } else if (out.kind == "gap") {
+    if (out.verdict != "missing" && out.verdict != "found") {
+      out.error = "verdict gap inválido";
+      return out;
+    }
+  } else {
+    out.error = "kind worker desconocido";
+    return out;
+  }
+  if (out.why.size() < 8) {
+    out.error = "why worker corto";
+    return out;
+  }
+  out.ok = true;
+  return out;
+}
+
+nlohmann::json registry_causal_pilot_worker_to_json(const RegistryCausalPilotWorkerReport& r) {
+  return {{"ok", r.ok},
+          {"need_code", r.need_code},
+          {"is_tool", r.is_tool},
+          {"tool", r.tool},
+          {"action", r.action},
+          {"kind", r.kind},
+          {"zone", r.zone},
+          {"stem", r.stem},
+          {"verdict", r.verdict},
+          {"covers", r.covers},
+          {"owns", r.owns},
+          {"chain", r.chain},
+          {"path_symbol", r.path_symbol},
+          {"port_to", r.port_to},
+          {"target", r.target},
+          {"direction", r.direction},
+          {"why", r.why},
+          {"brief", r.brief},
+          {"error", r.error},
+          {"steps", r.steps}};
+}
+
+std::string registry_causal_pilot_worker_markdown(const RegistryCausalPilotWorkerReport& r) {
+  std::ostringstream out;
+  out << "# worker " << r.kind << " " << r.zone << " stem=" << r.stem << "\n";
+  out << "ok=" << (r.ok ? "yes" : "no");
+  if (r.is_tool) {
+    out << " tool=" << r.tool << " target=" << r.target;
+    if (!r.direction.empty()) {
+      out << " dir=" << r.direction;
+    }
+  } else if (r.kind == "cubre") {
+    out << " RESULTADO=" << (r.covers ? "CUBRE" : "NO_CUBRE");
+  } else if (r.kind == "como") {
+    out << " RESULTADO=" << (r.covers ? "CADENA" : "SIN_CADENA");
+  } else {
+    out << " RESULTADO=" << r.verdict;
+  }
+  if (r.need_code && !r.is_tool) {
+    out << " need_code=" << r.target;
+  }
+  out << " steps=" << r.steps << "\n";
+  if (!r.brief.empty()) {
+    out << "brief: " << r.brief << "\n";
+  }
+  if (!r.chain.empty()) {
+    out << "chain: " << r.chain << "\n";
+  }
+  if (!r.path_symbol.empty()) {
+    out << "path_symbol: " << r.path_symbol << "\n";
+  }
+  if (!r.port_to.empty()) {
+    out << "port_to: " << r.port_to << "\n";
+  }
+  if (!r.why.empty()) {
+    out << "why: " << r.why << "\n";
+  }
+  if (!r.error.empty()) {
+    out << "error: " << r.error << "\n";
+  }
+  return out.str();
+}
+
+std::string registry_causal_pilot_plenary_system_prompt() {
+  return R"(Eres el PILOTO en plenario. Recibes informes de trabajadores sordos. NO lees fichas.
+cubre=sí en un barrio y cubre=no en otro NO es contradicción: es el filtro de trampas.
+
+verdict:
+- entiendo: al menos un cubre=cubre nombra el objeto de la consulta.
+  keep = SOLO esos stems (nunca un como/chain). drop = no_cubre, como en trampa, gaps.
+- no_entiendo: TODOS los cubre son no_cubre. como=chain NO basta para keep.
+- abandono: los barrios no tienen nada que ver (chrome, toast, sha256).
+
+JSON:
+{"action":"causal_pilot_plenary_v1","verdict":"entiendo","keep":["stem"],"drop":["stem"],"why":"…"})";
+}
+
+std::string registry_causal_pilot_plenary_user_prompt(const std::string& reports_markdown) {
+  return "Lee los informes (veredicto + brief) y decide. keep/drop solo stems que aparecen.\n\n" +
+         reports_markdown;
+}
+
+RegistryCausalPilotPlenary registry_parse_causal_pilot_plenary(
+    const std::string& raw, const std::vector<std::string>& allowed_stems) {
+  RegistryCausalPilotPlenary out;
+  out.raw = raw;
+  out.action = "causal_pilot_plenary_v1";
+  const auto begin = raw.find('{');
+  const auto end = raw.rfind('}');
+  if (begin == std::string::npos || end == std::string::npos || end <= begin) {
+    out.error = "plenario sin objeto JSON";
+    return out;
+  }
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(raw.substr(begin, end - begin + 1));
+  } catch (const std::exception& e) {
+    out.error = std::string("JSON plenario inválido: ") + e.what();
+    return out;
+  }
+  if (j.value("action", "") != "causal_pilot_plenary_v1") {
+    out.error = "contrato causal_pilot_plenary_v1 inválido";
+    return out;
+  }
+  out.verdict = causal_lower(hyp_json_string(j, "verdict"));
+  static const std::unordered_set<std::string> kV = {"entiendo", "no_entiendo", "abandono"};
+  if (!kV.count(out.verdict)) {
+    out.error = "verdict plenario inválido";
+    return out;
+  }
+  std::unordered_set<std::string> allowed;
+  for (const auto& s : allowed_stems) {
+    if (!s.empty()) {
+      allowed.insert(causal_lower(s));
+    }
+  }
+  auto take_list = [&](const char* key, std::vector<std::string>* dest) {
+    if (!j.contains(key) || !j[key].is_array()) {
+      return;
+    }
+    for (const auto& item : j[key]) {
+      std::string s = item.is_string() ? item.get<std::string>() : std::string{};
+      if (s.empty() || !allowed.count(causal_lower(s))) {
+        continue;
+      }
+      dest->push_back(s);
+    }
+  };
+  take_list("keep", &out.keep);
+  take_list("drop", &out.drop);
+  out.why = hyp_json_string(j, "why");
+  if (out.why.size() < 8) {
+    out.error = "why plenario corto";
+    return out;
+  }
+  if (out.why.size() > 240) {
+    out.why.resize(240);
+  }
+  if (out.verdict == "entiendo" && out.keep.empty()) {
+    out.error = "entiendo sin keep";
+    return out;
+  }
+  if (out.verdict == "no_entiendo" && !out.keep.empty()) {
+    out.verdict = "entiendo";
+  }
+  out.ok = true;
+  return out;
+}
+
+void registry_tally_pilot_plenary(RegistryCausalPilotPlenary* plenary,
+                                  const std::vector<RegistryCausalPilotWorkerReport>& reports) {
+  if (plenary == nullptr || plenary->verdict == "abandono") {
+    return;
+  }
+  std::vector<std::string> keep;
+  std::vector<std::string> drop;
+  std::unordered_set<std::string> seen_keep;
+  std::unordered_set<std::string> seen_drop;
+  for (const auto& r : reports) {
+    if (!r.ok || r.stem.empty()) {
+      continue;
+    }
+    const std::string sl = causal_lower(r.stem);
+    const bool cubre_yes = r.kind == "cubre" && r.covers && r.verdict == "cubre";
+    if (cubre_yes) {
+      if (seen_keep.insert(sl).second) {
+        keep.push_back(r.stem);
+      }
+    } else if (r.verdict == "no_cubre" || r.verdict == "missing") {
+      if (seen_drop.insert(sl).second) {
+        drop.push_back(r.stem);
+      }
+    }
+  }
+  std::vector<std::string> drop_only;
+  for (const auto& s : drop) {
+    if (seen_keep.count(causal_lower(s)) == 0) {
+      drop_only.push_back(s);
+    }
+  }
+  plenary->keep = keep;
+  plenary->drop = drop_only;
+  if (!plenary->keep.empty()) {
+    plenary->verdict = "entiendo";
+    plenary->ok = true;
+    plenary->error.clear();
+    if (plenary->why.size() < 8) {
+      plenary->why = "tally: keep solo de cubre=cubre";
+    }
+  } else if (plenary->verdict == "entiendo" || plenary->verdict.empty()) {
+    plenary->verdict = "no_entiendo";
+    if (plenary->why.size() < 8) {
+      plenary->why = "tally: ningún cubre=cubre";
+    }
+  }
+}
+
+nlohmann::json registry_causal_pilot_plenary_to_json(const RegistryCausalPilotPlenary& p) {
+  return {{"ok", p.ok},   {"action", p.action}, {"verdict", p.verdict}, {"keep", p.keep},
+          {"drop", p.drop}, {"why", p.why},       {"error", p.error}};
+}
+
+std::string registry_causal_pilot_plenary_markdown(const RegistryCausalPilotPlenary& p) {
+  std::ostringstream out;
+  out << "# causal_pilot_plenary_v1\n";
+  out << "ok=" << (p.ok ? "yes" : "no") << " verdict=" << p.verdict << "\n";
+  if (!p.why.empty()) {
+    out << "why: " << p.why << "\n";
+  }
+  if (!p.error.empty()) {
+    out << "error: " << p.error << "\n";
+  }
+  out << "keep:";
+  for (const auto& s : p.keep) {
+    out << " " << s;
+  }
+  out << "\n drop:";
+  for (const auto& s : p.drop) {
+    out << " " << s;
+  }
+  out << "\n";
+  return out.str();
 }
 
 std::string registry_causal_judge_system_prompt() {

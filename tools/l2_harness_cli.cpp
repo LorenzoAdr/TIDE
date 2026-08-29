@@ -381,6 +381,7 @@ void usage() {
             << "  zone-judge-shot --cards FILE --case ID  // 1× LLM sobre causal_judge_v1\n"
             << "  zone-judge-battery --cards-root DIR --out DIR  // un LLM secuencial\n"
             << "  atlas-survey --cards-root DIR --out DIR --only ID  // atlas → LLM inspect → ficha\n"
+            << "  worker-probe --kind cubre|como|gap --case ID --stem S --out DIR\n"
             << "  trail-judge-shot [SYM] // 1× LLM: trail mapa L0 → a_trail_judge (caso 17)\n"
             << "  dataflow-probe VAR     // sin LLM: writes/reads/decls vía ripgrep (no LSP)\n"
             << "  effect-summary-probe   // sin LLM: fichas TS (SYM|--from-a-state|--from-map)\n"
@@ -1953,11 +1954,447 @@ bool target_matches_query(const std::string& target, const std::string& query) {
   return false;
 }
 
+void append_outline_symbols(tuide::RegistryCausalPilotWorkerNotebook* nb, const std::string& path,
+                            const std::string& body) {
+  if (nb == nullptr) {
+    return;
+  }
+  tuide::registry_causal_pilot_notebook_add_target(nb, path);
+  std::string cur;
+  auto flush = [&]() {
+    if (cur.size() >= 5 && std::isalpha(static_cast<unsigned char>(cur[0]))) {
+      tuide::registry_causal_pilot_notebook_add_target(nb, path + ":" + cur);
+    }
+    cur.clear();
+  };
+  for (char c : body) {
+    if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') {
+      cur.push_back(c);
+    } else {
+      flush();
+    }
+  }
+  flush();
+}
+
+tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
+    tuide::L2Brain& brain, const AiSettings& settings, const std::string& root,
+    const fs::path& case_out, int task_i, const tuide::RegistryCausalPilotTask& task,
+    const nlohmann::json& inspect_payload, const nlohmann::json& atlas_payload,
+    tuide::GraphViewLevel view, const std::string& instruction) {
+  tuide::RegistryCausalPilotWorkerReport report;
+  report.kind = task.kind;
+  report.zone = task.zone;
+  report.stem = task.stem;
+  nlohmann::json one =
+      tuide::registry_causal_payload_filter_zones(inspect_payload, {task.zone});
+  if (one.value("zones", nlohmann::json::array()).empty()) {
+    one = tuide::registry_causal_payload_filter_zones(atlas_payload, {task.zone});
+    view = tuide::GraphViewLevel::Atlas;
+  }
+  one["uncovered_seeds"] = nlohmann::json::array();
+  const std::string zone_md = tuide::registry_causal_pack_markdown(one, view);
+  tuide::RegistryCausalPilotWorkerNotebook nb;
+  tuide::registry_causal_pilot_notebook_from_payload(one, task.stem, &nb);
+  const std::string prefix = "w" + std::to_string(task_i);
+  std::ofstream(case_out / (prefix + "_zone.md")) << zone_md;
+  for (int step = 0; step < tuide::kPilotWorkerMaxSteps; ++step) {
+    tuide::L2BrainRequest req;
+    req.system_prompt = tuide::registry_causal_pilot_worker_system_prompt(task.kind, task.stem);
+    req.user_prompt =
+        "## Consulta del usuario\n" + instruction + "\n\n## Encargo del piloto\n" +
+        task.question + "\n\n" +
+        tuide::registry_causal_pilot_worker_user_prompt(
+            task.kind, task.question, zone_md, nb.notes,
+            tuide::registry_causal_pilot_allowed_markdown(nb));
+    req.phase = "causal_pilot_worker";
+    req.max_tokens =
+        std::min(640, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 640);
+    req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+    req.temperature = 0.05f;
+    if (step == 0) {
+      std::ofstream(case_out / (prefix + "_system.txt")) << req.system_prompt;
+    }
+    std::ofstream(case_out / (prefix + "_user_" + std::to_string(step) + ".md"))
+        << req.user_prompt;
+    const auto response = brain.propose(req, nullptr);
+    std::ofstream(case_out / (prefix + "_raw_" + std::to_string(step) + ".txt"))
+        << response.text;
+    if (!response.ok) {
+      report.error = response.error;
+      report.raw = response.text;
+      report.steps = step + 1;
+      return report;
+    }
+    report = tuide::registry_parse_causal_pilot_worker(response.text, task.kind, task.stem,
+                                                       instruction, &nb);
+    report.zone = task.zone;
+    report.stem = task.stem;
+    report.steps = step + 1;
+    if (report.ok && !report.is_tool) {
+      int zone_ov = 0;
+      const auto& zs = one.value("zones", nlohmann::json::array());
+      if (!zs.empty() && zs.front().is_object()) {
+        zone_ov = tuide::registry_causal_query_zone_overlap(instruction, zs.front());
+      }
+      const bool cubre_mismatch =
+          task.kind == "cubre" && report.verdict == "cubre" && !instruction.empty() &&
+          tuide::registry_causal_query_hay_overlap(
+              instruction, report.why + " " + report.owns + " " + report.stem) <= 0;
+      const bool card_miss = zone_ov <= 0;
+      if (cubre_mismatch && card_miss && nb.n_query_nudge < 1 &&
+          step + 1 < tuide::kPilotWorkerMaxSteps) {
+        ++nb.n_query_nudge;
+        std::ostringstream note;
+        note << "\n----- nota -----\nEl símbolo de why no solapa con ## Consulta del usuario. "
+                "Si este barrio implementa otro objeto, emite informe verdict=no_cubre citando "
+                "un símbolo de la ficha.\n";
+        nb.notes += note.str();
+        std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+            << note.str();
+        continue;
+      }
+      if (cubre_mismatch && card_miss) {
+        report.verdict = "no_cubre";
+        report.covers = false;
+      }
+      return report;
+    }
+    const bool missing_tool_err =
+        report.error == "como sin need_code/follow" || report.error == "gap sin follow/need_code" ||
+        report.error == "follow sin target" || report.error == "need_code sin target" ||
+        report.error == "outline sin target";
+    const bool ficha_tool_err =
+        report.error == "follow no está en la ficha" ||
+        report.error == "need_code no está en la ficha" ||
+        report.error == "follow fuera del stem" || report.error == "need_code fuera del stem";
+    const bool empty_surrender = report.error == "follow vacío no es no_cubre";
+    const bool brief_corto = report.error == "brief corto: 2 frases para el piloto";
+    if (!report.is_tool && missing_tool_err && !nb.used_code_or_follow() &&
+        step + 1 < tuide::kPilotWorkerMaxSteps) {
+      std::ostringstream note;
+      note << "\n----- nota -----\nInforme rechazado: " << report.error
+           << ". Emite una tool con target de ## Símbolos permitidos.\n";
+      nb.notes += note.str();
+      std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+          << note.str();
+      continue;
+    }
+    if (!report.is_tool && ficha_tool_err && step + 1 < tuide::kPilotWorkerMaxSteps) {
+      std::ostringstream note;
+      note << "\n----- nota -----\nInforme rechazado: " << report.error
+           << ". Elige un target de ## Símbolos permitidos; no inventes.\n";
+      nb.notes += note.str();
+      std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+          << note.str();
+      continue;
+    }
+    if (!report.is_tool && empty_surrender && step + 1 < tuide::kPilotWorkerMaxSteps) {
+      std::ostringstream note;
+      note << "\n----- nota -----\nInforme rechazado: " << report.error
+           << ". Follow sin hops no autoriza no_cubre. outline del archivo del stem, o "
+              "follow/need_code de OTRO símbolo de ## Símbolos permitidos, o chain si el "
+              "símbolo ES el acto.\n";
+      nb.notes += note.str();
+      std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+          << note.str();
+      continue;
+    }
+    if (!report.is_tool && brief_corto && nb.n_query_nudge < 1 &&
+        step + 1 < tuide::kPilotWorkerMaxSteps) {
+      ++nb.n_query_nudge;
+      std::ostringstream note;
+      note << "\n----- nota -----\nInforme rechazado: " << report.error
+           << ". Reemite causal_pilot_worker_v1 con brief de 2 frases para el piloto, "
+              "citando un símbolo de la ficha.\n";
+      nb.notes += note.str();
+      std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+          << note.str();
+      continue;
+    }
+    const bool bad_como_verdict = task.kind == "como" && !report.is_tool &&
+                                  nb.used_code_or_follow() &&
+                                  (report.error == "verdict como inválido" ||
+                                   report.verdict == "need_code" || report.verdict == "follow" ||
+                                   report.verdict == "outline");
+    if (bad_como_verdict && step + 1 < tuide::kPilotWorkerMaxSteps) {
+      std::ostringstream note;
+      note << "\n----- nota -----\nInforme rechazado: verdict de como debe ser chain o "
+              "no_cubre, no need_code. Reemite causal_pilot_worker_v1 con chain/why/brief.\n";
+      nb.notes += note.str();
+      std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+          << note.str();
+      continue;
+    }
+    if (report.ok && report.is_tool &&
+        (task.kind == "como" || task.kind == "gap") && nb.used_code_or_follow() &&
+        step + 1 < tuide::kPilotWorkerMaxSteps) {
+      const bool empty_follow_retry =
+          nb.notes.find("sin hops") != std::string::npos &&
+          (nb.n_need_code + nb.n_follow) < 2;
+      if (!empty_follow_retry) {
+        std::ostringstream note;
+        note << "\n----- nota -----\nYa hay follow/need_code en ## Notas. Emite el informe "
+                "causal_pilot_worker_v1; no repitas la tool.\n";
+        nb.notes += note.str();
+        std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+            << note.str();
+        continue;
+      }
+    }
+    if (!report.ok || !report.is_tool || step + 1 >= tuide::kPilotWorkerMaxSteps) {
+      if (report.is_tool) {
+        report.ok = false;
+        report.error = "presupuesto de tools agotado";
+        report.is_tool = false;
+        report.need_code = false;
+      }
+      return report;
+    }
+    std::ostringstream chunk;
+    chunk << "\n----- " << report.tool << " " << report.target;
+    if (!report.direction.empty()) {
+      chunk << " " << report.direction;
+    }
+    chunk << " -----\n";
+    if (report.tool == "need_code") {
+      ++nb.n_need_code;
+      GetCodeOfRequest creq = parse_get_code_of_arg(report.target, root);
+      creq.workspace_root = root;
+      if (creq.max_lines <= 0) {
+        creq.max_lines = 80;
+      }
+      const auto got = get_code_of(creq);
+      if (got.ok) {
+        chunk << tuide::format_get_code_of_result(got, got.path);
+        tuide::registry_causal_pilot_notebook_add_target(&nb, report.target);
+      } else {
+        chunk << "(get_code_of falló: " << got.error << ")\n";
+      }
+    } else if (report.tool == "outline") {
+      ++nb.n_outline;
+      fs::path abs = report.target;
+      if (!abs.is_absolute()) {
+        abs = fs::path(root) / report.target;
+      }
+      abs = abs.lexically_normal();
+      const std::string cmd =
+          "rg -n --no-heading -e "
+          "'^[a-zA-Z_].*\\(.*\\)\\s*\\{?\\s*$|^\\s*(class|struct|namespace|enum)\\s+' " +
+          shell_quote(abs.string()) + " | head -n 80";
+      std::string body = fs::exists(abs) ? run_cmd(cmd) : std::string{};
+      if (body.empty()) {
+        body = "(sin outline)\n";
+      }
+      chunk << "outline: " << report.target << "\n" << body;
+      append_outline_symbols(&nb, report.target, body);
+    } else if (report.tool == "follow") {
+      ++nb.n_follow;
+      std::vector<std::string> extra;
+      std::string port;
+      chunk << tuide::registry_causal_pilot_follow_markdown(one, report.target, report.direction,
+                                                            task.stem, &extra, &port);
+      for (const auto& t : extra) {
+        tuide::registry_causal_pilot_notebook_add_target(&nb, t);
+      }
+      if (!port.empty()) {
+        chunk << "port_to_hint: " << port << "\n";
+      }
+      nb.notes += chunk.str();
+      std::ofstream(case_out / (prefix + "_tool_" + std::to_string(step) + ".md")) << chunk.str();
+      if (task.kind == "como" && extra.empty() && nb.n_outline == 0) {
+        std::string path = report.target;
+        const auto slash = path.find_last_of("/\\");
+        const auto colon = path.rfind(':');
+        if (colon != std::string::npos && (slash == std::string::npos || colon > slash)) {
+          path = path.substr(0, colon);
+        }
+        if (!path.empty()) {
+          ++nb.n_outline;
+          fs::path abs = path;
+          if (!abs.is_absolute()) {
+            abs = fs::path(root) / path;
+          }
+          abs = abs.lexically_normal();
+          const std::string cmd =
+              "rg -n --no-heading -e "
+              "'^[a-zA-Z_].*\\(.*\\)\\s*\\{?\\s*$|^\\s*(class|struct|namespace|enum)\\s+' " +
+              shell_quote(abs.string()) + " | head -n 80";
+          std::string body = fs::exists(abs) ? run_cmd(cmd) : std::string{};
+          if (body.empty()) {
+            body = "(sin outline)\n";
+          }
+          std::ostringstream ochunk;
+          ochunk << "\n----- outline " << path << " -----\noutline: " << path << "\n" << body;
+          append_outline_symbols(&nb, path, body);
+          nb.notes += ochunk.str();
+          std::ofstream(case_out / (prefix + "_tool_" + std::to_string(step) + "_outline.md"))
+              << ochunk.str();
+        }
+      }
+      continue;
+    }
+    nb.notes += chunk.str();
+    std::ofstream(case_out / (prefix + "_tool_" + std::to_string(step) + ".md")) << chunk.str();
+  }
+  report.error = "worker sin informe";
+  return report;
+}
+
+int run_worker_probe(const std::string& root, int argc, char** argv) {
+  std::string cards_root_arg;
+  std::string out_arg;
+  std::string only_case;
+  std::string kind;
+  std::string stem;
+  std::string zone;
+  std::string question;
+  std::string model_id;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--cards-root" && i + 1 < argc) {
+      cards_root_arg = argv[++i];
+    } else if (a == "--out" && i + 1 < argc) {
+      out_arg = argv[++i];
+    } else if (a == "--case" && i + 1 < argc) {
+      only_case = argv[++i];
+    } else if (a == "--kind" && i + 1 < argc) {
+      kind = argv[++i];
+    } else if (a == "--stem" && i + 1 < argc) {
+      stem = argv[++i];
+    } else if (a == "--zone" && i + 1 < argc) {
+      zone = argv[++i];
+    } else if (a == "--question" && i + 1 < argc) {
+      question = argv[++i];
+    } else if (a == "--model-id" && i + 1 < argc) {
+      model_id = argv[++i];
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "worker-probe --kind cubre|como|gap --case ID --stem S --out DIR\n"
+                   "  [--cards-root DIR] [--zone M*] [--question …] [--model-id ID]\n"
+                   "  Un worker sordo sobre una ficha inspect/atlas ya guardada. Sin piloto.\n";
+      return 2;
+    }
+  }
+  if (only_case.empty() || stem.empty() || out_arg.empty() || kind.empty()) {
+    std::cerr << "worker-probe: requiere --kind, --case, --stem y --out\n";
+    return 2;
+  }
+  if (kind != "cubre" && kind != "como" && kind != "gap") {
+    std::cerr << "worker-probe: kind debe ser cubre|como|gap\n";
+    return 2;
+  }
+  fs::path cards_root(cards_root_arg.empty()
+                          ? (fs::path(root) / ".tuide/ai/l2_explore_battery/round_atlas20_pilot_workers2")
+                          : fs::path(cards_root_arg));
+  if (!cards_root.is_absolute()) {
+    cards_root = fs::path(root) / cards_root;
+  }
+  fs::path output_root(out_arg);
+  if (!output_root.is_absolute()) {
+    output_root = fs::path(root) / output_root;
+  }
+  const fs::path prompts_path =
+      fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
+  std::ifstream prompts_in(prompts_path);
+  if (!prompts_in) {
+    std::cerr << "worker-probe: no se pudo leer " << prompts_path << "\n";
+    return 2;
+  }
+  nlohmann::json cases;
+  prompts_in >> cases;
+  std::string instruction;
+  for (const auto& item : cases) {
+    if (item.value("id", "") == only_case) {
+      instruction = item.value("prompt", "");
+      break;
+    }
+  }
+  if (instruction.empty()) {
+    std::cerr << "worker-probe: caso desconocido " << only_case << "\n";
+    return 2;
+  }
+  fs::path case_dir = cards_root / only_case;
+  if (!fs::exists(case_dir / "inspect.json") && !fs::exists(case_dir / "judge_cards.json") &&
+      fs::exists(cards_root / "survey" / only_case / "inspect.json")) {
+    case_dir = cards_root / "survey" / only_case;
+  }
+  fs::path inspect_path = case_dir / "inspect.json";
+  fs::path cards_path = case_dir / "judge_cards.json";
+  nlohmann::json payload;
+  tuide::GraphViewLevel view = tuide::GraphViewLevel::Inspect;
+  try {
+    if (fs::exists(inspect_path)) {
+      payload = nlohmann::json::parse(read_file(inspect_path));
+    } else if (fs::exists(cards_path)) {
+      payload = nlohmann::json::parse(read_file(cards_path));
+      view = tuide::GraphViewLevel::Atlas;
+    } else {
+      std::cerr << "worker-probe: sin inspect.json ni judge_cards.json en " << case_dir << "\n";
+      return 1;
+    }
+  } catch (...) {
+    std::cerr << "worker-probe: JSON de ficha inválido\n";
+    return 1;
+  }
+  if (zone.empty()) {
+    zone = tuide::registry_causal_zone_id_for_stem(payload, stem);
+  }
+  if (zone.empty()) {
+    std::cerr << "worker-probe: no hay zona para stem=" << stem << "\n";
+    return 1;
+  }
+  if (question.empty()) {
+    if (kind == "cubre") {
+      question = "¿es " + stem + " el objeto de la consulta?";
+    } else if (kind == "como") {
+      question = "¿quién escribe, limpia o dispara la acción en " + stem + "?";
+    } else {
+      question = "¿qué eslabón falta en " + stem + " para explicar la consulta?";
+    }
+  }
+  AiSettings settings = load_ai_settings(root);
+  if (!model_id.empty()) {
+    settings.level2.model_id = model_id;
+    settings.level2.model_path.clear();
+  }
+  std::string err;
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  auto brain_ptr = ready_l2_brain(settings, progress, &err);
+  if (!brain_ptr) {
+    std::cerr << "worker-probe: " << err << "\n";
+    return 1;
+  }
+  const fs::path case_out = output_root;
+  fs::create_directories(case_out);
+  std::ofstream(case_out / "inspect.json") << payload.dump(2) << "\n";
+  tuide::RegistryCausalPilotTask task;
+  task.kind = kind;
+  task.zone = zone;
+  task.stem = stem;
+  task.question = question;
+  const auto wr = run_one_pilot_worker(*brain_ptr, settings, root, case_out, 1, task, payload,
+                                       payload, view, instruction);
+  const auto wj = tuide::registry_causal_pilot_worker_to_json(wr);
+  nlohmann::json summary = wj;
+  summary["id"] = only_case;
+  summary["kind"] = kind;
+  summary["zone"] = zone;
+  summary["stem"] = stem;
+  summary["question"] = question;
+  std::ofstream(case_out / "w1.json") << wj.dump(2) << "\n";
+  std::ofstream(case_out / "w1.md") << tuide::registry_causal_pilot_worker_markdown(wr);
+  std::ofstream(case_out / "summary.json") << summary.dump(2) << "\n";
+  std::cout << summary.dump(2) << "\n";
+  return wr.ok && !wr.is_tool ? 0 : 1;
+}
+
 int run_atlas_survey(const std::string& root, int argc, char** argv) {
   std::string cards_root_arg;
   std::string out_arg;
   std::string only_case;
   std::string model_id;
+  bool pilot_plan = false;
+  bool pilot_workers = false;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--cards-root" && i + 1 < argc) {
@@ -1968,11 +2405,18 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
       only_case = argv[++i];
     } else if (a == "--model-id" && i + 1 < argc) {
       model_id = argv[++i];
+    } else if (a == "--pilot-plan") {
+      pilot_plan = true;
+    } else if (a == "--pilot-workers") {
+      pilot_plan = true;
+      pilot_workers = true;
     } else if (a == "-h" || a == "--help") {
-      std::cerr << "atlas-survey --cards-root DIR --out DIR --only ID\n"
+      std::cerr << "atlas-survey --cards-root DIR --out DIR --only ID [--pilot-plan|--pilot-workers]\n"
                    "  Pasada 0: atlas. LLM elige 1–3 ids por cobertura (no diversidad).\n"
                    "  Pasada 1: inspect + review de cobertura (añade hasta 2 M*).\n"
-                   "  Pasada 2: hipótesis affected/control/trigger/cleanup sobre esas fichas.\n";
+                   "  Pasada 2: hipótesis; masa baja → una ampliación need_more y se reintenta.\n"
+                   "  --pilot-plan: survey + pack compacto; el piloto planifica o pide 1 ampliación.\n"
+                   "  --pilot-workers: plan + trabajadores (need_code|outline|follow) + plenario.\n";
       return 2;
     }
   }
@@ -2121,6 +2565,39 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
   }
   summary["inspect_r1_zones"] = survey.shortlist;
 
+  auto json_ids = [](const nlohmann::json& arr) {
+    std::vector<std::string> out;
+    if (!arr.is_array()) {
+      return out;
+    }
+    for (const auto& item : arr) {
+      if (item.is_string()) {
+        out.push_back(item.get<std::string>());
+      }
+    }
+    return out;
+  };
+  constexpr int kAtlasInspectCap = 4;
+  const auto ov = tuide::registry_atlas_overlap_add_ids(base_payload, instruction,
+                                                       survey.shortlist);
+  const auto ov_ids = json_ids(ov);
+  summary["overlap_survey_add"] = ov;
+  if (!pilot_plan) {
+    const int nadd =
+        tuide::registry_atlas_merge_inspect_ids(&survey, ov_ids, zone_ids, kAtlasInspectCap);
+    summary["overlap_survey_merged"] = nadd;
+    if (nadd > 0) {
+      if (!expand_survey(survey, &expanded_payload, &err)) {
+        summary["overlap_survey_expand_error"] = err;
+      } else {
+        inspect_md = tuide::registry_causal_pack_markdown(expanded_payload, next_view);
+      }
+    }
+  } else {
+    summary["overlap_suggest"] = ov;
+    summary["overlap_survey_merged"] = 0;
+  }
+
   std::vector<std::string> remaining_ids;
   for (const auto& zid : zone_ids) {
     if (std::find(survey.shortlist.begin(), survey.shortlist.end(), zid) ==
@@ -2128,6 +2605,7 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
       remaining_ids.push_back(zid);
     }
   }
+  if (!pilot_plan) {
   tuide::L2BrainRequest cover_req;
   cover_req.system_prompt = tuide::registry_causal_atlas_cover_system_prompt();
   cover_req.user_prompt =
@@ -2169,7 +2647,6 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
                          {"error", cover.error}})
              .dump(2)
          << "\n";
-  constexpr int kAtlasInspectCap = 4;
   if (cover.ok && !cover.add.empty()) {
     const int nadd =
         tuide::registry_atlas_merge_inspect_ids(&survey, cover.add, zone_ids, kAtlasInspectCap);
@@ -2181,6 +2658,24 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
         inspect_md = tuide::registry_causal_pack_markdown(expanded_payload, next_view);
       }
     }
+  }
+  {
+    const auto ov = tuide::registry_atlas_overlap_add_ids(base_payload, instruction,
+                                                         survey.shortlist);
+    const auto ov_ids = json_ids(ov);
+    const int nadd =
+        tuide::registry_atlas_merge_inspect_ids(&survey, ov_ids, zone_ids, kAtlasInspectCap);
+    summary["overlap_cover_add"] = ov;
+    summary["overlap_cover_merged"] = nadd;
+    if (nadd > 0) {
+      cover.covers = false;
+      if (!expand_survey(survey, &expanded_payload, &err)) {
+        summary["overlap_cover_expand_error"] = err;
+      } else {
+        inspect_md = tuide::registry_causal_pack_markdown(expanded_payload, next_view);
+      }
+    }
+  }
   }
   summary["ok"] = survey.ok && !survey.shortlist.empty();
   summary["shortlist"] = survey.shortlist;
@@ -2203,36 +2698,336 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
                                 {"expand_from", zone.expand_from}});
   }
 
-  tuide::L2BrainRequest hyp_req;
-  hyp_req.system_prompt = tuide::registry_causal_zone_hyp_system_prompt();
-  hyp_req.user_prompt = "## Consulta\n" + instruction + "\n\n" +
-                        tuide::registry_causal_zone_hyp_user_prompt(inspect_md);
-  hyp_req.phase = "causal_zone_hyp";
-  hyp_req.max_tokens =
-      std::min(512, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512);
-  hyp_req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
-  hyp_req.temperature = 0.05f;
-  std::ofstream(case_out / "hyp_system.txt") << hyp_req.system_prompt;
-  std::ofstream(case_out / "hyp_user.md") << hyp_req.user_prompt;
-  const auto hyp_t0 = std::chrono::steady_clock::now();
-  const auto hyp_response = brain.propose(hyp_req, nullptr);
-  const int64_t hyp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             std::chrono::steady_clock::now() - hyp_t0)
-                             .count();
-  std::ofstream(case_out / "hyp_raw.txt") << hyp_response.text;
+  auto remaining_now = [&]() {
+    std::vector<std::string> rem;
+    for (const auto& zid : zone_ids) {
+      if (std::find(survey.shortlist.begin(), survey.shortlist.end(), zid) ==
+          survey.shortlist.end()) {
+        rem.push_back(zid);
+      }
+    }
+    return rem;
+  };
+
+  if (pilot_plan) {
+    auto pack_src = [&]() -> const nlohmann::json& {
+      if (expanded_payload.contains("zones") && !expanded_payload["zones"].empty()) {
+        return expanded_payload;
+      }
+      return base_payload;
+    };
+    tuide::RegistryCausalPilotPlan plan;
+    int64_t plan_ms = 0;
+    std::string last_plan_raw;
+    for (int pass = 0; pass < 2; ++pass) {
+      const auto rem = remaining_now();
+      nlohmann::json pack_payload = pack_src();
+      const std::string opened_pack = tuide::registry_causal_pilot_opened_pack(
+          pack_payload, survey.shortlist, instruction);
+      const std::vector<std::string> suggest = pass == 0 ? ov_ids : std::vector<std::string>{};
+      tuide::L2BrainRequest plan_req;
+      const bool allow_more = pass == 0;
+      plan_req.system_prompt = tuide::registry_causal_pilot_plan_system_prompt(allow_more);
+      plan_req.user_prompt = "## Consulta\n" + instruction + "\n\n" +
+                             tuide::registry_causal_pilot_plan_user_prompt(
+                                 atlas_md, opened_pack, rem, suggest, allow_more);
+      plan_req.phase = pass == 0 ? "causal_pilot_plan" : "causal_pilot_plan_more";
+      plan_req.max_tokens =
+          std::min(512, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512);
+      plan_req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+      plan_req.temperature = 0.05f;
+      const std::string pass_tag = pass == 0 ? "" : "_more";
+      std::ofstream(case_out / ("plan_system" + pass_tag + ".txt")) << plan_req.system_prompt;
+      std::ofstream(case_out / ("plan_user" + pass_tag + ".md")) << plan_req.user_prompt;
+      const auto plan_t0 = std::chrono::steady_clock::now();
+      const auto plan_response = brain.propose(plan_req, nullptr);
+      last_plan_raw = plan_response.text;
+      plan_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - plan_t0)
+                     .count();
+      std::ofstream(case_out / ("plan_raw" + pass_tag + ".txt")) << plan_response.text;
+      if (!plan_response.ok) {
+        plan = tuide::RegistryCausalPilotPlan{};
+        plan.error = plan_response.error;
+        plan.raw = plan_response.text;
+        break;
+      }
+      plan = tuide::registry_parse_causal_pilot_plan(plan_response.text, base_payload, zone_ids,
+                                                    survey.shortlist, instruction, pass == 0);
+      if (plan.need_more && plan.ok && pass == 0) {
+        const int nadd = tuide::registry_atlas_merge_inspect_ids(&survey, plan.add, zone_ids,
+                                                                kAtlasInspectCap);
+        summary["pilot_need_more"] = true;
+        summary["pilot_need_more_add"] = plan.add;
+        summary["pilot_need_more_merged"] = nadd;
+        std::ofstream(case_out / "plan_need_more.json")
+            << tuide::registry_causal_pilot_plan_to_json(plan).dump(2) << "\n";
+        if (nadd > 0) {
+          if (!expand_survey(survey, &expanded_payload, &err)) {
+            summary["pilot_need_more_expand_error"] = err;
+            break;
+          }
+          inspect_md = tuide::registry_causal_pack_markdown(expanded_payload, next_view);
+          std::ofstream(case_out / "inspect.md") << inspect_md;
+          std::ofstream(case_out / "inspect.json") << expanded_payload.dump(2) << "\n";
+          summary["inspect_chars"] = inspect_md.size();
+          summary["inspect_zones"] = zone_ids_from_payload(expanded_payload);
+          summary["shortlist"] = survey.shortlist;
+        }
+        continue;
+      }
+      break;
+    }
+    const auto plan_json = tuide::registry_causal_pilot_plan_to_json(plan);
+    std::ofstream(case_out / "plan.json") << plan_json.dump(2) << "\n";
+    std::ofstream(case_out / "plan.md") << tuide::registry_causal_pilot_plan_markdown(plan);
+    summary["pilot_plan"] = true;
+    summary["plan_ok"] = plan.ok && !plan.need_more;
+    summary["plan_ms"] = plan_ms;
+    summary["plan_error"] = plan.error;
+    summary["plan_why"] = plan.why;
+    summary["plan_tasks"] = plan_json["tasks"];
+    summary["plan_unique_stems"] = plan.unique_stems;
+    summary["plan_n_cubre"] = plan.n_cubre;
+    summary["plan_has_como"] = plan.has_como;
+    summary["plan_has_gap"] = plan.has_gap;
+    summary["ok"] = survey.ok && plan.ok && !plan.need_more;
+
+    if (pilot_workers && plan.ok && !plan.need_more) {
+      std::ostringstream reports_md;
+      nlohmann::json reports_json = nlohmann::json::array();
+      std::vector<std::string> allowed_stems;
+      std::vector<tuide::RegistryCausalPilotWorkerReport> worker_reports;
+      int workers_ok = 0;
+      int64_t workers_ms = 0;
+      for (int i = 0; i < static_cast<int>(plan.tasks.size()); ++i) {
+        const auto t0 = std::chrono::steady_clock::now();
+        auto wr = run_one_pilot_worker(brain, settings, root, case_out, i + 1, plan.tasks[i],
+                                       expanded_payload, base_payload, next_view, instruction);
+        workers_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - t0)
+                          .count();
+        if (wr.ok && !wr.is_tool) {
+          ++workers_ok;
+        }
+        allowed_stems.push_back(wr.stem);
+        const auto wj = tuide::registry_causal_pilot_worker_to_json(wr);
+        reports_json.push_back(wj);
+        reports_md << tuide::registry_causal_pilot_worker_markdown(wr) << "\n";
+        std::ofstream(case_out / ("w" + std::to_string(i + 1) + ".json"))
+            << wj.dump(2) << "\n";
+        std::ofstream(case_out / ("w" + std::to_string(i + 1) + ".md"))
+            << tuide::registry_causal_pilot_worker_markdown(wr);
+        worker_reports.push_back(std::move(wr));
+      }
+      {
+        auto lower = [](std::string s) {
+          for (char& c : s) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+          }
+          return s;
+        };
+        std::unordered_set<std::string> tasked;
+        for (const auto& t : plan.tasks) {
+          tasked.insert(lower(t.stem));
+        }
+        std::string extra_stem;
+        std::string extra_zone;
+        for (const auto& wr : worker_reports) {
+          if (wr.port_to.empty()) {
+            continue;
+          }
+          const std::string zid =
+              tuide::registry_causal_zone_id_for_stem(base_payload, wr.port_to);
+          if (zid.empty() || tasked.count(lower(wr.port_to)) != 0) {
+            continue;
+          }
+          extra_stem = wr.port_to;
+          extra_zone = zid;
+          break;
+        }
+        if (!extra_stem.empty()) {
+          if (std::find(survey.shortlist.begin(), survey.shortlist.end(), extra_zone) ==
+              survey.shortlist.end()) {
+            const int nadd = tuide::registry_atlas_merge_inspect_ids(
+                &survey, {extra_zone}, zone_ids, kAtlasInspectCap);
+            if (nadd > 0) {
+              if (expand_survey(survey, &expanded_payload, &err)) {
+                inspect_md = tuide::registry_causal_pack_markdown(expanded_payload, next_view);
+              }
+            }
+          }
+          tuide::RegistryCausalPilotTask extra;
+          extra.kind = "cubre";
+          extra.zone = extra_zone;
+          extra.stem = extra_stem;
+          extra.question = "¿es " + extra_stem + " el objeto de la consulta?";
+          const int extra_i = static_cast<int>(plan.tasks.size()) + 1;
+          const auto t0 = std::chrono::steady_clock::now();
+          auto wr = run_one_pilot_worker(brain, settings, root, case_out, extra_i, extra,
+                                         expanded_payload, base_payload, next_view, instruction);
+          workers_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - t0)
+                            .count();
+          if (wr.ok && !wr.is_tool) {
+            ++workers_ok;
+          }
+          allowed_stems.push_back(wr.stem);
+          const auto wj = tuide::registry_causal_pilot_worker_to_json(wr);
+          reports_json.push_back(wj);
+          reports_md << tuide::registry_causal_pilot_worker_markdown(wr) << "\n";
+          std::ofstream(case_out / ("w" + std::to_string(extra_i) + ".json")) << wj.dump(2) << "\n";
+          std::ofstream(case_out / ("w" + std::to_string(extra_i) + ".md"))
+              << tuide::registry_causal_pilot_worker_markdown(wr);
+          worker_reports.push_back(std::move(wr));
+          summary["port_to_extra"] = extra_stem;
+          summary["port_to_extra_zone"] = extra_zone;
+        }
+      }
+      std::ofstream(case_out / "workers.md") << reports_md.str();
+      summary["pilot_workers"] = true;
+      summary["workers_ok"] = workers_ok;
+      summary["workers_n"] = static_cast<int>(plan.tasks.size());
+      summary["workers_ms"] = workers_ms;
+      summary["worker_reports"] = reports_json;
+
+      tuide::L2BrainRequest plen_req;
+      plen_req.system_prompt = tuide::registry_causal_pilot_plenary_system_prompt();
+      plen_req.user_prompt = "## Consulta\n" + instruction + "\n\n" +
+                             tuide::registry_causal_pilot_plenary_user_prompt(reports_md.str());
+      plen_req.phase = "causal_pilot_plenary";
+      plen_req.max_tokens =
+          std::min(384, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 384);
+      plen_req.n_ctx = std::max(4096, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 4096);
+      plen_req.temperature = 0.05f;
+      std::ofstream(case_out / "plenary_system.txt") << plen_req.system_prompt;
+      std::ofstream(case_out / "plenary_user.md") << plen_req.user_prompt;
+      const auto plen_t0 = std::chrono::steady_clock::now();
+      const auto plen_response = brain.propose(plen_req, nullptr);
+      const int64_t plen_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now() - plen_t0)
+                                  .count();
+      std::ofstream(case_out / "plenary_raw.txt") << plen_response.text;
+      tuide::RegistryCausalPilotPlenary plenary;
+      if (!plen_response.ok) {
+        plenary.error = plen_response.error;
+        plenary.raw = plen_response.text;
+      } else {
+        plenary = tuide::registry_parse_causal_pilot_plenary(plen_response.text, allowed_stems);
+      }
+      tuide::registry_tally_pilot_plenary(&plenary, worker_reports);
+      const auto plen_json = tuide::registry_causal_pilot_plenary_to_json(plenary);
+      std::ofstream(case_out / "plenary.json") << plen_json.dump(2) << "\n";
+      std::ofstream(case_out / "plenary.md") << tuide::registry_causal_pilot_plenary_markdown(plenary);
+      summary["plenary_ok"] = plenary.ok;
+      summary["plenary_verdict"] = plenary.verdict;
+      summary["plenary_keep"] = plenary.keep;
+      summary["plenary_drop"] = plenary.drop;
+      summary["plenary_why"] = plenary.why;
+      summary["plenary_error"] = plenary.error;
+      summary["plenary_ms"] = plen_ms;
+      summary["ok"] = survey.ok && plan.ok && plenary.ok;
+    }
+
+    std::ofstream(case_out / "summary.json") << summary.dump(2) << "\n";
+    std::cout << summary.dump(2) << "\n";
+    std::cout << "\n===== atlas =====\n" << atlas_md << "\n===== plan =====\n"
+              << tuide::registry_causal_pilot_plan_markdown(plan) << "\n===== plan raw =====\n"
+              << last_plan_raw << "\n";
+    tuide::registry_close(&expansion_registry);
+    if (pilot_workers) {
+      return summary.value("plenary_ok", false) ? 0 : 1;
+    }
+    return plan.ok ? 0 : 1;
+  }
+
   tuide::RegistryCausalHypDecision hyp;
-  if (!hyp_response.ok) {
-    hyp.error = hyp_response.error;
-    hyp.raw = hyp_response.text;
-  } else {
-    hyp = tuide::registry_parse_causal_zone_hyp(hyp_response.text, expanded_payload);
+  std::string last_hyp_raw;
+  int64_t hyp_ms = 0;
+  bool did_more = false;
+  for (int pass = 0; pass < 2; ++pass) {
+    const auto rem = remaining_now();
+    tuide::L2BrainRequest hyp_req;
+    hyp_req.system_prompt = tuide::registry_causal_zone_hyp_system_prompt();
+    hyp_req.user_prompt = "## Consulta\n" + instruction + "\n\n" +
+                          tuide::registry_causal_zone_hyp_user_prompt(inspect_md, rem);
+    hyp_req.phase = pass == 0 ? "causal_zone_hyp" : "causal_zone_hyp_more";
+    hyp_req.max_tokens =
+        std::min(512, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512);
+    hyp_req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+    hyp_req.temperature = 0.05f;
+    const std::string sys_name = pass == 0 ? "hyp_system.txt" : "hyp_more_system.txt";
+    const std::string user_name = pass == 0 ? "hyp_user.md" : "hyp_more_user.md";
+    std::ofstream(case_out / sys_name) << hyp_req.system_prompt;
+    std::ofstream(case_out / user_name) << hyp_req.user_prompt;
+    const auto hyp_t0 = std::chrono::steady_clock::now();
+    const auto hyp_response = brain.propose(hyp_req, nullptr);
+    hyp_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now() - hyp_t0)
+                  .count();
+    last_hyp_raw = hyp_response.text;
+    const std::string raw_name = pass == 0 ? "hyp_raw.txt" : "hyp_more_raw.txt";
+    std::ofstream(case_out / raw_name) << hyp_response.text;
+    if (!hyp_response.ok) {
+      hyp = tuide::RegistryCausalHypDecision{};
+      hyp.error = hyp_response.error;
+      hyp.raw = hyp_response.text;
+    } else {
+      hyp = tuide::registry_parse_causal_zone_hyp(hyp_response.text, expanded_payload, zone_ids);
+    }
+    if (hyp.ok || pass == 1) {
+      break;
+    }
+    std::vector<std::string> add = hyp.add;
+    if (add.empty()) {
+      add = tuide::registry_atlas_suggest_cover_ids(base_payload, survey.shortlist, 2);
+    }
+    bool added = false;
+    if (!add.empty()) {
+      const int nadd =
+          tuide::registry_atlas_merge_inspect_ids(&survey, add, zone_ids, kAtlasInspectCap);
+      summary["hyp_more_merged"] = nadd;
+      added = nadd > 0;
+    }
+    if (!hyp.expand_from.empty()) {
+      for (auto& zone : survey.zones) {
+        if (zone.expand_from.empty()) {
+          zone.expand_from = hyp.expand_from;
+        }
+      }
+    }
+    tuide::GraphViewLevel more_view = next_view;
+    if (!added) {
+      more_view = tuide::GraphViewLevel::Deep;
+      tuide::graph_view_profile_apply(tuide::graph_view_profile_default(more_view),
+                                      &expanded_opts);
+    }
+    if (!expand_survey(survey, &expanded_payload, &err)) {
+      summary["hyp_more_expand_error"] = err;
+      break;
+    }
+    inspect_md = tuide::registry_causal_pack_markdown(expanded_payload, more_view);
+    std::ofstream(case_out / "inspect.md") << inspect_md;
+    std::ofstream(case_out / "inspect.json") << expanded_payload.dump(2) << "\n";
+    summary["inspect_chars"] = inspect_md.size();
+    summary["inspect_zones"] = zone_ids_from_payload(expanded_payload);
+    summary["shortlist"] = survey.shortlist;
+    summary["hyp_more"] = true;
+    summary["hyp_more_add"] = add;
+    summary["hyp_more_view"] = tuide::graph_view_level_name(more_view);
+    did_more = true;
   }
   std::ofstream(case_out / "hyp.json")
       << tuide::registry_causal_hyp_decision_to_json(hyp).dump(2) << "\n";
   summary["hyp_ok"] = hyp.ok;
+  summary["hyp_parsed"] = hyp.parsed;
+  summary["hyp_need_more"] = hyp.need_more;
+  summary["hyp_mass"] = hyp.mass;
+  summary["hyp_band"] = hyp.mass_band;
   summary["hyp_ms"] = hyp_ms;
   summary["hyp_error"] = hyp.error;
   summary["hyp_why"] = hyp.why;
+  summary["hyp_more"] = did_more;
   summary["hypotheses"] = tuide::registry_causal_hyp_decision_to_json(hyp)["hypotheses"];
   if (hyp.ok) {
     tuide::ProblemFrame pf;
@@ -2241,7 +3036,7 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
     pf.problem_kind = "debug";
     pf.problem_frame = instruction;
     pf.provenance = "causal_atlas_hyp";
-    pf.anchor_confidence = hyp.hypotheses.size() == 1 ? "medium" : "low";
+    pf.anchor_confidence = hyp.mass_band == "high" ? "high" : "medium";
     pf.anchor_hypotheses = hyp.hypotheses;
     if (!hyp.hypotheses.empty()) {
       const auto& h0 = hyp.hypotheses.front();
@@ -2257,7 +3052,7 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
   std::ofstream(case_out / "summary.json") << summary.dump(2) << "\n";
   std::cout << summary.dump(2) << "\n";
   std::cout << "\n===== atlas =====\n" << atlas_md << "\n===== survey raw =====\n"
-            << response.text << "\n===== hyp raw =====\n" << hyp_response.text
+            << response.text << "\n===== hyp raw =====\n" << last_hyp_raw
             << "\n===== hyp =====\n"
             << tuide::registry_causal_hyp_decision_to_json(hyp).dump(2) << "\n";
   tuide::registry_close(&expansion_registry);
@@ -5842,6 +6637,9 @@ int main(int argc, char** argv) {
   }
   if (cmd == "atlas-survey") {
     return run_atlas_survey(root, argc, argv);
+  }
+  if (cmd == "worker-probe") {
+    return run_worker_probe(root, argc, argv);
   }
   if (cmd == "zone-judge-shot") {
     return run_zone_judge_shot(root, argc, argv);

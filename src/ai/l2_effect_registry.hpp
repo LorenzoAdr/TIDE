@@ -66,6 +66,7 @@ inline constexpr int kRegistryMaxNewFnPerWave = 400;
 inline constexpr int kRegistryMaxInventoryPerFile = 64;
 inline constexpr int kRegistryPathMaxDepth = 8;
 inline constexpr int kRegistryGcMinAgeQueries = 3;
+inline constexpr int kPilotWorkerMaxSteps = 5;  // tools + informe (cubre: máx. 1 tool)
 
 struct EffectRegistry {
   sqlite3* db = nullptr;
@@ -605,6 +606,14 @@ std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
                                           const std::string& consulta = {});
 std::string registry_causal_pack_markdown(const nlohmann::json& payload, GraphViewLevel level);
 std::string registry_causal_zone_kind(const nlohmann::json& zone);
+// Solape consulta↔owns/peek/stems (genérico; no hay lista de barrios).
+int registry_causal_query_zone_overlap(const std::string& query, const nlohmann::json& zone);
+int registry_causal_query_hay_overlap(const std::string& query, const std::string& hay);
+nlohmann::json registry_atlas_overlap_add_ids(const nlohmann::json& payload,
+                                            const std::string& query,
+                                            const std::vector<std::string>& opened_ids);
+std::string registry_causal_zone_id_for_stem(const nlohmann::json& payload,
+                                            const std::string& stem);
 void registry_atlas_fill_expand_from(const nlohmann::json& payload,
                                      RegistryCausalTriageDecision* decision);
 std::string registry_causal_atlas_survey_system_prompt();
@@ -637,21 +646,176 @@ int registry_atlas_merge_inspect_ids(RegistryCausalTriageDecision* decision,
                                      const std::vector<std::string>& allowed_zone_ids,
                                      int max_total);
 
+// Masa determinista de una hyp (no es autoevaluación del LLM).
+struct RegistryCausalHypMass {
+  float score = 0.f;
+  std::string band;  // high | medium | low
+  int grounded_slots = 0;
+  bool owns_ok = false;
+  bool neighbor_fill = false;
+  bool honest_gap = false;
+  std::string why;
+};
+
 // Hipótesis de fallo (slots affected/control/trigger/cleanup) sobre fichas inspect.
+// ok = parseada Y al menos una hyp de masa alta (candidata). need_more = ampliar fichas.
 struct RegistryCausalHypDecision {
   bool ok = false;
+  bool parsed = false;
+  bool need_more = false;
   std::string action;  // causal_zone_hyp_v1
+  std::string view;    // inspect | deep (si need_more)
+  std::vector<std::string> add;
+  std::vector<std::string> expand_from;
   std::vector<AnchorHypothesis> hypotheses;
+  std::vector<RegistryCausalHypMass> masses;  // paralelo a hypotheses
+  float mass = 0.f;
+  std::string mass_band;  // high | medium | low
   std::string why;
   std::string raw;
   std::string error;
 };
 
 std::string registry_causal_zone_hyp_system_prompt();
-std::string registry_causal_zone_hyp_user_prompt(const std::string& inspect_markdown);
-RegistryCausalHypDecision registry_parse_causal_zone_hyp(const std::string& raw,
-                                                         const nlohmann::json& inspect_payload);
+std::string registry_causal_zone_hyp_user_prompt(const std::string& inspect_markdown,
+                                                 const std::vector<std::string>& remaining_ids = {});
+RegistryCausalHypDecision registry_parse_causal_zone_hyp(
+    const std::string& raw, const nlohmann::json& inspect_payload,
+    const std::vector<std::string>& atlas_zone_ids = {});
+void registry_score_causal_zone_hyp(RegistryCausalHypDecision* decision,
+                                    const nlohmann::json& inspect_payload);
+std::vector<std::string> registry_atlas_suggest_cover_ids(const nlohmann::json& atlas_payload,
+                                                         const std::vector<std::string>& opened,
+                                                         int max_n = 2);
 nlohmann::json registry_causal_hyp_decision_to_json(const RegistryCausalHypDecision& decision);
+
+// PoC piloto: plan de 3–4 encargos (cubre|como|gap) sobre barrios. No es hyp.
+struct RegistryCausalPilotTask {
+  std::string kind;  // cubre | como | gap
+  std::string zone;
+  std::string stem;
+  std::string question;
+};
+
+struct RegistryCausalPilotPlan {
+  bool ok = false;
+  bool need_more = false;
+  std::string action;  // causal_pilot_plan_v1 | causal_pilot_need_more
+  std::vector<RegistryCausalPilotTask> tasks;
+  std::vector<std::string> add;
+  int unique_stems = 0;
+  int n_cubre = 0;
+  bool has_como = false;
+  bool has_gap = false;
+  std::string why;
+  std::string raw;
+  std::string error;
+};
+
+std::string registry_causal_pilot_plan_system_prompt(bool allow_need_more = true);
+std::string registry_causal_pilot_plan_user_prompt(
+    const std::string& atlas_markdown, const std::string& opened_pack,
+    const std::vector<std::string>& remaining_ids,
+    const std::vector<std::string>& overlap_suggest = {}, bool allow_need_more = true);
+RegistryCausalPilotPlan registry_parse_causal_pilot_plan(
+    const std::string& raw, const nlohmann::json& atlas_payload,
+    const std::vector<std::string>& atlas_zone_ids = {},
+    const std::vector<std::string>& opened_ids = {}, const std::string& query = {},
+    bool allow_need_more = false);
+std::string registry_causal_pilot_opened_pack(const nlohmann::json& payload,
+                                             const std::vector<std::string>& ids,
+                                             const std::string& query = {});
+std::string registry_causal_pilot_barrio_menu(const nlohmann::json& payload,
+                                              const std::vector<std::string>& ids,
+                                              const std::string& query = {});
+nlohmann::json registry_causal_payload_filter_zones(const nlohmann::json& payload,
+                                                    const std::vector<std::string>& ids);
+bool registry_causal_pilot_target_in_stem(const std::string& target, const std::string& stem);
+nlohmann::json registry_causal_pilot_plan_to_json(const RegistryCausalPilotPlan& plan);
+std::string registry_causal_pilot_plan_markdown(const RegistryCausalPilotPlan& plan);
+
+// Notebook del worker: símbolos de la ficha + lo que vayan devolviendo las tools.
+struct RegistryCausalPilotWorkerNotebook {
+  std::vector<std::string> allowed_targets;
+  std::vector<std::string> allowed_paths;
+  std::string notes;
+  int n_need_code = 0;
+  int n_outline = 0;
+  int n_follow = 0;
+  int n_query_nudge = 0;
+  bool used_tool() const { return n_need_code + n_outline + n_follow > 0; }
+  bool used_code_or_follow() const { return n_need_code + n_follow > 0; }
+};
+
+// Trabajador sordo: una ficha, un stem, catálogo need_code|outline|follow. Máx. kPilotWorkerMaxSteps.
+struct RegistryCausalPilotWorkerReport {
+  bool ok = false;
+  bool need_code = false;
+  bool is_tool = false;
+  std::string tool;    // need_code | outline | follow
+  std::string action;  // causal_pilot_worker_v1 | causal_pilot_need_code | …_outline | …_follow
+  std::string kind;    // cubre | como | gap
+  std::string zone;
+  std::string stem;
+  std::string verdict;  // cubre | no_cubre | chain | missing | found
+  bool covers = false;
+  std::string owns;
+  std::string chain;
+  std::string path_symbol;
+  std::string port_to;
+  std::string target;
+  std::string direction;  // incoming | outgoing (follow)
+  std::string why;
+  std::string brief;  // 2 frases para el piloto: qué hace el barrio / qué falta
+  std::string raw;
+  std::string error;
+  int steps = 0;
+};
+
+struct RegistryCausalPilotPlenary {
+  bool ok = false;
+  std::string action;   // causal_pilot_plenary_v1
+  std::string verdict;  // entiendo | no_entiendo | abandono
+  std::vector<std::string> keep;
+  std::vector<std::string> drop;
+  std::string why;
+  std::string raw;
+  std::string error;
+};
+
+void registry_causal_pilot_notebook_from_payload(const nlohmann::json& payload,
+                                                 const std::string& stem,
+                                                 RegistryCausalPilotWorkerNotebook* nb);
+bool registry_causal_pilot_target_in_notebook(const std::string& target,
+                                              const RegistryCausalPilotWorkerNotebook& nb);
+void registry_causal_pilot_notebook_add_target(RegistryCausalPilotWorkerNotebook* nb,
+                                               const std::string& target);
+std::string registry_causal_pilot_allowed_markdown(const RegistryCausalPilotWorkerNotebook& nb);
+std::string registry_causal_pilot_follow_markdown(const nlohmann::json& payload,
+                                                  const std::string& target,
+                                                  const std::string& direction,
+                                                  const std::string& stem,
+                                                  std::vector<std::string>* new_targets,
+                                                  std::string* port_to);
+std::string registry_causal_pilot_worker_system_prompt(const std::string& kind,
+                                                       const std::string& stem);
+std::string registry_causal_pilot_worker_user_prompt(
+    const std::string& kind, const std::string& question, const std::string& zone_markdown,
+    const std::string& notes = {}, const std::string& allowed_markdown = {});
+RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
+    const std::string& raw, const std::string& expected_kind, const std::string& expected_stem,
+    const std::string& query = {}, const RegistryCausalPilotWorkerNotebook* notebook = nullptr);
+nlohmann::json registry_causal_pilot_worker_to_json(const RegistryCausalPilotWorkerReport& r);
+std::string registry_causal_pilot_worker_markdown(const RegistryCausalPilotWorkerReport& r);
+
+std::string registry_causal_pilot_plenary_system_prompt();
+std::string registry_causal_pilot_plenary_user_prompt(const std::string& reports_markdown);
+RegistryCausalPilotPlenary registry_parse_causal_pilot_plenary(
+    const std::string& raw, const std::vector<std::string>& allowed_stems);
+void registry_tally_pilot_plenary(RegistryCausalPilotPlenary* plenary,
+                                  const std::vector<RegistryCausalPilotWorkerReport>& reports);
+nlohmann::json registry_causal_pilot_plenary_to_json(const RegistryCausalPilotPlenary& p);
+std::string registry_causal_pilot_plenary_markdown(const RegistryCausalPilotPlenary& p);
 
 std::string registry_causal_judge_system_prompt();
 std::string registry_causal_judge_user_prompt(const std::string& cards_markdown);

@@ -773,7 +773,7 @@ void test_query_constellations() {
         R"("falsify_by":"si clear_busy corre al done, hyp muere",)"
         R"("why":"M6 posee spinner_frame"}],"why":"latch y caller visibles en fichas"})",
         atlas_payload);
-    expect(hyp.ok && hyp.hypotheses.size() == 1, "zone hyp parses slot schema");
+    expect(hyp.ok && hyp.parsed && hyp.mass_band == "high", "zone hyp parses slot schema");
     expect(hyp.hypotheses[0].affected.stem == "busy_strip", "hyp affected stem");
     expect(hyp.hypotheses[0].affected.path_symbol.find("clear_busy") != std::string::npos,
            "hyp canonicalizes short path_symbol");
@@ -796,8 +796,11 @@ void test_query_constellations() {
         R"("gap":"affected","anchor_role":"affected","why":"ruido"}],)"
         R"("why":"stem ajeno se anula, la hyp de ausencia vive"})",
         atlas_payload);
-    expect(invented.ok && invented.hypotheses.size() == 1, "ungrounded stem does not drop hyp");
+    expect(invented.parsed && !invented.ok && invented.need_more,
+           "ungrounded stem is not accepted mass");
+    expect(invented.hypotheses.size() == 1, "ungrounded stem does not drop hyp");
     expect(invented.hypotheses[0].affected.stem.empty(), "ungrounded stem is nulled");
+    expect(invented.mass_band == "low", "honest gap is low mass");
     const auto mixed = tuide::registry_parse_causal_zone_hyp(
         R"({"action":"causal_zone_hyp_v1","hypotheses":[{)"
         R"("claim":"el latch spinner no se limpia al terminar",)"
@@ -810,6 +813,451 @@ void test_query_constellations() {
     expect(mixed.ok && mixed.hypotheses.size() == 1, "mixed hyp keeps grounded slot");
     expect(mixed.hypotheses[0].affected.stem == "busy_strip", "mixed keeps busy_strip");
     expect(mixed.hypotheses[0].control.stem.empty(), "mixed nulls ungrounded control");
+    const auto need_more = tuide::registry_parse_causal_zone_hyp(
+        R"({"action":"causal_zone_hyp_v1","need_more":true,"add":["M6","M99"],)"
+        R"("view":"deep","hypotheses":[],"why":"las fichas no cubren el latch del spinner"})",
+        atlas_payload, {"M1", "M6"});
+    expect(need_more.parsed && !need_more.ok && need_more.need_more, "need_more is not accepted");
+    expect(need_more.add.size() == 1 && need_more.add[0] == "M6", "need_more add filters ids");
+    expect(need_more.view == "deep", "need_more view deep");
+    nlohmann::json neighbor_payload = nlohmann::json{
+        {"zones",
+         nlohmann::json::array(
+             {nlohmann::json{{"id", "M1"},
+                             {"primary_stems", nlohmann::json::array({"visual_highlight"})},
+                             {"representatives",
+                              nlohmann::json::array({nlohmann::json{
+                                  {"target", "src/editor/visual_highlight.cpp:drain"}}})}},
+              nlohmann::json{{"id", "M5"},
+                             {"primary_stems", nlohmann::json::array({"editor_panel"})},
+                             {"representatives",
+                              nlohmann::json::array({nlohmann::json{
+                                  {"target", "src/ui/editor_panel.cpp:MakeEditorPanel"}}})}}})}};
+    const auto neighbor = tuide::registry_parse_causal_zone_hyp(
+        R"({"action":"causal_zone_hyp_v1","hypotheses":[{)"
+        R"("claim":"el resaltado no se actualiza tras el replace",)"
+        R"("slots":{"affected":{"stem":"visual_highlight"},"control":null,)"
+        R"("trigger":null,"cleanup":{"stem":"visual_highlight"}},)"
+        R"("gap":"cleanup","anchor_role":"affected",)"
+        R"("falsify_by":"si drain corre al replace, hyp muere","why":"M1 mechanism"}],)"
+        R"("why":"vecino con mechanism no debe coronar"})",
+        neighbor_payload);
+    expect(neighbor.parsed && !neighbor.ok && neighbor.need_more, "neighbor fill is not accepted");
+    expect(!neighbor.masses.empty() && neighbor.masses[0].neighbor_fill,
+           "neighbor_fill flag on highlight vs editor_panel");
+    const auto suggested =
+        tuide::registry_atlas_suggest_cover_ids(atlas_payload, {"M1"}, 2);
+    expect(!suggested.empty() && suggested[0] == "M6", "suggest remaining latch not chrome");
+    const auto plan = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_plan_v1","tasks":[)"
+        R"({"kind":"cubre","zone":"M6","question":"este barrio es el latch del spinner pedido?"},)"
+        R"({"kind":"como","zone":"M1","question":"como se gestiona el hover en este chrome?"}],)"
+        R"("why":"latch del spinner vs chrome rival"})",
+        atlas_payload, {"M1", "M6"});
+    expect(plan.ok && plan.tasks.size() == 2, "pilot plan parses two diverse tasks");
+    expect(plan.tasks[0].kind == "cubre" && plan.tasks[0].stem == "busy_strip",
+           "pilot fills stem from zone");
+    expect(plan.tasks[1].kind == "como" && plan.tasks[1].stem == "busy_strip",
+           "como on chrome retargets to latch");
+    expect(plan.n_cubre == 1 && plan.has_como, "pilot score fields");
+    const auto plan_dup = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_plan_v1","tasks":[)"
+        R"({"kind":"cubre","zone":"M6","question":"este barrio es el latch del spinner pedido?"},)"
+        R"({"kind":"gap","zone":"M6","question":"quien limpia el spinner en el mismo barrio?"}],)"
+        R"("why":"cubre y gap en el mismo barrio son encargos distintos"})",
+        atlas_payload, {"M1", "M6"}, {"M6"});
+    expect(plan_dup.ok && plan_dup.tasks.size() == 2, "cubre+gap same stem allowed");
+    expect(plan_dup.n_cubre == 1 && plan_dup.has_gap, "cubre+gap score");
+    const auto plan_two_cubre = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_plan_v1","tasks":[)"
+        R"({"kind":"cubre","zone":"M6","question":"este barrio es el latch del spinner pedido?"},)"
+        R"({"kind":"cubre","zone":"M6","question":"este mismo barrio cubre el spinner otra vez?"}],)"
+        R"("why":"dos cubre al mismo owns se colapsan"})",
+        atlas_payload, {"M1", "M6"}, {"M6"});
+    expect(!plan_two_cubre.ok && plan_two_cubre.tasks.size() == 1,
+           "two cubre same stem collapse");
+    const auto plan_como_remaining = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_plan_v1","tasks":[)"
+        R"({"kind":"cubre","zone":"M6","question":"este barrio es el latch del spinner pedido?"},)"
+        R"({"kind":"como","zone":"M1","question":"como se escribe el hover en un id no abierto?"}],)"
+        R"("why":"como en restantes debe caer"})",
+        atlas_payload, {"M1", "M6"}, {"M6"});
+    expect(plan_como_remaining.tasks.size() == 1 && !plan_como_remaining.has_como,
+           "como on remaining is dropped");
+    const auto plan_template_q = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_plan_v1","tasks":[)"
+        R"({"kind":"cubre","zone":"M6","question":"¿Es ESTE owns el objeto de la consulta?"},)"
+        R"({"kind":"cubre","zone":"M1","question":"¿Es ESTE owns el objeto de la consulta?"},)"
+        R"({"kind":"como","zone":"M6","question":"¿Quién pone/limpia/dispara X EN este stem?"}],)"
+        R"("why":"plantilla clonada se especializa por owns"})",
+        atlas_payload, {"M1", "M6"}, {"M1", "M6"});
+    expect(plan_template_q.ok && plan_template_q.tasks.size() == 3,
+           "template questions salvage two cubre");
+    expect(plan_template_q.n_cubre == 2 && plan_template_q.has_como, "template score two cubre");
+    expect(plan_template_q.tasks[0].question.find("busy_strip") != std::string::npos &&
+               plan_template_q.tasks[1].question.find("console_panel") != std::string::npos,
+           "template cubre names each owns");
+    const auto plan_como_q = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_plan_v1","tasks":[)"
+        R"({"kind":"cubre","zone":"M6","question":"¿Cómo se llama el objeto que representa el spinner?"},)"
+        R"({"kind":"como","zone":"M1","question":"¿es console_panel el objeto de la consulta?"}],)"
+        R"("why":"cubre cómo y como yes/no se reescriben"})",
+        atlas_payload, {"M1", "M6"}, {"M1", "M6"});
+    expect(plan_como_q.ok && plan_como_q.tasks.size() == 2, "rewritten verbs still parse");
+    expect(plan_como_q.tasks[0].question.find("¿es busy_strip") != std::string::npos,
+           "cubre cómo becomes yes/no");
+    expect(plan_como_q.tasks[1].kind == "como" &&
+               plan_como_q.tasks[1].stem == "busy_strip",
+           "como on chrome retargets to latch cubre");
+    const auto wr_pipe = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain|no_cubre",)"
+        R"("path_symbol":"src/ui/busy_strip.cpp:clear_busy",)"
+        R"("chain":"done→clear_busy→spinner_frame","why":"limpia el latch al terminar"})",
+        "como", "busy_strip");
+    expect(wr_pipe.ok && wr_pipe.verdict == "chain" && wr_pipe.covers, "como accepts chain|alt");
+    const auto wr = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"cubre","verdict":"no_cubre",)"
+        R"("owns":"console_panel","why":"esto es chrome de hover, no el spinner"})",
+        "cubre", "console_panel");
+    expect(wr.ok && !wr.covers && wr.verdict == "no_cubre", "worker cubre no_cubre");
+    const auto wr_code = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_need_code","target":"src/ui/busy_strip.cpp:clear_busy"})",
+        "como", "busy_strip");
+    expect(wr_code.ok && wr_code.need_code, "worker need_code in stem");
+    const auto wr_out = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_need_code","target":"src/ai/ai_controller.cpp:begin_thinking"})",
+        "como", "busy_strip");
+    expect(!wr_out.ok && !wr_out.need_code, "worker need_code fenced by stem");
+    const auto plen = tuide::registry_parse_causal_pilot_plenary(
+        R"({"action":"causal_pilot_plenary_v1","verdict":"entiendo",)"
+        R"("keep":["busy_strip"],"drop":["console_panel"],"why":"el latch explica el spinner"})",
+        {"busy_strip", "console_panel"});
+    expect(plen.ok && plen.verdict == "entiendo" && plen.keep.size() == 1, "plenary keep");
+    tuide::RegistryCausalPilotPlenary empty_plen;
+    empty_plen.verdict = "no_entiendo";
+    empty_plen.ok = true;
+    std::vector<tuide::RegistryCausalPilotWorkerReport> reps(2);
+    reps[0].ok = true;
+    reps[0].kind = "cubre";
+    reps[0].stem = "settings_modal";
+    reps[0].covers = true;
+    reps[0].verdict = "cubre";
+    reps[1].ok = true;
+    reps[1].stem = "application";
+    reps[1].verdict = "no_cubre";
+    tuide::registry_tally_pilot_plenary(&empty_plen, reps);
+    expect(empty_plen.verdict == "entiendo" && empty_plen.keep.size() == 1 &&
+               empty_plen.keep[0] == "settings_modal",
+           "tally fills keep from cubre");
+    nlohmann::json one = tuide::registry_causal_payload_filter_zones(atlas_payload, {"M6"});
+    expect(one["zones"].size() == 1 && one["zones"][0]["id"] == "M6", "filter one zone");
+    const auto menu = tuide::registry_causal_pilot_barrio_menu(twins, {"M1", "M6"});
+    expect(menu.find("owns=visual_highlight") != std::string::npos, "barrio menu owns");
+    expect(menu.find("same=M1") != std::string::npos, "barrio menu marks clone");
+    nlohmann::json quit_z = {{"id", "M9"},
+                             {"primary_stems", nlohmann::json::array({"quit_confirm"})},
+                             {"representatives", nlohmann::json::array({nlohmann::json{
+                                 {"target", "src/ui/quit_confirm.cpp:show_dialog"}}})}};
+    nlohmann::json shut_z = {{"id", "M2"},
+                             {"primary_stems", nlohmann::json::array({"shutdown_overlay"})},
+                             {"representatives", nlohmann::json::array({nlohmann::json{
+                                 {"target", "src/ui/shutdown_overlay.cpp:draw"}}})}};
+    const std::string q_quit = "dialogo de confirmacion al cerrar la aplicacion";
+    expect(tuide::registry_causal_query_zone_overlap(q_quit, quit_z) >
+               tuide::registry_causal_query_zone_overlap(q_quit, shut_z),
+           "confirmacion overlaps quit_confirm more than shutdown");
+    nlohmann::json compile_z = {
+        {"id", "M3"},
+        {"primary_stems", nlohmann::json::array({"compile_commands_remap"})},
+        {"representatives", nlohmann::json::array({nlohmann::json{
+            {"target", "src/util/compile_commands_remap.cpp:remap"}}})}};
+    expect(tuide::registry_causal_query_zone_overlap("compile o ejecute el build", compile_z) > 0,
+           "compile overlaps compile_commands");
+    expect(tuide::registry_causal_zone_id_for_stem(atlas_payload, "busy_strip") == "M6",
+           "zone id from primary stem");
+    nlohmann::json ov_payload = {{"zones", nlohmann::json::array({shut_z, quit_z})}};
+    const auto ov_add =
+        tuide::registry_atlas_overlap_add_ids(ov_payload, q_quit, std::vector<std::string>{"M2"});
+    expect(ov_add.size() == 1 && ov_add[0] == "M9", "overlap add remaining with higher score");
+    const auto opened_pack = tuide::registry_causal_pilot_opened_pack(atlas_payload, {"M6"}, "");
+    expect(opened_pack.find("pilot_opened_v1") != std::string::npos, "opened pack header");
+    expect(opened_pack.find("owns:") != std::string::npos &&
+               opened_pack.find("busy_strip") != std::string::npos,
+           "opened pack names latch owns");
+    expect(opened_pack.find("nucleus:") != std::string::npos &&
+               opened_pack.find("spinner_frame") != std::string::npos,
+           "opened pack keeps nucleus");
+    expect(opened_pack.find("mini-cards") == std::string::npos, "opened pack omits mini-cards");
+    const auto plan_need = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_need_more","add":["M6","M99"],)"
+        R"("why":"el latch del spinner está en restantes no en abiertos"})",
+        atlas_payload, {"M1", "M6"}, {"M1"}, "", true);
+    expect(plan_need.ok && plan_need.need_more && plan_need.add.size() == 1 &&
+               plan_need.add[0] == "M6",
+           "need_more filters remaining ids");
+    const auto need_blocked = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_need_more","add":["M6"],)"
+        R"("why":"segunda ampliación no está permitida en este pase"})",
+        atlas_payload, {"M1", "M6"}, {"M1"}, "", false);
+    expect(!need_blocked.ok && need_blocked.need_more, "need_more rejected on second pass");
+    const auto need_open = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_need_more","add":["M1"],)"
+        R"("why":"no se puede pedir un id ya abierto"})",
+        atlas_payload, {"M1", "M6"}, {"M1"}, "", true);
+    expect(!need_open.ok, "need_more drops already-open ids");
+    const auto sys_more = tuide::registry_causal_pilot_plan_system_prompt(true);
+    const auto sys_plan = tuide::registry_causal_pilot_plan_system_prompt(false);
+    expect(sys_more.find("causal_pilot_need_more") != std::string::npos,
+           "first-pass prompt offers need_more");
+    expect(sys_plan.find("causal_pilot_need_more") == std::string::npos &&
+               sys_plan.find("PROHIBIDO ampliar") != std::string::npos,
+           "second-pass prompt forbids need_more");
+    const auto user_plan = tuide::registry_causal_pilot_plan_user_prompt("atlas", "pack", {"M6"},
+                                                                        {}, false);
+    expect(user_plan.find("PROHIBIDO add") != std::string::npos,
+           "second-pass user forbids add");
+    const auto plan_rem_zero = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_plan_v1","tasks":[)"
+        R"({"kind":"cubre","zone":"M6","question":"este barrio es el latch del spinner pedido?"},)"
+        R"({"kind":"cubre","zone":"M1","question":"este barrio cubre el hover de chrome?"}],)"
+        R"("why":"restante sin solape no entra en plaza 4"})",
+        atlas_payload, {"M1", "M6"}, {"M6"},
+        "dialogo de confirmacion al cerrar");
+    expect(plan_rem_zero.tasks.size() == 1, "remaining cubre without overlap is dropped");
+    const auto plan_rem_hit = tuide::registry_parse_causal_pilot_plan(
+        R"({"action":"causal_pilot_plan_v1","tasks":[)"
+        R"({"kind":"cubre","zone":"M6","question":"este barrio es el latch del spinner pedido?"},)"
+        R"({"kind":"cubre","zone":"M1","question":"este barrio cubre el texto de la consola?"}],)"
+        R"("why":"restante con solape de console si entra"})",
+        atlas_payload, {"M1", "M6"}, {"M6"}, "pinta el texto del terminal console");
+    expect(plan_rem_hit.ok && plan_rem_hit.n_cubre == 2, "remaining cubre with overlap kept");
+    const auto wr_flip = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"cubre","verdict":"cubre",)"
+        R"("owns":"shutdown_overlay","why":"owns es shutdown_overlay de la ficha"})",
+        "cubre", "shutdown_overlay", q_quit);
+    expect(wr_flip.ok && wr_flip.covers && wr_flip.verdict == "cubre",
+           "cubre without query overlap keeps worker verdict");
+    const auto wr_keep = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"cubre","verdict":"cubre",)"
+        R"("owns":"quit_confirm","why":"este barrio es el dialogo de confirmacion al salir"})",
+        "cubre", "quit_confirm", q_quit);
+    expect(wr_keep.ok && wr_keep.covers && wr_keep.verdict == "cubre",
+           "cubre with query overlap stays cubre");
+    const auto wr_port = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"gap","verdict":"missing",)"
+        R"("port_to":"stem_vecino","why":"el call sale a un vecino que no veo"})",
+        "gap", "busy_strip");
+    expect(wr_port.ok && wr_port.port_to.empty(), "placeholder port_to is cleared");
+    const auto wr_outline = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_outline","target":"src/ui/busy_strip.cpp"})",
+        "cubre", "busy_strip");
+    expect(wr_outline.ok && wr_outline.is_tool && wr_outline.tool == "outline",
+           "worker outline in stem");
+    const auto wr_ol_out = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_outline","target":"src/ai/ai_controller.cpp"})",
+        "cubre", "busy_strip");
+    expect(!wr_ol_out.ok && !wr_ol_out.is_tool, "outline fenced by stem");
+    const auto wr_follow = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_follow","target":"src/ui/busy_strip.cpp:set_busy_spinner",)"
+        R"("direction":"outgoing"})",
+        "como", "busy_strip");
+    expect(wr_follow.ok && wr_follow.is_tool && wr_follow.tool == "follow" &&
+               wr_follow.direction == "outgoing",
+           "worker follow outgoing");
+    const auto wr_alias = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"need_code","target":"src/ui/busy_strip.cpp:set_busy_spinner"})",
+        "como", "busy_strip");
+    expect(wr_alias.ok && wr_alias.is_tool && wr_alias.tool == "need_code",
+           "short action need_code aliases to catalog");
+    const auto wr_cubre_follow = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_follow","target":"src/ui/busy_strip.cpp:set_busy_spinner",)"
+        R"("direction":"outgoing"})",
+        "cubre", "busy_strip");
+    expect(!wr_cubre_follow.ok, "cubre rejects follow");
+    tuide::RegistryCausalPilotWorkerNotebook nb_card;
+    nlohmann::json zone_busy = {
+        {"id", "M1"},
+        {"primary_stems", nlohmann::json::array({"busy_strip"})},
+        {"representatives",
+         nlohmann::json::array({nlohmann::json{
+             {"target", "src/ui/busy_strip.cpp:set_busy_spinner"}}})},
+        {"edges", nlohmann::json::array({nlohmann::json{
+                      {"from", "src/ui/busy_strip.cpp:set_busy_spinner"},
+                      {"to", "src/ui/busy_strip.cpp:ensure_spinner_thread"},
+                      {"kind", "call"}}})}};
+    tuide::registry_causal_pilot_notebook_from_payload(nlohmann::json{{"zones", {zone_busy}}},
+                                                       "busy_strip", &nb_card);
+    expect(tuide::registry_causal_pilot_target_in_notebook(
+               "src/ui/busy_strip.cpp:set_busy_spinner", nb_card),
+           "notebook has spinner symbol");
+    const auto wr_invent = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_need_code","target":"src/ui/busy_strip.cpp:handle_load_state"})",
+        "como", "busy_strip", "", &nb_card);
+    expect(!wr_invent.ok && !wr_invent.need_code, "need_code must be on the card");
+    const auto wr_follow_invent = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_follow","target":"src/ui/busy_strip.cpp:handle_load_state",)"
+        R"("direction":"outgoing"})",
+        "como", "busy_strip", "", &nb_card);
+    expect(!wr_follow_invent.ok && !wr_follow_invent.is_tool,
+           "follow must be on the card");
+    const auto wr_follow_card = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_follow","target":"src/ui/busy_strip.cpp:set_busy_spinner",)"
+        R"("direction":"outgoing"})",
+        "como", "busy_strip", "", &nb_card);
+    expect(wr_follow_card.ok && wr_follow_card.is_tool && wr_follow_card.tool == "follow",
+           "follow of a card symbol is allowed");
+    tuide::RegistryCausalPilotWorkerNotebook nb_chrome;
+    nlohmann::json zone_chrome = {
+        {"id", "M2"},
+        {"owns", "console_panel"},
+        {"primary_stems", nlohmann::json::array({"console_panel"})},
+        {"representatives",
+         nlohmann::json::array({nlohmann::json{
+             {"target", "src/ui/console_panel.cpp:handle_console_tab_hover"}}})}};
+    nlohmann::json chrome_payload = {
+        {"zones", nlohmann::json::array({zone_chrome})},
+        {"uncovered_seeds", nlohmann::json::array({nlohmann::json{
+                                {"target", "src/ui/console_panel.cpp:try_open_ai_result_at"},
+                                {"stem", "console_panel"}}})}};
+    tuide::registry_causal_pilot_notebook_from_payload(chrome_payload, "console_panel",
+                                                       &nb_chrome);
+    expect(tuide::registry_causal_pilot_target_in_notebook(
+               "src/ui/console_panel.cpp:handle_console_tab_hover", nb_chrome),
+           "chrome notebook has representative");
+    expect(!tuide::registry_causal_pilot_target_in_notebook(
+               "src/ui/console_panel.cpp:try_open_ai_result_at", nb_chrome),
+           "uncovered seeds are not ficha symbols");
+    const auto wr_seed_follow = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_follow","target":"src/ui/console_panel.cpp:try_open_ai_result_at",)"
+        R"("direction":"outgoing"})",
+        "como", "console_panel", "", &nb_chrome);
+    expect(!wr_seed_follow.ok && !wr_seed_follow.is_tool,
+           "follow of an uncovered seed is rejected");
+    nb_chrome.n_follow = 1;
+    nb_chrome.notes =
+        "\n----- follow src/ui/console_panel.cpp:handle_console_tab_hover outgoing -----\n"
+        "(sin hops en la ficha para ese símbolo)\n";
+    const auto wr_empty_nc = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"no_cubre",)"
+        R"("path_symbol":"src/ui/console_panel.cpp:handle_console_tab_hover",)"
+        R"("why":"handle_console_tab_hover no tiene hops para el acto de carga",)"
+        R"("brief":"Este barrio solo registra hover del tab. No controla el spinner de carga."})",
+        "como", "console_panel", "", &nb_chrome);
+    expect(!wr_empty_nc.ok && wr_empty_nc.error.find("follow vacío") != std::string::npos,
+           "empty follow of a rep is not no_cubre");
+    const auto wr_empty_chain = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+        R"("path_symbol":"src/ui/console_panel.cpp:handle_console_tab_hover",)"
+        R"("chain":"handle_console_tab_hover registra el hover del tab de consola",)"
+        R"("why":"handle_console_tab_hover es el acto de hover en este stem",)"
+        R"("brief":"El hover del tab vive aquí. No hay hops; el símbolo mismo es el acto."})",
+        "como", "console_panel", "", &nb_chrome);
+    expect(wr_empty_chain.ok && wr_empty_chain.verdict == "chain",
+           "empty follow may still chain if the symbol is the act");
+    nb_chrome.notes +=
+        "\n----- follow src/ui/console_panel.cpp:handle_console_tab_click outgoing -----\n"
+        "(sin hops en la ficha para ese símbolo)\n";
+    tuide::registry_causal_pilot_notebook_add_target(
+        &nb_chrome, "src/ui/console_panel.cpp:handle_console_tab_click");
+    const auto wr_two_nc = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"no_cubre",)"
+        R"("path_symbol":"src/ui/console_panel.cpp:handle_console_tab_hover",)"
+        R"("why":"handle_console_tab_hover y handle_console_tab_click no cubren la carga",)"
+        R"("brief":"Ni hover ni click controlan el spinner. Este barrio es chrome de consola."})",
+        "como", "console_panel", "", &nb_chrome);
+    expect(wr_two_nc.ok && wr_two_nc.verdict == "no_cubre",
+           "no_cubre after two distinct empty follows is allowed");
+    const auto wr_como_notool = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+        R"("path_symbol":"src/ui/busy_strip.cpp:set_busy_spinner",)"
+        R"("chain":"set_busy_spinner pinta el latch","why":"set_busy_spinner escribe spinner_frame"})",
+        "como", "busy_strip", "", &nb_card);
+    expect(!wr_como_notool.ok, "como chain without need_code/follow is invalid");
+    nb_card.n_need_code = 1;
+    const auto wr_como_tool = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+        R"("path_symbol":"src/ui/busy_strip.cpp:set_busy_spinner",)"
+        R"("chain":"set_busy_spinner pinta el latch","why":"set_busy_spinner escribe spinner_frame"})",
+        "como", "busy_strip", "", &nb_card);
+    expect(wr_como_tool.ok && wr_como_tool.covers, "como chain after need_code");
+    const auto wr_template = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"cubre","verdict":"cubre",)"
+        R"("owns":"busy_strip","why":"la ficha muestra el UI pedido"})",
+        "cubre", "busy_strip", "spinner del chat", &nb_card);
+    expect(!wr_template.ok, "cubre template why is rejected when notebook has symbols");
+    const auto wr_cite = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"cubre","verdict":"cubre",)"
+        R"("owns":"busy_strip","why":"set_busy_spinner es el latch del spinner pedido"})",
+        "cubre", "busy_strip", "spinner del chat", &nb_card);
+    expect(wr_cite.ok && wr_cite.covers && wr_cite.brief.find("latch") != std::string::npos,
+           "cubre why that cites a card symbol");
+    const auto wr_symbol_only = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"cubre","verdict":"cubre",)"
+        R"("owns":"busy_strip","why":"set_busy_spinner"})",
+        "cubre", "busy_strip", "spinner del chat", &nb_card);
+    expect(!wr_symbol_only.ok, "cubre symbol-only why is not a piloto brief");
+    const auto como_nudge_only = tuide::registry_causal_pilot_worker_user_prompt(
+        "como", "q", "# ficha\n", "\n----- nota -----\nInforme rechazado\n");
+    expect(como_nudge_only.find("Aún no hay resultado de tool") != std::string::npos,
+           "referee note is not a tool result");
+    const auto como_follow_notes = tuide::registry_causal_pilot_worker_user_prompt(
+        "como", "q", "# ficha\n",
+        "\n----- follow src/ui/busy_strip.cpp:set_busy_spinner outgoing -----\nhop\n");
+    expect(como_follow_notes.find("Ya hay resultado de tool") != std::string::npos &&
+               como_follow_notes.find("nunca need_code") != std::string::npos,
+           "follow chunk unlocks informe");
+    const auto como_empty_hops = tuide::registry_causal_pilot_worker_user_prompt(
+        "como", "q", "# ficha\n",
+        "\n----- follow src/ui/console_panel.cpp:handle_console_tab_hover outgoing -----\n"
+        "(sin hops en la ficha para ese símbolo)\n");
+    expect(como_empty_hops.find("PROHIBIDO verdict=no_cubre") != std::string::npos,
+           "empty follow prompt forbids no_cubre");
+    std::vector<std::string> hops;
+    std::string port;
+    const auto follow_md = tuide::registry_causal_pilot_follow_markdown(
+        nlohmann::json{{"zones", {zone_busy}}}, "src/ui/busy_strip.cpp:set_busy_spinner",
+        "outgoing", "busy_strip", &hops, &port);
+    expect(follow_md.find("ensure_spinner_thread") != std::string::npos && !hops.empty(),
+           "follow markdown lists outgoing hop");
+    tuide::RegistryCausalPilotWorkerNotebook nb_empty;
+    const auto wr_empty = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"cubre","verdict":"no_cubre",)"
+        R"("owns":"console_panel","why":"esto es chrome de hover, no el spinner"})",
+        "cubre", "console_panel", "", &nb_empty);
+    expect(!wr_empty.ok, "empty card cubre must outline or need_code first");
+    tuide::RegistryCausalPilotPlenary trap_plen;
+    trap_plen.verdict = "entiendo";
+    trap_plen.ok = true;
+    trap_plen.keep = {"application"};
+    trap_plen.why = "el plenario copio un como de trampa";
+    std::vector<tuide::RegistryCausalPilotWorkerReport> mix(2);
+    mix[0].ok = true;
+    mix[0].kind = "cubre";
+    mix[0].stem = "quit_confirm";
+    mix[0].covers = true;
+    mix[0].verdict = "cubre";
+    mix[1].ok = true;
+    mix[1].kind = "como";
+    mix[1].stem = "application";
+    mix[1].covers = true;
+    mix[1].verdict = "chain";
+    tuide::registry_tally_pilot_plenary(&trap_plen, mix);
+    expect(trap_plen.keep.size() == 1 && trap_plen.keep[0] == "quit_confirm",
+           "tally keep is only cubre not como chain");
+    tuide::RegistryCausalPilotPlenary como_only;
+    como_only.verdict = "entiendo";
+    como_only.ok = true;
+    como_only.keep = {"application"};
+    como_only.why = "como chain no debe coronar";
+    std::vector<tuide::RegistryCausalPilotWorkerReport> only_como(1);
+    only_como[0].ok = true;
+    only_como[0].kind = "como";
+    only_como[0].stem = "application";
+    only_como[0].covers = true;
+    only_como[0].verdict = "chain";
+    tuide::registry_tally_pilot_plenary(&como_only, only_como);
+    expect(como_only.keep.empty() && como_only.verdict == "no_entiendo",
+           "tally drops como-only keep");
   }
 
   // Pack-off path keeps edges without requiring skeleton slots.

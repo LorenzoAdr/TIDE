@@ -1,0 +1,199 @@
+{
+  "cards_root": ".tuide/ai/l2_explore_battery/round_atlas20_pilot_workers2",
+  "pack": "items",
+  "item_defs": [
+    {
+      "id": "follow_ficha",
+      "title": "Follow/need_code solo de la ficha",
+      "watch": "Ninguna tool inventada (target fuera de representantes/edges)."
+    },
+    {
+      "id": "empty_follow_rep",
+      "title": "Follow vacío de un representante no es no_cubre",
+      "watch": "Si el follow sale sin hops, chain o segunda tool de OTRO símbolo; no rendirse a no_cubre."
+    },
+    {
+      "id": "brief_as_why",
+      "title": "Brief prosa salva why corto",
+      "watch": "Informe ok si brief cita símbolo y tiene 2 frases, aunque why < 8."
+    },
+    {
+      "id": "no_silent_flip",
+      "title": "No voltear cubre en silencio",
+      "watch": "raw_verdict == verdict parseado (nudge sí, reescribir el bit no)."
+    },
+    {
+      "id": "no_repeat_follow",
+      "title": "No repetir el mismo follow",
+      "watch": "Como/gap: a lo sumo un follow/need_code por symbol_key."
+    },
+    {
+      "id": "trap_on_raw",
+      "title": "Trampa honesta en el raw",
+      "watch": "Casos trap: raw_verdict=no_cubre. El parse no cuenta como victoria."
+    },
+    {
+      "id": "gold_keep",
+      "title": "Hits de cubre no regresan",
+      "watch": "spinner, cancel y toolpacks siguen cubre en raw y parse."
+    }
+  ],
+  "cases": [
+    {
+      "id": "hit_cubre_spinner",
+      "family": "hit",
+      "items": ["gold_keep"],
+      "kind": "cubre",
+      "case_id": "17_ai_spinner_stuck",
+      "stem": "busy_strip",
+      "question": "¿es este stem el objeto de la consulta?",
+      "trap": false,
+      "require_tool": false,
+      "expect": { "verdict": ["cubre"] }
+    },
+    {
+      "id": "hit_cubre_cancel",
+      "family": "hit",
+      "items": ["gold_keep"],
+      "kind": "cubre",
+      "case_id": "20_cancel_ai_generation",
+      "stem": "ai_controller",
+      "question": "¿es este stem el objeto de la consulta?",
+      "trap": false,
+      "require_tool": false,
+      "expect": { "verdict": ["cubre"] }
+    },
+    {
+      "id": "hit_cubre_toolpacks",
+      "family": "hit",
+      "items": ["gold_keep", "no_silent_flip"],
+      "kind": "cubre",
+      "case_id": "08_toolpacks_install_python",
+      "stem": "settings_modal",
+      "question": "¿es este stem el objeto de la consulta?",
+      "trap": false,
+      "require_tool": false,
+      "expect": { "verdict": ["cubre"] }
+    },
+    {
+      "id": "hit_como_cancel",
+      "family": "hit",
+      "items": ["follow_ficha", "no_repeat_follow"],
+      "kind": "como",
+      "case_id": "20_cancel_ai_generation",
+      "stem": "ai_controller",
+      "question": "¿quién cancela o limpia la generación en este stem?",
+      "trap": false,
+      "require_tool": true,
+      "expect": { "verdict": ["chain"] }
+    },
+    {
+      "id": "hit_como_latch",
+      "family": "hit",
+      "items": ["follow_ficha", "empty_follow_rep", "no_repeat_follow"],
+      "kind": "como",
+      "case_id": "17_ai_spinner_stuck",
+      "stem": "busy_strip",
+      "question": "¿quién pone o limpia el estado de carga en este stem?",
+      "trap": false,
+      "require_tool": true,
+      "expect": { "verdict": ["chain"] }
+    },
+    {
+      "id": "miss_cubre_status_chrome",
+      "family": "miss",
+      "items": ["trap_on_raw"],
+      "kind": "cubre",
+      "case_id": "04_ai_thinking_status_bar",
+      "stem": "console_panel",
+      "question": "¿es este stem el objeto de la consulta?",
+      "trap": true,
+      "require_tool": false,
+      "expect": { "verdict": ["no_cubre"] }
+    },
+    {
+      "id": "miss_cubre_cancel_search",
+      "family": "miss",
+      "items": ["trap_on_raw", "brief_as_why"],
+      "kind": "cubre",
+      "case_id": "20_cancel_ai_generation",
+      "stem": "search_replace",
+      "question": "¿es este stem el objeto de la consulta?",
+      "trap": true,
+      "require_tool": false,
+      "expect": { "verdict": ["no_cubre"] }
+    },
+    {
+      "id": "miss_cubre_welcome_dap",
+      "family": "miss",
+      "items": ["trap_on_raw", "brief_as_why"],
+      "kind": "cubre",
+      "case_id": "15_welcome_message_first_launch",
+      "stem": "dap_backend",
+      "question": "¿es este stem el objeto de la consulta?",
+      "trap": true,
+      "require_tool": false,
+      "expect": { "verdict": ["no_cubre"] }
+    },
+    {
+      "id": "miss_cubre_quit_shutdown",
+      "family": "miss",
+      "items": ["trap_on_raw"],
+      "kind": "cubre",
+      "case_id": "06_quit_unsaved_warning",
+      "stem": "shutdown_overlay",
+      "question": "¿es este stem el objeto de la consulta?",
+      "trap": true,
+      "require_tool": false,
+      "expect": { "verdict": ["no_cubre"] }
+    },
+    {
+      "id": "miss_como_overlay",
+      "family": "miss",
+      "items": ["follow_ficha", "no_repeat_follow", "empty_follow_rep"],
+      "kind": "como",
+      "case_id": "17_ai_spinner_stuck",
+      "stem": "console_panel",
+      "question": "¿quién controla el estado de carga del chat en este stem?",
+      "trap": false,
+      "require_tool": true,
+      "expect": { "verdict": ["chain", "no_cubre"] }
+    },
+    {
+      "id": "empty_cubre_layout",
+      "family": "empty",
+      "items": ["no_silent_flip", "trap_on_raw"],
+      "kind": "cubre",
+      "case_id": "10_performance_threads_panel",
+      "stem": "main_layout",
+      "question": "¿es este stem el objeto de la consulta?",
+      "trap": true,
+      "require_tool": false,
+      "expect": { "verdict": ["no_cubre"] }
+    },
+    {
+      "id": "gap_port_spinner",
+      "family": "gap",
+      "items": ["follow_ficha", "no_repeat_follow"],
+      "kind": "gap",
+      "case_id": "17_ai_spinner_stuck",
+      "stem": "busy_strip",
+      "question": "¿qué eslabón falta en este stem para explicar la consulta?",
+      "trap": false,
+      "require_tool": true,
+      "expect": { "verdict": ["missing", "found"], "prefer_follow": true }
+    },
+    {
+      "id": "gap_cancel",
+      "family": "gap",
+      "items": ["follow_ficha", "no_repeat_follow"],
+      "kind": "gap",
+      "case_id": "20_cancel_ai_generation",
+      "stem": "ai_controller",
+      "question": "¿qué eslabón falta en este stem para cancelar en limpio?",
+      "trap": false,
+      "require_tool": true,
+      "expect": { "verdict": ["missing", "found"], "prefer_follow": true }
+    }
+  ]
+}
