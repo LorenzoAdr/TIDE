@@ -60,7 +60,74 @@ GetCodeOfResult get_code_of(const GetCodeOfRequest& req);
 //   path:Symbol | path:line | path:start-end | path:Symbol#head|mid|tail | Symbol
 GetCodeOfRequest parse_get_code_of_arg(const std::string& arg, const std::string& workspace_root);
 
-// Tool / pack text: header with [TRUNCATED] metadata + body.
+// Markdown fence language for a path or get_code_of target (path:Symbol, path:A-B, #tail).
+// Empty if unknown — opener is then a bare ``` (same as dataflow snippets).
+inline std::string fence_lang_for_path(const std::string& path) {
+  std::string p = path;
+  const auto hash = p.find('#');
+  if (hash != std::string::npos) {
+    p.resize(hash);
+  }
+  const auto slash = p.find_last_of("/\\");
+  auto colon = p.rfind(':');
+  while (colon != std::string::npos && (slash == std::string::npos || colon > slash)) {
+    p.resize(colon);
+    colon = p.rfind(':');
+  }
+  if (p.find("CMakeLists") != std::string::npos) {
+    return "cmake";
+  }
+  const auto dot = p.find_last_of('.');
+  if (dot == std::string::npos) {
+    return {};
+  }
+  const std::string ext = p.substr(dot + 1);
+  if (ext == "hpp" || ext == "h" || ext == "hh" || ext == "cpp" || ext == "cc" || ext == "cxx" ||
+      ext == "c") {
+    return "cpp";
+  }
+  if (ext == "py") {
+    return "python";
+  }
+  if (ext == "rs") {
+    return "rust";
+  }
+  if (ext == "go") {
+    return "go";
+  }
+  if (ext == "sh" || ext == "bash") {
+    return "bash";
+  }
+  if (ext == "js" || ext == "mjs" || ext == "cjs") {
+    return "javascript";
+  }
+  if (ext == "ts" || ext == "tsx") {
+    return "typescript";
+  }
+  if (ext == "cmake") {
+    return "cmake";
+  }
+  return {};
+}
+
+// ```lang\ntext\n```  (closer always on its own line).
+inline std::string wrap_source_fence(const std::string& text, const std::string& path) {
+  std::string out = "```";
+  out += fence_lang_for_path(path);
+  out += '\n';
+  out += text;
+  if (!text.empty() && text.back() != '\n') {
+    out += '\n';
+  }
+  out += "```\n";
+  return out;
+}
+
+// Span / [TRUNCATED] / refetch lines — no source body (so a fence can wrap got.text).
+std::string format_get_code_of_header(const GetCodeOfResult& got,
+                                      const std::string& display_path = {});
+
+// Tool / pack text: header with [TRUNCATED] metadata + body (unfenced).
 // display_path: prefer workspace-relative for refetch hints.
 std::string format_get_code_of_result(const GetCodeOfResult& got,
                                       const std::string& display_path = {});

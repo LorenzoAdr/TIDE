@@ -64,6 +64,24 @@ std::string extract_json_object(const std::string& raw) {
   return raw.substr(a, b - a + 1);
 }
 
+// Body starts after the opener line (``` or ```cpp).
+std::size_t markdown_fence_inner_begin(const std::string& s, std::size_t fence) {
+  if (fence == std::string::npos) {
+    return std::string::npos;
+  }
+  const auto nl = s.find('\n', fence);
+  return nl == std::string::npos ? s.size() : nl + 1;
+}
+
+std::string markdown_fence_inner_text(const std::string& s, std::size_t fence0,
+                                     std::size_t fence1) {
+  const auto inner = markdown_fence_inner_begin(s, fence0);
+  if (inner == std::string::npos || fence1 == std::string::npos || fence1 < inner) {
+    return {};
+  }
+  return s.substr(inner, fence1 - inner);
+}
+
 }  // namespace
 
 std::string build_pack_digest(const std::string& pack_body, std::size_t max_chars) {
@@ -71,6 +89,7 @@ std::string build_pack_digest(const std::string& pack_body, std::size_t max_char
   std::istringstream in(pack_body);
   std::string line;
   bool in_frag = false;
+  bool in_code = false;
   int frag_lines = 0;
   int frag_line_cap = 10;
   int frags = 0;
@@ -84,6 +103,7 @@ std::string build_pack_digest(const std::string& pack_body, std::size_t max_char
         break;
       }
       in_frag = true;
+      in_code = false;
       frag_lines = 0;
       // First must/ancla fragments: keep more body so review sees real loci.
       frag_line_cap = frags < 4 ? 28 : 10;
@@ -92,9 +112,18 @@ std::string build_pack_digest(const std::string& pack_body, std::size_t max_char
       continue;
     }
     if (in_frag) {
-      if (line == "```") {
+      if (line.rfind("```", 0) == 0) {
         out << line << '\n';
-        in_frag = false;
+        if (in_code) {
+          in_frag = false;
+          in_code = false;
+        } else {
+          in_code = true;
+        }
+        continue;
+      }
+      if (!in_code) {
+        out << line << '\n';
         continue;
       }
       if (frag_lines < frag_line_cap) {
@@ -552,10 +581,7 @@ std::string load_pack_fragment_body(const std::string& pack_body, const std::str
   if (code_start == std::string::npos) {
     return {};
   }
-  const auto body_start = code_start + 3;
-  if (body_start < pack_body.size() && pack_body[body_start] == '\n') {
-    // skip newline after ```
-  }
+  const auto body_start = markdown_fence_inner_begin(pack_body, code_start);
   const auto code_end = pack_body.find("```", body_start);
   if (code_end == std::string::npos) {
     return pack_body.substr(body_start, std::min<std::size_t>(1200, pack_body.size() - body_start));
@@ -1345,7 +1371,7 @@ bool pack_has_lifecycle_pair(const std::string& pack_body) {
     if (fence1 == std::string::npos || fence1 <= fence0 + 3) {
       continue;
     }
-    const std::string body = pack_body.substr(fence0 + 3, fence1 - (fence0 + 3));
+    const std::string body = markdown_fence_inner_text(pack_body, fence0, fence1);
     if (body.size() < 40) {
       continue;
     }
@@ -1446,7 +1472,7 @@ std::string pack_code_fences_only(const std::string& pack_body) {
     if (fence1 == std::string::npos) {
       break;
     }
-    out << pack_body.substr(fence0 + 3, fence1 - (fence0 + 3)) << '\n';
+    out << markdown_fence_inner_text(pack_body, fence0, fence1) << '\n';
     pos = fence1 + 3;
   }
   return out.str();
@@ -1493,7 +1519,7 @@ bool pack_target_has_symbol_body(const std::string& pack_body, const std::string
     if (fence1 == std::string::npos || fence1 <= fence0 + 3) {
       continue;
     }
-    const std::string body = pack_body.substr(fence0 + 3, fence1 - (fence0 + 3));
+    const std::string body = markdown_fence_inner_text(pack_body, fence0, fence1);
     const std::string body_key = to_snake_token(body);
     // Skip near-empty / include-only noise.
     if (body.size() < 40) {

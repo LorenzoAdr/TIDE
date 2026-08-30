@@ -14,10 +14,12 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include <sqlite3.h>
 
 #include "ai/l2_effect_summary.hpp"
+#include "ai/l2_explore_a.hpp"
 #include "ai/vector_math.hpp"
 #include "parser/tree_sitter_language.hpp"
 #include "parser/tree_sitter_symbols.hpp"
@@ -8773,9 +8775,21 @@ std::string pilot_target_path(const std::string& target) {
   return path;
 }
 
+std::string pilot_strip_window(const std::string& s) {
+  const auto hash = s.rfind('#');
+  if (hash == std::string::npos || hash + 1 >= s.size()) {
+    return s;
+  }
+  const std::string w = causal_lower(s.substr(hash + 1));
+  if (w == "head" || w == "mid" || w == "tail" || w == "hit") {
+    return s.substr(0, hash);
+  }
+  return s;
+}
+
 bool pilot_targets_match(const std::string& a, const std::string& b) {
-  const std::string la = causal_lower(a);
-  const std::string lb = causal_lower(b);
+  const std::string la = causal_lower(pilot_strip_window(a));
+  const std::string lb = causal_lower(pilot_strip_window(b));
   if (la.empty() || lb.empty()) {
     return false;
   }
@@ -8831,7 +8845,7 @@ void pilot_collect_json_target(RegistryCausalPilotWorkerNotebook* nb, const nloh
   if (!j.is_object()) {
     return;
   }
-  for (const char* key : {"target", "from", "to", "path_symbol", "symbol"}) {
+  for (const char* key : {"target", "from", "to", "path_symbol", "symbol", "member"}) {
     const std::string s = j.value(key, "");
     if (!s.empty()) {
       pilot_notebook_push(nb, s);
@@ -8869,7 +8883,382 @@ bool pilot_why_cites_targets(const std::string& why,
 bool pilot_notes_have_tool_result(const std::string& notes) {
   return notes.find("----- follow ") != std::string::npos ||
          notes.find("----- need_code ") != std::string::npos ||
-         notes.find("----- outline ") != std::string::npos;
+         notes.find("----- outline ") != std::string::npos ||
+         notes.find("----- dataflow ") != std::string::npos ||
+         notes.find("----- causal ") != std::string::npos;
+}
+
+bool pilot_notes_have_body(const std::string& notes) {
+  return notes.find("----- need_code ") != std::string::npos;
+}
+
+bool pilot_notes_have_flow(const std::string& notes) {
+  return notes.find("----- dataflow ") != std::string::npos ||
+         notes.find("----- causal ") != std::string::npos;
+}
+
+bool pilot_target_is_windowed(const std::string& target) {
+  if (target.find('#') != std::string::npos) {
+    return true;
+  }
+  const auto col = target.rfind(':');
+  if (col == std::string::npos || col + 1 >= target.size()) {
+    return false;
+  }
+  return std::isdigit(static_cast<unsigned char>(target[col + 1])) != 0;
+}
+
+bool pilot_notes_have_tool_target(const std::string& notes, const std::string& tool,
+                                  const std::string& target) {
+  if (notes.empty() || tool.empty() || target.empty()) {
+    return false;
+  }
+  const std::string prefix = "----- " + tool + " ";
+  std::size_t pos = 0;
+  while (true) {
+    const auto hit = notes.find(prefix, pos);
+    if (hit == std::string::npos) {
+      return false;
+    }
+    std::size_t i = hit + prefix.size();
+    while (i < notes.size() && (notes[i] == ' ' || notes[i] == '\t')) {
+      ++i;
+    }
+    auto end = notes.find(" -----", i);
+    if (end == std::string::npos) {
+      end = notes.find('\n', i);
+    }
+    std::string have = notes.substr(i, end == std::string::npos ? std::string::npos : end - i);
+    while (!have.empty() && std::isspace(static_cast<unsigned char>(have.back()))) {
+      have.pop_back();
+    }
+    const auto sp = have.find(' ');
+    if (sp != std::string::npos) {
+      have = have.substr(0, sp);
+    }
+    if (pilot_targets_match(have, target)) {
+      return true;
+    }
+    pos = hit + 1;
+  }
+}
+
+std::string pilot_missing_clear_field(const std::string& notes) {
+  const std::string needle = "no hay clear de ";
+  const auto hit = notes.find(needle);
+  if (hit == std::string::npos) {
+    return {};
+  }
+  std::size_t i = hit + needle.size();
+  std::string name;
+  while (i < notes.size() &&
+         (std::isalnum(static_cast<unsigned char>(notes[i])) != 0 || notes[i] == '_')) {
+    name.push_back(notes[i]);
+    ++i;
+  }
+  return name;
+}
+
+bool pilot_notes_are_closing(const std::string& notes) {
+  return notes.find("----- cierre -----") != std::string::npos;
+}
+
+std::string pilot_trim_copy(std::string s) {
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
+    s.erase(s.begin());
+  }
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
+    s.pop_back();
+  }
+  return s;
+}
+
+std::string pilot_need_code_corpus(const std::string& notes) {
+  std::string out;
+  const std::string prefix = "----- need_code ";
+  std::size_t pos = 0;
+  while (true) {
+    const auto hit = notes.find(prefix, pos);
+    if (hit == std::string::npos) {
+      break;
+    }
+    const auto next = notes.find("\n----- ", hit + 1);
+    const auto n = next == std::string::npos ? notes.size() - hit : next - hit;
+    out.append(notes, hit, n);
+    out.push_back('\n');
+    pos = hit + 1;
+  }
+  return out;
+}
+
+bool pilot_step_is_duda(const std::string& step) {
+  const std::string s = causal_lower(pilot_trim_copy(step));
+  return s.find("duda:") == 0 || s.find("duda ") == 0;
+}
+
+std::vector<std::string> pilot_split_walk_steps(const std::string& walk) {
+  std::vector<std::string> steps;
+  std::string cur;
+  auto flush = [&]() {
+    const std::string t = pilot_trim_copy(cur);
+    if (!t.empty()) {
+      steps.push_back(t);
+    }
+    cur.clear();
+  };
+  for (std::size_t i = 0; i < walk.size(); ++i) {
+    if (walk[i] == ';') {
+      flush();
+      continue;
+    }
+    if (walk[i] == '-' && i + 1 < walk.size() && walk[i + 1] == '>') {
+      flush();
+      ++i;
+      continue;
+    }
+    if (static_cast<unsigned char>(walk[i]) == 0xE2 && i + 2 < walk.size() &&
+        static_cast<unsigned char>(walk[i + 1]) == 0x86 &&
+        static_cast<unsigned char>(walk[i + 2]) == 0x92) {
+      flush();
+      i += 2;
+      continue;
+    }
+    cur.push_back(walk[i]);
+  }
+  flush();
+  return steps;
+}
+
+std::string pilot_walk_claimed_hay(const std::string& walk) {
+  std::string hay;
+  for (const auto& step : pilot_split_walk_steps(walk)) {
+    if (pilot_step_is_duda(step)) {
+      continue;
+    }
+    hay += ' ';
+    hay += causal_lower(step);
+  }
+  return hay;
+}
+
+bool pilot_ident_bounded_in(const std::string& hay, const std::string& needle) {
+  if (needle.size() < 4 || hay.size() < needle.size()) {
+    return false;
+  }
+  auto is_id = [](unsigned char c) {
+    return std::isalnum(c) != 0 || c == '_';
+  };
+  std::size_t pos = 0;
+  while (true) {
+    const auto hit = hay.find(needle, pos);
+    if (hit == std::string::npos) {
+      return false;
+    }
+    const bool before_ok = hit == 0 || !is_id(static_cast<unsigned char>(hay[hit - 1]));
+    const auto end = hit + needle.size();
+    const bool after_ok = end >= hay.size() || !is_id(static_cast<unsigned char>(hay[end]));
+    if (before_ok && after_ok) {
+      return true;
+    }
+    pos = hit + 1;
+  }
+}
+
+std::string pilot_walk_step_symbol(const std::string& step) {
+  std::string s = pilot_trim_copy(step);
+  const auto acto = s.find(": ");
+  std::string head = acto == std::string::npos ? s : s.substr(0, acto);
+  if (acto == std::string::npos) {
+    const auto sp = head.find(' ');
+    if (sp != std::string::npos) {
+      head = head.substr(0, sp);
+    }
+  }
+  const auto ns = head.rfind("::");
+  if (ns != std::string::npos) {
+    head = head.substr(ns + 2);
+  } else {
+    const auto slash = head.find_last_of("/\\");
+    const auto col = head.rfind(':');
+    if (col != std::string::npos && (slash == std::string::npos || col > slash)) {
+      head = head.substr(col + 1);
+    }
+  }
+  while (!head.empty() && std::isalnum(static_cast<unsigned char>(head.back())) == 0 &&
+         head.back() != '_') {
+    head.pop_back();
+  }
+  return head;
+}
+
+bool pilot_walk_has_duda_of(const std::string& walk, const std::string& target) {
+  std::string needle = causal_lower(target);
+  const auto slash = needle.find_last_of("/\\");
+  const auto col = needle.rfind(':');
+  if (col != std::string::npos && (slash == std::string::npos || col > slash)) {
+    needle = needle.substr(col + 1);
+  }
+  if (needle.size() < 4) {
+    return false;
+  }
+  return causal_lower(walk).find("duda:" + needle) != std::string::npos;
+}
+
+bool rest_has_write_token(const std::string& rest) {
+  std::size_t i = 0;
+  while (i < rest.size()) {
+    while (i < rest.size() && std::isalnum(static_cast<unsigned char>(rest[i])) == 0) {
+      ++i;
+    }
+    std::size_t j = i;
+    while (j < rest.size() && std::isalnum(static_cast<unsigned char>(rest[j])) != 0) {
+      ++j;
+    }
+    if (j - i == 5 && rest.compare(i, 5, "write") == 0) {
+      return true;
+    }
+    i = j;
+  }
+  return false;
+}
+
+std::string pilot_unread_dataflow_writer(const std::string& notes, const std::string& stem) {
+  const std::string marker = "fn=`";
+  std::vector<std::string> writers;
+  std::size_t pos = 0;
+  while (true) {
+    const auto hit = notes.find(marker, pos);
+    if (hit == std::string::npos) {
+      break;
+    }
+    const auto end = notes.find('`', hit + marker.size());
+    if (end == std::string::npos) {
+      break;
+    }
+    const std::string target = notes.substr(hit + marker.size(), end - (hit + marker.size()));
+    const auto nl = notes.find('\n', end);
+    const std::string rest =
+        notes.substr(end + 1, (nl == std::string::npos ? notes.size() : nl) - (end + 1));
+    pos = end + 1;
+    if (target.size() < 4 || !rest_has_write_token(rest)) {
+      continue;
+    }
+    if (!stem.empty() && !registry_causal_pilot_target_in_stem(target, stem)) {
+      continue;
+    }
+    bool seen = false;
+    for (const auto& w : writers) {
+      if (pilot_targets_match(w, target)) {
+        seen = true;
+        break;
+      }
+    }
+    if (!seen) {
+      writers.push_back(target);
+    }
+  }
+  int n_fenced = 0;
+  std::string first_unfenced;
+  for (const auto& t : writers) {
+    if (pilot_notes_have_tool_target(notes, "need_code", t)) {
+      ++n_fenced;
+    } else if (first_unfenced.empty()) {
+      first_unfenced = t;
+    }
+  }
+  if (first_unfenced.empty() || n_fenced >= 2) {
+    return {};
+  }
+  return first_unfenced;
+}
+
+std::string pilot_walk_first_unread(const std::string& walk,
+                                    const RegistryCausalPilotWorkerNotebook& nb) {
+  for (const auto& step : pilot_split_walk_steps(walk)) {
+    if (pilot_step_is_duda(step)) {
+      continue;
+    }
+    const std::string ident = pilot_walk_step_symbol(step);
+    if (ident.size() < 4) {
+      continue;
+    }
+    bool in_card = false;
+    std::string full = ident;
+    for (const auto& have : nb.allowed_targets) {
+      if (pilot_targets_match(ident, have)) {
+        in_card = true;
+        full = have;
+        break;
+      }
+    }
+    const bool looks_sym = ident.find('_') != std::string::npos ||
+                           std::any_of(ident.begin(), ident.end(), [](char c) {
+                             return std::isupper(static_cast<unsigned char>(c)) != 0;
+                           });
+    if (!in_card && !looks_sym) {
+      continue;
+    }
+    if (!pilot_notes_have_tool_target(nb.notes, "need_code", ident) &&
+        !pilot_notes_have_tool_target(nb.notes, "need_code", full)) {
+      return full;
+    }
+  }
+  return {};
+}
+
+bool pilot_notes_need_tool_now(const std::string& notes) {
+  if (!pilot_notes_have_body(notes)) {
+    return true;
+  }
+  const std::string unread_key = "walk nombra un símbolo no leído: ";
+  const std::string writer_key = "falta need_code del writer: ";
+  const auto unread_hit = notes.rfind(unread_key);
+  const auto writer_hit = notes.rfind(writer_key);
+  std::string key;
+  std::size_t hit = std::string::npos;
+  if (unread_hit != std::string::npos && (writer_hit == std::string::npos || unread_hit > writer_hit)) {
+    key = unread_key;
+    hit = unread_hit;
+  } else if (writer_hit != std::string::npos) {
+    key = writer_key;
+    hit = writer_hit;
+  }
+  if (hit == std::string::npos) {
+    return false;
+  }
+  std::size_t i = hit + key.size();
+  std::size_t j = i;
+  while (j < notes.size() && !std::isspace(static_cast<unsigned char>(notes[j])) &&
+         notes[j] != '"' ) {
+    ++j;
+  }
+  std::string tgt = notes.substr(i, j - i);
+  while (!tgt.empty() && (tgt.back() == '.' || tgt.back() == ',')) {
+    tgt.pop_back();
+  }
+  if (tgt.size() < 4) {
+    return true;
+  }
+  return !pilot_notes_have_tool_target(notes, "need_code", tgt);
+}
+
+bool pilot_ident_in_notebook(const std::string& ident,
+                             const RegistryCausalPilotWorkerNotebook& nb) {
+  const std::string id = causal_lower(ident);
+  if (id.size() < 3) {
+    return false;
+  }
+  for (const auto& have : nb.allowed_targets) {
+    if (pilot_targets_match(ident, have)) {
+      return true;
+    }
+    const std::string h = causal_lower(have);
+    if (h.size() >= id.size() && h.find(id) != std::string::npos) {
+      return true;
+    }
+  }
+  const std::string hay = causal_lower(nb.notes);
+  return hay.find(id) != std::string::npos;
 }
 
 int pilot_notes_unique_code_targets(const std::string& notes) {
@@ -9023,6 +9412,8 @@ std::string registry_causal_pilot_allowed_markdown(const RegistryCausalPilotWork
   }
   if (n == 0) {
     out << "(ninguno: usa outline del archivo del stem)\n";
+  } else {
+    out << "El why/brief del informe debe incluir el nombre de uno de estos símbolos.\n";
   }
   return out.str();
 }
@@ -9090,51 +9481,484 @@ std::string registry_causal_pilot_follow_markdown(const nlohmann::json& payload,
   return out.str();
 }
 
+std::string registry_causal_pilot_causal_mermaid(
+    const std::vector<std::pair<std::string, std::string>>& edges) {
+  auto node_id = [](std::string s) {
+    for (char& c : s) {
+      if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
+        c = '_';
+      }
+    }
+    if (s.empty()) {
+      s = "n";
+    }
+    if (std::isdigit(static_cast<unsigned char>(s.front()))) {
+      s.insert(s.begin(), 'n');
+    }
+    return s;
+  };
+  std::ostringstream out;
+  out << "```mermaid\nflowchart TD\n";
+  if (edges.empty()) {
+    out << "  empty[sin aristas de codigo]\n";
+  }
+  for (const auto& e : edges) {
+    out << "  " << node_id(e.first) << "[\"" << e.first << "\"] --> " << node_id(e.second)
+        << "[\"" << e.second << "\"]\n";
+  }
+  out << "```\n";
+  return out.str();
+}
+
+namespace {
+
+bool aguas_ident_char(char c) {
+  return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
+}
+
+std::string aguas_trim(std::string s) {
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
+    s.erase(s.begin());
+  }
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
+    s.pop_back();
+  }
+  return s;
+}
+
+std::string aguas_compact(std::string s, std::size_t max_n) {
+  std::string out;
+  bool sp = false;
+  for (char c : s) {
+    if (c == '\n' || c == '\r' || c == '\t' || c == ' ') {
+      sp = true;
+      continue;
+    }
+    if (sp && !out.empty()) {
+      out.push_back(' ');
+    }
+    sp = false;
+    out.push_back(c);
+  }
+  if (max_n > 0 && out.size() > max_n) {
+    out.resize(max_n);
+    out += "…";
+  }
+  return out;
+}
+
+std::string aguas_bare_symbol(std::string name) {
+  const auto slash = name.find_last_of("/\\");
+  if (slash != std::string::npos) {
+    name = name.substr(slash + 1);
+  }
+  const auto colon = name.rfind(':');
+  if (colon != std::string::npos) {
+    name = name.substr(colon + 1);
+  }
+  return name;
+}
+
+bool aguas_skip_member(const std::string& name) {
+  static const char* kSkip[] = {"this", "std", "string", "vector", "optional", "unique_ptr",
+                                "shared_ptr", "npos", "mutex", "lock", "lock_guard"};
+  for (const char* s : kSkip) {
+    if (name == s) {
+      return true;
+    }
+  }
+  if (name.size() <= 1) {
+    return true;
+  }
+  if (name.find("mutex") != std::string::npos) {
+    return true;
+  }
+  return false;
+}
+
+std::string aguas_rhs_after_name(const std::string& line, const std::string& name) {
+  const auto pos = line.find(name);
+  if (pos == std::string::npos) {
+    return {};
+  }
+  std::size_t i = pos + name.size();
+  while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) {
+    ++i;
+  }
+  if (i + 1 < line.size() &&
+      ((line[i] == '+' && line[i + 1] == '+') || (line[i] == '-' && line[i + 1] == '-'))) {
+    return line[i] == '+' ? "incrementa" : "decrementa";
+  }
+  if (i + 1 < line.size() &&
+      (line[i] == '+' || line[i] == '-' || line[i] == '*' || line[i] == '/') &&
+      line[i + 1] == '=') {
+    return line[i] == '+' ? "incrementa" : (line[i] == '-' ? "decrementa" : line.substr(i, 2));
+  }
+  if (i < line.size() && line[i] == '.' ) {
+    std::size_t j = i + 1;
+    while (j < line.size() && aguas_ident_char(line[j])) {
+      ++j;
+    }
+    const std::string method = line.substr(i + 1, j - (i + 1));
+    if (method == "store" || method == "exchange") {
+      std::size_t k = j;
+      while (k < line.size() && (std::isspace(static_cast<unsigned char>(line[k])) ||
+                                 line[k] == '(')) {
+        ++k;
+      }
+      std::size_t e = k;
+      while (e < line.size() && line[e] != ')' && line[e] != ',' && line[e] != ';') {
+        ++e;
+      }
+      const std::string arg = aguas_trim(line.substr(k, e - k));
+      return arg.empty() ? "escribe" : arg;
+    }
+  }
+  if (i >= line.size() || line[i] != '=' || (i + 1 < line.size() && line[i + 1] == '=')) {
+    return {};
+  }
+  ++i;
+  while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) {
+    ++i;
+  }
+  std::size_t e = i;
+  while (e < line.size() && line[e] != ';') {
+    ++e;
+  }
+  return aguas_compact(line.substr(i, e - i), 24);
+}
+
+void aguas_collect_members(const std::string& text, std::vector<std::string>* names) {
+  if (names == nullptr) {
+    return;
+  }
+  auto consider = [&](const std::string& name) {
+    if (aguas_skip_member(name)) {
+      return;
+    }
+    if (std::find(names->begin(), names->end(), name) == names->end()) {
+      names->push_back(name);
+    }
+  };
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    std::size_t j = std::string::npos;
+    if (text[i] == '.') {
+      j = i + 1;
+    } else if (text[i] == '-' && i + 1 < text.size() && text[i + 1] == '>') {
+      j = i + 2;
+    }
+    if (j == std::string::npos) {
+      continue;
+    }
+    while (j < text.size() && std::isspace(static_cast<unsigned char>(text[j]))) {
+      ++j;
+    }
+    if (j >= text.size() ||
+        !(std::isalpha(static_cast<unsigned char>(text[j])) != 0 || text[j] == '_')) {
+      continue;
+    }
+    std::size_t k = j;
+    while (k < text.size() && aguas_ident_char(text[k])) {
+      ++k;
+    }
+    std::size_t p = k;
+    while (p < text.size() && std::isspace(static_cast<unsigned char>(text[p]))) {
+      ++p;
+    }
+    if (p < text.size() && text[p] == '(') {
+      i = k - 1;
+      continue;
+    }
+    consider(text.substr(j, k - j));
+    i = k - 1;
+  }
+  // Trailing-underscore fields: agent_cancel_.store / foo_ =
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    if (!(std::isalpha(static_cast<unsigned char>(text[i])) != 0 || text[i] == '_')) {
+      continue;
+    }
+    if (i > 0 && aguas_ident_char(text[i - 1])) {
+      continue;
+    }
+    std::size_t k = i;
+    while (k < text.size() && aguas_ident_char(text[k])) {
+      ++k;
+    }
+    if (k == i || text[k - 1] != '_') {
+      i = k - 1;
+      continue;
+    }
+    std::size_t p = k;
+    while (p < text.size() && std::isspace(static_cast<unsigned char>(text[p]))) {
+      ++p;
+    }
+    bool fieldish = false;
+    if (p < text.size() && text[p] == '=') {
+      fieldish = p + 1 >= text.size() || text[p + 1] != '=';
+    } else if (p < text.size() && text[p] == '.') {
+      std::size_t m = p + 1;
+      while (m < text.size() && aguas_ident_char(text[m])) {
+        ++m;
+      }
+      const std::string method = text.substr(p + 1, m - (p + 1));
+      fieldish = method == "store" || method == "load" || method == "exchange" ||
+                 method == "compare_exchange_weak" || method == "compare_exchange_strong" ||
+                 method == "fetch_add" || method == "fetch_sub";
+    }
+    if (fieldish) {
+      consider(text.substr(i, k - i));
+    }
+    i = k - 1;
+  }
+}
+
+}  // namespace
+
+std::string registry_causal_pilot_aguas_arriba_markdown(
+    const std::string& workspace_root, const std::string& focus_path,
+    const std::string& focus_symbol,
+    const std::function<std::vector<ATrailSearchHit>(const std::string& symbol)>& search,
+    std::vector<std::string>* incoming_targets) {
+  const std::string target =
+      focus_path.empty() ? focus_symbol : (focus_path + ":" + focus_symbol);
+  std::ostringstream out;
+  out << "----- aguas_arriba " << target << " -----\n";
+  if (!search || focus_symbol.empty()) {
+    out << "(sin caller en este stem)\n";
+    return out.str();
+  }
+  const auto stacks =
+      a_trail_build_full_stacks(workspace_root, focus_symbol, focus_path, search, 2, 2);
+  int shown = 0;
+  for (const auto& st : stacks) {
+    if (st.hops.size() < 2) {
+      continue;
+    }
+    const ATrailHop& caller = st.hops[st.hops.size() - 2];
+    if (caller.symbol.empty() || caller.symbol == focus_symbol) {
+      continue;
+    }
+    const std::string focus_stem = registry_stem_of(focus_path);
+    const std::string caller_stem = registry_stem_of(caller.path);
+    if (focus_stem.empty() || caller_stem != focus_stem) {
+      continue;
+    }
+    std::string quien;
+    for (const auto& hop : st.hops) {
+      const std::string name = aguas_bare_symbol(hop.symbol.empty() ? hop.anchor : hop.symbol);
+      if (name.empty()) {
+        continue;
+      }
+      if (!quien.empty()) {
+        quien += " → ";
+      }
+      quien += name;
+    }
+    std::string cuando = aguas_compact(caller.control_cond, 72);
+    if (cuando.empty()) {
+      cuando = aguas_compact(caller.control_chain, 72);
+    }
+    if (cuando.empty()) {
+      cuando = "(sin cond en el call site)";
+    }
+    out << "cuando: " << cuando << "\n";
+    out << "quien:  " << quien << "\n";
+    ++shown;
+    if (incoming_targets != nullptr) {
+      for (std::size_t i = 0; i + 1 < st.hops.size(); ++i) {
+        const auto& hop = st.hops[i];
+        if (hop.symbol.empty() || hop.symbol == focus_symbol) {
+          continue;
+        }
+        const std::string t =
+            hop.path.empty() ? hop.symbol : (hop.path + ":" + hop.symbol);
+        if (std::find(incoming_targets->begin(), incoming_targets->end(), t) ==
+            incoming_targets->end()) {
+          incoming_targets->push_back(t);
+        }
+      }
+    }
+  }
+  if (shown == 0) {
+    out << "(sin caller en este stem)\n";
+  }
+  return out.str();
+}
+
+std::string registry_causal_pilot_aguas_abajo_markdown(const std::string& display_target,
+                                                       const std::string& body_text,
+                                                       bool truncated) {
+  std::ostringstream out;
+  out << "----- aguas_abajo " << display_target << " -----\n";
+  if (truncated) {
+    out << "solo el recorte enviado\n";
+  }
+  const std::string stem = registry_stem_of(display_target);
+  std::vector<std::string> members;
+  aguas_collect_members(body_text, &members);
+  members.erase(std::remove_if(members.begin(), members.end(),
+                               [&](const std::string& n) { return !stem.empty() && n == stem; }),
+                members.end());
+  if (members.empty()) {
+    out << "(sin miembros en este recorte)\n";
+    return out.str();
+  }
+  struct Attr {
+    bool wrote = false;
+    bool read = false;
+    std::string polarity;
+    bool wrote_true = false;
+    bool wrote_false = false;
+  };
+  std::vector<std::pair<std::string, Attr>> attrs;
+  std::string line;
+  auto flush_line = [&]() {
+    if (line.empty()) {
+      return;
+    }
+    for (auto& pair : attrs) {
+      const auto kind = a_dataflow_classify_line(line, pair.first);
+      if (kind == ADataFlowKind::Write) {
+        pair.second.wrote = true;
+        const std::string rhs = aguas_rhs_after_name(line, pair.first);
+        if (!rhs.empty() && pair.second.polarity.empty()) {
+          pair.second.polarity = rhs;
+        }
+        const std::string low = causal_lower(rhs);
+        if (low == "true" || low == "1") {
+          pair.second.wrote_true = true;
+        }
+        if (low == "false" || low == "0" || low == "nullptr" || low == "null") {
+          pair.second.wrote_false = true;
+        }
+      } else if (kind == ADataFlowKind::Read) {
+        pair.second.read = true;
+      }
+    }
+    line.clear();
+  };
+  for (const auto& m : members) {
+    attrs.push_back({m, Attr{}});
+  }
+  for (char c : body_text) {
+    if (c == '\n') {
+      flush_line();
+    } else if (c != '\r') {
+      line.push_back(c);
+    }
+  }
+  flush_line();
+  int n_attr = 0;
+  for (const auto& pair : attrs) {
+    if (!pair.second.wrote && !pair.second.read) {
+      continue;
+    }
+    if (n_attr >= 8) {
+      break;
+    }
+    out << (stem.empty() ? std::string{} : stem + " ") << pair.first << ":  ";
+    if (pair.second.wrote) {
+      out << "escribe";
+      if (!pair.second.polarity.empty()) {
+        out << " " << pair.second.polarity;
+      }
+      if (pair.second.read) {
+        out << "; lee";
+      }
+    } else {
+      out << "lee";
+    }
+    out << "\n";
+    ++n_attr;
+  }
+  if (n_attr == 0) {
+    out << "(sin miembros en este recorte)\n";
+  }
+  auto looks_latch_field = [](const std::string& n) {
+    auto ends = [&](const char* suf, std::size_t n_suf) {
+      return n.size() >= n_suf && n.compare(n.size() - n_suf, n_suf, suf) == 0;
+    };
+    return n == "busy" || n == "active" || n == "running" || n == "enabled" || n == "halted" ||
+           n == "pending" || ends("_busy", 5) || ends("_active", 7) || ends("_halted", 7) ||
+           ends("_pending", 8) || n.find("pending_") == 0;
+  };
+  bool emitted_next = false;
+  for (const auto& pair : attrs) {
+    const bool missing_clear = looks_latch_field(pair.first) && !pair.second.wrote_false &&
+                               (pair.second.wrote || pair.second.read);
+    if (missing_clear) {
+      out << "no hay clear de " << pair.first << " en este cuerpo\n";
+      if (!emitted_next) {
+        out << "siguiente: {\"action\":\"causal_pilot_dataflow\",\"target\":\"" << pair.first
+            << "\"}\n";
+        out << "una llamada en este recorte no es el clear\n";
+        emitted_next = true;
+      }
+    }
+  }
+  return out.str();
+}
+
 std::string registry_causal_pilot_worker_system_prompt(const std::string& kind,
                                                        const std::string& stem) {
   std::ostringstream out;
   out << "Eres un TRABAJADOR SORDO. No ves otros barrios ni al piloto. Solo el stem `" << stem
       << "`.\n";
-  out << "El owns de la ficha NO es la respuesta. Compara con la CONSULTA DEL USUARIO.\n";
-  out << "Si un call sale de este stem, cítalo en port_to y PARA.\n";
-  out << "Catálogo (target DEBE estar en ## Símbolos permitidos o en ## Notas):\n";
+  out << "Tu trabajo: enumerar los pasos por los que pasa la CONSULTA DEL USUARIO en este "
+         "stem, SIN DUDAS. El veredicto sale de esa enumeración, no al revés.\n";
+  out << "El owns de la ficha NO es la respuesta. Las aristas de la ficha NO son evidencia. "
+         "Un follow de hops no es un paso.\n";
+  out << "Un nombre que el flujo o la ficha apuntó y cuyo cuerpo no has abierto es una DUDA: "
+         "pide need_code, o márcala duda:Symbol en el walk. No la listes como paso comprendido.\n";
+  out << "Si la consulta pregunta quién escribe o limpia un campo y en el cuerpo leído no ves "
+         "el clear, pide dataflow de ese campo (nombra a los writers) y need_code de cada uno. "
+         "Un hop de la ficha no es el walk.\n";
+  out << "Tras need_code hay ----- aguas_arriba ----- (quién te llama y bajo qué cond) y "
+         "----- aguas_abajo ----- (qué campos escribe o lee ESTE recorte). aguas_arriba no es "
+         "el walk de quién escribe o limpia. Un nombre solo ahí no está leído. El walk de un "
+         "campo sale de aguas_abajo y de los writers del dataflow (need_code de cada fn=). "
+         "Una llamada en el recorte no es el clear. Un paso comprendido exige "
+         "----- need_code ----- de ESE símbolo; ver el nombre en otro cuerpo no cuenta. "
+         "Tras dataflow, need_code de cada fn= write de este stem. Si aguas_abajo pide "
+         "dataflow, el siguiente JSON es esa tool.\n";
+  out << "Catálogo — si aún no hay ----- need_code ----- en notas, responde SOLO una tool:\n";
   out << "{\"action\":\"causal_pilot_need_code\",\"target\":\"path.cpp:Symbol\"}\n";
+  out << "{\"action\":\"causal_pilot_dataflow\",\"target\":\"member_or_var\"}\n";
+  out << "{\"action\":\"causal_pilot_causal\",\"target\":\"path.cpp:Symbol\"}\n";
   out << "{\"action\":\"causal_pilot_outline\",\"target\":\"path.cpp\"}\n";
   out << "{\"action\":\"causal_pilot_follow\",\"target\":\"path.cpp:Symbol\","
          "\"direction\":\"outgoing\"}\n";
-  out << "PROHIBIDO inventar símbolos. PROHIBIDO informar con why de plantilla.\n";
-  out << "El informe lleva brief: 2 frases para el PILOTO (qué hace este barrio, qué símbolo, "
-         "qué falta). No basta el veredicto ni un símbolo suelto.\n\n";
+  out << "PROHIBIDO inventar símbolos. PROHIBIDO why/walk de plantilla.\n";
+  out << "walk: \"FnA: escribe el campo -> FnB: limpia el campo\". Duda: "
+         "\"duda:FnB\". Nombres reales de ## Notas, nunca el placeholder sym. Si te queda una "
+         "duda, pide tool; no_cubre no es rendirse. brief: 2 frases para el PILOTO derivadas "
+         "del walk.\n\n";
   if (kind == "cubre") {
-    out << "cubre: ¿el objeto de ## Consulta del usuario está EN este stem? Máx. 1 outline o 1 "
-           "need_code. No follow. why=símbolo de ficha/Notas, nunca solo el nombre del stem.\n";
-    out << "Si la ficha no tiene símbolos, outline o need_code ANTES del informe.\n";
+    out << "cubre: los pasos del walk son o no el objeto de la consulta. No follow. Tokens "
+           "temáticos (asistente, chat, panel, IA) no bastan. El encargo nombra este stem a "
+           "propósito: eso NO es cubre.\n";
     out << "Informe: {\"action\":\"causal_pilot_worker_v1\",\"kind\":\"cubre\","
-           "\"verdict\":\"cubre|no_cubre\",\"owns\":\""
+           "\"walk\":\"NombreFn: qué hace\",\"verdict\":\"cubre|no_cubre\",\"owns\":\""
         << stem << "\",\"why\":\"…símbolo…\",\"brief\":\"2 frases para el piloto\"}\n";
-    out << "El encargo nombra este stem a propósito: eso NO es cubre. Tokens temáticos "
-           "(asistente, chat, panel, IA) no bastan. Si la ficha es otro objeto, "
-           "verdict=no_cubre y why=un símbolo de la ficha.\n";
   } else if (kind == "como") {
-    out << "como: ¿quién escribe/limpia/dispara el acto EN este stem?\n";
-    out << "chain y why citan símbolos de ficha/Notas. direction: outgoing o incoming.\n";
+    out << "como: cada paso es quién escribe, observa o limpia el acto EN este stem. Lee el "
+           "cuerpo, no copies hops. Si no viste el clear, dataflow del campo; no emitas "
+           "no_cubre con una duda pendiente.\n";
     out << "Informe: {\"action\":\"causal_pilot_worker_v1\",\"kind\":\"como\","
-           "\"verdict\":\"chain|no_cubre\",\"path_symbol\":\"…\","
-           "\"chain\":\"…símbolo…\",\"port_to\":\"\",\"why\":\"…símbolo…\","
+           "\"walk\":\"NombreFn: escribe el campo -> OtraFn: limpia el campo\","
+           "\"verdict\":\"chain|no_cubre\","
+           "\"path_symbol\":\"…\",\"chain\":\"…\",\"port_to\":\"\",\"why\":\"…símbolo…\","
            "\"brief\":\"2 frases para el piloto\"}\n";
-    out << "Sin resultado de tool (----- follow/need_code): pide tool. Una ----- nota ----- "
-           "de árbitro NO cuenta. Tras un follow: informe worker_v1 con verdict chain o "
-           "no_cubre (nunca need_code en verdict). Follow sin hops: NO es no_cubre. "
-           "outline del archivo del stem o follow/need_code de OTRO símbolo; chain si el "
-           "símbolo ES el acto.\n";
+    out << "verdict de informe nunca es need_code. Una ----- nota ----- de árbitro no es "
+           "lectura.\n";
   } else {
-    out << "gap: follow outgoing de un símbolo de la ficha. Si el call sale, port_to y PARA.\n";
+    out << "gap: la enumeración se corta en un call que sale de este stem, o en una duda que "
+           "no puedes leer aquí. Si el call sale, port_to.\n";
     out << "Informe: {\"action\":\"causal_pilot_worker_v1\",\"kind\":\"gap\","
-           "\"verdict\":\"missing|found\",\"port_to\":\"\",\"why\":\"…símbolo…\","
-           "\"brief\":\"2 frases para el piloto\"}\n";
-    out << "Sin resultado de follow/need_code: el JSON causal_pilot_follow del catálogo, con "
-           "target de ## Símbolos permitidos. Una ----- nota ----- no basta. Con resultado de "
-           "tool: informe worker_v1. why cita un símbolo.\n";
+           "\"walk\":\"NombreFn: acto -> duda:OtraFn\",\"verdict\":\"missing|found\","
+           "\"port_to\":\"\",\"why\":\"…símbolo…\",\"brief\":\"2 frases para el piloto\"}\n";
+    out << "why/walk DEBEN citar un símbolo de ## Símbolos permitidos (el que leíste). Prosa "
+           "tematica sin símbolo se rechaza.\n";
   }
   out << "Responde SOLO JSON.";
   return out.str();
@@ -9144,32 +9968,76 @@ std::string registry_causal_pilot_worker_user_prompt(const std::string& kind,
                                                      const std::string& question,
                                                      const std::string& zone_markdown,
                                                      const std::string& notes,
-                                                     const std::string& allowed_markdown) {
+                                                     const std::string& allowed_markdown,
+                                                     bool last_turn, const std::string& stem) {
   std::ostringstream out;
-  if (kind == "cubre") {
-    out << "kind=cubre\nDecide cubre/no_cubre por ## Consulta del usuario, no por el nombre "
-           "del stem. El informe incluye brief de 2 frases para el piloto.\n\n";
-  } else if (kind == "como" || kind == "gap") {
-    const bool have_tool = pilot_notes_have_tool_result(notes);
-    if (!have_tool) {
-      out << "kind=" << kind
-          << "\nAún no hay resultado de tool. Responde SOLO follow o need_code con target de "
-             "## Símbolos permitidos. Una nota de árbitro no cuenta.\n\n";
-    } else if (kind == "como" && notes.find("sin hops") != std::string::npos &&
-               pilot_notes_unique_code_targets(notes) <= 1) {
-      out << "kind=como\nEse follow no tenía hops. Responde SOLO JSON: "
-             "causal_pilot_outline del archivo .cpp, o causal_pilot_follow/need_code de OTRO "
-             "símbolo de ## Símbolos permitidos, o causal_pilot_worker_v1 con verdict=chain. "
-             "PROHIBIDO verdict=no_cubre. PROHIBIDO repetir el mismo target.\n\n";
-    } else if (kind == "como") {
-      out << "kind=como\nYa hay resultado de tool. Emite causal_pilot_worker_v1 con verdict "
-             "chain o no_cubre (nunca need_code) y brief de 2 frases. No pidas otra tool.\n\n";
+  out << "kind=" << kind << "\n";
+  const std::string unread_writer =
+      (kind == "como" || kind == "gap") ? pilot_unread_dataflow_writer(notes, stem) : std::string{};
+  if (last_turn) {
+    out << "ÚLTIMO TURNO. Emite causal_pilot_worker_v1 ahora. walk con las dudas que queden "
+           "(duda:Symbol). why/brief citan un símbolo de ## Símbolos permitidos. Si no cerraste "
+           "el acto: verdict no_cubre o missing. PROHIBIDO pedir tool.\n\n";
+  } else if (pilot_notes_need_tool_now(notes)) {
+    out << "PROHIBIDO causal_pilot_worker_v1. Responde SOLO una tool del catálogo "
+           "(causal_pilot_need_code con target de ## Símbolos permitidos). Follow no es "
+           "lectura. No reemitas un informe.\n";
+    if (!pilot_notes_have_body(notes)) {
+      out << "Sin ----- need_code ----- en ## Notas aún no has leído código.\n";
+    } else if (!unread_writer.empty()) {
+      out << "Tras dataflow el siguiente JSON es "
+             "{\"action\":\"causal_pilot_need_code\",\"target\":\""
+          << unread_writer
+          << "\"}. Un fn= write no está leído hasta su fence. Un lector no es el clear.\n";
     } else {
-      out << "kind=gap\nYa hay resultado de tool. Emite causal_pilot_worker_v1 con verdict "
-             "missing o found y brief de 2 frases. No pidas otra tool.\n\n";
+      out << "El walk anterior nombró un símbolo que no abriste. need_code de ESE símbolo o "
+             "dataflow del campo.\n";
+    }
+    out << "\n";
+  } else if (kind == "cubre" && pilot_notes_have_body(notes)) {
+    out << "Ya hay ----- need_code -----. Emite causal_pilot_worker_v1 con cubre|no_cubre. "
+           "PROHIBIDO repetir need_code del mismo símbolo (salvo #tail|#mid o un rango de "
+           "líneas omitidas). cubre no recorre writers.\n\n";
+  } else if ((kind == "como" || kind == "gap") && !unread_writer.empty()) {
+    out << "PROHIBIDO causal_pilot_worker_v1. Tras dataflow hay un writer de este stem sin "
+           "abrir. Responde SOLO {\"action\":\"causal_pilot_need_code\",\"target\":\""
+        << unread_writer
+        << "\"}. Un fn= write no está en el walk hasta su ----- need_code -----. Un lector no "
+           "es el clear.\n\n";
+  } else if ((kind == "como" || kind == "gap") && !pilot_notes_have_flow(notes)) {
+    const std::string field = pilot_missing_clear_field(notes);
+    if (!field.empty()) {
+      out << "PROHIBIDO causal_pilot_worker_v1. aguas_abajo dice que no hay clear. Responde "
+             "SOLO {\"action\":\"causal_pilot_dataflow\",\"target\":\""
+          << field << "\"}. Una llamada en el recorte no es el clear.\n\n";
+    } else {
+      out << "Enumera los pasos por los que pasa la consulta en este stem, sin dudas. Si un "
+             "paso es un nombre que no has abierto (no hay ----- need_code ----- de ese símbolo), "
+             "es duda: pide tool (no emitas no_cubre con duda pendiente). Follow no es lectura. "
+             "No copies hops de la ficha al walk. "
+             "El informe causal_pilot_worker_v1 lo emites TÚ cuando el walk no tenga dudas; "
+             "no cuando haya dos tools.\n";
+      out << "Hay un cuerpo. Si la consulta pregunta quién escribe o limpia y no viste el "
+             "clear en ese cuerpo, pide causal_pilot_dataflow del campo. Un hop de la ficha "
+             "no cierra esa duda.\n\n";
     }
   } else {
-    out << "kind=" << kind << "\npregunta: " << question << "\n\n";
+    out << "Enumera los pasos por los que pasa la consulta en este stem, sin dudas. Si un "
+           "paso es un nombre que no has abierto (no hay ----- need_code ----- de ese símbolo), "
+           "es duda: pide tool (no emitas no_cubre con duda pendiente). Follow no es lectura. "
+           "No copies hops de la ficha al walk. "
+           "El informe causal_pilot_worker_v1 lo emites TÚ cuando el walk no tenga dudas; "
+           "no cuando haya dos tools.\n";
+    if (notes.find("----- dataflow ") == std::string::npos &&
+        notes.find("----- causal ") == std::string::npos) {
+      out << "Hay un cuerpo. Si la consulta pregunta quién escribe o limpia y no viste el "
+             "clear en ese cuerpo, pide causal_pilot_dataflow del campo. Un hop de la ficha "
+             "no cierra esa duda.\n";
+    }
+    out << "\n";
+  }
+  if (!question.empty()) {
+    out << "## Consulta del usuario\n" << question << "\n\n";
   }
   if (!allowed_markdown.empty()) {
     out << allowed_markdown << "\n";
@@ -9210,6 +10078,10 @@ RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
     out.action = "causal_pilot_outline";
   } else if (out.action == "follow" || out.action == "causal_pilot_follow") {
     out.action = "causal_pilot_follow";
+  } else if (out.action == "dataflow" || out.action == "causal_pilot_dataflow") {
+    out.action = "causal_pilot_dataflow";
+  } else if (out.action == "causal" || out.action == "causal_pilot_causal") {
+    out.action = "causal_pilot_causal";
   } else if (out.action == "worker_v1" || out.action == "causal_pilot_worker" ||
              out.action == "causal_pilot_worker_v1") {
     out.action = "causal_pilot_worker_v1";
@@ -9226,22 +10098,12 @@ RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
     }
     return true;
   };
-  auto cubre_tool_budget = [&]() {
-    return notebook != nullptr && out.kind == "cubre" &&
-           (notebook->n_need_code + notebook->n_outline) >= 1;
-  };
   if (out.action == "causal_pilot_need_code") {
     out.target = hyp_json_string(j, "target");
     if (out.target.empty()) {
       out.target = hyp_json_string(j, "path_symbol");
     }
     if (!finish_tool("need_code", "need_code sin target")) {
-      return out;
-    }
-    if (out.kind == "cubre" && cubre_tool_budget()) {
-      out.error = "cubre: presupuesto de tools agotado";
-      out.is_tool = false;
-      out.need_code = false;
       return out;
     }
     if (!registry_causal_pilot_target_in_stem(out.target, expected_stem)) {
@@ -9257,6 +10119,13 @@ RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
       out.need_code = false;
       return out;
     }
+    if (notebook != nullptr && !pilot_target_is_windowed(out.target) &&
+        pilot_notes_have_tool_target(notebook->notes, "need_code", out.target)) {
+      out.error = "need_code repetido";
+      out.is_tool = false;
+      out.need_code = false;
+      return out;
+    }
     out.ok = true;
     return out;
   }
@@ -9266,12 +10135,6 @@ RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
       out.target = hyp_json_string(j, "path");
     }
     if (!finish_tool("outline", "outline sin target")) {
-      return out;
-    }
-    if (out.kind == "cubre" && cubre_tool_budget()) {
-      out.error = "cubre: presupuesto de tools agotado";
-      out.is_tool = false;
-      out.need_code = false;
       return out;
     }
     if (!registry_causal_pilot_target_in_stem(out.target, expected_stem)) {
@@ -9308,6 +10171,70 @@ RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
       }
     } else if (!registry_causal_pilot_target_in_stem(out.target, expected_stem)) {
       out.error = "follow fuera del stem";
+      out.is_tool = false;
+      out.need_code = false;
+      return out;
+    }
+    out.ok = true;
+    return out;
+  }
+  if (out.action == "causal_pilot_dataflow") {
+    out.target = hyp_json_string(j, "target");
+    if (out.target.empty()) {
+      out.target = hyp_json_string(j, "member");
+    }
+    const std::string path = hyp_json_string(j, "path");
+    if (!path.empty()) {
+      out.path_symbol = path;
+    }
+    {
+      const auto slash = out.target.find_last_of("/\\");
+      const auto colon = out.target.rfind(':');
+      if (colon != std::string::npos && slash != std::string::npos && colon > slash) {
+        if (out.path_symbol.empty()) {
+          out.path_symbol = out.target.substr(0, colon);
+        }
+        out.target = out.target.substr(colon + 1);
+      }
+    }
+    if (out.target.size() < 3) {
+      out.error = "dataflow sin target";
+      return out;
+    }
+    out.tool = "dataflow";
+    out.is_tool = true;
+    if (!out.path_symbol.empty() &&
+        !registry_causal_pilot_target_in_stem(out.path_symbol, expected_stem)) {
+      out.error = "dataflow fuera del stem";
+      out.is_tool = false;
+      return out;
+    }
+    if (notebook != nullptr &&
+        pilot_notes_have_tool_target(notebook->notes, "dataflow", out.target)) {
+      out.error = "dataflow repetido";
+      out.is_tool = false;
+      return out;
+    }
+    out.ok = true;
+    return out;
+  }
+  if (out.action == "causal_pilot_causal") {
+    out.target = hyp_json_string(j, "target");
+    if (out.target.empty()) {
+      out.target = hyp_json_string(j, "path_symbol");
+    }
+    if (!finish_tool("causal", "causal sin target")) {
+      return out;
+    }
+    if (!registry_causal_pilot_target_in_stem(out.target, expected_stem)) {
+      out.error = "causal fuera del stem";
+      out.is_tool = false;
+      out.need_code = false;
+      return out;
+    }
+    if (notebook != nullptr && !notebook->allowed_targets.empty() &&
+        !registry_causal_pilot_target_in_notebook(out.target, *notebook)) {
+      out.error = "causal no está en la ficha";
       out.is_tool = false;
       out.need_code = false;
       return out;
@@ -9352,6 +10279,46 @@ RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
   if (out.chain == "trigger→estado→efecto" || out.chain == "trigger->estado->efecto") {
     out.chain.clear();
   }
+  out.walk = hyp_json_string(j, "walk");
+  if (out.walk.empty() && j.contains("walk") && j["walk"].is_array()) {
+    std::ostringstream w;
+    for (const auto& step : j["walk"]) {
+      if (!step.is_string()) {
+        continue;
+      }
+      const std::string s = step.get<std::string>();
+      if (s.empty()) {
+        continue;
+      }
+      if (!w.str().empty()) {
+        w << " -> ";
+      }
+      w << s;
+    }
+    out.walk = w.str();
+  }
+  if (out.walk.empty()) {
+    out.walk = out.chain;
+  }
+  if (out.chain.empty()) {
+    out.chain = out.walk;
+  }
+  if (causal_lower(out.walk).find("sym:") != std::string::npos) {
+    out.error = "walk de plantilla";
+    return out;
+  }
+  if (out.why.size() < 8 && out.walk.size() >= 8) {
+    out.why = out.walk;
+    if (out.why.size() > 240) {
+      out.why.resize(240);
+    }
+  }
+  if (out.brief.empty() && pilot_text_is_brief(out.walk)) {
+    out.brief = out.walk;
+    if (out.brief.size() > 400) {
+      out.brief.resize(400);
+    }
+  }
   out.path_symbol = hyp_json_string(j, "path_symbol");
   if (out.path_symbol == "path.cpp:fn" || out.path_symbol == "src/foo.cpp:Symbol" ||
       (out.path_symbol.size() >= 3 &&
@@ -9375,20 +10342,47 @@ RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
       out.error = "ficha vacía: pide outline o need_code";
       return out;
     }
-    if (out.kind == "como" && !notebook->used_code_or_follow()) {
-      out.error = "como sin need_code/follow";
+    const bool closing = pilot_notes_are_closing(notebook->notes);
+    if (!closing && !pilot_notes_have_body(notebook->notes)) {
+      out.error = "sin lectura de código";
       return out;
     }
-    if (out.kind == "gap" && !notebook->used_code_or_follow()) {
-      out.error = "gap sin follow/need_code";
-      return out;
+    if (out.walk.empty() && out.why.size() >= 8) {
+      out.walk = out.why;
+      if (out.chain.empty()) {
+        out.chain = out.why;
+      }
     }
-    if (!notebook->allowed_targets.empty() &&
-        !pilot_why_cites_targets(out.why + " " + out.brief, notebook->allowed_targets) &&
-        (out.chain.empty() || !pilot_why_cites_targets(out.chain + " " + out.path_symbol,
-                                                       notebook->allowed_targets))) {
+    const std::string cite_hay = out.why + " " + out.brief + " " + out.walk + " " + out.chain +
+                                 " " + out.path_symbol;
+    if (!notebook->allowed_targets.empty() && !pilot_why_cites_targets(cite_hay, notebook->allowed_targets)) {
       out.error = "why no cita un símbolo de la ficha";
       return out;
+    }
+    if ((out.kind == "como" || out.kind == "gap") &&
+        (out.verdict == "chain" || out.verdict == "found") &&
+        !pilot_notes_are_closing(notebook->notes) && !pilot_notes_have_flow(notebook->notes)) {
+      const std::string field = pilot_missing_clear_field(notebook->notes);
+      if (!field.empty()) {
+        out.error = "falta dataflow del campo: " + field;
+        return out;
+      }
+    }
+    if ((out.kind == "como" || out.kind == "gap") &&
+        (out.verdict == "chain" || out.verdict == "found") &&
+        !pilot_notes_are_closing(notebook->notes)) {
+      const std::string writer = pilot_unread_dataflow_writer(notebook->notes, expected_stem);
+      if (!writer.empty() && !pilot_walk_has_duda_of(out.walk, writer)) {
+        out.error = "falta need_code del writer: " + writer;
+        return out;
+      }
+    }
+    if (out.verdict == "cubre" || out.verdict == "chain" || out.verdict == "found") {
+      const std::string unread = pilot_walk_first_unread(out.walk, *notebook);
+      if (!unread.empty()) {
+        out.error = "walk nombra un símbolo no leído: " + unread;
+        return out;
+      }
     }
     if (!pilot_text_is_brief(out.brief)) {
       out.error = "brief corto: 2 frases para el piloto";
@@ -9447,6 +10441,7 @@ nlohmann::json registry_causal_pilot_worker_to_json(const RegistryCausalPilotWor
           {"verdict", r.verdict},
           {"covers", r.covers},
           {"owns", r.owns},
+          {"walk", r.walk},
           {"chain", r.chain},
           {"path_symbol", r.path_symbol},
           {"port_to", r.port_to},
@@ -9481,7 +10476,10 @@ std::string registry_causal_pilot_worker_markdown(const RegistryCausalPilotWorke
   if (!r.brief.empty()) {
     out << "brief: " << r.brief << "\n";
   }
-  if (!r.chain.empty()) {
+  if (!r.walk.empty()) {
+    out << "walk: " << r.walk << "\n";
+  }
+  if (!r.chain.empty() && r.chain != r.walk) {
     out << "chain: " << r.chain << "\n";
   }
   if (!r.path_symbol.empty()) {

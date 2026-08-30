@@ -1,0 +1,19 @@
+{
+  "zones": [
+    {
+      "id": "L1",
+      "owns": "latch",
+      "primary_stems": ["latch"],
+      "representatives": [
+        { "target": "src/latch.cpp:start_busy" }
+      ],
+      "edges": [
+        {
+          "from": "src/latch.cpp:start_busy",
+          "to": "src/latch.cpp:tick",
+          "kind": "call"
+        }
+      ]
+    }
+  ]
+}

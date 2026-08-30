@@ -1,5 +1,6 @@
 #include "ai/l2_effect_registry.hpp"
 #include "ai/l2_effect_slice.hpp"
+#include "ai/l2_explore_a.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -58,6 +59,21 @@ void copy_rel(const std::string& tide, const std::string& tmp, const std::string
   const fs::path dst = fs::path(tmp) / rel;
   fs::create_directories(dst.parent_path());
   fs::copy_file(fs::path(tide) / rel, dst, fs::copy_options::overwrite_existing);
+}
+
+std::string worker_read_notes(const std::string& target, const std::string& body,
+                              const std::string& var) {
+  return "\n----- need_code " + target + " -----\n```cpp\n" + body +
+         (body.empty() || body.back() == '\n' ? "" : "\n") + "```\n" +
+         "----- dataflow " + var + " -----\nwrites of `" + var + "` in " + target + "\n";
+}
+
+void stamp_worker_read(tuide::RegistryCausalPilotWorkerNotebook* nb, const std::string& target,
+                       const std::string& body = "void fn() { busy = true; }\n",
+                       const std::string& var = "busy") {
+  nb->n_need_code = std::max(nb->n_need_code, 1);
+  nb->n_dataflow = std::max(nb->n_dataflow, 1);
+  nb->notes += worker_read_notes(target, body, var);
 }
 
 tuide::EffectSliceDeps deps_empty(const std::string& root) {
@@ -1106,6 +1122,20 @@ void test_query_constellations() {
         "como", "busy_strip", "", &nb_card);
     expect(wr_follow_card.ok && wr_follow_card.is_tool && wr_follow_card.tool == "follow",
            "follow of a card symbol is allowed");
+    const auto wr_df = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_dataflow","target":"busy","path":"src/ui/busy_strip.cpp"})",
+        "como", "busy_strip", "", &nb_card);
+    expect(wr_df.ok && wr_df.is_tool && wr_df.tool == "dataflow" && wr_df.target == "busy",
+           "dataflow of a field is allowed");
+    const auto wr_df_out = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"dataflow","target":"busy","path":"src/ai/ai_controller.cpp"})",
+        "como", "busy_strip", "", &nb_card);
+    expect(!wr_df_out.ok && !wr_df_out.is_tool, "dataflow path fenced by stem");
+    const auto wr_causal = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_causal","target":"src/ui/busy_strip.cpp:set_busy_spinner"})",
+        "como", "busy_strip", "", &nb_card);
+    expect(wr_causal.ok && wr_causal.is_tool && wr_causal.tool == "causal",
+           "causal of a card symbol is allowed");
     tuide::RegistryCausalPilotWorkerNotebook nb_chrome;
     nlohmann::json zone_chrome = {
         {"id", "M2"},
@@ -1143,8 +1173,18 @@ void test_query_constellations() {
         R"("why":"handle_console_tab_hover no tiene hops para el acto de carga",)"
         R"("brief":"Este barrio solo registra hover del tab. No controla el spinner de carga."})",
         "como", "console_panel", "", &nb_chrome);
-    expect(!wr_empty_nc.ok && wr_empty_nc.error.find("follow vacío") != std::string::npos,
-           "empty follow of a rep is not no_cubre");
+    expect(!wr_empty_nc.ok && wr_empty_nc.error.find("sin lectura") != std::string::npos,
+           "empty follow of a rep is not a report");
+    stamp_worker_read(&nb_chrome, "src/ui/console_panel.cpp:handle_console_tab_hover",
+                      "void handle_console_tab_hover() {}\n", "hover");
+    const auto wr_empty_nc_flow = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"no_cubre",)"
+        R"("path_symbol":"src/ui/console_panel.cpp:handle_console_tab_hover",)"
+        R"("why":"handle_console_tab_hover no tiene hops para el acto de carga",)"
+        R"("brief":"Este barrio solo registra hover del tab. No controla el spinner de carga."})",
+        "como", "console_panel", "", &nb_chrome);
+    expect(!wr_empty_nc_flow.ok && wr_empty_nc_flow.error.find("follow vacío") != std::string::npos,
+           "empty follow of a rep is not no_cubre even after a read");
     const auto wr_empty_chain = tuide::registry_parse_causal_pilot_worker(
         R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
         R"("path_symbol":"src/ui/console_panel.cpp:handle_console_tab_hover",)"
@@ -1153,7 +1193,7 @@ void test_query_constellations() {
         R"("brief":"El hover del tab vive aquí. No hay hops; el símbolo mismo es el acto."})",
         "como", "console_panel", "", &nb_chrome);
     expect(wr_empty_chain.ok && wr_empty_chain.verdict == "chain",
-           "empty follow may still chain if the symbol is the act");
+           "empty follow may still chain if the symbol is the act after a read");
     nb_chrome.notes +=
         "\n----- follow src/ui/console_panel.cpp:handle_console_tab_click outgoing -----\n"
         "(sin hops en la ficha para ese símbolo)\n";
@@ -1172,14 +1212,16 @@ void test_query_constellations() {
         R"("path_symbol":"src/ui/busy_strip.cpp:set_busy_spinner",)"
         R"("chain":"set_busy_spinner pinta el latch","why":"set_busy_spinner escribe spinner_frame"})",
         "como", "busy_strip", "", &nb_card);
-    expect(!wr_como_notool.ok, "como chain without need_code/follow is invalid");
-    nb_card.n_need_code = 1;
+    expect(!wr_como_notool.ok, "como chain without need_code is invalid");
+    stamp_worker_read(&nb_card, "src/ui/busy_strip.cpp:set_busy_spinner",
+                      "void set_busy_spinner() { spinner_frame = 1; }\n", "spinner_frame");
     const auto wr_como_tool = tuide::registry_parse_causal_pilot_worker(
         R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
         R"("path_symbol":"src/ui/busy_strip.cpp:set_busy_spinner",)"
         R"("chain":"set_busy_spinner pinta el latch","why":"set_busy_spinner escribe spinner_frame"})",
         "como", "busy_strip", "", &nb_card);
-    expect(wr_como_tool.ok && wr_como_tool.covers, "como chain after need_code");
+    expect(wr_como_tool.ok && wr_como_tool.covers && !wr_como_tool.walk.empty(),
+           "como chain after need_code aliases walk");
     const auto wr_template = tuide::registry_parse_causal_pilot_worker(
         R"({"action":"causal_pilot_worker_v1","kind":"cubre","verdict":"cubre",)"
         R"("owns":"busy_strip","why":"la ficha muestra el UI pedido"})",
@@ -1191,6 +1233,20 @@ void test_query_constellations() {
         "cubre", "busy_strip", "spinner del chat", &nb_card);
     expect(wr_cite.ok && wr_cite.covers && wr_cite.brief.find("latch") != std::string::npos,
            "cubre why that cites a card symbol");
+    const auto wr_gap_prose = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"gap","verdict":"missing",)"
+        R"("why":"falta el control del estado de carga del chat",)"
+        R"("brief":"El spinner se queda. No hay cancelacion limpia en este barrio."})",
+        "gap", "busy_strip", "", &nb_card);
+    expect(!wr_gap_prose.ok && wr_gap_prose.error.find("why no cita") != std::string::npos,
+           "gap prose without a notebook symbol is rejected");
+    const auto wr_gap_cite = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"gap","verdict":"missing",)"
+        R"("why":"set_busy_spinner pinta el latch pero el cancel sale del stem",)"
+        R"("brief":"busy_strip tiene set_busy_spinner. El eslabon de cancel no vive aqui."})",
+        "gap", "busy_strip", "", &nb_card);
+    expect(wr_gap_cite.ok && wr_gap_cite.verdict == "missing",
+           "gap missing that cites a card symbol");
     const auto wr_symbol_only = tuide::registry_parse_causal_pilot_worker(
         R"({"action":"causal_pilot_worker_v1","kind":"cubre","verdict":"cubre",)"
         R"("owns":"busy_strip","why":"set_busy_spinner"})",
@@ -1198,20 +1254,55 @@ void test_query_constellations() {
     expect(!wr_symbol_only.ok, "cubre symbol-only why is not a piloto brief");
     const auto como_nudge_only = tuide::registry_causal_pilot_worker_user_prompt(
         "como", "q", "# ficha\n", "\n----- nota -----\nInforme rechazado\n");
-    expect(como_nudge_only.find("Aún no hay resultado de tool") != std::string::npos,
-           "referee note is not a tool result");
+    expect(como_nudge_only.find("PROHIBIDO causal_pilot_worker_v1") != std::string::npos &&
+               como_nudge_only.find("need_code") != std::string::npos,
+           "without a body the next JSON must be a tool");
     const auto como_follow_notes = tuide::registry_causal_pilot_worker_user_prompt(
         "como", "q", "# ficha\n",
         "\n----- follow src/ui/busy_strip.cpp:set_busy_spinner outgoing -----\nhop\n");
-    expect(como_follow_notes.find("Ya hay resultado de tool") != std::string::npos &&
-               como_follow_notes.find("nunca need_code") != std::string::npos,
-           "follow chunk unlocks informe");
+    expect(como_follow_notes.find("PROHIBIDO causal_pilot_worker_v1") != std::string::npos &&
+               como_follow_notes.find("need_code") != std::string::npos,
+           "follow chunk does not unlock informe");
     const auto como_empty_hops = tuide::registry_causal_pilot_worker_user_prompt(
         "como", "q", "# ficha\n",
         "\n----- follow src/ui/console_panel.cpp:handle_console_tab_hover outgoing -----\n"
         "(sin hops en la ficha para ese símbolo)\n");
-    expect(como_empty_hops.find("PROHIBIDO verdict=no_cubre") != std::string::npos,
-           "empty follow prompt forbids no_cubre");
+    expect(como_empty_hops.find("PROHIBIDO causal_pilot_worker_v1") != std::string::npos,
+           "empty follow still requires a body read");
+    const auto como_body_only = tuide::registry_causal_pilot_worker_user_prompt(
+        "como", "q", "# ficha\n",
+        "\n----- need_code src/ui/busy_strip.cpp:set_busy_spinner -----\nvoid set_busy_spinner(){}\n");
+    expect(como_body_only.find("sin dudas") != std::string::npos &&
+               como_body_only.find("PROHIBIDO causal_pilot_worker_v1") == std::string::npos,
+           "need_code without dataflow does not forbid informe");
+    const auto como_ready = tuide::registry_causal_pilot_worker_user_prompt(
+        "como", "q", "# ficha\n",
+        "\n----- need_code src/ui/busy_strip.cpp:set_busy_spinner -----\nvoid fn(){}\n"
+        "\n----- dataflow busy -----\nwrites\n");
+    expect(como_ready.find("sin dudas") != std::string::npos &&
+               como_ready.find("cuando baste") == std::string::npos &&
+               como_ready.find("Puedes emitir causal_pilot_worker_v1") == std::string::npos,
+           "body+flow does not invite an early report");
+    const auto como_unread = tuide::registry_causal_pilot_worker_user_prompt(
+        "como", "q", "# ficha\n",
+        "\n----- need_code src/ui/busy_strip.cpp:set_busy_spinner -----\nvoid fn(){}\n"
+        "\n----- nota -----\nInforme rechazado: walk nombra un símbolo no leído: "
+        "src/ui/busy_strip.cpp:halt_busy_strip\n");
+    expect(como_unread.find("PROHIBIDO causal_pilot_worker_v1") != std::string::npos,
+           "unread walk step forces a tool, not another report");
+    const auto como_unread_resolved = tuide::registry_causal_pilot_worker_user_prompt(
+        "como", "q", "# ficha\n",
+        "\n----- need_code src/ui/busy_strip.cpp:set_busy_spinner -----\nvoid set_busy_spinner(){}\n"
+        "\n----- nota -----\nInforme rechazado: walk nombra un símbolo no leído: "
+        "src/ui/busy_strip.cpp:halt_busy_strip\n"
+        "\n----- need_code src/ui/busy_strip.cpp:halt_busy_strip -----\nvoid halt_busy_strip(){}\n");
+    expect(como_unread_resolved.find("PROHIBIDO causal_pilot_worker_v1") == std::string::npos,
+           "after reading the unread symbol the report is allowed again");
+    const auto como_last = tuide::registry_causal_pilot_worker_user_prompt(
+        "como", "q", "# ficha\n", "\n----- nota -----\n", "", true);
+    expect(como_last.find("ÚLTIMO TURNO") != std::string::npos &&
+               como_last.find("PROHIBIDO pedir tool") != std::string::npos,
+           "last turn forces the report");
     std::vector<std::string> hops;
     std::string port;
     const auto follow_md = tuide::registry_causal_pilot_follow_markdown(
@@ -1225,6 +1316,15 @@ void test_query_constellations() {
         R"("owns":"console_panel","why":"esto es chrome de hover, no el spinner"})",
         "cubre", "console_panel", "", &nb_empty);
     expect(!wr_empty.ok, "empty card cubre must outline or need_code first");
+    tuide::RegistryCausalPilotWorkerNotebook nb_close;
+    nb_close.notes = "\n----- cierre -----\núltimo turno\n";
+    const auto wr_close = tuide::registry_parse_causal_pilot_worker(
+        R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"no_cubre",)"
+        R"("why":"no llegue a leer el cuerpo del latch",)"
+        R"("brief":"Se acabo el presupuesto. No pude explicar quien limpia busy."})",
+        "como", "busy_strip", "", &nb_close);
+    expect(wr_close.ok && wr_close.verdict == "no_cubre",
+           "closing turn allows honest no_cubre without body");
     tuide::RegistryCausalPilotPlenary trap_plen;
     trap_plen.verdict = "entiendo";
     trap_plen.ok = true;
@@ -1970,6 +2070,569 @@ void test_query_hop0_skips_ctrl() {
   fs::remove_all(tmp);
 }
 
+void test_pilot_worker_read_gate_a() {
+  const std::string root =
+      (fs::path(tide_root()) / "tests" / "fixtures" / "pilot_worker_read").string();
+  expect(fs::exists(fs::path(root) / "src" / "latch.cpp"), "latch fixture exists");
+  expect(fs::exists(fs::path(root) / "src" / "chrome.cpp"), "chrome fixture exists");
+
+  tuide::RegistryCausalPilotWorkerNotebook nb;
+  nlohmann::json zone = {
+      {"id", "L1"},
+      {"owns", "latch"},
+      {"primary_stems", nlohmann::json::array({"latch"})},
+      {"representatives",
+       nlohmann::json::array({nlohmann::json{{"target", "src/latch.cpp:start_busy"}}})}};
+  tuide::registry_causal_pilot_notebook_from_payload(nlohmann::json{{"zones", {zone}}}, "latch",
+                                                     &nb);
+
+  tuide::RegistryCausalPilotWorkerNotebook nb_hops = nb;
+  nb_hops.n_follow = 1;
+  nb_hops.notes =
+      "\n----- follow src/latch.cpp:start_busy outgoing -----\nhop to tick\n";
+  const auto hops_only = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("path_symbol":"src/latch.cpp:start_busy",)"
+      R"("chain":"start_busy dispara tick por una arista de ficha",)"
+      R"("why":"start_busy es el acto segun los hops",)"
+      R"("brief":"Las aristas dicen que start_busy cubre el latch. No hace falta leer el cuerpo."})",
+      "como", "latch", "", &nb_hops);
+  expect(!hops_only.ok && hops_only.error.find("sin lectura") != std::string::npos,
+         "follow hops are not evidence");
+
+  const auto ask_nc = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_need_code","target":"src/latch.cpp:start_busy"})", "como",
+      "latch", "", &nb);
+  expect(ask_nc.ok && ask_nc.tool == "need_code", "gate A need_code is accepted");
+
+  std::string latch_src;
+  {
+    std::ifstream in(fs::path(root) / "src" / "latch.cpp");
+    std::string line;
+    while (std::getline(in, line)) {
+      latch_src += line;
+      latch_src += '\n';
+    }
+  }
+  expect(latch_src.find("start_busy") != std::string::npos, "latch source has start_busy");
+  nb.n_need_code = 1;
+  nb.notes += "\n----- need_code src/latch.cpp:start_busy -----\n" + latch_src;
+
+  const auto ask_nc_again = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_need_code","target":"src/latch.cpp:start_busy"})", "cubre",
+      "latch", "", &nb);
+  expect(!ask_nc_again.ok && ask_nc_again.error.find("repetido") != std::string::npos,
+         "repeat need_code is rejected");
+  const auto ask_nc_tail = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_need_code","target":"src/latch.cpp:start_busy#tail"})", "cubre",
+      "latch", "", &nb);
+  expect(ask_nc_tail.ok && ask_nc_tail.tool == "need_code", "windowed need_code is a refetch");
+  const auto cubre_md = tuide::registry_causal_pilot_worker_user_prompt(
+      "cubre", "q", "# ficha\n", nb.notes, "", false);
+  expect(cubre_md.find("PROHIBIDO repetir need_code") != std::string::npos,
+         "cubre with body forbids repeat need_code");
+
+  const auto ask_df = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_dataflow","target":"busy","path":"src/latch.cpp"})", "como",
+      "latch", "", &nb);
+  expect(ask_df.ok && ask_df.tool == "dataflow" && ask_df.target == "busy",
+         "gate A dataflow is accepted");
+
+  auto search = [&](const std::string& name) {
+    std::vector<tuide::ATrailSearchHit> hits;
+    for (const char* rel : {"src/latch.cpp", "src/chrome.cpp"}) {
+      std::ifstream f(fs::path(root) / rel);
+      std::string line;
+      int n = 0;
+      while (std::getline(f, line)) {
+        ++n;
+        if (line.find(name) == std::string::npos) {
+          continue;
+        }
+        tuide::ATrailSearchHit h;
+        h.path = rel;
+        h.line = n;
+        h.preview = line;
+        hits.push_back(h);
+      }
+    }
+    return hits;
+  };
+  const auto df = tuide::a_dataflow_build_with_search(root, "busy", "src/latch.cpp", search);
+  const auto md = tuide::a_dataflow_markdown(df);
+  expect(!df.writes.empty(), "busy has writes in latch");
+  expect(md.find("src/latch.cpp") != std::string::npos, "dataflow gold is latch source");
+  bool write_true = false;
+  bool write_false = false;
+  bool chrome_write = false;
+  for (const auto& w : df.writes) {
+    if (w.path.find("chrome") != std::string::npos) {
+      chrome_write = true;
+    }
+    if (w.preview.find("= true") != std::string::npos) {
+      write_true = true;
+    }
+    if (w.preview.find("= false") != std::string::npos) {
+      write_false = true;
+    }
+  }
+  expect(write_true && write_false && !chrome_write, "busy writers are start/halt not hover");
+  for (const auto& w : df.writes) {
+    fs::path abs = fs::path(root) / w.path;
+    const auto hop =
+        tuide::a_trail_enrich_hop(abs.lexically_normal().string(), w.path, w.line, "");
+    if (!hop.symbol.empty()) {
+      tuide::registry_causal_pilot_notebook_add_target(&nb, w.path + ":" + hop.symbol);
+    }
+  }
+  expect(tuide::registry_causal_pilot_target_in_notebook("src/latch.cpp:halt_busy", nb),
+         "dataflow names halt_busy into the notebook");
+
+  nb.n_dataflow = 1;
+  nb.notes += "\n----- dataflow busy -----\n" + md;
+
+  const auto ask_df_again = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_dataflow","target":"busy"})", "como", "latch", "", &nb);
+  expect(!ask_df_again.ok && ask_df_again.error.find("repetido") != std::string::npos,
+         "repeat dataflow is rejected");
+
+  nb.n_need_code = 2;
+  nb.notes += "\n----- need_code src/latch.cpp:halt_busy -----\n"
+              "void halt_busy(Session* s) { if (s == nullptr) { return; } s->busy = false; }\n";
+
+  const auto canned = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("path_symbol":"src/latch.cpp:start_busy",)"
+      R"("chain":"start_busy escribe busy; halt_busy lo limpia",)"
+      R"("why":"start_busy pone busy=true en este stem",)"
+      R"("brief":"Este barrio es el latch busy. start_busy y halt_busy escriben el flag."})",
+      "como", "latch", "", &nb);
+  expect(canned.ok && canned.covers, "canned chain anchored to latch source");
+
+  const auto trap = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("path_symbol":"src/chrome.cpp:handle_tab_hover",)"
+      R"("chain":"handle_tab_hover escribe busy al pasar el raton",)"
+      R"("why":"handle_tab_hover es el writer del latch",)"
+      R"("brief":"El hover del chrome pone busy. Este barrio no es un latch."})",
+      "como", "latch", "", &nb);
+  const auto last_md = tuide::registry_causal_pilot_worker_user_prompt(
+      "como", "q", "# ficha\n", nb.notes, "", true);
+  expect(last_md.find("ÚLTIMO TURNO") != std::string::npos, "gate A last-turn prompt");
+  expect(last_md.find("duda:Symbol") != std::string::npos, "last turn asks for walk doubts");
+
+  tuide::RegistryCausalPilotWorkerNotebook nb_lie = nb;
+  nb_lie.notes = "\n----- need_code src/latch.cpp:start_busy -----\n"
+                 "void start_busy(Session* s) { s->busy = true; }\n";
+  nb_lie.n_need_code = 1;
+  tuide::registry_causal_pilot_notebook_add_target(&nb_lie, "src/latch.cpp:halt_busy");
+  const auto wr_lie = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("path_symbol":"src/latch.cpp:start_busy",)"
+      R"("walk":"start_busy: escribe busy -> halt_busy: limpia busy",)"
+      R"("why":"start_busy y halt_busy son el latch",)"
+      R"("brief":"Este barrio escribe y limpia busy. Halt cierra el flag."})",
+      "como", "latch", "", &nb_lie);
+  expect(!wr_lie.ok && wr_lie.error.find("no leído") != std::string::npos &&
+             wr_lie.error.find("halt_busy") != std::string::npos,
+         "walk that lists unread halt_busy is a lie");
+  const auto wr_short = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("path_symbol":"src/latch.cpp:start_busy",)"
+      R"("walk":"start_busy: escribe busy",)"
+      R"("why":"start_busy pone busy=true en este stem",)"
+      R"("brief":"Este barrio escribe busy. No abri el clear todavia."})",
+      "como", "latch", "", &nb_lie);
+  expect(wr_short.ok && wr_short.verdict == "chain",
+         "one-step walk of a read symbol is the model deciding");
+  const auto wr_duda = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"no_cubre",)"
+      R"("path_symbol":"src/latch.cpp:start_busy",)"
+      R"("walk":"start_busy: escribe busy -> duda:halt_busy",)"
+      R"("why":"start_busy escribe; duda halt_busy",)"
+      R"("brief":"Vi quien escribe busy. No lei el clear halt_busy."})",
+      "como", "latch", "", &nb_lie);
+  expect(wr_duda.ok && wr_duda.verdict == "no_cubre",
+         "duda:halt_busy with no_cubre is honest");
+  tuide::RegistryCausalPilotWorkerNotebook nb_tick = nb_lie;
+  nb_tick.notes = "\n----- need_code src/latch.cpp:start_busy -----\n"
+                  "void start_busy(Session* s) { s->busy = true; s->ticks = 0; }\n";
+  tuide::registry_causal_pilot_notebook_add_target(&nb_tick, "src/latch.cpp:tick");
+  const auto wr_tick = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("walk":"start_busy: escribe busy -> tick: limpia busy",)"
+      R"("why":"start_busy escribe; tick limpia",)"
+      R"("brief":"El hop de la ficha dice que tick limpia. No lei el cuerpo de tick."})",
+      "como", "latch", "", &nb_tick);
+  expect(!wr_tick.ok && wr_tick.error.find("no leído") != std::string::npos,
+         "ticks in a body is not a read of tick");
+  tuide::RegistryCausalPilotWorkerNotebook nb_close_lie = nb_tick;
+  nb_close_lie.notes += "\n----- cierre -----\núltimo turno\n";
+  const auto wr_close_lie = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("walk":"start_busy: escribe busy -> tick: limpia busy",)"
+      R"("why":"tick limpia segun la ficha",)"
+      R"("brief":"Cierro con el hop de la ficha. Tick seria el clear."})",
+      "como", "latch", "", &nb_close_lie);
+  expect(!wr_close_lie.ok && wr_close_lie.error.find("no leído") != std::string::npos,
+         "last turn still cannot claim an unread walk step");
+  const auto sys_md = tuide::registry_causal_pilot_worker_system_prompt("como", "latch");
+  expect(sys_md.find("SIN DUDAS") != std::string::npos &&
+             sys_md.find("cuando baste") == std::string::npos,
+         "system prompt enumerates without a close semaphore");
+  expect(sys_md.find("aguas_abajo") != std::string::npos, "system prompt names aguas_abajo");
+}
+
+void test_pilot_worker_aguas() {
+  const std::string root =
+      (fs::path(tide_root()) / "tests" / "fixtures" / "pilot_worker_read").string();
+  auto search = [&](const std::string& name) {
+    std::vector<tuide::ATrailSearchHit> hits;
+    for (const char* rel : {"src/latch.cpp", "src/chrome.cpp"}) {
+      std::ifstream f(fs::path(root) / rel);
+      std::string line;
+      int n = 0;
+      while (std::getline(f, line)) {
+        ++n;
+        if (line.find(name) == std::string::npos) {
+          continue;
+        }
+        tuide::ATrailSearchHit h;
+        h.path = rel;
+        h.line = n;
+        h.preview = line;
+        hits.push_back(h);
+      }
+    }
+    return hits;
+  };
+
+  const std::string start_body =
+      "void start_busy(Session* s) {\n"
+      "  if (s == nullptr) { return; }\n"
+      "  s->busy = true;\n"
+      "  s->ticks = 0;\n"
+      "}\n";
+  const std::string start_down = tuide::registry_causal_pilot_aguas_abajo_markdown(
+      "src/latch.cpp:start_busy", start_body, false);
+  expect(start_down.find("----- aguas_abajo src/latch.cpp:start_busy -----") != std::string::npos,
+         "aguas_abajo fence for start_busy");
+  expect(start_down.find("busy:") != std::string::npos &&
+             start_down.find("escribe true") != std::string::npos,
+         "start_busy writes busy true");
+  expect(start_down.find("ticks:") != std::string::npos &&
+             start_down.find("escribe 0") != std::string::npos,
+         "start_busy writes ticks 0");
+  expect(start_down.find("no hay clear de busy") != std::string::npos,
+         "start_busy notes missing busy clear");
+  expect(start_down.find("causal_pilot_dataflow") != std::string::npos &&
+             start_down.find("\"target\":\"busy\"") != std::string::npos,
+         "missing clear points at dataflow of busy");
+  expect(start_down.find("no es el clear") != std::string::npos,
+         "aguas_abajo says a call is not the clear");
+  expect(start_down.find("halt_busy") == std::string::npos &&
+             start_down.find("request_work") == std::string::npos &&
+             start_down.find("on_idle") == std::string::npos,
+         "aguas_abajo does not name other functions");
+
+  const std::string halt_body =
+      "void halt_busy(Session* s) {\n"
+      "  if (s == nullptr) { return; }\n"
+      "  s->busy = false;\n"
+      "}\n";
+  const std::string halt_down = tuide::registry_causal_pilot_aguas_abajo_markdown(
+      "src/latch.cpp:halt_busy", halt_body, false);
+  expect(halt_down.find("escribe false") != std::string::npos, "halt_busy writes busy false");
+  expect(halt_down.find("no hay clear de busy") == std::string::npos,
+         "halt_busy is the clear");
+
+  const std::string tick_body =
+      "void tick(Session* s) {\n"
+      "  if (s == nullptr || !s->busy) { return; }\n"
+      "  s->ticks += 1;\n"
+      "}\n";
+  const std::string tick_down = tuide::registry_causal_pilot_aguas_abajo_markdown(
+      "src/latch.cpp:tick", tick_body, false);
+  expect(tick_down.find("incrementa") != std::string::npos, "tick increments ticks");
+  expect(tick_down.find("busy:") != std::string::npos && tick_down.find("lee") != std::string::npos,
+         "tick reads busy");
+  expect(tick_down.find("no hay clear de busy") != std::string::npos,
+         "tick does not clear busy");
+  expect(tick_down.find("halt_busy") == std::string::npos, "tick aguas_abajo has no halt_busy");
+
+  const std::string cxl_body =
+      "void cancel_level1() {\n"
+      "  agent_cancel_.store(true);\n"
+      "  if (agent_busy_.load()) { append(\"cxl\"); }\n"
+      "}\n";
+  const std::string cxl_down = tuide::registry_causal_pilot_aguas_abajo_markdown(
+      "src/ai/ai_controller.cpp:cancel_level1", cxl_body, false);
+  expect(cxl_down.find("agent_cancel_") != std::string::npos &&
+             cxl_down.find("escribe true") != std::string::npos,
+         "cancel_level1 writes agent_cancel_ true");
+  expect(cxl_down.find("no hay clear de agent_cancel_") == std::string::npos,
+         "a cancel flag store(true) is the act, not a missing latch clear");
+
+  const std::string trunc = tuide::registry_causal_pilot_aguas_abajo_markdown(
+      "src/latch.cpp:start_busy", start_body, true);
+  expect(trunc.find("solo el recorte enviado") != std::string::npos, "truncated flag");
+
+  const std::string start_up = tuide::registry_causal_pilot_aguas_arriba_markdown(
+      root, "src/latch.cpp", "start_busy", search, nullptr);
+  expect(start_up.find("----- aguas_arriba src/latch.cpp:start_busy -----") != std::string::npos,
+         "aguas_arriba fence");
+  expect(start_up.find("(sin caller en este stem)") != std::string::npos,
+         "latch fixture has no caller of start_busy");
+  expect(start_up.find("halt_busy") == std::string::npos, "incoming of start_busy is not halt_busy");
+
+  const std::string tmp = make_tmp();
+  write_file(tmp + "/src/latch.cpp",
+             "namespace demo {\n"
+             "struct Session { bool busy = false; int ticks = 0; };\n"
+             "void start_busy(Session* s) {\n"
+             "  if (s == nullptr) { return; }\n"
+             "  s->busy = true;\n"
+             "}\n"
+             "void halt_busy(Session* s) {\n"
+             "  if (s == nullptr) { return; }\n"
+             "  s->busy = false;\n"
+             "}\n"
+             "void request_work(Session* s) {\n"
+             "  if (s != nullptr && !s->busy) { start_busy(s); }\n"
+             "}\n"
+             "void on_idle(Session* s) {\n"
+             "  if (s != nullptr && s->ticks > 8) { halt_busy(s); }\n"
+             "}\n"
+             "}\n");
+  auto search_tmp = [&](const std::string& name) {
+    std::vector<tuide::ATrailSearchHit> hits;
+    std::ifstream f(tmp + "/src/latch.cpp");
+    std::string line;
+    int n = 0;
+    while (std::getline(f, line)) {
+      ++n;
+      if (line.find(name) == std::string::npos) {
+        continue;
+      }
+      tuide::ATrailSearchHit h;
+      h.path = "src/latch.cpp";
+      h.line = n;
+      h.preview = line;
+      hits.push_back(h);
+    }
+    return hits;
+  };
+  std::vector<std::string> incoming;
+  const std::string start_up_call = tuide::registry_causal_pilot_aguas_arriba_markdown(
+      tmp, "src/latch.cpp", "start_busy", search_tmp, &incoming);
+  expect(start_up_call.find("request_work") != std::string::npos,
+         "temp caller of start_busy is request_work");
+  expect(start_up_call.find("quien:") != std::string::npos, "aguas_arriba has quien");
+  expect(start_up_call.find("cuando:") != std::string::npos, "aguas_arriba has cuando");
+  bool saw_request = false;
+  for (const auto& t : incoming) {
+    if (t.find("request_work") != std::string::npos) {
+      saw_request = true;
+    }
+  }
+  expect(saw_request, "incoming targets include request_work");
+  const std::string halt_up = tuide::registry_causal_pilot_aguas_arriba_markdown(
+      tmp, "src/latch.cpp", "halt_busy", search_tmp, nullptr);
+  expect(halt_up.find("on_idle") != std::string::npos, "halt_busy caller is on_idle");
+  const std::string tick_up = tuide::registry_causal_pilot_aguas_arriba_markdown(
+      root, "src/latch.cpp", "tick", search, nullptr);
+  expect(tick_up.find("(sin caller en este stem)") != std::string::npos,
+         "tick has no caller in the fixture");
+
+  const std::string atomic_body =
+      "void cancel_level1() {\n"
+      "  agent_cancel_.store(true);\n"
+      "  if (agent_busy_.load()) { append(\"x\"); }\n"
+      "}\n";
+  const std::string atomic_down = tuide::registry_causal_pilot_aguas_abajo_markdown(
+      "src/ai/ai_controller.cpp:cancel_level1", atomic_body, false);
+  expect(atomic_down.find("agent_cancel_") != std::string::npos &&
+             atomic_down.find("escribe true") != std::string::npos,
+         "aguas_abajo sees atomic store");
+  expect(atomic_down.find("agent_busy_") != std::string::npos &&
+             atomic_down.find("lee") != std::string::npos,
+         "aguas_abajo sees atomic load");
+
+  const std::string other = make_tmp();
+  write_file(other + "/src/latch.cpp",
+             "namespace demo {\n"
+             "struct Session { bool busy = false; };\n"
+             "void start_busy(Session* s) { if (s) s->busy = true; }\n"
+             "}\n");
+  write_file(other + "/src/chrome.cpp",
+             "namespace demo {\n"
+             "void request_work(Session* s) {\n"
+             "  if (s != nullptr && !s->busy) { start_busy(s); }\n"
+             "}\n"
+             "}\n");
+  auto search_other = [&](const std::string& name) {
+    std::vector<tuide::ATrailSearchHit> hits;
+    for (const char* rel : {"src/latch.cpp", "src/chrome.cpp"}) {
+      std::ifstream f(other + "/" + rel);
+      std::string line;
+      int n = 0;
+      while (std::getline(f, line)) {
+        ++n;
+        if (line.find(name) == std::string::npos) {
+          continue;
+        }
+        tuide::ATrailSearchHit h;
+        h.path = rel;
+        h.line = n;
+        h.preview = line;
+        hits.push_back(h);
+      }
+    }
+    return hits;
+  };
+  const std::string up_other = tuide::registry_causal_pilot_aguas_arriba_markdown(
+      other, "src/latch.cpp", "start_busy", search_other, nullptr);
+  expect(up_other.find("(sin caller en este stem)") != std::string::npos,
+         "other-stem caller is not aguas_arriba");
+  expect(up_other.find("request_work") == std::string::npos,
+         "aguas_arriba does not leak chrome caller");
+  fs::remove_all(other);
+  fs::remove_all(tmp);
+
+  tuide::RegistryCausalPilotWorkerNotebook nb;
+  nlohmann::json zone = {
+      {"id", "L1"},
+      {"owns", "latch"},
+      {"primary_stems", nlohmann::json::array({"latch"})},
+      {"representatives",
+       nlohmann::json::array({nlohmann::json{{"target", "src/latch.cpp:start_busy"}}})}};
+  tuide::registry_causal_pilot_notebook_from_payload(nlohmann::json{{"zones", {zone}}}, "latch",
+                                                     &nb);
+  tuide::registry_causal_pilot_notebook_add_target(&nb, "src/latch.cpp:halt_busy");
+  nb.n_need_code = 1;
+  nb.notes = "\n----- need_code src/latch.cpp:start_busy -----\n" + start_body + start_down +
+             start_up +
+             "----- aguas_abajo src/latch.cpp:start_busy -----\n"
+             "no hay clear; halt_busy seria el writer\n"
+             "\n----- dataflow busy -----\n(sin fn= write)\n";
+  const auto lie = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("walk":"start_busy: escribe busy -> halt_busy: limpia busy",)"
+      R"("why":"aguas_abajo nombra halt_busy",)"
+      R"("brief":"El fence de atributos dice que halt_busy limpia. No abri el cuerpo."})",
+      "como", "latch", "", &nb);
+  expect(!lie.ok && lie.error.find("no leído") != std::string::npos,
+         "aguas fences are not a need_code read of halt_busy");
+
+  tuide::RegistryCausalPilotWorkerNotebook nb_call = nb;
+  tuide::registry_causal_pilot_notebook_add_target(&nb_call, "src/ui/busy_strip.cpp:ensure_spinner_thread");
+  nb_call.n_need_code = 1;
+  nb_call.notes =
+      "\n----- need_code src/ui/busy_strip.cpp:set_busy_spinner -----\n"
+      "void set_busy_spinner() { state.halted.load(); ensure_spinner_thread(&state); }\n"
+      "----- aguas_abajo src/ui/busy_strip.cpp:set_busy_spinner -----\n"
+      "halted:  lee\nno hay clear de halted en este cuerpo\n";
+  const auto hop_call = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("walk":"set_busy_spinner: escribe -> ensure_spinner_thread: mantiene",)"
+      R"("why":"set_busy_spinner llama ensure_spinner_thread",)"
+      R"("brief":"El call del cuerpo mantiene el spinner. No pedi dataflow."})",
+      "como", "busy_strip", "", &nb_call);
+  expect(!hop_call.ok && hop_call.error.find("falta dataflow") != std::string::npos &&
+             hop_call.error.find("halted") != std::string::npos,
+         "outgoing call in the body is not a substitute for dataflow");
+  nb_call.n_dataflow = 1;
+  nb_call.notes +=
+      "\n----- dataflow halted -----\nfn=`src/ui/busy_strip.cpp:halt_busy_strip` @329 write\n";
+  tuide::registry_causal_pilot_notebook_add_target(&nb_call, "src/ui/busy_strip.cpp:halt_busy_strip");
+  const auto still_call = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("walk":"set_busy_spinner: escribe -> ensure_spinner_thread: mantiene",)"
+      R"("why":"set_busy_spinner llama ensure_spinner_thread",)"
+      R"("brief":"Tras dataflow sigo copiando el hop del cuerpo. Halt no esta."})",
+      "como", "busy_strip", "", &nb_call);
+  expect(!still_call.ok && still_call.error.find("writer") != std::string::npos &&
+             still_call.error.find("halt_busy_strip") != std::string::npos,
+         "dataflow write fn= requires need_code of that writer");
+  const auto md_writer = tuide::registry_causal_pilot_worker_user_prompt(
+      "como", "q", "# ficha\n", nb_call.notes, "", false, "busy_strip");
+  expect(md_writer.find("PROHIBIDO causal_pilot_worker_v1") != std::string::npos &&
+             md_writer.find("halt_busy_strip") != std::string::npos &&
+             md_writer.find("causal_pilot_need_code") != std::string::npos,
+         "como prompt after dataflow forces need_code of the write fn=");
+  const auto duda_writer = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"no_cubre",)"
+      R"("walk":"set_busy_spinner: escribe -> duda:halt_busy_strip",)"
+      R"("why":"set_busy_spinner escribe; duda halt_busy_strip",)"
+      R"("brief":"Vi quien escribe halted. No abri el writer halt_busy_strip."})",
+      "como", "busy_strip", "", &nb_call);
+  expect(duda_writer.ok && duda_writer.verdict == "no_cubre",
+         "duda:writer with no_cubre is honest without opening it");
+  tuide::RegistryCausalPilotWorkerNotebook nb_opened = nb_call;
+  nb_opened.n_need_code = 2;
+  nb_opened.notes +=
+      "\n----- need_code src/ui/busy_strip.cpp:halt_busy_strip -----\n"
+      "void halt_busy_strip() { state.halted.store(true); }\n";
+  const auto opened = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("walk":"set_busy_spinner: escribe halted -> halt_busy_strip: limpia halted",)"
+      R"("why":"halt_busy_strip escribe halted",)"
+      R"("brief":"set_busy_spinner pone el spinner. halt_busy_strip lo para."})",
+      "como", "busy_strip", "", &nb_opened);
+  expect(opened.ok && opened.verdict == "chain", "need_code of the write fn= unlocks chain");
+  const auto callee_lie = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("walk":"set_busy_spinner: escribe -> ensure_spinner_thread: mantiene",)"
+      R"("why":"set_busy_spinner llama ensure_spinner_thread",)"
+      R"("brief":"Abri halt_busy_strip pero el walk sigue siendo la llamada del recorte."})",
+      "como", "busy_strip", "", &nb_opened);
+  expect(!callee_lie.ok && callee_lie.error.find("no leído") != std::string::npos,
+         "a callee in another body is not a need_code of that callee");
+
+  tuide::RegistryCausalPilotWorkerNotebook nb_two = nb_opened;
+  nb_two.notes +=
+      "\n----- dataflow agent_cancel_ -----\n"
+      "fn=`src/ai/ai_controller.cpp:cancel_level1` @737 write\n"
+      "fn=`src/ai/ai_controller.cpp:run_level1_async` @937 write\n"
+      "fn=`src/ai/ai_controller.cpp:run_insert_async` @1038 write\n";
+  nb_two.notes +=
+      "\n----- need_code src/ai/ai_controller.cpp:cancel_level1 -----\n"
+      "void cancel_level1() { agent_cancel_.store(true); }\n"
+      "\n----- need_code src/ai/ai_controller.cpp:run_level1_async -----\n"
+      "void run_level1_async() { agent_cancel_.store(false); }\n";
+  tuide::registry_causal_pilot_notebook_add_target(&nb_two, "src/ai/ai_controller.cpp:cancel_level1");
+  tuide::registry_causal_pilot_notebook_add_target(&nb_two,
+                                                   "src/ai/ai_controller.cpp:run_level1_async");
+  tuide::registry_causal_pilot_notebook_add_target(&nb_two,
+                                                   "src/ai/ai_controller.cpp:run_insert_async");
+  const auto two_writers = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("walk":"cancel_level1: escribe agent_cancel_ -> run_level1_async: limpia agent_cancel_",)"
+      R"("why":"cancel_level1 escribe; run_level1_async limpia",)"
+      R"("brief":"Abri un write extra del flag. No recorro todos los run_async."})",
+      "como", "ai_controller", "", &nb_two);
+  expect(two_writers.ok && two_writers.verdict == "chain",
+         "two fenced write fn= do not force a third");
+  const auto md_two = tuide::registry_causal_pilot_worker_user_prompt(
+      "como", "q", "# ficha\n", nb_two.notes, "", false, "ai_controller");
+  expect(md_two.find("run_insert_async") == std::string::npos ||
+             md_two.find("PROHIBIDO causal_pilot_worker_v1") == std::string::npos,
+         "prompt does not serialize every write fn= after two are open");
+
+  const auto md_clear = tuide::registry_causal_pilot_worker_user_prompt(
+      "como", "q", "# ficha\n",
+      "\n----- need_code src/latch.cpp:start_busy -----\n" + start_body + start_down, "", false);
+  expect(md_clear.find("PROHIBIDO causal_pilot_worker_v1") != std::string::npos &&
+             md_clear.find("causal_pilot_dataflow") != std::string::npos &&
+             md_clear.find("busy") != std::string::npos,
+         "como user prompt forces dataflow after missing clear");
+  const auto md_cubre = tuide::registry_causal_pilot_worker_user_prompt(
+      "cubre", "q", "# ficha\n",
+      "\n----- need_code src/latch.cpp:start_busy -----\n" + start_body + start_down, "", false);
+  expect(md_cubre.find("PROHIBIDO causal_pilot_worker_v1") == std::string::npos,
+         "cubre does not force dataflow after missing clear");
+}
+
 }  // namespace
 
 int main() {
@@ -1985,6 +2648,8 @@ int main() {
   test_query_constellations();
   test_large_inventory_keeps_linked_fn();
   test_query_hop0_skips_ctrl();
+  test_pilot_worker_read_gate_a();
+  test_pilot_worker_aguas();
   if (failures > 0) {
     std::cerr << failures << " failure(s)\n";
     return 1;

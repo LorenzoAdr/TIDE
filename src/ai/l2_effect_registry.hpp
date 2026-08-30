@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "ai/l2_effect_slice.hpp"
+#include "ai/l2_explore_a.hpp"
 #include "ai/l2_problem_frame.hpp"
 
 struct sqlite3;
@@ -66,7 +67,7 @@ inline constexpr int kRegistryMaxNewFnPerWave = 400;
 inline constexpr int kRegistryMaxInventoryPerFile = 64;
 inline constexpr int kRegistryPathMaxDepth = 8;
 inline constexpr int kRegistryGcMinAgeQueries = 3;
-inline constexpr int kPilotWorkerMaxSteps = 5;  // tools + informe (cubre: máx. 1 tool)
+inline constexpr int kPilotWorkerMaxSteps = 20;  // fusible; el último turno es informe
 
 struct EffectRegistry {
   sqlite3* db = nullptr;
@@ -742,24 +743,30 @@ struct RegistryCausalPilotWorkerNotebook {
   int n_need_code = 0;
   int n_outline = 0;
   int n_follow = 0;
+  int n_dataflow = 0;
+  int n_causal = 0;
   int n_query_nudge = 0;
-  bool used_tool() const { return n_need_code + n_outline + n_follow > 0; }
+  bool used_tool() const {
+    return n_need_code + n_outline + n_follow + n_dataflow + n_causal > 0;
+  }
   bool used_code_or_follow() const { return n_need_code + n_follow > 0; }
+  bool used_read() const { return n_need_code > 0 && (n_dataflow + n_causal) > 0; }
 };
 
-// Trabajador sordo: una ficha, un stem, catálogo need_code|outline|follow. Máx. kPilotWorkerMaxSteps.
+// Trabajador sordo: una ficha, un stem, catálogo need_code|dataflow|causal|outline|follow.
 struct RegistryCausalPilotWorkerReport {
   bool ok = false;
   bool need_code = false;
   bool is_tool = false;
-  std::string tool;    // need_code | outline | follow
-  std::string action;  // causal_pilot_worker_v1 | causal_pilot_need_code | …_outline | …_follow
+  std::string tool;    // need_code | outline | follow | dataflow | causal
+  std::string action;  // causal_pilot_worker_v1 | causal_pilot_need_code | …_dataflow | …_causal
   std::string kind;    // cubre | como | gap
   std::string zone;
   std::string stem;
   std::string verdict;  // cubre | no_cubre | chain | missing | found
   bool covers = false;
   std::string owns;
+  std::string walk;  // pasos: "sym: acto -> sym: acto" o "duda:Symbol"
   std::string chain;
   std::string path_symbol;
   std::string port_to;
@@ -797,11 +804,25 @@ std::string registry_causal_pilot_follow_markdown(const nlohmann::json& payload,
                                                   const std::string& stem,
                                                   std::vector<std::string>* new_targets,
                                                   std::string* port_to);
+// Mermaid trigger→effect from code-derived edges (not atlas mechanism).
+std::string registry_causal_pilot_causal_mermaid(
+    const std::vector<std::pair<std::string, std::string>>& edges);
+// Call-site incoming (1–2 hops). Fence aparte de need_code: no autoriza el walk.
+std::string registry_causal_pilot_aguas_arriba_markdown(
+    const std::string& workspace_root, const std::string& focus_path,
+    const std::string& focus_symbol,
+    const std::function<std::vector<ATrailSearchHit>(const std::string& symbol)>& search,
+    std::vector<std::string>* incoming_targets = nullptr);
+// Writes/reads of members inside the sent span. Not outgoing calls, not stem dataflow.
+std::string registry_causal_pilot_aguas_abajo_markdown(const std::string& display_target,
+                                                       const std::string& body_text,
+                                                       bool truncated = false);
 std::string registry_causal_pilot_worker_system_prompt(const std::string& kind,
                                                        const std::string& stem);
 std::string registry_causal_pilot_worker_user_prompt(
     const std::string& kind, const std::string& question, const std::string& zone_markdown,
-    const std::string& notes = {}, const std::string& allowed_markdown = {});
+    const std::string& notes = {}, const std::string& allowed_markdown = {},
+    bool last_turn = false, const std::string& stem = {});
 RegistryCausalPilotWorkerReport registry_parse_causal_pilot_worker(
     const std::string& raw, const std::string& expected_kind, const std::string& expected_stem,
     const std::string& query = {}, const RegistryCausalPilotWorkerNotebook* notebook = nullptr);

@@ -33,6 +33,7 @@ TEMPLATE_NEEDLES = (
     "path.cpp:fn",
     ":fn",
     "hace x",
+    "sym:",
 )
 
 
@@ -47,6 +48,8 @@ def load_pack(name: str) -> dict:
         path = ROBUST_PATH
     elif name == "items":
         path = ITEMS_PATH
+    elif name == "synth":
+        path = ROOT / "tools/l2_battery/worker_probe/synth.json"
     else:
         path = CASES_PATH
     return json.loads(path.read_text(encoding="utf-8"))
@@ -197,15 +200,44 @@ def _repeat_tool(tools: list[dict]) -> bool:
     return len(keys) != len(set(keys))
 
 
-def tag_tool(target: str, zone: dict, tool: str, kind: str) -> str:
+def walk_claimed_text(walk: str, chain: str = "") -> str:
+    text = walk or chain or ""
+    parts = re.split(r"\s*(?:->|→|;)\s*", text)
+    claimed: list[str] = []
+    for part in parts:
+        pl = part.strip().lower()
+        if not pl or pl.startswith("duda:") or pl.startswith("duda "):
+            continue
+        claimed.append(pl)
+    return " ".join(claimed)
+
+
+def tool_discovered_keys(tools: list[dict]) -> set[str]:
+    keys: set[str] = set()
+    for t in tools:
+        body = str(t.get("body") or "")
+        for m in re.finditer(r"fn=`([^`]+)`", body):
+            sk = symbol_key(m.group(1))
+            if sk:
+                keys.add(sk)
+    return keys
+
+
+def tag_tool(target: str, zone: dict, tool: str, kind: str, extra_keys: set[str] | None = None) -> str:
     if kind == "cubre" and tool == "follow":
         return "fuera_de_modo"
+    if tool == "dataflow":
+        return "de_dataflow"
     keys = {symbol_key(t) for t in zone_targets(zone)}
+    if extra_keys:
+        keys |= extra_keys
     sk = symbol_key(target)
     if sk and sk in keys:
         return "de_ficha"
     if tool == "outline":
         return "de_outline"
+    if tool == "causal":
+        return "inventada" if target else "de_ficha"
     if target:
         return "inventada"
     return "de_ficha"
@@ -217,7 +249,10 @@ def score_row(case: dict, summary: dict, out_dir: Path, zone: dict, thin_applied
     brief = str(summary.get("brief") or "")
     if not brief and why:
         brief = why
+    walk = str(summary.get("walk") or "")
     chain = str(summary.get("chain") or "")
+    if not walk:
+        walk = chain
     path_symbol = str(summary.get("path_symbol") or "")
     verdict = str(summary.get("verdict") or "")
     raw_verdict = raw_informe_verdict(out_dir)
@@ -229,15 +264,20 @@ def score_row(case: dict, summary: dict, out_dir: Path, zone: dict, thin_applied
         is_template(why)
         or is_template(brief)
         or is_template(chain)
+        or is_template(walk)
         or is_template(path_symbol)
     )
     cited = (
-        cites_card(why + " " + brief + " " + chain + " " + path_symbol, targets)
+        cites_card(why + " " + brief + " " + chain + " " + walk + " " + path_symbol, targets)
         if targets
         else bool(tools)
     )
     brief_ok = len(brief) >= 24 and " " in brief
-    tags = [tag_tool(t.get("target") or "", zone, t.get("tool") or "", case["kind"]) for t in tools]
+    extra_keys = tool_discovered_keys(tools)
+    tags = [
+        tag_tool(t.get("target") or "", zone, t.get("tool") or "", case["kind"], extra_keys)
+        for t in tools
+    ]
     invented = "inventada" in tags
     fuera = "fuera_de_modo" in tags
     notes: list[str] = []
@@ -253,19 +293,23 @@ def score_row(case: dict, summary: dict, out_dir: Path, zone: dict, thin_applied
         notes.append("trap_lie")
         if raw_verdict == "cubre" and verdict != "cubre":
             notes.append("parse_flip")
-    if case["kind"] == "cubre" and len(tools) > 1:
-        pass_ok = False
-        notes.append("cubre_mas_de_una_tool")
+    tools_used = {str(t.get("tool") or "") for t in tools}
+    if case.get("require_read"):
+        if "need_code" not in tools_used:
+            pass_ok = False
+            notes.append("sin_need_code")
+        if "dataflow" not in tools_used and "causal" not in tools_used:
+            pass_ok = False
+            notes.append("sin_flujo")
+        if tools and tools_used <= {"follow", "outline"}:
+            pass_ok = False
+            notes.append("solo_aristas")
     if thin_applied and case.get("require_tool") and not tools:
         pass_ok = False
         notes.append("thin_sin_tool")
     if case["kind"] in ("como", "gap") and case.get("require_tool") and not tools:
         pass_ok = False
         notes.append("sin_tool")
-    if case["kind"] == "gap" and tools and not any(t.get("tool") == "follow" for t in tools):
-        if expect.get("prefer_follow"):
-            notes.append("gap_sin_follow")
-            pass_ok = False
     if template:
         pass_ok = False
         notes.append("plantilla")
@@ -281,6 +325,17 @@ def score_row(case: dict, summary: dict, out_dir: Path, zone: dict, thin_applied
     if ok and not brief_ok:
         pass_ok = False
         notes.append("brief_corto")
+    gold = [str(g) for g in (case.get("gold_writers") or [])]
+    claimed = walk_claimed_text(walk, chain)
+    if gold:
+        missing = [g for g in gold if g.lower() not in claimed]
+        if missing:
+            pass_ok = False
+            notes.append("sin_writer:" + ",".join(missing))
+        chain_l = claimed
+        if "tick" in chain_l and "halt_busy" not in claimed:
+            pass_ok = False
+            notes.append("hop_ficha")
     return {
         "id": case["id"],
         "family": case.get("family") or "",
@@ -309,7 +364,10 @@ def score_row(case: dict, summary: dict, out_dir: Path, zone: dict, thin_applied
         "why": why,
         "brief": brief,
         "brief_ok": brief_ok,
+        "walk": walk,
+        "walk_claimed": claimed,
         "chain": chain,
+        "gold_writers": gold,
         "port_to": summary.get("port_to") or "",
         "error": summary.get("error") or "",
         "notes": notes,
@@ -326,7 +384,14 @@ def score_row(case: dict, summary: dict, out_dir: Path, zone: dict, thin_applied
     }
 
 
-def run_one(case: dict, cards_root: Path, out_dir: Path, env: dict[str, str], timeout: int) -> dict:
+def run_one(
+    case: dict,
+    cards_root: Path,
+    out_dir: Path,
+    env: dict[str, str],
+    timeout: int,
+    workspace: Path | None = None,
+) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     case_dir = resolve_case_dir(cards_root, case["case_id"])
     payload = load_payload(case_dir)
@@ -371,7 +436,7 @@ def run_one(case: dict, cards_root: Path, out_dir: Path, env: dict[str, str], ti
         "--kind",
         case["kind"],
         "--case",
-        case["case_id"],
+        case["case_id"] or case["id"],
         "--stem",
         stem,
         "--cards-root",
@@ -384,6 +449,11 @@ def run_one(case: dict, cards_root: Path, out_dir: Path, env: dict[str, str], ti
     zid = str(zone.get("id") or "")
     if zid:
         cmd.extend(["--zone", zid])
+    instruction = str(case.get("instruction") or "")
+    if instruction:
+        cmd.extend(["--instruction", instruction])
+    if workspace is not None:
+        cmd.extend(["--workspace", str(workspace)])
     log = out_dir / "probe.log"
     try:
         proc = subprocess.run(
@@ -450,6 +520,21 @@ def item_row_pass(item_id: str, row: dict) -> bool | None:
         return raw == "no_cubre"
     if item_id == "gold_keep":
         return bool(row.get("pass")) and raw == "cubre" and verdict == "cubre"
+    if item_id == "walk_gold":
+        golds = [str(g).lower() for g in (row.get("gold_writers") or [])]
+        if golds:
+            claimed = str(row.get("walk_claimed") or "").lower()
+            full = (str(row.get("walk") or "") + " " + str(row.get("chain") or "")).lower()
+            for g in golds:
+                if g in claimed:
+                    continue
+                if f"duda:{g}" in full:
+                    continue
+                return False
+            return True
+        if row.get("trap"):
+            return raw == "no_cubre"
+        return bool(row.get("walk") or row.get("chain"))
     return None
 
 
@@ -557,7 +642,7 @@ def mode_acceptable(kind: str, rows: list[dict]) -> tuple[bool, str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--kind", default="all", choices=("cubre", "como", "gap", "all"))
-    ap.add_argument("--pack", default="tune", choices=("tune", "robustness", "items"))
+    ap.add_argument("--pack", default="tune", choices=("tune", "robustness", "items", "synth"))
     ap.add_argument("--cycle", type=int, default=1)
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--cards-root", default="")
@@ -582,6 +667,11 @@ def main() -> int:
     cards_root = Path(args.cards_root or pack.get("cards_root") or "")
     if not cards_root.is_absolute():
         cards_root = ROOT / cards_root
+    workspace = Path(pack.get("workspace") or "")
+    if str(workspace) and not workspace.is_absolute():
+        workspace = ROOT / workspace
+    if not str(pack.get("workspace") or ""):
+        workspace = None
     cases = list(pack["cases"])
     if args.kind != "all":
         cases = [c for c in cases if c.get("kind") == args.kind]
@@ -604,6 +694,10 @@ def main() -> int:
         cycle_dir = TUNE_ROOT / "items" / f"cycle_{args.cycle}"
         state_path = TUNE_ROOT / "items" / "state.json"
         score_kind = "items"
+    elif pack_name == "synth":
+        cycle_dir = TUNE_ROOT / "synth" / f"cycle_{args.cycle}"
+        state_path = TUNE_ROOT / "synth" / "state.json"
+        score_kind = "synth"
     else:
         cycle_dir = TUNE_ROOT / args.kind / f"cycle_{args.cycle}"
         state_path = TUNE_ROOT / "state.json"
@@ -619,7 +713,7 @@ def main() -> int:
         else:
             out_dir = cycle_dir / case["id"]
             print(f"==== probe {case.get('kind')} {case['id']} ====", flush=True)
-            row = run_one(case, cards_root, out_dir, env, args.timeout)
+            row = run_one(case, cards_root, out_dir, env, args.timeout, workspace)
         rows.append(row)
         brief = str(row.get("brief") or "")
         traces.append(

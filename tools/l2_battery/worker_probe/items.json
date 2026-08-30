@@ -36,6 +36,11 @@
       "id": "gold_keep",
       "title": "Hits de cubre no regresan",
       "watch": "spinner, cancel y toolpacks siguen cubre en raw y parse."
+    },
+    {
+      "id": "walk_gold",
+      "title": "Walk recorre el acto o declara duda",
+      "watch": "gold_writers en el walk (no solo why); duda:Symbol cuenta. Trampa layout: raw no_cubre."
     }
   ],
   "cases": [
@@ -78,25 +83,29 @@
     {
       "id": "hit_como_cancel",
       "family": "hit",
-      "items": ["follow_ficha", "no_repeat_follow"],
+      "items": ["follow_ficha", "no_repeat_follow", "walk_gold"],
       "kind": "como",
       "case_id": "20_cancel_ai_generation",
       "stem": "ai_controller",
       "question": "¿quién cancela o limpia la generación en este stem?",
       "trap": false,
       "require_tool": true,
+      "require_read": true,
+      "gold_writers": ["cancel_current"],
       "expect": { "verdict": ["chain"] }
     },
     {
       "id": "hit_como_latch",
       "family": "hit",
-      "items": ["follow_ficha", "empty_follow_rep", "no_repeat_follow"],
+      "items": ["follow_ficha", "empty_follow_rep", "no_repeat_follow", "walk_gold"],
       "kind": "como",
       "case_id": "17_ai_spinner_stuck",
       "stem": "busy_strip",
       "question": "¿quién pone o limpia el estado de carga en este stem?",
       "trap": false,
       "require_tool": true,
+      "require_read": true,
+      "gold_writers": ["set_busy_spinner", "halt_busy_strip"],
       "expect": { "verdict": ["chain"] }
     },
     {
@@ -157,12 +166,13 @@
       "question": "¿quién controla el estado de carga del chat en este stem?",
       "trap": false,
       "require_tool": true,
+      "require_read": true,
       "expect": { "verdict": ["chain", "no_cubre"] }
     },
     {
       "id": "empty_cubre_layout",
       "family": "empty",
-      "items": ["no_silent_flip", "trap_on_raw"],
+      "items": ["no_silent_flip", "trap_on_raw", "walk_gold"],
       "kind": "cubre",
       "case_id": "10_performance_threads_panel",
       "stem": "main_layout",
@@ -181,7 +191,8 @@
       "question": "¿qué eslabón falta en este stem para explicar la consulta?",
       "trap": false,
       "require_tool": true,
-      "expect": { "verdict": ["missing", "found"], "prefer_follow": true }
+      "require_read": true,
+      "expect": { "verdict": ["missing", "found"] }
     },
     {
       "id": "gap_cancel",
@@ -193,7 +204,8 @@
       "question": "¿qué eslabón falta en este stem para cancelar en limpio?",
       "trap": false,
       "require_tool": true,
-      "expect": { "verdict": ["missing", "found"], "prefer_follow": true }
+      "require_read": true,
+      "expect": { "verdict": ["missing", "found"] }
     }
   ]
 }

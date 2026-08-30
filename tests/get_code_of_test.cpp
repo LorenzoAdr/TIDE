@@ -836,6 +836,20 @@ int main() {
     expect(formatted.find("[TRUNCATED]") != std::string::npos, "format TRUNCATED");
     expect(formatted.find("missing_lines:") != std::string::npos, "format missing_lines");
     expect(formatted.find("refetch:") != std::string::npos, "format refetch");
+    expect(formatted.find("```") == std::string::npos, "tool payload stays unfenced");
+    const std::string hdr = tuide::format_get_code_of_header(got, "long_fn.cpp");
+    expect(hdr.find("[TRUNCATED]") != std::string::npos, "header TRUNCATED");
+    expect(hdr.find("int long_fn()") == std::string::npos, "header has no body");
+    const std::string fenced = tuide::wrap_source_fence(got.text, "long_fn.cpp");
+    expect(fenced.find("```cpp\n") == 0, "fence opens with cpp");
+    expect(fenced.find("int long_fn()") != std::string::npos, "fence keeps body");
+    expect(fenced.size() >= 4 && fenced.compare(fenced.size() - 4, 4, "```\n") == 0,
+           "fence closes");
+    expect(tuide::fence_lang_for_path("src/latch.cpp:start_busy") == "cpp",
+           "lang from path:Symbol");
+    expect(tuide::fence_lang_for_path("src/foo.cpp:10-40") == "cpp", "lang from path:A-B");
+    expect(tuide::fence_lang_for_path("src/foo.cpp:wake#tail") == "cpp", "lang from #tail");
+    expect(tuide::fence_lang_for_path("notes.md").empty(), "unknown ext is bare fence");
 
     GetCodeOfRequest tail_req = req;
     tail_req.window = tuide::GetCodeOfWindow::Tail;
@@ -879,6 +893,86 @@ int main() {
            "refetch not forced to symbol head only");
     // Prefer adjacent window near the requested line.
     expect(around.refetch_hint.find(':') != std::string::npos, "refetch is path:range");
+  }
+
+  {
+    const fs::path proto = tmp / "fwd_decl.cpp";
+    {
+      std::ofstream out(proto);
+      out << "struct State { int x = 0; };\n"
+             "enum class Event { A };\n"
+             "bool handle_toolpacks_settings_keys(State* state, Event event);\n"
+             "bool handle_ai_settings_keys(State* state, Event event);\n"
+             "\n"
+             "bool other_helper() { return false; }\n"
+             "\n"
+             "bool handle_toolpacks_settings_keys(State* state, Event event) {\n"
+             "  if (state == nullptr) {\n"
+             "    return false;\n"
+             "  }\n"
+             "  state->x = 1;\n"
+             "  return true;\n"
+             "}\n"
+             "\n"
+             "int one_liner() { return 7; }\n";
+    }
+    GetCodeOfRequest req;
+    req.workspace_root = tmp.string();
+    req.file = "fwd_decl.cpp";
+    req.symbol = "handle_toolpacks_settings_keys";
+    req.max_lines = 120;
+    const auto got = get_code_of(req);
+    expect(got.ok, "fwd_decl pick ok");
+    expect(got.symbol_start > 3, "skips the prototype at the top");
+    expect(got.text.find("state->x = 1") != std::string::npos, "returns the function body");
+    expect(got.text.find("return true") != std::string::npos, "body includes the close");
+    expect(!got.truncated, "short body is not truncated");
+    expect(got.text.find("bool handle_toolpacks_settings_keys(State* state, Event event);") ==
+               std::string::npos,
+           "does not return only the prototype");
+
+    GetCodeOfRequest one;
+    one.workspace_root = tmp.string();
+    one.file = "fwd_decl.cpp";
+    one.symbol = "one_liner";
+    const auto one_got = get_code_of(one);
+    expect(one_got.ok && one_got.text.find("return 7") != std::string::npos,
+           "one-line definition still found");
+  }
+
+  {
+    const fs::path hdr = tmp / "only_decl.hpp";
+    {
+      std::ofstream out(hdr);
+      out << "bool handle_toolpacks_settings_keys(State* state, Event event);\n";
+    }
+    GetCodeOfRequest req;
+    req.workspace_root = tmp.string();
+    req.file = "only_decl.hpp";
+    req.symbol = "handle_toolpacks_settings_keys";
+    const auto got = get_code_of(req);
+    expect(got.ok, "header prototype ok");
+    expect(got.text.find("handle_toolpacks_settings_keys") != std::string::npos,
+           "header still returns the declaration");
+  }
+
+  {
+    const fs::path modal = fs::path("src/ui/settings_modal.cpp");
+    if (fs::exists(modal)) {
+      GetCodeOfRequest req;
+      req.workspace_root = fs::current_path().string();
+      req.file = "src/ui/settings_modal.cpp";
+      req.symbol = "handle_toolpacks_settings_keys";
+      req.max_lines = 120;
+      const auto got = get_code_of(req);
+      expect(got.ok, "settings_modal pick ok");
+      expect(got.symbol_start > 80, "settings_modal skips the cpp prototype");
+      expect(got.text.find("handle_top_level_tab_keys") != std::string::npos,
+             "settings_modal returns the body");
+      expect(got.text.find("bool handle_toolpacks_settings_keys(SettingsModalState* state, Event event);") ==
+                 std::string::npos,
+             "settings_modal does not return only the prototype");
+    }
   }
 
   {

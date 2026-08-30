@@ -132,7 +132,8 @@ def run_cards(case: dict, l1_dir: Path, cards_dir: Path, env: dict[str, str]) ->
     }
 
 
-def run_survey(case_id: str, cards_root: Path, survey_root: Path, env: dict[str, str]) -> dict:
+def run_survey(case_id: str, cards_root: Path, survey_root: Path, env: dict[str, str],
+               extra: list[str] | None = None, timeout: int = 240) -> dict:
     cmd = [
         str(CLI),
         "atlas-survey",
@@ -143,7 +144,9 @@ def run_survey(case_id: str, cards_root: Path, survey_root: Path, env: dict[str,
         "--only",
         case_id,
     ]
-    p = subprocess.run(cmd, cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=240)
+    if extra:
+        cmd.extend(extra)
+    p = subprocess.run(cmd, cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=timeout)
     case_out = survey_root / case_id
     (case_out / "survey_run.log").write_text(
         (p.stderr or "") + "\n" + (p.stdout or ""), encoding="utf-8"
@@ -201,6 +204,11 @@ def score_case(case: dict, l1_dir: Path, cards_dir: Path, survey_dir: Path, row:
         "shortlist": shortlist,
         "inspect_zones": row.get("inspect_zones") or [],
         "hyp_ok": bool(row.get("hyp_ok")),
+        "hyp_parsed": bool(row.get("hyp_parsed")),
+        "hyp_need_more": bool(row.get("hyp_need_more")),
+        "hyp_band": row.get("hyp_band") or "",
+        "hyp_mass": row.get("hyp_mass"),
+        "hyp_more": bool(row.get("hyp_more")),
         "hyp_error": row.get("hyp_error") or row.get("error") or "",
         "n_hyps_kept": len(hyps),
         "n_hyps_raw": raw_n,
@@ -224,6 +232,10 @@ def score_case(case: dict, l1_dir: Path, cards_dir: Path, survey_dir: Path, row:
 
 def verdict_bucket(row: dict) -> str:
     if not row.get("hyp_ok"):
+        if row.get("hyp_need_more") or row.get("hyp_more"):
+            return "need_more"
+        if row.get("hyp_parsed"):
+            return "low_mass"
         return "fail_parse"
     if row.get("gold_in_hyp"):
         return "gold_hyp"
@@ -236,6 +248,91 @@ def verdict_bucket(row: dict) -> str:
     return "no_gold"
 
 
+def stem_overlap(needles: list[str], hay: list[str]) -> list[str]:
+    return any_overlap(needles, hay)
+
+
+def score_pilot_case(case: dict, srow: dict) -> dict:
+    expected = list(case.get("expected_stems") or [])
+    traps = list(case.get("trap_stems") or [])
+    tasks = [t for t in (srow.get("plan_tasks") or []) if isinstance(t, dict)]
+    tasked = [str(t.get("stem") or "") for t in tasks if t.get("stem")]
+    cubre_stems = [str(t.get("stem") or "") for t in tasks if t.get("kind") == "cubre"]
+    gold_tasked = stem_overlap(expected, tasked)
+    trap_tasked = stem_overlap(traps, tasked)
+    gold_cubre = stem_overlap(expected, cubre_stems)
+    cubre_yesno = 0
+    como_quien = 0
+    for t in tasks:
+        q = str(t.get("question") or "").lower()
+        if t.get("kind") == "cubre" and ("¿es " in q or q.startswith("¿es") or " el objeto" in q):
+            cubre_yesno += 1
+        if t.get("kind") == "como" and ("quién" in q or "quien" in q):
+            como_quien += 1
+    shape_ok = bool(srow.get("plan_ok")) and int(srow.get("plan_n_cubre") or 0) >= 2 and bool(
+        srow.get("plan_has_como")
+    )
+    keep = [str(x) for x in (srow.get("plenary_keep") or [])]
+    gold_keep = stem_overlap(expected, keep)
+    trap_keep = stem_overlap(traps, keep)
+    verdict = str(srow.get("plenary_verdict") or "")
+    workers_n = int(srow.get("workers_n") or 0)
+    if workers_n:
+        if verdict == "entiendo" and gold_keep:
+            bucket = "well"
+        elif verdict == "entiendo" and trap_keep and not gold_keep:
+            bucket = "trap_keep"
+        elif verdict == "abandono":
+            bucket = "abandono"
+        elif verdict == "no_entiendo":
+            bucket = "no_entiendo"
+        elif not srow.get("plenary_ok"):
+            bucket = "fail_plenary"
+        else:
+            bucket = "no_gold_keep"
+    else:
+        if not srow.get("plan_ok"):
+            bucket = "fail_parse"
+        elif gold_cubre:
+            bucket = "gold_cubre"
+        elif gold_tasked:
+            bucket = "gold_tasked"
+        elif trap_tasked and not gold_tasked:
+            bucket = "trap_only"
+        elif shape_ok:
+            bucket = "shape_ok"
+        else:
+            bucket = "thin"
+    return {
+        "id": case["id"],
+        "ok": bool(srow.get("plan_ok")),
+        "shape_ok": shape_ok,
+        "unique_stems": srow.get("plan_unique_stems") or 0,
+        "n_cubre": srow.get("plan_n_cubre") or 0,
+        "has_como": bool(srow.get("plan_has_como")),
+        "has_gap": bool(srow.get("plan_has_gap")),
+        "tasked": tasked,
+        "gold_tasked": gold_tasked,
+        "gold_cubre": gold_cubre,
+        "trap_tasked": trap_tasked,
+        "cubre_yesno": cubre_yesno,
+        "como_quien": como_quien,
+        "expected": expected,
+        "traps": traps,
+        "tasks": tasks,
+        "plan_why": srow.get("plan_why") or "",
+        "workers_ok": srow.get("workers_ok"),
+        "workers_n": workers_n,
+        "plenary_ok": bool(srow.get("plenary_ok")),
+        "plenary_verdict": verdict,
+        "plenary_keep": keep,
+        "plenary_drop": srow.get("plenary_drop") or [],
+        "gold_keep": gold_keep,
+        "trap_keep": trap_keep,
+        "bucket": bucket,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--label", default="atlas20_hyp")
@@ -246,7 +343,13 @@ def main() -> int:
     ap.add_argument("--cards-from", type=Path, default=None, help="Reuse judge_cards.json from another round")
     ap.add_argument("--only", default="", help="Comma-separated case ids")
     ap.add_argument("--timeout-l1", type=int, default=300)
+    ap.add_argument("--pilot-plan", action="store_true",
+                    help="Tras inspect, pedir plan de encargos (cubre|como|gap) en vez de hyp")
+    ap.add_argument("--pilot-workers", action="store_true",
+                    help="Plan + trabajadores sordos + plenario")
     args = ap.parse_args()
+    if args.pilot_workers:
+        args.pilot_plan = True
 
     cases = load_cases(PROMPTS)
     if args.only:
@@ -321,17 +424,96 @@ def main() -> int:
             survey_rows.append({"id": cid, "ok": False, "error": cards_ok.get("error", "no_cards")})
             print(f"==== skip survey {cid} (no cards) ====", flush=True)
             continue
-        print(f"==== survey+hyp {cid} ====", flush=True)
-        row = run_survey(cid, cards_root, survey_root, env)
+        print(
+            f"==== survey{'+workers' if args.pilot_workers else '+plan' if args.pilot_plan else '+hyp'} {cid} ====",
+            flush=True,
+        )
+        extra = None
+        timeout = 240
+        if args.pilot_workers:
+            extra = ["--pilot-workers"]
+            timeout = 900
+        elif args.pilot_plan:
+            extra = ["--pilot-plan"]
+        row = run_survey(cid, cards_root, survey_root, env, extra, timeout=timeout)
         if cards_ok.get("query"):
             row["query"] = cards_ok["query"]
         survey_rows.append(row)
-        print(
-            f"  ok={row.get('ok')} hyp_ok={row.get('hyp_ok')} "
-            f"r1={row.get('inspect_r1_zones')} add={row.get('cover_add')} covers={row.get('cover_covers')} "
-            f"shortlist={row.get('shortlist')} n_hyps={len(row.get('hypotheses') or [])}",
-            flush=True,
+        if args.pilot_plan:
+            tasks = row.get("plan_tasks") or []
+            bits = [f"{t.get('kind')} {t.get('zone')}/{t.get('stem')}" for t in tasks if isinstance(t, dict)]
+            extra_w = ""
+            if args.pilot_workers:
+                extra_w = (
+                    f" workers={row.get('workers_ok')}/{row.get('workers_n')} "
+                    f"plenary={row.get('plenary_verdict')}"
+                )
+            print(
+                f"  ok={row.get('ok')} plan_ok={row.get('plan_ok')} "
+                f"stems={row.get('plan_unique_stems')} cubre={row.get('plan_n_cubre')} "
+                f"como={row.get('plan_has_como')} gap={row.get('plan_has_gap')} "
+                f"r1={row.get('inspect_r1_zones')} add={row.get('cover_add')} "
+                f"need_more={row.get('pilot_need_more_add')} "
+                f"shortlist={row.get('shortlist')} tasks={bits}{extra_w}",
+                flush=True,
+            )
+        else:
+            print(
+                f"  ok={row.get('ok')} hyp_ok={row.get('hyp_ok')} band={row.get('hyp_band')} "
+                f"more={row.get('hyp_more')} r1={row.get('inspect_r1_zones')} "
+                f"add={row.get('cover_add')} covers={row.get('cover_covers')} "
+                f"shortlist={row.get('shortlist')} n_hyps={len(row.get('hypotheses') or [])}",
+                flush=True,
+            )
+
+    if args.pilot_plan:
+        scored = [score_pilot_case(case, next((r for r in survey_rows if r.get("id") == case["id"]), {}))
+                  for case in cases]
+        buckets: dict[str, int] = {}
+        for s in scored:
+            buckets[s["bucket"]] = buckets.get(s["bucket"], 0) + 1
+        summary = {
+            "label": args.label,
+            "pilot_plan": True,
+            "pilot_workers": bool(args.pilot_workers),
+            "n": len(scored),
+            "plan_ok": sum(1 for s in scored if s.get("ok")),
+            "shape_ok": sum(1 for s in scored if s.get("shape_ok")),
+            "gold_cubre": sum(1 for s in scored if s.get("gold_cubre")),
+            "gold_tasked": sum(1 for s in scored if s.get("gold_tasked")),
+            "trap_only": sum(1 for s in scored if s["bucket"] == "trap_only"),
+            "well": sum(1 for s in scored if s["bucket"] == "well"),
+            "mal": sum(1 for s in scored if s["bucket"] in
+                       ("trap_keep", "abandono", "no_entiendo", "fail_plenary", "no_gold_keep",
+                        "fail_parse", "trap_only")),
+            "buckets": buckets,
+            "rows": scored,
+        }
+        out_name = "workers_score.json" if args.pilot_workers else "plan_score.json"
+        (hyp_root / out_name).write_text(
+            json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
+        print("==== PLAN ====" if not args.pilot_workers else "==== WORKERS ====", flush=True)
+        print(json.dumps({k: summary[k] for k in summary if k != "rows"}, indent=2), flush=True)
+        for s in scored:
+            tasks = s.get("tasks") or []
+            line = "; ".join(
+                f"{t.get('kind')} {t.get('zone')}={t.get('stem')}: {(t.get('question') or '')[:50]}"
+                for t in tasks
+                if isinstance(t, dict)
+            )
+            extra = ""
+            if args.pilot_workers:
+                extra = (
+                    f" plenary={s.get('plenary_verdict')} keep={s.get('plenary_keep')} "
+                    f"gold_keep={s.get('gold_keep')}"
+                )
+            print(
+                f"{s['id']:32} {s['bucket']:14} gold={s.get('gold_cubre')} "
+                f"stems={s.get('unique_stems')} cubre={s.get('n_cubre')}{extra}  {line}",
+                flush=True,
+            )
+        return 0
 
     scored = []
     for case in cases:
@@ -351,6 +533,8 @@ def main() -> int:
         "trap_hyp": sum(1 for s in scored if s["bucket"] == "trap_hyp"),
         "gold_inspect_miss_hyp": sum(1 for s in scored if s["bucket"] == "gold_inspect_miss_hyp"),
         "gold_atlas_not_inspected": sum(1 for s in scored if s["bucket"] == "gold_atlas_not_inspected"),
+        "need_more": sum(1 for s in scored if s["bucket"] == "need_more"),
+        "low_mass": sum(1 for s in scored if s["bucket"] == "low_mass"),
         "fail_parse": sum(1 for s in scored if s["bucket"] == "fail_parse"),
         "no_gold": sum(1 for s in scored if s["bucket"] == "no_gold"),
         "rows": scored,
@@ -365,6 +549,7 @@ def main() -> int:
         print(
             f"{s['id']:32} {s['bucket']:24} gold_hyp={s['gold_in_hyp']} "
             f"inspect={s['gold_in_inspect']} atlas={s['gold_in_atlas']} "
+            f"band={s.get('hyp_band')} more={s.get('hyp_more')} "
             f"r1={s.get('inspect_r1_zones')} add={s.get('cover_add')} "
             f"stems={s['hyp_stems'][:4]}",
             flush=True,

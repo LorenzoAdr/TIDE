@@ -24,6 +24,7 @@
 #include "ai/l2_entityness.hpp"
 #include "ai/l2_effect_registry.hpp"
 #include "ai/l2_pack_review.hpp"
+#include "ai/get_code_of.hpp"
 
 namespace fs = std::filesystem;
 
@@ -58,6 +59,10 @@ bool is_lsp_locate_tool(const std::string& name) {
       "workspace_symbols", "hover", "diagnostics", "definition", "references", "context_pack",
   };
   return k.count(name) > 0;
+}
+
+std::string md_source_fence_open(const std::string& path_or_arg) {
+  return "```" + fence_lang_for_path(path_or_arg);
 }
 
 std::string json_escape(const std::string& s) {
@@ -3991,7 +3996,9 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
   if (!arg.empty()) {
     block << " `" << arg << "`";
   }
-  block << "\n\n```\n" << obs_text;
+  block << "\n\n" << md_source_fence_open(name == "get_code_of" || name == "read_file" ? arg : "")
+        << "\n"
+        << obs_text;
   if (!obs_text.empty() && obs_text.back() != '\n') {
     block << '\n';
   }
@@ -4196,7 +4203,12 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
     if (!call.arg.empty()) {
       batch_block << " `" << call.arg << "`";
     }
-    batch_block << "\n\n```\n" << obs_text;
+    batch_block << "\n\n"
+                << md_source_fence_open(call.name == "get_code_of" || call.name == "read_file"
+                                            ? call.arg
+                                            : "")
+                << "\n"
+                << obs_text;
     if (!obs_text.empty() && obs_text.back() != '\n') {
       batch_block << '\n';
     }
@@ -5610,11 +5622,7 @@ std::string Level2Session::build_a_peek_tranche_markdown(const std::string& work
     if (body.size() > 2400) {
       body = body.substr(0, 2400) + "\n…[peek A1 truncado ~60 líneas]…\n";
     }
-    out << "```\n" << body;
-    if (!body.empty() && body.back() != '\n') {
-      out << '\n';
-    }
-    out << "```\n\nResponde `a_judge`.\n";
+    out << wrap_source_fence(body, item.target) << "\nResponde `a_judge`.\n";
     return out.str();
   }
 
@@ -5717,11 +5725,7 @@ std::string Level2Session::build_a_peek_tranche_markdown(const std::string& work
     if (body.size() > 3500) {
       body = body.substr(0, 3500) + "\n…[peek truncado]…\n";
     }
-    out << "```\n" << body;
-    if (!body.empty() && body.back() != '\n') {
-      out << '\n';
-    }
-    out << "```\n\n";
+    out << wrap_source_fence(body, item.target);
   }
   out << "Responde con `a_judge` (verdicts para estos peeks) o `a_done` si loci estables.\n";
   return out.str();
@@ -6976,7 +6980,8 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
         if (body.size() < fj.text.size()) {
           sec << " [TRUNCATED]";
         }
-        sec << "  <!-- role:must -->\n\n```\n" << body << "\n```\n\n";
+        sec << "  <!-- role:must -->\n\n"
+            << wrap_source_fence(body, fj.target) << '\n';
         pack << sec.str();
         used_frags += sec.str().size();
         if (fj.ok) {
@@ -7080,11 +7085,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       sec << " [TRUNCATED]";
     }
     sec << "  <!-- role:" << role_name(role) << " -->";
-    sec << "\n\n```\n" << body;
-    if (!body.empty() && body.back() != '\n') {
-      sec << '\n';
-    }
-    sec << "```\n\n";
+    sec << "\n\n" << wrap_source_fence(body, f.target) << '\n';
     pack << sec.str();
     used_frags += sec.str().size();
   }
@@ -7105,11 +7106,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       std::string body =
           truncate_to_budget(h.text, std::min<std::size_t>(header_budget, 400), {});
       std::ostringstream sec;
-      sec << "### headers_of `" << h.path << "`\n\n```\n" << body;
-      if (!body.empty() && body.back() != '\n') {
-        sec << '\n';
-      }
-      sec << "```\n\n";
+      sec << "### headers_of `" << h.path << "`\n\n" << wrap_source_fence(body, h.path) << '\n';
       const std::string s = sec.str();
       if (s.size() > header_budget) {
         break;

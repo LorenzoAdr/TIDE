@@ -185,6 +185,25 @@ int main() {
     expect(!tuide::pack_has_anchor_fragment("### get_code_of `src/ui/x.cpp:y` (omitido)\n",
                                               pack_anchors),
            "omit-only does not count");
+    const std::string pack_lang =
+        "### get_code_of `src/view/status_panel.cpp:226`\n\n```cpp\n"
+        "void set_active(State* state) {\n"
+        "  if (state->halted) return;\n"
+        "}\n```\n"
+        "### get_code_of `src/view/status_panel.cpp:clear_active`\n\n```cpp\n"
+        "void clear_active(State* state) { state->active = false; }\n```\n";
+    expect(tuide::pack_target_has_symbol_body(pack_lang, "src/view/status_panel.cpp:set_active"),
+           "```cpp fence still has symbol");
+    expect(tuide::pack_has_lifecycle_pair(pack_lang), "```cpp pack has set+clear pair");
+    expect(tuide::load_pack_fragment_body(pack_lang, "src/view/status_panel.cpp:226")
+                   .find("void set_active") != std::string::npos,
+           "inner body skips cpp tag");
+    expect(tuide::load_pack_fragment_body(pack_lang, "src/view/status_panel.cpp:226")
+                   .find("cpp") == std::string::npos,
+           "lang tag not in reused body");
+    const std::string digest = tuide::build_pack_digest(pack_lang);
+    expect(digest.find("void set_active") != std::string::npos, "digest keeps fenced body");
+    expect(digest.find("```cpp") != std::string::npos, "digest keeps lang opener");
   }
 
   if (failures == 0) {

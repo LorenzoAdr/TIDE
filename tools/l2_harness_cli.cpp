@@ -9,6 +9,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "ai/get_code_of.hpp"
@@ -1998,7 +1999,14 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
   tuide::registry_causal_pilot_notebook_from_payload(one, task.stem, &nb);
   const std::string prefix = "w" + std::to_string(task_i);
   std::ofstream(case_out / (prefix + "_zone.md")) << zone_md;
-  for (int step = 0; step < tuide::kPilotWorkerMaxSteps; ++step) {
+  int step_limit = tuide::kPilotWorkerMaxSteps;
+  for (int step = 0; step < step_limit; ++step) {
+    const bool last_turn = step >= tuide::kPilotWorkerMaxSteps - 1;
+    if (last_turn && nb.notes.find("----- cierre -----") == std::string::npos) {
+      nb.notes +=
+          "\n----- cierre -----\nÚltimo turno: emite causal_pilot_worker_v1 con walk (duda:Symbol "
+          "si queda un hueco). Si no entiendes, verdict no_cubre o missing. PROHIBIDO tool.\n";
+    }
     tuide::L2BrainRequest req;
     req.system_prompt = tuide::registry_causal_pilot_worker_system_prompt(task.kind, task.stem);
     req.user_prompt =
@@ -2006,7 +2014,7 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
         task.question + "\n\n" +
         tuide::registry_causal_pilot_worker_user_prompt(
             task.kind, task.question, zone_md, nb.notes,
-            tuide::registry_causal_pilot_allowed_markdown(nb));
+            tuide::registry_causal_pilot_allowed_markdown(nb), last_turn, task.stem);
     req.phase = "causal_pilot_worker";
     req.max_tokens =
         std::min(640, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 640);
@@ -2042,8 +2050,7 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
           tuide::registry_causal_query_hay_overlap(
               instruction, report.why + " " + report.owns + " " + report.stem) <= 0;
       const bool card_miss = zone_ov <= 0;
-      if (cubre_mismatch && card_miss && nb.n_query_nudge < 1 &&
-          step + 1 < tuide::kPilotWorkerMaxSteps) {
+      if (cubre_mismatch && card_miss && nb.n_query_nudge < 1 && !last_turn) {
         ++nb.n_query_nudge;
         std::ostringstream note;
         note << "\n----- nota -----\nEl símbolo de why no solapa con ## Consulta del usuario. "
@@ -2061,35 +2068,73 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
       return report;
     }
     const bool missing_tool_err =
-        report.error == "como sin need_code/follow" || report.error == "gap sin follow/need_code" ||
+        report.error == "sin lectura de código" ||
+        report.error == "sin dataflow ni diagrama causal" ||
+        report.error == "ficha vacía: pide outline o need_code" ||
         report.error == "follow sin target" || report.error == "need_code sin target" ||
-        report.error == "outline sin target";
+        report.error == "outline sin target" || report.error == "dataflow sin target" ||
+        report.error == "causal sin target";
     const bool ficha_tool_err =
         report.error == "follow no está en la ficha" ||
         report.error == "need_code no está en la ficha" ||
-        report.error == "follow fuera del stem" || report.error == "need_code fuera del stem";
+        report.error == "causal no está en la ficha" ||
+        report.error == "follow fuera del stem" || report.error == "need_code fuera del stem" ||
+        report.error == "dataflow fuera del stem" || report.error == "causal fuera del stem";
     const bool empty_surrender = report.error == "follow vacío no es no_cubre";
     const bool brief_corto = report.error == "brief corto: 2 frases para el piloto";
-    if (!report.is_tool && missing_tool_err && !nb.used_code_or_follow() &&
-        step + 1 < tuide::kPilotWorkerMaxSteps) {
+    const bool no_cite = report.error == "why no cita un símbolo de la ficha";
+    const bool walk_unread =
+        report.error.find("walk nombra un símbolo no leído") == 0;
+    const bool walk_no_flow = report.error.find("falta dataflow del campo") == 0;
+    const bool walk_no_writer = report.error.find("falta need_code del writer") == 0;
+    const bool walk_template = report.error == "walk de plantilla";
+    const bool tool_repeat = report.error == "need_code repetido" ||
+                             report.error == "dataflow repetido";
+    if (!report.is_tool && missing_tool_err && !last_turn) {
       std::ostringstream note;
-      note << "\n----- nota -----\nInforme rechazado: " << report.error
-           << ". Emite una tool con target de ## Símbolos permitidos.\n";
+      note << "\n----- nota -----\nInforme rechazado: " << report.error << ". ";
+      if (report.error == "sin lectura de código") {
+        note << "PROHIBIDO causal_pilot_worker_v1. Pide ahora SOLO una tool";
+        if (!nb.allowed_targets.empty()) {
+          note << ": {\"action\":\"causal_pilot_need_code\",\"target\":\"" << nb.allowed_targets.front()
+               << "\"}";
+        } else {
+          note << " (causal_pilot_need_code o outline).";
+        }
+        note << " Follow no es lectura.\n";
+      } else {
+        note << "Pide need_code u otra tool del catálogo. Follow no es lectura.\n";
+      }
       nb.notes += note.str();
       std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
           << note.str();
       continue;
     }
-    if (!report.is_tool && ficha_tool_err && step + 1 < tuide::kPilotWorkerMaxSteps) {
+    if (!report.is_tool && tool_repeat && !last_turn) {
       std::ostringstream note;
       note << "\n----- nota -----\nInforme rechazado: " << report.error
-           << ". Elige un target de ## Símbolos permitidos; no inventes.\n";
+           << ". Ya está en ## Notas. Emite causal_pilot_worker_v1 ahora "
+              "(cubre|no_cubre|chain|missing). PROHIBIDO repetir esa tool.\n";
       nb.notes += note.str();
       std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
           << note.str();
       continue;
     }
-    if (!report.is_tool && empty_surrender && step + 1 < tuide::kPilotWorkerMaxSteps) {
+    if (!report.is_tool && ficha_tool_err && !last_turn) {
+      std::ostringstream note;
+      note << "\n----- nota -----\nInforme rechazado: " << report.error
+           << ". Elige un target de ## Símbolos permitidos; no inventes.";
+      if (!nb.allowed_targets.empty()) {
+        note << " Ejemplo: {\"action\":\"causal_pilot_need_code\",\"target\":\""
+             << nb.allowed_targets.front() << "\"}";
+      }
+      note << "\n";
+      nb.notes += note.str();
+      std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+          << note.str();
+      continue;
+    }
+    if (!report.is_tool && empty_surrender && !last_turn) {
       std::ostringstream note;
       note << "\n----- nota -----\nInforme rechazado: " << report.error
            << ". Follow sin hops no autoriza no_cubre. outline del archivo del stem, o "
@@ -2100,8 +2145,38 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
           << note.str();
       continue;
     }
-    if (!report.is_tool && brief_corto && nb.n_query_nudge < 1 &&
-        step + 1 < tuide::kPilotWorkerMaxSteps) {
+    if (!report.is_tool && no_cite && !last_turn) {
+      std::ostringstream note;
+      note << "\n----- nota -----\nInforme rechazado: " << report.error
+           << ". Reemite causal_pilot_worker_v1 con why/brief que nombren un símbolo de "
+              "## Símbolos permitidos (el que leíste), no solo el tema de la consulta.\n";
+      nb.notes += note.str();
+      std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+          << note.str();
+      continue;
+    }
+    if (!report.is_tool && (walk_unread || walk_template || walk_no_flow || walk_no_writer) &&
+        !last_turn) {
+      std::ostringstream note;
+      note << "\n----- nota -----\nInforme rechazado: " << report.error
+           << ". PROHIBIDO reemitir el mismo walk. Pide ahora SOLO una tool";
+      const auto colon = report.error.find(": ");
+      if (walk_no_flow && colon != std::string::npos) {
+        note << ": {\"action\":\"causal_pilot_dataflow\",\"target\":\""
+             << report.error.substr(colon + 2) << "\"}";
+      } else if ((walk_unread || walk_no_writer) && colon != std::string::npos) {
+        note << ": {\"action\":\"causal_pilot_need_code\",\"target\":\""
+             << report.error.substr(colon + 2) << "\"}";
+      } else {
+        note << " (need_code de ese símbolo o dataflow del campo)";
+      }
+      note << ".\n";
+      nb.notes += note.str();
+      std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
+          << note.str();
+      continue;
+    }
+    if (!report.is_tool && brief_corto && nb.n_query_nudge < 1 && !last_turn) {
       ++nb.n_query_nudge;
       std::ostringstream note;
       note << "\n----- nota -----\nInforme rechazado: " << report.error
@@ -2113,11 +2188,11 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
       continue;
     }
     const bool bad_como_verdict = task.kind == "como" && !report.is_tool &&
-                                  nb.used_code_or_follow() &&
                                   (report.error == "verdict como inválido" ||
                                    report.verdict == "need_code" || report.verdict == "follow" ||
-                                   report.verdict == "outline");
-    if (bad_como_verdict && step + 1 < tuide::kPilotWorkerMaxSteps) {
+                                   report.verdict == "outline" || report.verdict == "dataflow" ||
+                                   report.verdict == "causal");
+    if (bad_como_verdict && !last_turn) {
       std::ostringstream note;
       note << "\n----- nota -----\nInforme rechazado: verdict de como debe ser chain o "
               "no_cubre, no need_code. Reemite causal_pilot_worker_v1 con chain/why/brief.\n";
@@ -2126,29 +2201,25 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
           << note.str();
       continue;
     }
-    if (report.ok && report.is_tool &&
-        (task.kind == "como" || task.kind == "gap") && nb.used_code_or_follow() &&
-        step + 1 < tuide::kPilotWorkerMaxSteps) {
-      const bool empty_follow_retry =
-          nb.notes.find("sin hops") != std::string::npos &&
-          (nb.n_need_code + nb.n_follow) < 2;
-      if (!empty_follow_retry) {
+    if (report.ok && report.is_tool && last_turn) {
+      if (step_limit == tuide::kPilotWorkerMaxSteps) {
+        step_limit = tuide::kPilotWorkerMaxSteps + 1;
         std::ostringstream note;
-        note << "\n----- nota -----\nYa hay follow/need_code en ## Notas. Emite el informe "
-                "causal_pilot_worker_v1; no repitas la tool.\n";
+        note << "\n----- cierre -----\nTool rechazada en el último turno. Emite "
+                "causal_pilot_worker_v1; si no entiendes, no_cubre/missing y brief de qué "
+                "falta.\n";
         nb.notes += note.str();
         std::ofstream(case_out / (prefix + "_nudge_" + std::to_string(step) + ".md"))
             << note.str();
         continue;
       }
+      report.ok = false;
+      report.error = "sin informe";
+      report.is_tool = false;
+      report.need_code = false;
+      return report;
     }
-    if (!report.ok || !report.is_tool || step + 1 >= tuide::kPilotWorkerMaxSteps) {
-      if (report.is_tool) {
-        report.ok = false;
-        report.error = "presupuesto de tools agotado";
-        report.is_tool = false;
-        report.need_code = false;
-      }
+    if (!report.ok || !report.is_tool) {
       return report;
     }
     std::ostringstream chunk;
@@ -2156,18 +2227,32 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
     if (!report.direction.empty()) {
       chunk << " " << report.direction;
     }
+    if (report.tool == "dataflow" && !report.path_symbol.empty()) {
+      chunk << " " << report.path_symbol;
+    }
     chunk << " -----\n";
+    auto search_fn = [&](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
+      return harness_rg_symbol(root, symbol);
+    };
     if (report.tool == "need_code") {
       ++nb.n_need_code;
       GetCodeOfRequest creq = parse_get_code_of_arg(report.target, root);
       creq.workspace_root = root;
-      if (creq.max_lines <= 0) {
-        creq.max_lines = 80;
-      }
+      creq.max_lines = 120;
       const auto got = get_code_of(creq);
       if (got.ok) {
-        chunk << tuide::format_get_code_of_result(got, got.path);
+        chunk << tuide::format_get_code_of_header(got, got.path);
+        chunk << tuide::wrap_source_fence(got.text, got.path.empty() ? report.target : got.path);
         tuide::registry_causal_pilot_notebook_add_target(&nb, report.target);
+        const std::string focus_path = creq.file.empty() ? got.path : creq.file;
+        const std::string focus_sym =
+            !creq.symbol.empty() ? creq.symbol : (!got.name.empty() ? got.name : report.target);
+        const std::string display =
+            focus_path.empty() ? focus_sym : (focus_path + ":" + focus_sym);
+        chunk << tuide::registry_causal_pilot_aguas_arriba_markdown(root, focus_path, focus_sym,
+                                                                    search_fn);
+        chunk << tuide::registry_causal_pilot_aguas_abajo_markdown(display, got.text,
+                                                                   got.truncated);
       } else {
         chunk << "(get_code_of falló: " << got.error << ")\n";
       }
@@ -2200,39 +2285,92 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
       if (!port.empty()) {
         chunk << "port_to_hint: " << port << "\n";
       }
-      nb.notes += chunk.str();
-      std::ofstream(case_out / (prefix + "_tool_" + std::to_string(step) + ".md")) << chunk.str();
-      if (task.kind == "como" && extra.empty() && nb.n_outline == 0) {
-        std::string path = report.target;
-        const auto slash = path.find_last_of("/\\");
-        const auto colon = path.rfind(':');
-        if (colon != std::string::npos && (slash == std::string::npos || colon > slash)) {
-          path = path.substr(0, colon);
+    } else if (report.tool == "dataflow") {
+      ++nb.n_dataflow;
+      const auto df = tuide::a_dataflow_build_with_search(root, report.target, report.path_symbol,
+                                                         search_fn);
+      chunk << tuide::a_dataflow_markdown(df);
+      std::vector<std::string> stem_writers;
+      auto note_site = [&](const tuide::ADataFlowSite& s, const char* polarity) {
+        fs::path abs = fs::path(root) / s.path;
+        const auto hop =
+            tuide::a_trail_enrich_hop(abs.lexically_normal().string(), s.path, s.line, "");
+        if (hop.symbol.empty()) {
+          return;
         }
-        if (!path.empty()) {
-          ++nb.n_outline;
-          fs::path abs = path;
-          if (!abs.is_absolute()) {
-            abs = fs::path(root) / path;
+        const std::string target = s.path + ":" + hop.symbol;
+        chunk << "fn=`" << target << "` @" << s.line << " " << polarity << "\n";
+        const bool same_stem = tuide::registry_causal_pilot_target_in_stem(s.path, task.stem) ||
+                               tuide::registry_causal_pilot_target_in_stem(target, task.stem);
+        if (same_stem) {
+          tuide::registry_causal_pilot_notebook_add_target(&nb, target);
+        }
+        if (same_stem && polarity != nullptr && polarity[0] == 'w') {
+          stem_writers.push_back(target);
+        }
+      };
+      for (const auto& s : df.decls) {
+        note_site(s, "decl");
+      }
+      for (const auto& s : df.writes) {
+        note_site(s, "write");
+      }
+      for (const auto& s : df.reads) {
+        note_site(s, "read");
+      }
+      if (!stem_writers.empty()) {
+        chunk << "writers de este stem:";
+        for (const auto& w : stem_writers) {
+          chunk << " `" << w << "`";
+        }
+        chunk << ". Un fn= write no está en el walk hasta ----- need_code ----- de ese "
+                 "símbolo. Un lector no es el clear.\n";
+      }
+    } else if (report.tool == "causal") {
+      ++nb.n_causal;
+      GetCodeOfRequest creq = parse_get_code_of_arg(report.target, root);
+      const std::string focus_path = creq.file;
+      const std::string focus_sym = creq.symbol.empty() ? report.target : creq.symbol;
+      const auto stacks =
+          tuide::a_trail_build_full_stacks(root, focus_sym, focus_path, search_fn);
+      const auto branches = tuide::a_trail_build_cond_branches(
+          root, focus_sym, focus_path, std::vector<std::string>{focus_sym}, search_fn, stacks);
+      std::vector<std::pair<std::string, std::string>> edges;
+      for (const auto& st : stacks) {
+        chunk << st.id << ":";
+        for (std::size_t i = 0; i < st.hops.size(); ++i) {
+          chunk << (i == 0 ? " " : " -> ") << st.hops[i].symbol;
+          if (i + 1 < st.hops.size()) {
+            const std::string a =
+                st.hops[i].symbol.empty() ? st.hops[i].anchor : st.hops[i].symbol;
+            const std::string b =
+                st.hops[i + 1].symbol.empty() ? st.hops[i + 1].anchor : st.hops[i + 1].symbol;
+            if (!a.empty() && !b.empty()) {
+              edges.push_back({a, b});
+            }
           }
-          abs = abs.lexically_normal();
-          const std::string cmd =
-              "rg -n --no-heading -e "
-              "'^[a-zA-Z_].*\\(.*\\)\\s*\\{?\\s*$|^\\s*(class|struct|namespace|enum)\\s+' " +
-              shell_quote(abs.string()) + " | head -n 80";
-          std::string body = fs::exists(abs) ? run_cmd(cmd) : std::string{};
-          if (body.empty()) {
-            body = "(sin outline)\n";
+        }
+        chunk << "\n";
+        for (const auto& hop : st.hops) {
+          if (!hop.symbol.empty() && !hop.path.empty()) {
+            tuide::registry_causal_pilot_notebook_add_target(&nb, hop.path + ":" + hop.symbol);
+          } else if (!hop.anchor.empty()) {
+            tuide::registry_causal_pilot_notebook_add_target(&nb, hop.anchor);
           }
-          std::ostringstream ochunk;
-          ochunk << "\n----- outline " << path << " -----\noutline: " << path << "\n" << body;
-          append_outline_symbols(&nb, path, body);
-          nb.notes += ochunk.str();
-          std::ofstream(case_out / (prefix + "_tool_" + std::to_string(step) + "_outline.md"))
-              << ochunk.str();
         }
       }
-      continue;
+      for (const auto& b : branches) {
+        chunk << b.id << " when=" << b.when_text << " then=" << b.then_text << "\n";
+        if (!b.symbol.empty() && !focus_sym.empty()) {
+          edges.push_back({focus_sym, b.symbol});
+        }
+        if (!b.path.empty() && !b.symbol.empty()) {
+          tuide::registry_causal_pilot_notebook_add_target(&nb, b.path + ":" + b.symbol);
+        }
+      }
+      chunk << tuide::registry_causal_pilot_causal_mermaid(edges);
+    } else {
+      chunk << "(tool desconocida)\n";
     }
     nb.notes += chunk.str();
     std::ofstream(case_out / (prefix + "_tool_" + std::to_string(step) + ".md")) << chunk.str();
@@ -2250,6 +2388,8 @@ int run_worker_probe(const std::string& root, int argc, char** argv) {
   std::string zone;
   std::string question;
   std::string model_id;
+  std::string instruction_arg;
+  std::string workspace_arg;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--cards-root" && i + 1 < argc) {
@@ -2268,9 +2408,14 @@ int run_worker_probe(const std::string& root, int argc, char** argv) {
       question = argv[++i];
     } else if (a == "--model-id" && i + 1 < argc) {
       model_id = argv[++i];
+    } else if (a == "--instruction" && i + 1 < argc) {
+      instruction_arg = argv[++i];
+    } else if (a == "--workspace" && i + 1 < argc) {
+      workspace_arg = argv[++i];
     } else if (a == "-h" || a == "--help") {
       std::cerr << "worker-probe --kind cubre|como|gap --case ID --stem S --out DIR\n"
                    "  [--cards-root DIR] [--zone M*] [--question …] [--model-id ID]\n"
+                   "  [--instruction TXT] [--workspace DIR]\n"
                    "  Un worker sordo sobre una ficha inspect/atlas ya guardada. Sin piloto.\n";
       return 2;
     }
@@ -2295,18 +2440,20 @@ int run_worker_probe(const std::string& root, int argc, char** argv) {
   }
   const fs::path prompts_path =
       fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
-  std::ifstream prompts_in(prompts_path);
-  if (!prompts_in) {
-    std::cerr << "worker-probe: no se pudo leer " << prompts_path << "\n";
-    return 2;
-  }
-  nlohmann::json cases;
-  prompts_in >> cases;
-  std::string instruction;
-  for (const auto& item : cases) {
-    if (item.value("id", "") == only_case) {
-      instruction = item.value("prompt", "");
-      break;
+  std::string instruction = instruction_arg;
+  if (instruction.empty()) {
+    std::ifstream prompts_in(prompts_path);
+    if (!prompts_in) {
+      std::cerr << "worker-probe: no se pudo leer " << prompts_path << "\n";
+      return 2;
+    }
+    nlohmann::json cases;
+    prompts_in >> cases;
+    for (const auto& item : cases) {
+      if (item.value("id", "") == only_case) {
+        instruction = item.value("prompt", "");
+        break;
+      }
     }
   }
   if (instruction.empty()) {
@@ -2364,6 +2511,10 @@ int run_worker_probe(const std::string& root, int argc, char** argv) {
     std::cerr << "worker-probe: " << err << "\n";
     return 1;
   }
+  fs::path workspace = workspace_arg.empty() ? fs::path(root) : fs::path(workspace_arg);
+  if (!workspace.is_absolute()) {
+    workspace = fs::path(root) / workspace;
+  }
   const fs::path case_out = output_root;
   fs::create_directories(case_out);
   std::ofstream(case_out / "inspect.json") << payload.dump(2) << "\n";
@@ -2372,8 +2523,8 @@ int run_worker_probe(const std::string& root, int argc, char** argv) {
   task.zone = zone;
   task.stem = stem;
   task.question = question;
-  const auto wr = run_one_pilot_worker(*brain_ptr, settings, root, case_out, 1, task, payload,
-                                       payload, view, instruction);
+  const auto wr = run_one_pilot_worker(*brain_ptr, settings, workspace.string(), case_out, 1, task,
+                                       payload, payload, view, instruction);
   const auto wj = tuide::registry_causal_pilot_worker_to_json(wr);
   nlohmann::json summary = wj;
   summary["id"] = only_case;

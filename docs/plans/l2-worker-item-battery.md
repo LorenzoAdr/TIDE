@@ -1,6 +1,6 @@
 # Batería por ítem (medidas genéricas)
 
-Cada ciclo puntúa **7 ítems** sobre las mismas 13 tiradas del pack de robustez. No es la batería atlas 20 ni el plenario.
+Cada ciclo puntúa **8 ítems** sobre las mismas 13 tiradas del pack. No es la batería atlas 20 ni el plenario.
 
 ## Ítems
 
@@ -13,6 +13,7 @@ Cada ciclo puntúa **7 ítems** sobre las mismas 13 tiradas del pack de robustez
 | `no_repeat_follow` | No repetir el mismo símbolo en tools | como y gap |
 | `trap_on_raw` | Trampa: el **raw** es `no_cubre` | chrome, search, DAP, quit, layout |
 | `gold_keep` | Hits cubre no regresan | spinner, cancel, toolpacks |
+| `walk_gold` | gold_writers en el walk (o `duda:`); trampa layout = raw no_cubre | latch, cancel, layout |
 
 ## Cómo correr
 
