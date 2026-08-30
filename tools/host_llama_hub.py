@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import http.server
 import json
 import os
 import platform
+import re
 import shutil
 import signal
 import socket
@@ -15,10 +17,11 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
@@ -47,6 +50,17 @@ CFG = {
     "embed_ctx": os.environ.get("TUIDE_HOST_EMBED_CTX", "2048"),
     "embed_np": os.environ.get("TUIDE_HOST_EMBED_NP", "8"),
 }
+
+# Last chat/embed argv summary (for /api/status).
+last_perf: Dict[str, Any] = {"chat": {}, "embed": {}}
+launch_lock = threading.Lock()
+launch_opts: Dict[str, str] = {}
+
+DRAFT_CATALOG_ID = "qwen2.5-1.5b-instruct-q4_k_m"
+LAUNCH_KEYS = (
+    "flash_attn", "cache_type", "threads", "np", "ngl", "chat_ctx",
+    "embed_ngl", "embed_ctx", "embed_np", "draft", "draft_n_max", "draft_gguf",
+)
 
 
 def spy_enabled() -> bool:
@@ -143,6 +157,1003 @@ def shards_present(entry: Dict[str, Any]) -> bool:
         if not sp.is_file():
             return False
     return True
+
+
+def env_trimmed(key: str, default: str = "") -> str:
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    return val.strip()
+
+
+def parse_on_off_auto(value: str, default: str = "auto") -> str:
+    raw = (value or default).strip().lower()
+    if raw in ("0", "off", "false", "no", "none"):
+        return "off"
+    if raw in ("1", "on", "true", "yes"):
+        return "on"
+    if raw in ("auto", ""):
+        return "auto"
+    return raw
+
+
+def detect_performance_cores() -> int:
+    if platform.system() == "Darwin":
+        try:
+            out = subprocess.check_output(
+                ["sysctl", "-n", "hw.perflevel0.logicalcpu"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            n = int(out)
+            if n > 0:
+                return n
+        except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+            pass
+    return os.cpu_count() or 4
+
+
+def opt_or_env(opt_key: str, env_key: str, default: str = "") -> str:
+    with launch_lock:
+        if opt_key in launch_opts:
+            return str(launch_opts[opt_key]).strip()
+    return env_trimmed(env_key, default)
+
+
+def performance_core_count() -> int:
+    raw = opt_or_env("threads", "TUIDE_HOST_THREADS")
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return detect_performance_cores()
+
+
+def total_ram_bytes() -> int:
+    if platform.system() == "Darwin":
+        try:
+            out = subprocess.check_output(
+                ["sysctl", "-n", "hw.memsize"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            return int(out)
+        except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+            pass
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page = os.sysconf("SC_PAGE_SIZE")
+        if pages > 0 and page > 0:
+            return int(pages) * int(page)
+    except (ValueError, OSError):
+        pass
+    return 0
+
+
+_host_lock = threading.Lock()
+_host_latest: Dict[str, Any] = {}
+_host_sampler_started = False
+_cpu_prev: Optional[Tuple[float, List[int]]] = None
+_gguf_meta_cache: Dict[str, Tuple[int, int, Dict[str, Any]]] = {}
+
+_GGUF_FIXED = {
+    0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1,
+    10: 8, 11: 8, 12: 8,
+}
+
+
+def _run_capture(cmd: List[str], timeout: float = 0.6) -> str:
+    try:
+        return subprocess.check_output(
+            cmd, text=True, stderr=subprocess.DEVNULL, timeout=timeout
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return ""
+
+
+def _u32le(buf: bytes, off: int) -> Tuple[int, int]:
+    return int.from_bytes(buf[off:off + 4], "little"), off + 4
+
+
+def _u64le(buf: bytes, off: int) -> Tuple[int, int]:
+    return int.from_bytes(buf[off:off + 8], "little"), off + 8
+
+
+def _gguf_string(buf: bytes, off: int) -> Tuple[str, int]:
+    n, off = _u64le(buf, off)
+    end = off + n
+    if n > 1_000_000 or end > len(buf):
+        raise ValueError("gguf string")
+    return buf[off:end].decode("utf-8", "replace"), end
+
+
+def _gguf_skip(buf: bytes, off: int, typ: int) -> int:
+    if typ == 8:
+        _, off = _gguf_string(buf, off)
+        return off
+    if typ == 9:
+        subtype, off = _u32le(buf, off)
+        n, off = _u64le(buf, off)
+        for _ in range(min(n, 1_000_000)):
+            off = _gguf_skip(buf, off, subtype)
+        return off
+    width = _GGUF_FIXED.get(typ)
+    if width is None:
+        raise ValueError("gguf type")
+    return off + width
+
+
+def _gguf_value(buf: bytes, off: int, typ: int) -> Tuple[Any, int]:
+    if typ == 8:
+        return _gguf_string(buf, off)
+    if typ == 7:
+        return buf[off] != 0, off + 1
+    if typ == 4:
+        v, off = _u32le(buf, off)
+        return v, off
+    if typ == 5:
+        v = int.from_bytes(buf[off:off + 4], "little", signed=True)
+        return v, off + 4
+    if typ in (10, 11):
+        v = int.from_bytes(buf[off:off + 8], "little", signed=(typ == 11))
+        return v, off + 8
+    if typ in (0, 1):
+        return buf[off], off + 1
+    if typ in (2, 3):
+        v = int.from_bytes(buf[off:off + 2], "little", signed=(typ == 3))
+        return v, off + 2
+    off = _gguf_skip(buf, off, typ)
+    return None, off
+
+
+def read_gguf_meta(path: str) -> Dict[str, Any]:
+    try:
+        st = Path(path).stat()
+    except OSError:
+        return {}
+    cached = _gguf_meta_cache.get(path)
+    if cached and cached[0] == int(st.st_mtime) and cached[1] == st.st_size:
+        return cached[2]
+    meta: Dict[str, Any] = {}
+    raw: Dict[str, Any] = {}
+    try:
+        with open(path, "rb") as fh:
+            buf = fh.read(2 * 1024 * 1024)
+        if buf[:4] != b"GGUF":
+            return {}
+        off = 4
+        _ver, off = _u32le(buf, off)
+        _nt, off = _u64le(buf, off)
+        n_kv, off = _u64le(buf, off)
+        for _ in range(min(int(n_kv), 400)):
+            key, off = _gguf_string(buf, off)
+            typ, off = _u32le(buf, off)
+            if typ in (4, 5, 8, 10, 11):
+                val, off = _gguf_value(buf, off, typ)
+                raw[key] = val
+            else:
+                off = _gguf_skip(buf, off, typ)
+    except (OSError, ValueError, IndexError):
+        raw = {}
+    arch = str(raw.get("general.architecture") or "")
+    if arch:
+        meta["arch"] = arch
+        meta["n_layer"] = int(raw.get(f"{arch}.block_count") or 0)
+        meta["n_embd"] = int(raw.get(f"{arch}.embedding_length") or 0)
+        meta["n_head"] = int(raw.get(f"{arch}.attention.head_count") or 0)
+        meta["n_head_kv"] = int(raw.get(f"{arch}.attention.head_count_kv") or meta.get("n_head") or 0)
+    _gguf_meta_cache[path] = (int(st.st_mtime), st.st_size, meta)
+    return meta
+
+
+def kv_elem_bytes(cache_type: str) -> float:
+    raw = (cache_type or "f16").lower()
+    if raw in ("", "off", "none", "f16", "fp16"):
+        return 2.0
+    if raw in ("bf16",):
+        return 2.0
+    if raw.startswith("q8"):
+        return 1.0
+    if raw.startswith("q6"):
+        return 0.75
+    if raw.startswith("q5"):
+        return 0.625
+    if raw.startswith("q4"):
+        return 0.5
+    return 2.0
+
+
+def estimate_kv_bytes(
+    n_layer: int,
+    n_embd: int,
+    n_head: int,
+    n_head_kv: int,
+    n_ctx: int,
+    n_parallel: int,
+    cache_type: str,
+) -> int:
+    if n_layer <= 0 or n_embd <= 0 or n_ctx <= 0:
+        return 0
+    heads = n_head if n_head > 0 else 1
+    kv_heads = n_head_kv if n_head_kv > 0 else heads
+    np_n = n_parallel if n_parallel > 0 else 1
+    n_embd_gqa = n_embd * kv_heads / heads
+    return int(2 * n_layer * n_embd_gqa * n_ctx * kv_elem_bytes(cache_type) * np_n)
+
+
+def parse_prom_metrics(text: str) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, _, rest = line.partition(" ")
+        if not rest:
+            continue
+        name = name.split("{", 1)[0]
+        try:
+            out[name] = float(rest.split()[0])
+        except ValueError:
+            continue
+    return out
+
+
+def prom_get(metrics: Dict[str, float], *names: str) -> Optional[float]:
+    for name in names:
+        if name in metrics:
+            return metrics[name]
+        alt = name.replace(":", "_")
+        if alt in metrics:
+            return metrics[alt]
+    return None
+
+
+def parse_ioreg_gpu(text: str) -> Dict[str, Any]:
+    util = re.search(r'"Device Utilization %"\s*=\s*(\d+)', text)
+    alloc = re.search(r'"Alloc system memory"\s*=\s*(\d+)', text)
+    in_use = re.search(r'"In use system memory"\s*=\s*(\d+)', text)
+    out: Dict[str, Any] = {
+        "gpu_pct": int(util.group(1)) if util else None,
+        "gpu_alloc": int(alloc.group(1)) if alloc else 0,
+        "gpu_in_use": int(in_use.group(1)) if in_use else 0,
+    }
+    return out
+
+
+def parse_vm_stat(text: str, page_size: int) -> int:
+    fields: Dict[str, int] = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, _, raw = line.partition(":")
+        digits = re.sub(r"[^0-9]", "", raw)
+        if digits:
+            fields[key.strip().lower()] = int(digits)
+    if page_size <= 0:
+        page_size = 4096
+    used_pages = (
+        fields.get("pages active", 0)
+        + fields.get("pages wired down", 0)
+        + fields.get("pages occupied by compressor", 0)
+    )
+    return used_pages * page_size
+
+
+def parse_pmset_therm(text: str) -> str:
+    low = text.lower()
+    if "cpu_speed_limit" in low:
+        m = re.search(r"cpu_speed_limit\s*=\s*(\d+)", low)
+        if m and int(m.group(1)) < 100:
+            return "throttle"
+    if "thermal warning" in low and "no thermal warning" not in low:
+        return "throttle"
+    if "no thermal warning" in low or "no performance warning" in low:
+        return "ok"
+    if text.strip():
+        return "ok"
+    return "unknown"
+
+
+def _http_get(url: str, timeout: float = 0.3) -> str:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return ""
+
+
+def _http_json_any(url: str, timeout: float = 0.3) -> Any:
+    raw = _http_get(url, timeout)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _http_json(url: str, timeout: float = 0.3) -> Dict[str, Any]:
+    obj = _http_json_any(url, timeout)
+    return obj if isinstance(obj, dict) else {}
+
+
+def _cpu_pct_from_times(parts: List[int], idle_index: int, extra_idle: int = 0) -> int:
+    global _cpu_prev
+    now = time.time()
+    if _cpu_prev is None:
+        _cpu_prev = (now, list(parts))
+        return 0
+    prev = _cpu_prev[1]
+    _cpu_prev = (now, list(parts))
+    n = max(len(parts), len(prev))
+    parts = list(parts) + [0] * (n - len(parts))
+    prev = list(prev) + [0] * (n - len(prev))
+    deltas = [max(0, a - b) for a, b in zip(parts, prev)]
+    total = sum(deltas)
+    if total <= 0:
+        return 0
+    idle = deltas[idle_index] if idle_index < len(deltas) else 0
+    if extra_idle and extra_idle < len(deltas):
+        idle += deltas[extra_idle]
+    return max(0, min(100, int(round(100.0 * (total - idle) / total))))
+
+
+def _sample_host_cpu() -> int:
+    if platform.system() == "Darwin":
+        raw = _run_capture(["sysctl", "-n", "kern.cp_time"], timeout=0.3)
+        parts = [int(x) for x in raw.split() if x.isdigit()]
+        if len(parts) >= 4:
+            return _cpu_pct_from_times(parts, 3)
+        return 0
+    try:
+        with open("/proc/stat", encoding="utf-8") as fh:
+            line = fh.readline()
+        parts = [int(x) for x in line.split()[1:] if x.isdigit()]
+        if len(parts) >= 5:
+            return _cpu_pct_from_times(parts, 3, 4)
+    except (OSError, ValueError):
+        pass
+    return 0
+
+
+def _sample_ram_used(total: int) -> int:
+    if platform.system() == "Darwin":
+        page = 16384
+        raw_page = _run_capture(["sysctl", "-n", "hw.pagesize"], timeout=0.2)
+        if raw_page.strip().isdigit():
+            page = int(raw_page.strip())
+        used = parse_vm_stat(_run_capture(["vm_stat"], timeout=0.4), page)
+        if used > 0:
+            return min(used, total) if total else used
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            info = {}
+            for line in fh:
+                key, _, rest = line.partition(":")
+                digits = re.sub(r"[^0-9]", "", rest)
+                if digits:
+                    info[key] = int(digits) * 1024
+        total_i = info.get("MemTotal") or total
+        avail = info.get("MemAvailable")
+        if total_i and avail is not None:
+            return max(0, total_i - avail)
+    except OSError:
+        pass
+    return 0
+
+
+def _sample_gpu() -> Dict[str, Any]:
+    empty = {"gpu_pct": None, "gpu_alloc": 0, "gpu_in_use": 0}
+    if platform.system() != "Darwin":
+        return empty
+    try:
+        proc = subprocess.Popen(
+            ["ioreg", "-r", "-d", "1", "-c", "IOAccelerator", "-w", "0"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return empty
+    buf = b""
+    try:
+        assert proc.stdout is not None
+        deadline = time.time() + 0.45
+        while time.time() < deadline:
+            chunk = proc.stdout.read(65536)
+            if not chunk:
+                break
+            buf += chunk
+            if b"PerformanceStatistics" in buf and b"Device Utilization" in buf:
+                break
+    except Exception:
+        pass
+    finally:
+        try:
+            if proc.poll() is None:
+                proc.kill()
+        except OSError:
+            pass
+        try:
+            if proc.stdout:
+                proc.stdout.close()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=0.4)
+        except Exception:
+            pass
+    return parse_ioreg_gpu(buf.decode("utf-8", "replace"))
+
+
+def _ps_rss_cpu(pids: Dict[str, int]) -> Dict[int, Tuple[int, float]]:
+    if not pids:
+        return {}
+    uniq = sorted({p for p in pids.values() if p > 0})
+    if not uniq:
+        return {}
+    raw = _run_capture(
+        ["ps", "-p", ",".join(str(p) for p in uniq), "-o", "pid=,rss=,pcpu="],
+        timeout=0.4,
+    )
+    out: Dict[int, Tuple[int, float]] = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        try:
+            pid = int(parts[0])
+            rss = int(float(parts[1])) * 1024
+            cpu = float(parts[2])
+        except ValueError:
+            continue
+        out[pid] = (rss, cpu)
+    return out
+
+
+def _role_proc_info() -> Dict[str, Dict[str, Any]]:
+    info: Dict[str, Dict[str, Any]] = {}
+    with state_lock:
+        for role, r in roles.items():
+            proc = r.get("proc")
+            alive = proc is not None and proc.poll() is None
+            info[role] = {
+                "pid": proc.pid if alive else 0,
+                "path": r.get("path") or "",
+                "backend_port": r.get("backend_port") or 0,
+                "label": r.get("label") or "",
+            }
+    return info
+
+
+def _draft_path_from_cmd(cmd: List[str]) -> str:
+    if "-md" not in cmd:
+        return ""
+    try:
+        return cmd[cmd.index("-md") + 1]
+    except (ValueError, IndexError):
+        return ""
+
+
+def _n_ctx_from_props(props: Dict[str, Any], fallback: int) -> int:
+    gen = props.get("default_generation_settings")
+    if isinstance(gen, dict):
+        if isinstance(gen.get("n_ctx"), int) and gen["n_ctx"] > 0:
+            return int(gen["n_ctx"])
+        params = gen.get("params")
+        if isinstance(params, dict) and isinstance(params.get("n_ctx"), int) and params["n_ctx"] > 0:
+            return int(params["n_ctx"])
+    return fallback
+
+
+def _positive_int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    n = int(value)
+    return n if n > 0 else 0
+
+
+def tokens_from_slot(slot: Any) -> int:
+    if not isinstance(slot, dict):
+        return 0
+    past = _positive_int(slot.get("n_past"))
+    if past:
+        return past
+    named = _positive_int(slot.get("n_prompt_tokens"))
+    cache = _positive_int(slot.get("n_prompt_tokens_cache"))
+    processed = _positive_int(slot.get("n_prompt_tokens_processed"))
+    if named:
+        prompt = named
+    elif cache or processed:
+        prompt = cache + processed
+    else:
+        prompt = 0
+    nxt = slot.get("next_token") if isinstance(slot.get("next_token"), dict) else {}
+    decoded = _positive_int(nxt.get("n_decoded")) or _positive_int(slot.get("n_decoded"))
+    if prompt <= 0:
+        return 0
+    return prompt + decoded
+
+
+def tokens_from_slots(slots: Any) -> int:
+    if not isinstance(slots, list):
+        return 0
+    return max((tokens_from_slot(s) for s in slots), default=0)
+
+
+def resolve_ctx_tokens(
+    n_ctx: int,
+    metrics: Dict[str, float],
+    slots: Any = None,
+    last_tokens: int = 0,
+) -> Tuple[int, float, str]:
+    """Live occupancy, else last turn, else process watermark. ratio in [0, 1]."""
+    ctx = n_ctx if n_ctx > 0 else 0
+
+    def ratio_for(n: int, given: Optional[float] = None) -> float:
+        if given is not None:
+            return max(0.0, min(1.0, float(given)))
+        if ctx <= 0:
+            return 0.0
+        return max(0.0, min(1.0, float(n) / float(ctx)))
+
+    kv_tok = prom_get(metrics, "llamacpp:kv_cache_tokens")
+    kv_ratio = prom_get(metrics, "llamacpp:kv_cache_usage_ratio")
+    if kv_tok is not None and float(kv_tok) > 0:
+        n = int(kv_tok)
+        return n, ratio_for(n, kv_ratio), "kv"
+    if kv_ratio is not None and float(kv_ratio) > 0 and ctx:
+        n = int(round(float(kv_ratio) * ctx))
+        return n, ratio_for(n, kv_ratio), "kv"
+
+    live = tokens_from_slots(slots)
+    if live > 0:
+        return live, ratio_for(live), "slot"
+
+    last = _positive_int(last_tokens)
+    if last > 0:
+        return last, ratio_for(last), "last"
+
+    watermark = prom_get(metrics, "llamacpp:n_tokens_max", "llamacpp:n_past_max")
+    if watermark is not None and float(watermark) > 0:
+        n = int(watermark)
+        return n, ratio_for(n), "peak"
+    return 0, 0.0, ""
+
+
+def llm_view(
+    path: str,
+    n_ctx: int,
+    n_parallel: int,
+    cache_type: str,
+    draft_path: str,
+    metrics: Dict[str, float],
+    rss: int,
+    cpu_pct: float,
+    slots: Any = None,
+    last_tokens: int = 0,
+) -> Dict[str, Any]:
+    weights = _gguf_size(path)
+    draft_sz = _gguf_size(draft_path) if draft_path else 0
+    meta = read_gguf_meta(path) if path else {}
+    kv_res = estimate_kv_bytes(
+        int(meta.get("n_layer") or 0),
+        int(meta.get("n_embd") or 0),
+        int(meta.get("n_head") or 0),
+        int(meta.get("n_head_kv") or 0),
+        n_ctx,
+        n_parallel,
+        cache_type,
+    )
+    if kv_res <= 0 and weights > 0 and n_ctx > 0:
+        kv_res = int(weights * 0.08 * (n_ctx / 32768.0) * (kv_elem_bytes(cache_type) / 2.0))
+    n_tokens, ratio, ctx_src = resolve_ctx_tokens(n_ctx, metrics, slots, last_tokens)
+    kv_used = int(kv_res * ratio) if kv_res else 0
+    unified = weights + draft_sz + (kv_used if kv_used else kv_res)
+    return {
+        "weights": weights,
+        "draft": draft_sz,
+        "kv_reserved": kv_res,
+        "kv_used": kv_used,
+        "kv_ratio": ratio,
+        "n_ctx": n_ctx,
+        "n_tokens": n_tokens,
+        "ctx_src": ctx_src,
+        "rss": rss,
+        "cpu_pct": cpu_pct,
+        "unified": unified,
+    }
+
+
+def _empty_host() -> Dict[str, Any]:
+    return {
+        "ram_total": 0,
+        "ram_used": 0,
+        "ram_pct": 0,
+        "cpu_pct": 0,
+        "gpu_pct": None,
+        "gpu_alloc": 0,
+        "gpu_in_use": 0,
+        "therm": "unknown",
+        "llm": {},
+        "embed_rss": 0,
+    }
+
+
+def collect_host_stats() -> Dict[str, Any]:
+    host = _empty_host()
+    total = total_ram_bytes()
+    host["ram_total"] = total
+    used = _sample_ram_used(total)
+    host["ram_used"] = used
+    host["ram_pct"] = int(round(100.0 * used / total)) if total > 0 else 0
+    host["cpu_pct"] = _sample_host_cpu()
+    host.update(_sample_gpu())
+    if platform.system() == "Darwin":
+        host["therm"] = parse_pmset_therm(_run_capture(["pmset", "-g", "therm"], timeout=0.4))
+    roles_info = _role_proc_info()
+    pids = {k: int(v["pid"]) for k, v in roles_info.items() if v.get("pid")}
+    psmap = _ps_rss_cpu(pids)
+    chat = roles_info.get("chat") or {}
+    if chat.get("path"):
+        pid = int(chat.get("pid") or 0)
+        rss, cpu = psmap.get(pid, (0, 0.0))
+        port = int(chat.get("backend_port") or 0)
+        metrics: Dict[str, float] = {}
+        props: Dict[str, Any] = {}
+        slots: Any = []
+        if port:
+            metrics = parse_prom_metrics(_http_get(f"http://127.0.0.1:{port}/metrics"))
+            props = _http_json(f"http://127.0.0.1:{port}/props")
+            raw_slots = _http_json_any(f"http://127.0.0.1:{port}/slots")
+            slots = raw_slots if isinstance(raw_slots, list) else []
+        ctx_raw = opt_or_env("chat_ctx", "TUIDE_HOST_CHAT_CTX", str(CFG["chat_ctx"])) or "32768"
+        ctx_n = int(ctx_raw) if str(ctx_raw).isdigit() else 32768
+        n_ctx = _n_ctx_from_props(props, ctx_n)
+        np_raw = chat_slot_count()
+        np_n = int(np_raw) if np_raw.isdigit() else 1
+        cmd = (last_perf.get("chat") or {}).get("cmd") or []
+        draft = _draft_path_from_cmd(cmd) if isinstance(cmd, list) else ""
+        last_tokens = int((spy.last_chat_ctx() or {}).get("n_tokens") or 0)
+        host["llm"] = llm_view(
+            str(chat["path"]),
+            n_ctx,
+            np_n,
+            cache_type_k_v() or "f16",
+            draft,
+            metrics,
+            rss,
+            cpu,
+            slots=slots,
+            last_tokens=last_tokens,
+        )
+        host["llm"]["label"] = chat.get("label") or ""
+    embed = roles_info.get("embed") or {}
+    epid = int(embed.get("pid") or 0)
+    if epid:
+        host["embed_rss"] = psmap.get(epid, (0, 0.0))[0]
+    return host
+
+
+def _host_sampler_loop() -> None:
+    while True:
+        try:
+            snap = collect_host_stats()
+        except Exception:
+            snap = _empty_host()
+        with _host_lock:
+            _host_latest.clear()
+            _host_latest.update(snap)
+        time.sleep(1.0)
+
+
+def ensure_host_sampler() -> None:
+    global _host_sampler_started
+    with _host_lock:
+        if _host_sampler_started:
+            return
+        _host_sampler_started = True
+        if not _host_latest:
+            _host_latest.update(_empty_host())
+    threading.Thread(target=_host_sampler_loop, name="host-metrics", daemon=True).start()
+
+
+def host_payload() -> Dict[str, Any]:
+    ensure_host_sampler()
+    with _host_lock:
+        return dict(_host_latest) if _host_latest else _empty_host()
+
+
+def _gguf_size(path: str) -> int:
+    try:
+        return Path(path).stat().st_size
+    except OSError:
+        return 0
+
+
+def _name_is_small_chat(path: str) -> bool:
+    name = Path(path).name.lower()
+    return any(tag in name for tag in ("0.5b", "0_5b", "1.5b", "1_5b"))
+
+
+def find_draft_gguf() -> str:
+    explicit = opt_or_env("draft_gguf", "TUIDE_HOST_DRAFT_GGUF")
+    if explicit:
+        if Path(explicit).is_file():
+            return explicit
+        found = find_model(explicit)
+        if found and shards_present(found):
+            return str(model_path(found))
+        return ""
+    for entry in load_catalog_file().get("models") or []:
+        if entry.get("id") == DRAFT_CATALOG_ID:
+            path = model_path(entry)
+            if path.is_file():
+                return str(path)
+    l1 = cache_dir() / "l1"
+    if l1.is_dir():
+        found = sorted(
+            f for f in l1.glob("*.gguf")
+            if "1.5b" in f.name.lower() or "1_5b" in f.name.lower()
+        )
+        if found:
+            return str(found[0])
+    return ""
+
+
+def estimate_chat_plus_draft_bytes(chat_path: str, draft_path: str, ctx: int) -> int:
+    chat_sz = _gguf_size(chat_path)
+    draft_sz = _gguf_size(draft_path)
+    ctx_n = ctx if ctx > 0 else 32768
+    kv = int(chat_sz * 0.25 * (ctx_n / 32768.0))
+    return chat_sz + draft_sz + kv + (3 * 1024 * 1024 * 1024)
+
+
+def select_draft_path(chat_path: str, ctx: Optional[int] = None) -> str:
+    mode = parse_on_off_auto(opt_or_env("draft", "TUIDE_HOST_DRAFT", "auto"), "auto")
+    if mode == "off":
+        return ""
+    draft = find_draft_gguf()
+    if not draft:
+        return ""
+    try:
+        if Path(draft).resolve() == Path(chat_path).resolve():
+            return ""
+    except OSError:
+        if draft == chat_path:
+            return ""
+    if _name_is_small_chat(chat_path):
+        return ""
+    if _gguf_size(chat_path) and _gguf_size(draft) and _gguf_size(chat_path) <= int(_gguf_size(draft) * 1.2):
+        return ""
+    if mode == "on":
+        return draft
+    ctx_n = int(ctx if ctx is not None else (opt_or_env("chat_ctx", "TUIDE_HOST_CHAT_CTX", CFG["chat_ctx"]) or "32768"))
+    needed = estimate_chat_plus_draft_bytes(chat_path, draft, ctx_n)
+    ram = total_ram_bytes()
+    if ram > 0 and needed > int(ram * 0.75):
+        return ""
+    return draft
+
+
+def flash_attn_mode() -> str:
+    raw = opt_or_env("flash_attn", "TUIDE_HOST_FLASH_ATTN", "on")
+    parsed = parse_on_off_auto(raw, "on")
+    if parsed in ("on", "off", "auto"):
+        return parsed
+    return "on"
+
+
+def cache_type_k_v() -> str:
+    raw = opt_or_env("cache_type", "TUIDE_HOST_CACHE_TYPE", "q8_0").lower()
+    if raw in ("", "0", "off", "false", "no", "none", "f16", "fp16"):
+        return ""
+    return raw
+
+
+def chat_slot_count() -> str:
+    raw = opt_or_env("np", "TUIDE_HOST_NP", "1")
+    return raw if raw else "1"
+
+
+def draft_n_max() -> str:
+    raw = opt_or_env("draft_n_max", "TUIDE_HOST_DRAFT_N_MAX", "16")
+    return raw if raw else "16"
+
+
+def embed_ngl() -> str:
+    return opt_or_env("embed_ngl", "TUIDE_HOST_EMBED_NGL", "0") or "0"
+
+
+def chat_llama_argv(server: str, model: str, host: str, port: int, alias: str) -> List[str]:
+    threads = str(performance_core_count())
+    ngl = opt_or_env("ngl", "TUIDE_HOST_NGL", str(CFG["ngl"])) or str(CFG["ngl"])
+    ctx = opt_or_env("chat_ctx", "TUIDE_HOST_CHAT_CTX", str(CFG["chat_ctx"])) or str(CFG["chat_ctx"])
+    cmd = [
+        server, "-m", model, "--host", host, "--port", str(port),
+        "-ngl", ngl,
+        "-c", ctx,
+        "--alias", alias,
+        "-np", chat_slot_count(),
+        "-t", threads,
+        "-tb", threads,
+        "-fa", flash_attn_mode(),
+        "--metrics",
+    ]
+    ctk = cache_type_k_v()
+    if ctk:
+        cmd += ["-ctk", ctk, "-ctv", ctk]
+    draft = select_draft_path(model, int(ctx) if str(ctx).isdigit() else None)
+    if draft:
+        cmd += [
+            "-md", draft,
+            "-ngld", ngl,
+            "--spec-draft-n-max", draft_n_max(),
+        ]
+        if ctk:
+            cmd += ["-ctkd", ctk, "-ctvd", ctk]
+    return cmd
+
+
+def embed_llama_argv(server: str, model: str, host: str, port: int) -> List[str]:
+    ctx = opt_or_env("embed_ctx", "TUIDE_HOST_EMBED_CTX", str(CFG["embed_ctx"])) or str(CFG["embed_ctx"])
+    np_slots = opt_or_env("embed_np", "TUIDE_HOST_EMBED_NP", str(CFG["embed_np"])) or str(CFG["embed_np"])
+    return [
+        server, "-m", model, "--host", host, "--port", str(port),
+        "-ngl", embed_ngl(),
+        "--embedding", "--pooling", "mean",
+        "-c", ctx,
+        "-np", np_slots,
+        "--metrics",
+    ]
+
+
+def perf_summary(role: str = "chat") -> str:
+    snap = last_perf.get(role) or {}
+    if snap.get("summary"):
+        return str(snap["summary"])
+    bits = [
+        f"fa={flash_attn_mode()}",
+        f"kv={cache_type_k_v() or 'f16'}",
+        f"t={performance_core_count()}",
+        f"np={chat_slot_count()}",
+    ]
+    draft = find_draft_gguf()
+    bits.append("draft=" + (Path(draft).name if draft else "off"))
+    if role == "embed":
+        return f"ngl={embed_ngl()}"
+    return " ".join(bits)
+
+
+def _record_perf(role: str, cmd: List[str]) -> None:
+    if role == "chat":
+        draft = ""
+        if "-md" in cmd:
+            try:
+                draft = Path(cmd[cmd.index("-md") + 1]).name
+            except (ValueError, IndexError):
+                draft = "on"
+        last_perf[role] = {
+            "cmd": cmd,
+            "summary": (
+                f"fa={flash_attn_mode()} kv={cache_type_k_v() or 'f16'} "
+                f"t={performance_core_count()} np={chat_slot_count()} "
+                f"draft={draft or 'off'}"
+            ),
+        }
+        return
+    last_perf[role] = {"cmd": cmd, "summary": f"ngl={embed_ngl()}"}
+
+
+def default_launch_opts() -> Dict[str, str]:
+    threads_env = env_trimmed("TUIDE_HOST_THREADS")
+    threads = threads_env if threads_env.isdigit() and int(threads_env) > 0 else str(detect_performance_cores())
+    return {
+        "flash_attn": env_trimmed("TUIDE_HOST_FLASH_ATTN", "on") or "on",
+        "cache_type": env_trimmed("TUIDE_HOST_CACHE_TYPE", "q8_0") or "q8_0",
+        "threads": threads,
+        "np": env_trimmed("TUIDE_HOST_NP", "1") or "1",
+        "ngl": env_trimmed("TUIDE_HOST_NGL", str(CFG["ngl"])) or str(CFG["ngl"]),
+        "chat_ctx": env_trimmed("TUIDE_HOST_CHAT_CTX", str(CFG["chat_ctx"])) or str(CFG["chat_ctx"]),
+        "embed_ngl": env_trimmed("TUIDE_HOST_EMBED_NGL", "0") or "0",
+        "embed_ctx": env_trimmed("TUIDE_HOST_EMBED_CTX", str(CFG["embed_ctx"])) or str(CFG["embed_ctx"]),
+        "embed_np": env_trimmed("TUIDE_HOST_EMBED_NP", str(CFG["embed_np"])) or str(CFG["embed_np"]),
+        "draft": env_trimmed("TUIDE_HOST_DRAFT", "auto") or "auto",
+        "draft_n_max": env_trimmed("TUIDE_HOST_DRAFT_N_MAX", "16") or "16",
+        "draft_gguf": env_trimmed("TUIDE_HOST_DRAFT_GGUF"),
+    }
+
+
+def effective_launch_opts() -> Dict[str, str]:
+    out = default_launch_opts()
+    with launch_lock:
+        for key, val in launch_opts.items():
+            out[key] = str(val)
+    return out
+
+
+def _parse_int_opt(raw: str, lo: int, hi: int, name: str) -> "tuple[int, str]":
+    try:
+        n = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0, f"{name} inválido"
+    if n < lo or n > hi:
+        return 0, f"{name} fuera de rango ({lo}–{hi})"
+    return n, ""
+
+
+def apply_launch_opts(obj: Optional[Dict[str, Any]]) -> str:
+    if not obj:
+        return ""
+    updates: Dict[str, str] = {}
+    if "flash_attn" in obj:
+        fa = parse_on_off_auto(str(obj.get("flash_attn") or ""), "on")
+        if fa not in ("on", "off", "auto"):
+            return "flash_attn debe ser on, off o auto"
+        updates["flash_attn"] = fa
+    if "cache_type" in obj:
+        ctk = str(obj.get("cache_type") or "").strip().lower()
+        allowed = ("q8_0", "f16", "fp16", "q4_0", "q4_1", "q5_0", "q5_1", "bf16", "iq4_nl", "off", "0")
+        if ctk not in allowed:
+            return "cache_type no reconocido"
+        updates["cache_type"] = ctk
+    ranges = (
+        ("threads", 1, 256),
+        ("np", 1, 32),
+        ("ngl", 0, 999),
+        ("chat_ctx", 512, 131072),
+        ("embed_ngl", 0, 999),
+        ("embed_ctx", 256, 8192),
+        ("embed_np", 1, 64),
+        ("draft_n_max", 1, 32),
+    )
+    for key, lo, hi in ranges:
+        if key not in obj:
+            continue
+        n, err = _parse_int_opt(str(obj.get(key) or ""), lo, hi, key)
+        if err:
+            return err
+        updates[key] = str(n)
+    if "draft" in obj:
+        mode = parse_on_off_auto(str(obj.get("draft") or ""), "auto")
+        if mode not in ("on", "off", "auto"):
+            return "draft debe ser auto, on u off"
+        updates["draft"] = mode
+    if "draft_gguf" in obj:
+        raw = str(obj.get("draft_gguf") or "").strip()
+        if raw:
+            if Path(raw).is_file():
+                updates["draft_gguf"] = raw
+            else:
+                found = find_model(raw)
+                if found and shards_present(found):
+                    updates["draft_gguf"] = str(model_path(found))
+                else:
+                    return "draft GGUF no encontrado"
+        else:
+            updates["draft_gguf"] = ""
+    if not updates:
+        return ""
+    with launch_lock:
+        launch_opts.update(updates)
+    return ""
+
+
+def draft_choices() -> List[Dict[str, str]]:
+    items: List[Dict[str, str]] = []
+    seen = set()
+    for m in all_models():
+        if (m.get("role") or "chat") != "chat":
+            continue
+        if not shards_present(m):
+            continue
+        path = str(model_path(m))
+        if path in seen:
+            continue
+        seen.add(path)
+        items.append({
+            "id": str(m.get("id") or ""),
+            "label": str(m.get("label") or Path(path).name),
+            "path": path,
+        })
+    return items
 
 
 def _role_for_disk(rel: str, resolved: str) -> str:
@@ -292,7 +1303,11 @@ def download_url_to_file(url: str, dest: Path, expected: int, did: str) -> None:
     curl = shutil.which("curl")
     wget = shutil.which("wget")
     if curl:
-        cmd = ["curl", "-fL", "--retry", "3", "--connect-timeout", "20", "-o", str(tmp), url]
+        cmd = [
+            "curl", "-fL", "-C", "-",
+            "-A", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "--retry", "3", "--connect-timeout", "20", "-o", str(tmp), url,
+        ]
     elif wget:
         cmd = ["wget", "-O", str(tmp), url]
     else:
@@ -413,15 +1428,19 @@ def start_role(role: str, entry: Dict[str, Any]) -> str:
     for key in ("DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH"):
         prev = env.get(key, "")
         env[key] = lib_dir if not prev else f"{lib_dir}:{prev}"
-    cmd = [
-        server, "-m", str(path), "--host", bind_host, "--port", str(backend_port),
-        "-ngl", str(CFG["ngl"]),
-    ]
     if role == "chat":
-        cmd += ["-c", str(CFG["chat_ctx"]), "--alias", alias]
+        cmd = chat_llama_argv(server, str(path), bind_host, backend_port, alias)
     else:
-        cmd += ["--embedding", "--pooling", "mean", "-c", str(CFG["embed_ctx"]),
-                "-np", str(CFG["embed_np"])]
+        cmd = embed_llama_argv(server, str(path), bind_host, backend_port)
+    _record_perf(role, cmd)
+    log(f"{role} llama-server {' '.join(cmd[1:])}")
+    if role == "chat" and "-md" not in cmd:
+        mode = parse_on_off_auto(opt_or_env("draft", "TUIDE_HOST_DRAFT", "auto"), "auto")
+        if mode != "off":
+            if not find_draft_gguf():
+                log("chat sin draft: descarga Qwen2.5 Instruct 1.5B (L1) para speculative decoding")
+            else:
+                log("chat sin draft: modelo pequeño, mismo GGUF o RAM justa (TUIDE_HOST_DRAFT=1 fuerza)")
     logf = open(log_dir() / f"{role}.log", "ab")
     proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, env=env)
     health = f"http://127.0.0.1:{backend_port}/health"
@@ -462,7 +1481,7 @@ def start_role(role: str, entry: Dict[str, Any]) -> str:
 
 def preferred_chat() -> Optional[Dict[str, Any]]:
     installed = [m for m in all_models() if m.get("role") == "chat" and shards_present(m)]
-    order = ("32b", "14b", "7b", "3b", "1.5b")
+    order = ("70b", "32b", "14b", "7b", "3b", "1.5b")
     for key in order:
         for m in installed:
             name = (m.get("filename") or m.get("id") or "").lower()
@@ -538,12 +1557,21 @@ def status_payload() -> Dict[str, Any]:
         "ask": bool(chat.get("running")),
         "busy": spy.chat_busy(),
         "chat": chat,
+        "thread": spy.chat_thread_status(),
         "embed": embed,
         "advertise": adv,
         "chat_port": CFG["chat_port"],
         "embed_port": CFG["embed_port"],
         "web_port": CFG["web_port"],
         "runtime": runtime_payload(),
+        "perf": {
+            "chat": (last_perf.get("chat") or {}).get("summary") or perf_summary("chat"),
+            "embed": (last_perf.get("embed") or {}).get("summary") or f"ngl={embed_ngl()}",
+        },
+        "launch": effective_launch_opts(),
+        "launch_defaults": default_launch_opts(),
+        "drafts": draft_choices(),
+        "host": host_payload(),
         "vm": {
             "api_base": f"http://{adv}:{CFG['chat_port']}/v1" if chat.get("running") else "",
             "api_model": chat.get("alias") or "",
@@ -608,10 +1636,18 @@ html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:
   font:13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; }
 #chrome { height:var(--chrome); display:flex; align-items:center; gap:10px; padding:0 14px;
   border-bottom:1px solid var(--line); background:#14161c; flex-shrink:0; }
+body.webapp #chrome { padding-left:86px; -webkit-app-region:drag; }
+body.webapp #chrome button, body.webapp .chip { -webkit-app-region:no-drag; }
 #chrome h1 { margin:0; font-size:13px; font-weight:600; letter-spacing:.04em; }
 #modes { display:flex; gap:6px; }
-#chrome-status { color:var(--muted); font-size:11px; margin-left:auto; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; max-width:46vw; }
+#chrome-metrics { display:flex; gap:5px; margin-left:auto; align-items:center; min-width:0;
+  overflow:hidden; }
+.chip { font-size:11px; font-variant-numeric:tabular-nums; padding:2px 7px; border:1px solid var(--line);
+  border-radius:4px; color:var(--muted); white-space:nowrap; }
+.chip.warn { color:var(--warn); border-color:#6a5a20; }
+.chip.hot { color:var(--err); border-color:#5a3535; }
+#chrome-status { color:var(--muted); font-size:11px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; max-width:22vw; flex-shrink:0; }
 button { background:#0c0d10; color:var(--muted); border:1px solid var(--line);
   border-radius:6px; padding:6px 10px; cursor:pointer; font:inherit; }
 button.on { color:var(--txt); border-color:#4a5568; background:#22252c; }
@@ -640,6 +1676,13 @@ h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(-
 input, select { background:#0c0d10; color:var(--txt); border:1px solid var(--line);
   border-radius:6px; padding:6px 8px; font:inherit; }
 input[type=text] { min-width:280px; flex:1; }
+#perf-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(168px, 1fr));
+  gap:10px 14px; margin:8px 0 4px; }
+#perf-grid label { display:flex; flex-direction:column; gap:4px; color:var(--muted); font-size:11px; }
+#perf-grid label > span { letter-spacing:.04em; text-transform:uppercase; }
+#perf-grid input, #perf-grid select { width:100%; min-width:0; }
+#perf-help { color:var(--muted); font-size:11px; margin:0 0 8px; }
+#perf-help code { color:var(--txt); }
 #hint, #import-msg, #rt-msg { color:var(--warn); font-size:12px; min-height:1.2em; }
 pre.vm { background:#0c0d10; border:1px solid var(--line); border-radius:8px; padding:12px;
   overflow:auto; color:#c5c9d1; }
@@ -654,6 +1697,7 @@ pre.vm { background:#0c0d10; border:1px solid var(--line); border-radius:8px; pa
     <button type="button" id="m-launch" class="on">Lanzamiento</button>
     <button type="button" id="m-inspect">Inspección</button>
   </div>
+  <div id="chrome-metrics"></div>
   <div id="chrome-status">arrancando…</div>
 </div>
 <div id="views">
@@ -663,6 +1707,50 @@ pre.vm { background:#0c0d10; border:1px solid var(--line); border-radius:8px; pa
       <button type="button" id="rt-install" class="ok">Instalar llama-server</button>
     </div>
     <div id="rt-msg"></div>
+    <h2>Rendimiento</h2>
+    <p id="perf-help">Se aplican al <b>Lanzar</b> o <b>Reiniciar</b>. Por defecto: flash-attn, KV q8_0, 1 slot, embeddings en CPU, draft 1.5B automático.</p>
+    <div id="perf-grid">
+      <label><span>Flash attention</span>
+        <select id="opt-fa">
+          <option value="on" selected>on</option>
+          <option value="auto">auto</option>
+          <option value="off">off</option>
+        </select></label>
+      <label><span>KV cache</span>
+        <select id="opt-ctk">
+          <option value="q8_0" selected>q8_0</option>
+          <option value="f16">f16</option>
+          <option value="q4_0">q4_0</option>
+          <option value="q5_0">q5_0</option>
+          <option value="bf16">bf16</option>
+          <option value="off">off (f16)</option>
+        </select></label>
+      <label><span>Hilos (P-cores)</span>
+        <input id="opt-threads" type="number" min="1" max="256" value="8"></label>
+      <label><span>Slots (-np)</span>
+        <input id="opt-np" type="number" min="1" max="32" value="1"></label>
+      <label><span>GPU layers chat</span>
+        <input id="opt-ngl" type="number" min="0" max="999" value="99"></label>
+      <label><span>Contexto chat</span>
+        <input id="opt-ctx" type="number" min="512" max="131072" step="512" value="32768"></label>
+      <label><span>GPU layers embed</span>
+        <input id="opt-embed-ngl" type="number" min="0" max="999" value="0"></label>
+      <label><span>Draft</span>
+        <select id="opt-draft">
+          <option value="auto" selected>auto</option>
+          <option value="on">on</option>
+          <option value="off">off</option>
+        </select></label>
+      <label><span>Draft tokens</span>
+        <input id="opt-draft-n" type="number" min="1" max="32" value="16"></label>
+      <label><span>Draft GGUF</span>
+        <select id="opt-draft-gguf">
+          <option value="">automático (1.5B L1)</option>
+        </select></label>
+    </div>
+    <div class="row" style="margin-bottom:12px">
+      <button type="button" id="opt-reset">Restaurar defaults</button>
+    </div>
     <h2>Chat</h2>
     <div id="list-chat"></div>
     <h2>Embeddings</h2>
@@ -684,6 +1772,9 @@ pre.vm { background:#0c0d10; border:1px solid var(--line); border-radius:8px; pa
 </div>
 <script>
 let mode = "launch";
+let optsReady = false;
+let launchDefaults = null;
+let lastDrafts = [];
 function setMode(m) {
   mode = m === "inspect" ? "inspect" : "launch";
   document.getElementById("view-launch").classList.toggle("on", mode === "launch");
@@ -694,7 +1785,123 @@ function setMode(m) {
   if (location.hash !== hash) history.replaceState(null, "", hash);
 }
 function esc(s) {
-  return String(s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+  return String(s || "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+function fmtG(n) {
+  n = Number(n) || 0;
+  if (n >= 1073741824) return (n / 1073741824).toFixed(1) + "G";
+  if (n >= 1048576) return Math.round(n / 1048576) + "M";
+  if (n >= 1024) return Math.round(n / 1024) + "K";
+  return n + "B";
+}
+function fmtTok(n) {
+  n = Number(n) || 0;
+  if (n >= 10000) return Math.round(n / 1000) + "k";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+  return String(n);
+}
+function chip(text, title, cls) {
+  return `<span class="chip${cls ? " " + cls : ""}" title="${esc(title)}">${esc(text)}</span>`;
+}
+function renderMetrics(h) {
+  const el = document.getElementById("chrome-metrics");
+  if (!el) return;
+  if (!h) { el.innerHTML = ""; return; }
+  const chips = [];
+  if (h.ram_total) {
+    const cls = (h.ram_pct || 0) >= 85 ? "warn" : "";
+    chips.push(chip(
+      "RAM " + fmtG(h.ram_used) + "/" + fmtG(h.ram_total),
+      (h.ram_pct || 0) + "% · unificada (pesos+KV+macOS)",
+      cls
+    ));
+  }
+  const llm = h.llm || {};
+  if (llm.weights) {
+    const committed = (llm.weights || 0) + (llm.draft || 0) + (llm.kv_reserved || 0);
+    const ratio = llm.kv_ratio || 0;
+    const cls = ratio >= 0.8 ? "warn" : "";
+    let title = "pesos " + fmtG(llm.weights);
+    if (llm.draft) title += " · draft " + fmtG(llm.draft);
+    title += " · KV " + fmtG(llm.kv_used) + "/" + fmtG(llm.kv_reserved);
+    if (llm.rss) title += " · RSS " + fmtG(llm.rss);
+    if (h.embed_rss) title += " · embed " + fmtG(h.embed_rss);
+    chips.push(chip("LLM " + fmtG(committed), title, cls));
+    if (llm.n_ctx) {
+      const srcMap = {kv: "KV live", slot: "slot en curso", last: "último turno", peak: "máx. desde arranque"};
+      const src = srcMap[llm.ctx_src] || "";
+      chips.push(chip(
+        "ctx " + fmtTok(llm.n_tokens) + "/" + fmtTok(llm.n_ctx),
+        (src ? src + " · " : "") + Math.round(ratio * 100) + "% · " + (llm.n_tokens || 0) + "/" + llm.n_ctx + " tokens",
+        cls
+      ));
+    }
+  }
+  if (h.gpu_pct != null) {
+    const gTitle = "util " + h.gpu_pct + "%"
+      + (h.gpu_alloc ? " · GPU alloc " + fmtG(h.gpu_alloc) : "")
+      + (h.gpu_in_use ? " · in use " + fmtG(h.gpu_in_use) : "");
+    chips.push(chip("GPU " + h.gpu_pct + "%", gTitle, h.gpu_pct >= 90 ? "warn" : ""));
+  }
+  chips.push(chip("CPU " + (h.cpu_pct || 0) + "%", "carga del host (todos los núcleos)", (h.cpu_pct || 0) >= 90 ? "warn" : ""));
+  const therm = h.therm || "unknown";
+  chips.push(chip(
+    therm === "throttle" ? "therm throttle" : (therm === "ok" ? "therm ok" : "therm —"),
+    "presión térmica (sin °C; hace falta sudo powermetrics)",
+    therm === "throttle" ? "hot" : ""
+  ));
+  el.innerHTML = chips.join("");
+}
+function readLaunch() {
+  return {
+    flash_attn: document.getElementById("opt-fa").value,
+    cache_type: document.getElementById("opt-ctk").value,
+    threads: document.getElementById("opt-threads").value,
+    np: document.getElementById("opt-np").value,
+    ngl: document.getElementById("opt-ngl").value,
+    chat_ctx: document.getElementById("opt-ctx").value,
+    embed_ngl: document.getElementById("opt-embed-ngl").value,
+    draft: document.getElementById("opt-draft").value,
+    draft_n_max: document.getElementById("opt-draft-n").value,
+    draft_gguf: document.getElementById("opt-draft-gguf").value,
+  };
+}
+function fillSelect(id, value, allowed) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (value && allowed && !allowed.includes(value)) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = value;
+    el.appendChild(opt);
+  }
+  if (value) el.value = value;
+}
+function syncDraftSelect(drafts, keep) {
+  const sel = document.getElementById("opt-draft-gguf");
+  const cur = keep !== undefined ? keep : sel.value;
+  const rows = [["", "automático (1.5B L1)"]].concat(
+    (drafts || []).map(d => [d.path, (d.label || d.path) + (d.path ? "  ·  " + d.path.split("/").pop() : "")])
+  );
+  const same = sel.options.length === rows.length &&
+    [...sel.options].every((o, i) => o.value === rows[i][0]);
+  if (!same) {
+    sel.innerHTML = rows.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+  }
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+function applyLaunchForm(o, drafts) {
+  if (!o) return;
+  fillSelect("opt-fa", o.flash_attn, ["on", "off", "auto"]);
+  fillSelect("opt-ctk", o.cache_type, ["q8_0", "f16", "q4_0", "q5_0", "bf16", "off"]);
+  document.getElementById("opt-threads").value = o.threads || "";
+  document.getElementById("opt-np").value = o.np || "1";
+  document.getElementById("opt-ngl").value = o.ngl || "99";
+  document.getElementById("opt-ctx").value = o.chat_ctx || "32768";
+  document.getElementById("opt-embed-ngl").value = o.embed_ngl || "0";
+  fillSelect("opt-draft", o.draft, ["auto", "on", "off"]);
+  document.getElementById("opt-draft-n").value = o.draft_n_max || "16";
+  syncDraftSelect(drafts == null ? lastDrafts : drafts, o.draft_gguf || "");
 }
 function tierBadge(m) {
   if (m.tier === "tide-l2") return '<span class="badge l2">TIDE L2</span>';
@@ -732,9 +1939,9 @@ function bindCards(root) {
   root.querySelectorAll("button[data-act]").forEach(btn => {
     btn.onclick = async () => {
       const act = btn.dataset.act;
-      const body = {id: btn.dataset.id, role: btn.dataset.role};
+      const body = {id: btn.dataset.id, role: btn.dataset.role, launch: readLaunch()};
       try {
-        if (act === "download") await api("/api/download", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+        if (act === "download") await api("/api/download", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({id: body.id, role: body.role})});
         if (act === "start") await api("/api/start", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
         if (act === "stop") await api("/api/stop", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({role: body.role})});
         if (act === "restart") await api("/api/restart", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
@@ -756,13 +1963,23 @@ async function refresh() {
     le.innerHTML = embed.map(card).join("") || '<div class="meta">sin embeddings</div>';
     bindCards(lc); bindCards(le);
     const rt = st.runtime || {};
+    const perf = st.perf || {};
+    if (st.launch_defaults) launchDefaults = st.launch_defaults;
+    if (st.drafts) lastDrafts = st.drafts;
+    if (!optsReady && st.launch) {
+      applyLaunchForm(st.launch, lastDrafts);
+      optsReady = true;
+    } else {
+      syncDraftSelect(lastDrafts);
+    }
     document.getElementById("rt-line").textContent = rt.found
-      ? ("llama-server: " + rt.llama_server)
+      ? ("llama-server: " + rt.llama_server + (perf.chat ? " · " + perf.chat : ""))
       : "llama-server no encontrado";
     document.getElementById("rt-install").style.display = rt.found ? "none" : "inline-block";
     const ch = st.chat && st.chat.running ? (st.chat.label || "chat") : "chat off";
     const em = st.embed && st.embed.running ? (st.embed.label || "embed") : "embed off";
     document.getElementById("chrome-status").textContent = ch + " · " + em;
+    renderMetrics(st.host);
     const vm = st.vm || {};
     const lines = [];
     if (vm.api_base) {
@@ -789,6 +2006,13 @@ document.getElementById("rt-install").onclick = async () => {
     document.getElementById("rt-msg").textContent = e.message || String(e);
   }
 };
+document.getElementById("opt-reset").onclick = () => {
+  const d = launchDefaults || {
+    flash_attn: "on", cache_type: "q8_0", threads: "8", np: "1", ngl: "99",
+    chat_ctx: "32768", embed_ngl: "0", draft: "auto", draft_n_max: "16", draft_gguf: ""
+  };
+  applyLaunchForm(d, lastDrafts);
+};
 document.getElementById("imp-go").onclick = async () => {
   const src = document.getElementById("imp-src").value.trim();
   const role = document.getElementById("imp-role").value;
@@ -806,6 +2030,7 @@ document.getElementById("imp-go").onclick = async () => {
 window.addEventListener("hashchange", () => {
   setMode(location.hash === "#inspect" ? "inspect" : "launch");
 });
+if (/tuide-host-webapp/.test(navigator.userAgent || "")) document.body.classList.add("webapp");
 if (location.hash === "#inspect") setMode("inspect");
 refresh();
 setInterval(refresh, 1000);
@@ -940,6 +2165,10 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 return
             if role not in ("chat", "embed"):
                 role = str(entry.get("role") or "chat")
+            err = apply_launch_opts(obj.get("launch") if isinstance(obj.get("launch"), dict) else None)
+            if err:
+                self._json(400, {"ok": False, "error": err})
+                return
             err = start_role(role, entry)
             if err:
                 self._json(500, {"ok": False, "error": err})
@@ -969,6 +2198,10 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             if not entry:
                 self._json(400, {"ok": False, "error": "no hay modelo para reiniciar"})
                 return
+            err = apply_launch_opts(obj.get("launch") if isinstance(obj.get("launch"), dict) else None)
+            if err:
+                self._json(400, {"ok": False, "error": err})
+                return
             err = start_role(role, entry)
             if err:
                 self._json(500, {"ok": False, "error": err})
@@ -979,29 +2212,29 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             threading.Thread(target=install_runtime, daemon=True).start()
             self._json(200, {"ok": True})
             return
+        if path == "/api/history/clear":
+            self._json(200, spy.clear_history())
+            return
+        if path == "/api/ask/stop":
+            chat = role_snapshot("chat")
+            backend_port = int(chat.get("backend_port") or (CFG["chat_port"] + 10000))
+            self._json(200, spy.request_stop_generation("127.0.0.1", backend_port))
+            return
         if path == "/api/ask":
             chat = role_snapshot("chat")
             if not chat.get("running"):
                 self._json(503, {"ok": False, "error": "no hay LLM en este visor"})
                 return
-            user = str(obj.get("user") or "").strip()
-            system = str(obj.get("system") or "")
-            if not user:
-                self._json(400, {"ok": False, "error": "user vacío"})
-                return
             backend_port = int(chat.get("backend_port") or (CFG["chat_port"] + 10000))
             try:
-                text, rid, err = spy.run_direct_ask(user, system, "127.0.0.1", backend_port)
+                code, payload = spy.handle_ask_post(obj, "127.0.0.1", backend_port)
             except (TimeoutError, socket.timeout) as ex:
                 self._json(504, {"ok": False, "error": f"timeout: {ex}"})
                 return
             except OSError as ex:
                 self._json(502, {"ok": False, "error": str(ex)})
                 return
-            if err:
-                self._json(502, {"ok": False, "id": rid, "error": err, "chars": len(text)})
-                return
-            self._json(200, {"ok": True, "id": rid, "chars": len(text)})
+            self._json(code, payload)
             return
         self._send(404, b"not found\n", "text/plain")
 
@@ -1016,12 +2249,74 @@ def cleanup() -> None:
     stop_role("embed")
 
 
-def open_browser(url: str) -> None:
+WEBAPP_SRC = TOOLS_DIR / "host_llama_webapp.swift"
+
+
+def host_webapp_bin() -> Path:
+    return cache_dir() / "runtime" / "tuide-host-webapp"
+
+
+def chrome_macos_bin() -> str:
+    for path in (
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        str(Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    ):
+        if Path(path).is_file():
+            return path
+    return ""
+
+
+def ensure_host_webapp() -> str:
+    if platform.system() != "Darwin":
+        return ""
+    src = WEBAPP_SRC
+    if not src.is_file():
+        return ""
+    dest = host_webapp_bin()
     try:
-        if platform.system() == "Darwin":
-            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.is_file() and dest.stat().st_mtime >= src.stat().st_mtime:
+            return str(dest)
+        swiftc = shutil.which("swiftc") or "/usr/bin/swiftc"
+        if not Path(swiftc).is_file():
+            return ""
+        log("compilando ventana WebKit (sin chrome de Safari)…")
+        subprocess.check_call(
+            [swiftc, "-O", "-o", str(dest), str(src)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=90,
+        )
+        return str(dest) if dest.is_file() else ""
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return ""
+
+
+def browser_launch_argv(url: str) -> List[str]:
+    mode = os.environ.get("TUIDE_HOST_BROWSER", "app").strip().lower() or "app"
+    if platform.system() != "Darwin":
+        return ["xdg-open", url]
+    if mode in ("safari",):
+        return ["open", "-a", "Safari", url]
+    if mode in ("system", "default"):
+        return ["open", url]
+    if mode in ("app", "webapp", "webkit", "chrome"):
+        if mode != "chrome":
+            webapp = ensure_host_webapp()
+            if webapp:
+                return [webapp, url]
+        chrome = chrome_macos_bin()
+        if chrome:
+            return [chrome, f"--app={url}"]
+        if mode == "chrome":
+            return ["open", "-na", "Google Chrome", "--args", f"--app={url}"]
+    return ["open", url]
+
+
+def open_browser(url: str) -> None:
+    cmd = browser_launch_argv(url)
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
         log(f"abre el navegador en {url}")
 
@@ -1071,6 +2366,7 @@ def main() -> int:
     args = ap.parse_args()
     spy.jsonl_path = str(log_dir() / "spy.jsonl")
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    ensure_host_sampler()
 
     if args.autostart:
         if not args.chat:
@@ -1083,9 +2379,19 @@ def main() -> int:
     host, port_s = args.listen.rsplit(":", 1)
     CFG["web_host"] = host
     CFG["web_port"] = int(port_s)
-    httpd = HubServer((host, int(port_s)), HubHandler)
     mode = args.mode
     url = f"http://{host}:{port_s}/#{mode}"
+    try:
+        httpd = HubServer((host, int(port_s)), HubHandler)
+    except OSError as ex:
+        if getattr(ex, "errno", None) not in (errno.EADDRINUSE, 48):
+            raise
+        log(f"puerto {port_s} ocupado: el hub ya está en {url}")
+        log("para recargar: ./tools/run_host_llama.sh --stop")
+        log(f"o cierra esa instancia (lsof -nP -iTCP:{port_s} -sTCP:LISTEN)")
+        if args.open_browser:
+            open_browser(url)
+        return 0
     log(f"web {url}")
     log(f"cache {cache_dir()}")
     if args.open_browser:

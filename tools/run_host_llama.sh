@@ -11,6 +11,7 @@
 #   ./tools/run_host_llama.sh --term xterm    # XQuartz (legado / --ui gui)
 #   ./tools/run_host_llama.sh --term headless # nohup, sin ventana
 #   ./tools/run_host_llama.sh --foreground    # hub en esta terminal
+#   ./tools/run_host_llama.sh --stop          # para hub/spy/llama-server en los puertos tuide
 #   ./tools/run_host_llama.sh -y              # autoelige GGUF y abre Inspección
 set -euo pipefail
 
@@ -21,6 +22,12 @@ NGL="${TUIDE_HOST_NGL:-99}"
 CHAT_CTX="${TUIDE_HOST_CHAT_CTX:-32768}"
 EMBED_CTX="${TUIDE_HOST_EMBED_CTX:-2048}"
 EMBED_NP="${TUIDE_HOST_EMBED_NP:-8}"
+EMBED_NGL="${TUIDE_HOST_EMBED_NGL:-0}"
+FLASH_ATTN="${TUIDE_HOST_FLASH_ATTN:-on}"
+CACHE_TYPE="${TUIDE_HOST_CACHE_TYPE:-q8_0}"
+CHAT_NP="${TUIDE_HOST_NP:-1}"
+DRAFT_N_MAX="${TUIDE_HOST_DRAFT_N_MAX:-16}"
+DRAFT_MODE="${TUIDE_HOST_DRAFT:-auto}"
 
 CACHE_ROOT="${XDG_CACHE_HOME:-${HOME}/.cache}/tuide/models"
 L1_DIR="${CACHE_ROOT}/l1"
@@ -46,7 +53,7 @@ usage() {
   cat <<EOF
 Uso: $(basename "$0") [opciones]
 
-  --llm <id|ruta|none>   GGUF de chat (substring: 7b, 14b, 32b, o ruta)
+  --llm <id|ruta|none>   GGUF de chat (substring: 7b, 14b, 32b, 70b, o ruta)
   --embed [id|ruta]      GGUF de embeddings (sin valor = el primero / nomic)
   --no-llm               No levantar el servidor de chat
   --no-embed             No levantar el servidor de embeddings
@@ -56,17 +63,22 @@ Uso: $(basename "$0") [opciones]
   --no-spy               Sin proxy: no se ven tokens en la terminal
   --no-web               Sin hub HTML; picker legado y llama-server directo
   --foreground           Hub/servidores en esta terminal (no abre otra ventana)
+  --stop                 Para hub, spy y llama-server si ocupan los puertos tuide
   -y, --yes              Autoelege (LLM más grande + embeddings) y abre Inspección
   -h, --help             Esta ayuda
 
-Sin flags abre el hub HTML (Lanzamiento | Inspección) en el navegador.
+Sin flags abre el hub HTML (Lanzamiento | Inspección) en una ventana WebKit
+(sin pestañas ni barra de URL). TUIDE_HOST_BROWSER=safari|chrome|system para otro.
 GGUF en:
   LLM:  ${L2_DIR}  y  ${L1_DIR}
   Embed: ${EMBED_DIR}
 
 Variables: TUIDE_L2_GGUF, TUIDE_EMBED_GGUF, TUIDE_LLAMA_SERVER,
   TUIDE_HOST_CHAT_PORT, TUIDE_HOST_EMBED_PORT, TUIDE_HOST_WEB_PORT,
-  TUIDE_HOST_NGL, TUIDE_L2_API_MODEL, TUIDE_ADVERTISE_HOST.
+  TUIDE_HOST_NGL, TUIDE_HOST_EMBED_NGL, TUIDE_HOST_CHAT_CTX,
+  TUIDE_HOST_FLASH_ATTN, TUIDE_HOST_CACHE_TYPE, TUIDE_HOST_THREADS,
+  TUIDE_HOST_DRAFT, TUIDE_HOST_DRAFT_GGUF, TUIDE_L2_API_MODEL,
+  TUIDE_ADVERTISE_HOST, TUIDE_HOST_BROWSER (app|chrome|safari|system).
 EOF
 }
 
@@ -85,6 +97,87 @@ file_size() {
   else
     stat -c%s "$1"
   fi
+}
+
+perf_threads() {
+  if [[ -n "${TUIDE_HOST_THREADS:-}" ]]; then
+    printf '%s\n' "${TUIDE_HOST_THREADS}"
+    return 0
+  fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    local n
+    n="$(sysctl -n hw.perflevel0.logicalcpu 2>/dev/null || true)"
+    if [[ "${n}" =~ ^[1-9][0-9]*$ ]]; then
+      printf '%s\n' "${n}"
+      return 0
+    fi
+  fi
+  if command -v nproc >/dev/null 2>&1; then
+    nproc
+    return 0
+  fi
+  printf '4\n'
+}
+
+find_default_draft_gguf() {
+  if [[ -n "${TUIDE_HOST_DRAFT_GGUF:-}" && -f "${TUIDE_HOST_DRAFT_GGUF}" ]]; then
+    printf '%s\n' "${TUIDE_HOST_DRAFT_GGUF}"
+    return 0
+  fi
+  local f
+  shopt -s nullglob
+  for f in "${L1_DIR}"/*1.5b*.gguf "${L1_DIR}"/*1_5b*.gguf; do
+    [[ -f "${f}" ]] || continue
+    [[ "${f}" == *.partial ]] && continue
+    printf '%s\n' "${f}"
+    shopt -u nullglob
+    return 0
+  done
+  shopt -u nullglob
+  return 1
+}
+
+resolve_draft_gguf() {
+  local chat="$1"
+  local mode
+  mode="$(printf '%s' "${DRAFT_MODE}" | tr '[:upper:]' '[:lower:]')"
+  case "${mode}" in
+    0|off|false|no|none) printf '\n'; return 0 ;;
+  esac
+  local draft=""
+  draft="$(find_default_draft_gguf || true)"
+  if [[ -z "${draft}" || -z "${chat}" ]]; then
+    printf '\n'
+    return 0
+  fi
+  if [[ "${draft}" == "${chat}" ]]; then
+    printf '\n'
+    return 0
+  fi
+  local base
+  base="$(basename "${chat}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${base}" == *1.5b* || "${base}" == *1_5b* || "${base}" == *0.5b* ]]; then
+    printf '\n'
+    return 0
+  fi
+  case "${mode}" in
+    1|on|true|yes)
+      printf '%s\n' "${draft}"
+      return 0
+      ;;
+  esac
+  local chat_sz draft_sz mem=0 needed
+  chat_sz="$(file_size "${chat}")"
+  draft_sz="$(file_size "${draft}")"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    mem="$(sysctl -n hw.memsize 2>/dev/null || true)"
+  fi
+  needed=$((chat_sz + draft_sz + chat_sz / 4 + 3 * 1024 * 1024 * 1024))
+  if [[ "${mem}" =~ ^[1-9][0-9]*$ ]] && (( needed > mem * 3 / 4 )); then
+    printf '\n'
+    return 0
+  fi
+  printf '%s\n' "${draft}"
 }
 
 find_llama_server() {
@@ -197,6 +290,16 @@ preferred_llm_index() {
   local i=1
   local size role path base
   local fallback=1
+  while IFS=$'\t' read -r size role path; do
+    [[ -n "${path}" ]] || continue
+    base="$(basename "${path}")"
+    if [[ "${base}" == *70b* || "${base}" == *70B* ]]; then
+      printf '%s\n' "${i}"
+      return 0
+    fi
+    i=$((i + 1))
+  done <<<"${rows}"
+  i=1
   while IFS=$'\t' read -r size role path; do
     [[ -n "${path}" ]] || continue
     base="$(basename "${path}")"
@@ -464,9 +567,16 @@ EMBED_PORT=$(printf '%q' "${EMBED_PORT}")
 CHAT_BACKEND=$(printf '%q' "${chat_backend}")
 EMBED_BACKEND=$(printf '%q' "${embed_backend}")
 NGL=$(printf '%q' "${NGL}")
+EMBED_NGL=$(printf '%q' "${EMBED_NGL}")
 CHAT_CTX=$(printf '%q' "${CHAT_CTX}")
 EMBED_CTX=$(printf '%q' "${EMBED_CTX}")
 EMBED_NP=$(printf '%q' "${EMBED_NP}")
+FLASH_ATTN=$(printf '%q' "${FLASH_ATTN}")
+CACHE_TYPE=$(printf '%q' "${CACHE_TYPE}")
+CHAT_NP=$(printf '%q' "${CHAT_NP}")
+THREADS=$(printf '%q' "${THREADS}")
+DRAFT_GGUF=$(printf '%q' "${DRAFT_GGUF}")
+DRAFT_N_MAX=$(printf '%q' "${DRAFT_N_MAX}")
 LOG_DIR=$(printf '%q' "${LOG_DIR}")
 ADVERTISE=$(printf '%q' "${advertise}")
 SPY_PY=$(printf '%q' "${spy_py}")
@@ -522,16 +632,29 @@ wait_http() {
 }
 printf '[host-llama] llama-server: %s\\n' "\${SERVER}"
 if [[ -n "\${CHAT_GGUF}" ]]; then
+  CHAT_EXTRA=(-np "\${CHAT_NP}" -t "\${THREADS}" -tb "\${THREADS}" -fa "\${FLASH_ATTN}")
+  if [[ -n "\${CACHE_TYPE}" && "\${CACHE_TYPE}" != "off" && "\${CACHE_TYPE}" != "0" && "\${CACHE_TYPE}" != "f16" && "\${CACHE_TYPE}" != "fp16" ]]; then
+    CHAT_EXTRA+=(-ctk "\${CACHE_TYPE}" -ctv "\${CACHE_TYPE}")
+  fi
+  if [[ -n "\${DRAFT_GGUF}" ]]; then
+    CHAT_EXTRA+=(-md "\${DRAFT_GGUF}" -ngld "\${NGL}" --spec-draft-n-max "\${DRAFT_N_MAX}")
+    if [[ -n "\${CACHE_TYPE}" && "\${CACHE_TYPE}" != "off" && "\${CACHE_TYPE}" != "0" && "\${CACHE_TYPE}" != "f16" && "\${CACHE_TYPE}" != "fp16" ]]; then
+      CHAT_EXTRA+=(-ctkd "\${CACHE_TYPE}" -ctvd "\${CACHE_TYPE}")
+    fi
+    printf '[host-llama] chat draft %s\\n' "\${DRAFT_GGUF}"
+  else
+    printf '[host-llama] chat sin draft (descarga Qwen2.5 1.5B L1 para speculative decoding)\\n'
+  fi
   printf '[host-llama] chat llama-server %s:%s  %s\\n' "\${CHAT_BIND_HOST}" "\${CHAT_BIND_PORT}" "\${CHAT_GGUF}"
   "\${SERVER}" -m "\${CHAT_GGUF}" --host "\${CHAT_BIND_HOST}" --port "\${CHAT_BIND_PORT}" \\
-    -ngl "\${NGL}" -c "\${CHAT_CTX}" --alias "\${CHAT_ALIAS}" \\
+    -ngl "\${NGL}" -c "\${CHAT_CTX}" --alias "\${CHAT_ALIAS}" --metrics "\${CHAT_EXTRA[@]}" \\
     >"\${LOG_DIR}/chat.log" 2>&1 &
   CHAT_PID=\$!
 fi
 if [[ -n "\${EMBED_GGUF}" ]]; then
   printf '[host-llama] embed llama-server %s:%s  %s\\n' "\${EMBED_BIND_HOST}" "\${EMBED_BIND_PORT}" "\${EMBED_GGUF}"
   "\${SERVER}" -m "\${EMBED_GGUF}" --host "\${EMBED_BIND_HOST}" --port "\${EMBED_BIND_PORT}" \\
-    --embedding --pooling mean -c "\${EMBED_CTX}" -np "\${EMBED_NP}" -ngl "\${NGL}" \\
+    --embedding --pooling mean -c "\${EMBED_CTX}" -np "\${EMBED_NP}" -ngl "\${EMBED_NGL}" --metrics \\
     >"\${LOG_DIR}/embed.log" 2>&1 &
   EMBED_PID=\$!
 fi
@@ -696,6 +819,135 @@ print_vm_hint() {
   fi
 }
 
+is_tuide_llama_cmd() {
+  case "$1" in
+    *host_llama_hub.py*|*host_llama_spy.py*|*llama-server*|*host-llama/hub.command*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+listen_pids() {
+  # pipefail: lsof sale 1 si el puerto está libre
+  lsof -nP -t -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | sort -u || true
+}
+
+proc_args() {
+  ps -p "$1" -ww -o args= 2>/dev/null || true
+}
+
+write_stop_script() {
+  local dest="${LOG_DIR}/stop.command"
+  umask 077
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'export TUIDE_HOST_CHAT_PORT=%q\n' "${CHAT_PORT}"
+    printf 'export TUIDE_HOST_EMBED_PORT=%q\n' "${EMBED_PORT}"
+    printf 'export TUIDE_HOST_WEB_PORT=%q\n' "${WEB_PORT}"
+    printf 'exec %q --stop\n' "${TOOLS_DIR}/run_host_llama.sh"
+  } >"${dest}"
+  chmod +x "${dest}"
+}
+
+stop_host_stack() {
+  local chat_backend=$((CHAT_PORT + 10000))
+  local embed_backend=$((EMBED_PORT + 10000))
+  local ports=( "${WEB_PORT}" "${CHAT_PORT}" "${EMBED_PORT}" "${chat_backend}" "${embed_backend}" )
+  local port pid cmd line
+  local ours="" skipped=0
+
+  write_stop_script
+
+  for port in "${ports[@]}"; do
+    while IFS= read -r pid; do
+      [[ -n "${pid}" ]] || continue
+      cmd="$(proc_args "${pid}")"
+      if is_tuide_llama_cmd "${cmd}"; then
+        ours="${ours}${port} ${pid} ${cmd}"$'\n'
+      else
+        skipped=1
+        log ":${port} pid ${pid} no es llama/hub/spy — no toco"
+        if [[ -n "${cmd}" ]]; then
+          log "  ${cmd}"
+        fi
+      fi
+    done <<< "$(listen_pids "${port}")"
+  done
+
+  if [[ -z "${ours}" ]]; then
+    if [[ "${skipped}" -eq 0 ]]; then
+      log "nada que parar en :${WEB_PORT} :${CHAT_PORT} :${EMBED_PORT}"
+    fi
+    return 0
+  fi
+
+  # INT al hub primero: cleanup() para spy y llama-server hijos.
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    pid="$(printf '%s\n' "${line}" | awk '{print $2}')"
+    cmd="$(printf '%s\n' "${line}" | sed 's/^[^ ]* [^ ]* //')"
+    case "${cmd}" in
+      *host_llama_hub.py*)
+        log "SIGINT  pid ${pid}  ${cmd}"
+        kill -INT "${pid}" 2>/dev/null || true
+        ;;
+    esac
+  done <<< "${ours}"
+  sleep 0.6
+
+  ours=""
+  for port in "${ports[@]}"; do
+    while IFS= read -r pid; do
+      [[ -n "${pid}" ]] || continue
+      cmd="$(proc_args "${pid}")"
+      if is_tuide_llama_cmd "${cmd}"; then
+        ours="${ours}${port} ${pid} ${cmd}"$'\n'
+      fi
+    done <<< "$(listen_pids "${port}")"
+  done
+
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    pid="$(printf '%s\n' "${line}" | awk '{print $2}')"
+    cmd="$(printf '%s\n' "${line}" | sed 's/^[^ ]* [^ ]* //')"
+    if kill -0 "${pid}" 2>/dev/null; then
+      log "SIGTERM pid ${pid}  ${cmd}"
+      kill -TERM "${pid}" 2>/dev/null || true
+    fi
+  done <<< "${ours}"
+  sleep 0.5
+
+  for port in "${ports[@]}"; do
+    while IFS= read -r pid; do
+      [[ -n "${pid}" ]] || continue
+      cmd="$(proc_args "${pid}")"
+      if is_tuide_llama_cmd "${cmd}"; then
+        log "SIGKILL pid ${pid}  ${cmd}"
+        kill -KILL "${pid}" 2>/dev/null || true
+      fi
+    done <<< "$(listen_pids "${port}")"
+  done
+
+  local busy=0
+  for port in "${WEB_PORT}" "${CHAT_PORT}" "${EMBED_PORT}"; do
+    while IFS= read -r pid; do
+      [[ -n "${pid}" ]] || continue
+      cmd="$(proc_args "${pid}")"
+      if is_tuide_llama_cmd "${cmd}"; then
+        log "sigue en :${port} pid ${pid}"
+        busy=1
+      fi
+    done <<< "$(listen_pids "${port}")"
+  done
+  if [[ "${busy}" -eq 0 ]]; then
+    log "puertos tuide libres (:${WEB_PORT} hub, :${CHAT_PORT} chat, :${EMBED_PORT} embed)"
+  else
+    die "no se pudieron liberar todos los puertos tuide"
+  fi
+}
+
 write_hub_script() {
   local dest="$1"
   local py="$2"
@@ -709,9 +961,19 @@ write_hub_script() {
     printf 'export TUIDE_HOST_EMBED_PORT=%q\n' "${EMBED_PORT}"
     printf 'export TUIDE_HOST_WEB_PORT=%q\n' "${WEB_PORT}"
     printf 'export TUIDE_HOST_NGL=%q\n' "${NGL}"
+    printf 'export TUIDE_HOST_EMBED_NGL=%q\n' "${EMBED_NGL}"
     printf 'export TUIDE_HOST_CHAT_CTX=%q\n' "${CHAT_CTX}"
     printf 'export TUIDE_HOST_EMBED_CTX=%q\n' "${EMBED_CTX}"
     printf 'export TUIDE_HOST_EMBED_NP=%q\n' "${EMBED_NP}"
+    printf 'export TUIDE_HOST_FLASH_ATTN=%q\n' "${FLASH_ATTN}"
+    printf 'export TUIDE_HOST_CACHE_TYPE=%q\n' "${CACHE_TYPE}"
+    printf 'export TUIDE_HOST_THREADS=%q\n' "${THREADS}"
+    printf 'export TUIDE_HOST_NP=%q\n' "${CHAT_NP}"
+    printf 'export TUIDE_HOST_DRAFT=%q\n' "${DRAFT_MODE}"
+    printf 'export TUIDE_HOST_DRAFT_N_MAX=%q\n' "${DRAFT_N_MAX}"
+    if [[ -n "${TUIDE_HOST_DRAFT_GGUF:-}" ]]; then
+      printf 'export TUIDE_HOST_DRAFT_GGUF=%q\n' "${TUIDE_HOST_DRAFT_GGUF}"
+    fi
     printf 'export TUIDE_HOST_SPY=%q\n' "${SPY_ON}"
     printf 'exec %q %q' "${py}" "${TOOLS_DIR}/host_llama_hub.py"
     local a
@@ -749,9 +1011,16 @@ run_hub() {
   export TUIDE_HOST_EMBED_PORT="${EMBED_PORT}"
   export TUIDE_HOST_WEB_PORT="${WEB_PORT}"
   export TUIDE_HOST_NGL="${NGL}"
+  export TUIDE_HOST_EMBED_NGL="${EMBED_NGL}"
   export TUIDE_HOST_CHAT_CTX="${CHAT_CTX}"
   export TUIDE_HOST_EMBED_CTX="${EMBED_CTX}"
   export TUIDE_HOST_EMBED_NP="${EMBED_NP}"
+  export TUIDE_HOST_FLASH_ATTN="${FLASH_ATTN}"
+  export TUIDE_HOST_CACHE_TYPE="${CACHE_TYPE}"
+  export TUIDE_HOST_THREADS="${THREADS}"
+  export TUIDE_HOST_NP="${CHAT_NP}"
+  export TUIDE_HOST_DRAFT="${DRAFT_MODE}"
+  export TUIDE_HOST_DRAFT_N_MAX="${DRAFT_N_MAX}"
   export TUIDE_HOST_SPY="${SPY_ON}"
   log "hub HTML: ${WEB_URL}  (Lanzamiento | Inspección)"
   if [[ "${FOREGROUND}" -eq 1 ]]; then
@@ -759,9 +1028,12 @@ run_hub() {
   fi
   local session="${LOG_DIR}/hub.command"
   write_hub_script "${session}" "${py}" "${args[@]}"
+  write_stop_script
   open_background_terminal "${session}"
   printf '\n[host-llama] hub en otra terminal.\n'
   printf '  UI: %s\n' "${WEB_URL}"
+  printf '  stop: %s --stop\n' "${TOOLS_DIR}/run_host_llama.sh"
+  printf '        o %s\n' "${LOG_DIR}/stop.command"
   printf 'Logs: %s\n' "${LOG_DIR}"
 }
 
@@ -772,6 +1044,7 @@ EMBED_SET=0
 AUTO_YES=0
 UI_MODE="auto"
 FOREGROUND=0
+STOP=0
 TERM_MODE="${TUIDE_HOST_TERM:-auto}"
 SPY_ON=1
 WEB_ON=1
@@ -788,6 +1061,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --foreground)
       FOREGROUND=1
+      shift
+      ;;
+    --stop)
+      STOP=1
       shift
       ;;
     --no-spy)
@@ -849,6 +1126,11 @@ case "${TERM_MODE}" in
   *) die "--term debe ser auto|terminal|iterm|xterm|headless" ;;
 esac
 
+if [[ "${STOP}" -eq 1 ]]; then
+  stop_host_stack
+  exit 0
+fi
+
 if [[ "${LLM_SET}" -eq 0 && -n "${TUIDE_L2_GGUF:-}" ]]; then
   LLM_TOKEN="${TUIDE_L2_GGUF}"
   LLM_SET=1
@@ -862,6 +1144,8 @@ LLM_ROWS="$(list_llm_rows || true)"
 EMBED_ROWS="$(list_embed_rows || true)"
 LLM_N="$(row_count "${LLM_ROWS}")"
 EMBED_N="$(row_count "${EMBED_ROWS}")"
+
+THREADS="$(perf_threads)"
 
 USE_HUB=0
 if [[ "${WEB_ON}" -eq 1 && "${UI_MODE}" != "gui" && "${UI_MODE}" != "text" ]]; then
@@ -1022,6 +1306,13 @@ if [[ "${TUIDE_HOST_WEB:-1}" == "0" || "${SPY_ON}" -eq 0 ]]; then
 fi
 WEB_LISTEN="127.0.0.1:${WEB_PORT}"
 WEB_URL="http://${WEB_LISTEN}"
+
+DRAFT_GGUF="$(resolve_draft_gguf "${CHAT_GGUF}")"
+if [[ -n "${CHAT_GGUF}" && -n "${DRAFT_GGUF}" ]]; then
+  log "draft: ${DRAFT_GGUF}"
+elif [[ -n "${CHAT_GGUF}" ]]; then
+  log "sin draft (descarga Qwen2.5 1.5B L1 o TUIDE_HOST_DRAFT_GGUF)"
+fi
 
 SESSION="${LOG_DIR}/session.command"
 write_session_script "${SESSION}" "${SERVER}" "${LIB_DIR}" "${CHAT_GGUF}" \

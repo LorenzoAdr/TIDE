@@ -41,6 +41,18 @@
       "pack": "ai-l2-32b"
     },
     {
+      "id": "llama-3.3-70b-instruct-q4_k_m",
+      "role": "chat",
+      "tier": "tide-l2",
+      "label": "Llama 3.3 70B Instruct",
+      "filename": "Llama-3.3-70B-Instruct-Q4_K_M.gguf",
+      "dir": "l2",
+      "url": "https://huggingface.co/bartowski/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
+      "license_note": "Llama 3.3 Community License",
+      "approx_bytes": 42520398816,
+      "pack": "ai-l2-70b"
+    },
+    {
       "id": "qwen2.5-1.5b-instruct-q4_k_m",
       "role": "chat",
       "tier": "chat",

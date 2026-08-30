@@ -23,7 +23,9 @@ import threading
 import time
 import urllib.parse
 import uuid
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import host_llama_chat_session as chat_mem
 
 print_lock = threading.Lock()
 _force_color: Optional[bool] = None
@@ -33,6 +35,18 @@ req_seq = 0
 req_seq_lock = threading.Lock()
 inflight_lock = threading.Lock()
 inflight_chat = 0
+active_backend_conns: List[http.client.HTTPConnection] = []
+cancel_generation = threading.Event()
+chat_turn_lock = threading.Lock()
+chat_session_lock = threading.Lock()
+chat_session = chat_mem.ChatSession()
+_last_chat_ctx_lock = threading.Lock()
+_last_chat_ctx: Dict[str, int] = {
+    "n_tokens": 0,
+    "prompt": 0,
+    "predicted": 0,
+    "cached": 0,
+}
 
 RESET = "\033[0m"
 BOLD = "\033[1m"
@@ -121,6 +135,40 @@ def chat_busy() -> bool:
         return inflight_chat > 0
 
 
+def try_slot_cancel(host: str, port: int) -> None:
+    if not host or port <= 0:
+        return
+    try:
+        conn = http.client.HTTPConnection(host, int(port), timeout=2)
+        try:
+            conn.request(
+                "POST",
+                "/slots/0?action=cancel",
+                body=b"",
+                headers={"host": f"{host}:{port}", "content-length": "0"},
+            )
+            conn.getresponse().read()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+def request_stop_generation(backend_host: str = "", backend_port: int = 0) -> dict:
+    """Stop the in-flight llama-server completion (compose or VM)."""
+    cancel_generation.set()
+    with inflight_lock:
+        conns = list(active_backend_conns)
+    for conn in conns:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    if backend_host and backend_port:
+        try_slot_cancel(backend_host, int(backend_port))
+    return {"ok": True, "busy": chat_busy()}
+
+
 def jsonl_emit(obj: dict) -> None:
     if not jsonl_path:
         return
@@ -135,6 +183,22 @@ def jsonl_emit(obj: dict) -> None:
                 f.flush()
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def clear_history() -> dict:
+    """Truncate the spy JSONL. Does not reset chat-mode memory."""
+    if not jsonl_path:
+        return {"ok": True, "cleared": False}
+    os.makedirs(os.path.dirname(jsonl_path) or ".", exist_ok=True)
+    with jsonl_lock:
+        with open(jsonl_path, "w", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write("")
+                f.flush()
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    return {"ok": True, "cleared": True}
 
 
 class TokBatch:
@@ -330,6 +394,91 @@ def prompt_fields(payload: Optional[dict]) -> dict:
     return out
 
 
+def format_messages_prompt(payload: Optional[dict]) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    msgs = payload.get("messages")
+    if not isinstance(msgs, list) or not msgs:
+        return ""
+    parts: List[str] = []
+    for msg in msgs:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "message")
+        raw = content_text(msg.get("content"))
+        parts.append(f"—— {role} ——\n{raw}" if raw else f"—— {role} ——\n(vacío)")
+    return "\n\n".join(parts)
+
+
+def _positive_int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    n = int(value)
+    return n if n > 0 else 0
+
+
+def completion_ctx(obj: Any) -> Dict[str, int]:
+    """Prompt+completion occupancy from a llama-server usage/timings blob."""
+    if not isinstance(obj, dict):
+        return {}
+    usage = obj.get("usage")
+    if isinstance(usage, dict):
+        prompt = _positive_int(usage.get("prompt_tokens"))
+        predicted = _positive_int(usage.get("completion_tokens"))
+        details = usage.get("prompt_tokens_details")
+        cached = 0
+        if isinstance(details, dict):
+            cached = _positive_int(details.get("cached_tokens"))
+        total = _positive_int(usage.get("total_tokens"))
+        if total <= 0:
+            total = prompt + predicted
+        if total > 0:
+            return {
+                "n_tokens": total,
+                "prompt": prompt,
+                "predicted": predicted,
+                "cached": cached,
+            }
+    timings = obj.get("timings")
+    if isinstance(timings, dict):
+        cached = _positive_int(timings.get("cache_n"))
+        prompt_new = _positive_int(timings.get("prompt_n"))
+        predicted = _positive_int(timings.get("predicted_n"))
+        total = cached + prompt_new + predicted
+        if total > 0:
+            return {
+                "n_tokens": total,
+                "prompt": cached + prompt_new,
+                "predicted": predicted,
+                "cached": cached,
+            }
+    return {}
+
+
+def last_chat_ctx() -> Dict[str, int]:
+    with _last_chat_ctx_lock:
+        return dict(_last_chat_ctx)
+
+
+def record_chat_ctx(ctx: Dict[str, int]) -> None:
+    n = _positive_int(ctx.get("n_tokens"))
+    if n <= 0:
+        return
+    with _last_chat_ctx_lock:
+        _last_chat_ctx["n_tokens"] = n
+        _last_chat_ctx["prompt"] = _positive_int(ctx.get("prompt"))
+        _last_chat_ctx["predicted"] = _positive_int(ctx.get("predicted"))
+        _last_chat_ctx["cached"] = _positive_int(ctx.get("cached"))
+
+
+def clear_last_chat_ctx() -> None:
+    with _last_chat_ctx_lock:
+        _last_chat_ctx["n_tokens"] = 0
+        _last_chat_ctx["prompt"] = 0
+        _last_chat_ctx["predicted"] = 0
+        _last_chat_ctx["cached"] = 0
+
+
 def extract_delta(obj: dict) -> str:
     choices = obj.get("choices")
     if not isinstance(choices, list) or not choices:
@@ -425,6 +574,7 @@ def handle_chat(
     tag: str,
     src: str = "vm",
     reply: bool = True,
+    log_kind: str = "",
 ) -> Tuple[str, str, str]:
     global inflight_chat
     client_stream = False
@@ -448,21 +598,23 @@ def handle_chat(
     log(f"{tag_label(tag)} {paint(DIM, '── respuesta ──')}")
     rid = next_req_id(tag)
     fields = prompt_fields(payload if isinstance(payload, dict) else None)
-    jsonl_emit(
-        {
-            "kind": "req",
-            "id": rid,
-            "tag": tag,
-            "src": src,
-            "method": method,
-            "path": path,
-            "bytes": len(body),
-            "model": model,
-            "system": fields["system"][:12000],
-            "user": fields["user"][:32000],
-            "grammar": fields["grammar"],
-        }
-    )
+    req_ev = {
+        "kind": "req",
+        "id": rid,
+        "tag": tag,
+        "src": src,
+        "method": method,
+        "path": path,
+        "bytes": len(body),
+        "model": model,
+        "system": fields["system"][:12000],
+        "user": fields["user"][:32000],
+        "prompt": format_messages_prompt(payload if isinstance(payload, dict) else None)[:32000],
+        "grammar": fields["grammar"],
+    }
+    if log_kind:
+        req_ev["log_kind"] = log_kind
+    jsonl_emit(req_ev)
     tok_batch = TokBatch(rid, tag)
     stream_open(tag)
     acc: List[str] = []
@@ -470,9 +622,14 @@ def handle_chat(
     sse = False
     resp: Optional[http.client.HTTPResponse] = None
     err: Optional[str] = None
+    ctx_snap: Dict[str, int] = {}
     with inflight_lock:
         inflight_chat += 1
+        active_backend_conns.append(conn)
     try:
+        if cancel_generation.is_set():
+            err = "stopped"
+            raise OSError("stopped")
         headers["content-length"] = str(len(body))
         conn.request(method, path, body=body, headers=headers)
         resp = conn.getresponse()
@@ -483,6 +640,9 @@ def handle_chat(
                 obj = json.loads(raw.decode("utf-8"))
                 text = ""
                 if isinstance(obj, dict):
+                    snap = completion_ctx(obj)
+                    if snap:
+                        ctx_snap = snap
                     text = extract_delta(obj)
                     if not text:
                         choices = obj.get("choices") or []
@@ -502,6 +662,9 @@ def handle_chat(
             leftover = b""
             done = False
             while not done:
+                if cancel_generation.is_set():
+                    err = "stopped"
+                    break
                 chunk = resp.read(4096)
                 if not chunk:
                     break
@@ -521,35 +684,50 @@ def handle_chat(
                         continue
                     if not isinstance(obj, dict):
                         continue
+                    snap = completion_ctx(obj)
+                    if snap:
+                        ctx_snap = snap
                     tok = extract_delta(obj)
                     if tok:
                         acc.append(tok)
                         write_tok(tok)
                         tok_batch.add(tok)
     except (TimeoutError, socket.timeout, OSError, http.client.HTTPException) as ex:
-        err = str(ex)
-        log(f"{tag_label(tag)} {paint(RED, f'backend: {ex}')}")
+        if cancel_generation.is_set() or str(ex) == "stopped":
+            err = "stopped"
+        else:
+            err = str(ex)
+            log(f"{tag_label(tag)} {paint(RED, f'backend: {ex}')}")
     finally:
         tok_batch.flush()
         stream_close()
         with inflight_lock:
             inflight_chat -= 1
+            try:
+                active_backend_conns.remove(conn)
+            except ValueError:
+                pass
+            if inflight_chat <= 0:
+                cancel_generation.clear()
 
     text = "".join(acc)
     dt = time.monotonic() - t0
-    jsonl_emit(
-        {
-            "kind": "done",
-            "id": rid,
-            "tag": tag,
-            "src": src,
-            "seconds": round(dt, 3),
-            "chars": len(text),
-            "sse": sse,
-            "error": err or "",
-            "response": text[:200000],
-        }
-    )
+    if ctx_snap and log_kind != "summary":
+        record_chat_ctx(ctx_snap)
+    done_ev = {
+        "kind": "done",
+        "id": rid,
+        "tag": tag,
+        "src": src,
+        "seconds": round(dt, 3),
+        "chars": len(text),
+        "sse": sse,
+        "error": err or "",
+        "response": text[:200000],
+    }
+    if log_kind:
+        done_ev["log_kind"] = log_kind
+    jsonl_emit(done_ev)
     if err:
         log(f"{tag_label(tag)} {paint(DIM, f'done {dt:.1f}s  error')}")
         if reply and sock is not None:
@@ -671,8 +849,15 @@ html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:
 #side { display:flex; flex-direction:column;
   min-width:0; min-height:0; height:100%; overflow:hidden; }
 #head { padding:12px 14px; border-bottom:1px solid var(--line); flex-shrink:0; }
-#head h1 { margin:0 0 8px; font-size:14px; font-weight:600; letter-spacing:.02em; }
+#head h1 { margin:0 0 8px; font-size:14px; font-weight:600; letter-spacing:.02em;
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 #head p { margin:0; color:var(--muted); font-size:11px; }
+#llm-lamp { display:inline-flex; align-items:center; gap:7px; font-size:11px; font-weight:500;
+  letter-spacing:0; color:var(--muted); margin-left:auto; }
+#llm-lamp i { width:10px; height:10px; border-radius:50%; background:#2a2d33;
+  box-shadow:inset 0 0 0 1px #3a3e46; flex-shrink:0; }
+#llm-lamp.on { color:var(--ok); }
+#llm-lamp.on i { background:var(--ok); box-shadow:0 0 0 1px #355a45, 0 0 8px var(--ok); }
 #tools { display:flex; gap:6px; padding:10px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; flex-shrink:0; }
 #tools input { flex:1; min-width:120px; background:#0c0d10; color:var(--txt);
   border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
@@ -681,6 +866,8 @@ button { background:#0c0d10; color:var(--muted); border:1px solid var(--line);
 button.on { color:var(--txt); border-color:#4a5568; background:#22252c; }
 button:disabled { opacity:.45; cursor:not-allowed; }
 #send { color:var(--ok); border-color:#355a45; }
+#stop { color:var(--err); border-color:#5a3535; display:none; }
+#f-clear { color:var(--err); border-color:#5a3535; }
 #list { overflow-x:hidden; overflow-y:auto; flex:1; min-height:0; }
 .item { padding:10px 12px; border-bottom:1px solid var(--line); cursor:pointer; }
 .item:hover { background:#1f222a; }
@@ -690,6 +877,7 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .tag.vm { color:var(--chat); }
 .tag.yo { color:var(--yo); }
 .tag.embed { color:var(--embed); }
+.tag.memoria { color:var(--muted); }
 .item .sum { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#c5c9d1; }
 #main { display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; overflow:hidden; }
 #dhead { padding:8px 12px 8px 16px; border-bottom:1px solid var(--line); color:var(--muted);
@@ -699,14 +887,68 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .js-follow.on { color:#101114; background:var(--warn); border-color:var(--warn); }
 #dbody { display:grid; grid-template-rows:minmax(72px, var(--prompt-h, 50%)) 6px minmax(72px, 1fr);
   min-height:0; flex:1; overflow:hidden; }
+#dbody.hide-prompt { grid-template-rows:minmax(0, 1fr); }
+#dbody.hide-prompt #pane-prompt,
+#dbody.hide-prompt #split-io { display:none; }
 .pane { min-height:0; overflow:hidden; display:flex; flex-direction:column; }
-.pane h2 { margin:0; padding:10px 16px 6px; font-size:11px; color:var(--muted);
-  text-transform:uppercase; letter-spacing:.08em; flex-shrink:0; }
+.pane > h2 { margin:0; padding:10px 16px 6px; font-size:11px; color:var(--muted);
+  text-transform:uppercase; letter-spacing:.08em; flex-shrink:0;
+  display:flex; align-items:center; gap:8px; }
+.pane > h2 button { text-transform:none; letter-spacing:0; font-size:11px; padding:3px 8px; }
 .pane-body { flex:1; min-height:0; overflow-x:hidden; overflow-y:auto; padding:0 16px 14px; }
 pre { margin:0; white-space:pre-wrap; word-break:break-word; }
 #pane-prompt pre { color:var(--txt); }
-#pane-resp pre { color:var(--ok); }
-#pane-prompt pre.muted, #pane-resp pre.muted { color:var(--muted); }
+#pane-prompt .md { color:var(--txt); }
+#pane-prompt .md td { color:var(--txt); }
+#pane-resp pre, #pane-resp .md { color:var(--ok); }
+#pane-prompt pre.muted, #pane-resp pre.muted, #pane-resp .md.muted { color:var(--muted); }
+.md { white-space:normal; word-break:break-word; }
+.md p { margin:0.45em 0; }
+.md p:first-child { margin-top:0; }
+.md strong { color:var(--txt); font-weight:700; }
+.md em { font-style:italic; }
+.md h1,.md h2,.md h3,.md h4 { color:var(--txt); text-transform:none; letter-spacing:0;
+  font-size:13px; margin:0.85em 0 0.35em; }
+.md h1 { font-size:16px; }
+.md h2 { font-size:14px; }
+.md ul,.md ol { margin:0.4em 0; padding-left:1.4em; }
+.md li { margin:0.15em 0; }
+.md code { background:#0c0d10; border:1px solid var(--line); border-radius:4px;
+  padding:0 5px; color:var(--warn); font:inherit; }
+.md pre.md-code { background:#0c0d10; border:1px solid var(--line); border-radius:6px;
+  padding:10px 12px; overflow-x:auto; color:#c5c9d1; margin:0.5em 0; }
+#pane-resp pre.md-code { color:#c5c9d1; }
+.md pre.md-code code { background:none; border:0; padding:0; color:inherit; }
+.md-fence { margin:0.5em 0; background:#0c0d10; border:1px solid var(--line); border-radius:6px;
+  overflow:hidden; }
+.md-fence-bar { display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:4px 6px 0 12px; min-height:26px; }
+.md-fence-lang { color:var(--muted); font-size:10px; text-transform:uppercase;
+  letter-spacing:.08em; }
+.md-copy { font-size:10px; padding:2px 8px; line-height:1.3; flex-shrink:0; }
+.md-copy.on { color:var(--ok); border-color:#355a45; }
+.md-fence pre.md-code { margin:0; border:0; background:none; padding:6px 12px 10px; }
+.md-tok-kw { color:#c9a0e8; }
+.md-tok-str { color:#7dcea0; }
+.md-tok-cmt { color:#8d939e; font-style:italic; }
+.md-tok-num { color:#e8b86d; }
+.md-tok-type { color:#5ec8d8; }
+.md-tok-fn { color:#6cb6ff; }
+.md-tok-pp { color:#c9a0e8; }
+.md-tok-key { color:#5ec8d8; }
+.md blockquote { margin:0.5em 0; padding:0 10px; border-left:3px solid var(--line); color:var(--muted); }
+.md a { color:var(--chat); }
+.md hr { border:0; border-top:1px solid var(--line); margin:0.8em 0; }
+.md table { border-collapse:collapse; margin:0.6em 0; width:100%; font-size:12px; }
+.md th, .md td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+.md th { background:#14161c; color:var(--txt); font-weight:600; }
+.md td { color:var(--ok); }
+pre.md-mermaid::before { content:"mermaid"; display:block; color:var(--muted);
+  font-size:10px; text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; }
+.md-mermaid-fail { color:var(--warn); font-size:11px; margin:0.4em 0 0.2em; }
+.md-mermaid-out { margin:0.6em 0; overflow-x:auto; background:#0c0d10;
+  border:1px solid var(--line); border-radius:8px; padding:12px; }
+.md-mermaid-out svg { max-width:100%; height:auto; }
 .live { color:var(--warn); }
 #compose { display:none; flex-direction:column; padding:10px 12px 12px;
   flex-shrink:0; height:var(--compose-h, 180px); min-height:110px; overflow:auto; }
@@ -714,8 +956,9 @@ pre { margin:0; white-space:pre-wrap; word-break:break-word; }
   border-radius:6px; padding:8px; font:inherit; resize:vertical; }
 #sys { min-height:36px; max-height:80px; margin-bottom:6px; color:#c5c9d1; }
 #user { min-height:64px; max-height:140px; }
-#compose-row { display:flex; gap:8px; align-items:center; margin-top:8px; }
-#hint { color:var(--warn); font-size:11px; flex:1; min-height:1.2em; }
+#compose-row { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+#hint { color:var(--warn); font-size:11px; flex:1; min-height:1.2em; min-width:8em; }
+#chat-meta { color:var(--muted); font-size:11px; white-space:nowrap; display:none; }
 .split { background:var(--line); flex-shrink:0; }
 .split:hover, .split.drag { background:#6a7382; }
 .split-v { cursor:col-resize; }
@@ -729,7 +972,9 @@ body.resizing-h { user-select:none; cursor:row-resize; }
 <div id="app">
   <div id="side">
     <div id="head">
-      <h1>tuide spy</h1>
+      <h1>tuide spy
+        <span id="llm-lamp" title="Ningún LLM a la escucha"><i></i><span id="llm-lamp-label">LLM off</span></span>
+      </h1>
       <p>Historial local · VM y este Mac</p>
     </div>
     <div id="tools">
@@ -738,15 +983,21 @@ body.resizing-h { user-select:none; cursor:row-resize; }
       <button id="f-vm">vm</button>
       <button id="f-yo">yo</button>
       <button id="f-embed">embed</button>
+      <button id="f-clear" type="button" title="Vacía la lista de turnos (vm, yo, embed). No borra la memoria del modo chat.">resetear historial</button>
     </div>
     <div id="list"></div>
     <div id="split-compose" class="split split-h" title="Arrastra para redimensionar"></div>
     <div id="compose">
       <textarea id="sys" placeholder="system (opcional)"></textarea>
-      <textarea id="user" placeholder="Escribe un prompt…  Ctrl+Enter envía"></textarea>
+      <textarea id="user" placeholder="Escribe un prompt…  Option+Enter envía"></textarea>
       <div id="compose-row">
         <span id="hint"></span>
+        <span id="chat-meta"></span>
+        <button id="m-oneshot" class="on" type="button" title="Un prompt suelto, sin historial">prompt</button>
+        <button id="m-chat" type="button" title="Conversación con resumen acumulativo">chat</button>
+        <button id="chat-reset" type="button" style="display:none" title="Borra la memoria de esta conversación">nueva conversación</button>
         <button id="send" type="button">enviar</button>
+        <button id="stop" type="button" title="Detiene la generación en curso (tú o la VM). Esc.">stop</button>
       </div>
     </div>
   </div>
@@ -754,17 +1005,18 @@ body.resizing-h { user-select:none; cursor:row-resize; }
   <div id="main">
     <div id="dhead">
       <div id="dhead-meta">ningún turno seleccionado</div>
+      <button id="f-prompt" class="on" type="button" title="Ocultar el prompt enviado y dejar solo la salida">prompt</button>
       <button id="f-follow" class="js-follow on" type="button" title="Mantener el foco en el último turno">Anclado al último</button>
     </div>
     <div id="dbody">
       <div class="pane" id="pane-prompt">
-        <h2>prompt</h2>
-        <div class="pane-body"><pre id="prompt" class="muted">Selecciona un turno o escribe a la izquierda.</pre></div>
+        <h2>prompt <button id="f-prompt-pane" type="button" title="Ocultar este panel">ocultar</button></h2>
+        <div class="pane-body"><div id="prompt" class="md muted">Selecciona un turno o escribe a la izquierda.</div></div>
       </div>
       <div id="split-io" class="split split-h" title="Arrastra para redimensionar"></div>
       <div class="pane" id="pane-resp">
-        <h2>salida</h2>
-        <div class="pane-body"><pre id="response" class="muted">—</pre></div>
+        <h2>salida <button id="f-md" class="on" type="button" title="Renderizar markdown del prompt y de la salida">md</button></h2>
+        <div class="pane-body"><div id="response" class="md muted">—</div></div>
       </div>
     </div>
   </div>
@@ -777,12 +1029,521 @@ let query = "";
 let sel = null;
 let off = 0;
 let sending = false;
+let askAbort = null;
 let askEnabled = false;
 let serverBusy = false;
 let follow = true;
+let mdView = true;
+let promptView = true;
+let askMode = "oneshot";
+let thread = {on: false, turns: 0, summary_chars: 0, recent_turns: 0};
 
 function esc(s) {
   return String(s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+}
+function kwSet(words) {
+  const o = Object.create(null);
+  String(words).split(/\s+/).forEach(w => { if (w) o[w] = 1; });
+  return o;
+}
+const LANG_KW = {
+  cpp: kwSet("alignas alignof and asm auto bool break case catch char class const consteval constexpr continue decltype default delete do double else enum explicit export extern false float for friend goto if inline int long mutable namespace new noexcept nullptr operator private protected public return short signed sizeof static static_assert static_cast struct switch template this throw true try typedef typeid typename union unsigned using virtual void volatile wchar_t while override final concept requires co_await co_return co_yield"),
+  python: kwSet("and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield match case"),
+  js: kwSet("async await break case catch class const continue debugger default delete do else export extends false finally for function if import in instanceof let new null return static super switch this throw true try typeof undefined var void while with yield of from as"),
+  rust: kwSet("as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while"),
+  go: kwSet("break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var true false nil iota"),
+  bash: kwSet("if then else elif fi for while do done case esac in function return break continue select until time coproc true false"),
+  cmake: kwSet("if else elseif endif foreach endforeach while endwhile function endfunction macro endmacro set list string option project include message return break continue"),
+  json: kwSet("true false null")
+};
+LANG_KW.ts = Object.assign(kwSet("interface type enum implements private public protected readonly abstract declare namespace module any never unknown"), LANG_KW.js);
+function normalizeLang(lang) {
+  const x = String(lang || "").toLowerCase().trim();
+  if (!x) return "";
+  if (/^(c|cc|cxx|c\+\+|cpp|h|hh|hpp|hxx)$/.test(x)) return "cpp";
+  if (/^(py|python)$/.test(x)) return "python";
+  if (/^(js|javascript|mjs|cjs)$/.test(x)) return "js";
+  if (/^(ts|typescript|tsx)$/.test(x)) return "ts";
+  if (/^(rs|rust)$/.test(x)) return "rust";
+  if (x === "go" || x === "golang") return "go";
+  if (/^(sh|bash|zsh|shell)$/.test(x)) return "bash";
+  if (x === "json") return "json";
+  if (x === "cmake") return "cmake";
+  if (/^(html|xml|svg)$/.test(x)) return "html";
+  return x;
+}
+function guessLang(code) {
+  const t = String(code || "").trim();
+  if (!t) return "";
+  if ((t.startsWith("{") || t.startsWith("[")) && /"[^"]+"\s*:/.test(t)) return "json";
+  if (/^\s*#include\b|std::|int\s+main\s*\(/.test(t)) return "cpp";
+  if (/^#!/.test(t) || /\bthen\b[\s\S]*\bfi\b|\besac\b/.test(t)) return "bash";
+  if (/\bdef\s+\w+\s*\(|^\s*import\s+\w+/m.test(t)) return "python";
+  if (/\b(fn\s+\w+|let\s+mut\b|impl\s+)/.test(t)) return "rust";
+  if (/\bfunc\s+\w+|package\s+\w+/.test(t)) return "go";
+  if (/\b(function|const|let|=>)\b/.test(t)) return "js";
+  return "";
+}
+function tok(cls, text) {
+  return cls ? '<span class="md-tok-' + cls + '">' + esc(text) + "</span>" : esc(text);
+}
+function highlightHtml(src) {
+  const out = [];
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    if (src.startsWith("<!--", i)) {
+      const end = src.indexOf("-->", i + 4);
+      const j = end < 0 ? n : end + 3;
+      out.push(tok("cmt", src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (src[i] === "<") {
+      const end = src.indexOf(">", i + 1);
+      const j = end < 0 ? n : end + 1;
+      out.push(highlightHtmlTag(src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    out.push(esc(src[i]));
+    i++;
+  }
+  return out.join("");
+}
+function highlightHtmlTag(tag) {
+  const out = [];
+  let i = 0;
+  while (i < tag.length) {
+    const c = tag[i];
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < tag.length && tag[j] !== c) j++;
+      j = Math.min(tag.length, j + 1);
+      out.push(tok("str", tag.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (/[A-Za-z]/.test(c)) {
+      let j = i;
+      while (/[A-Za-z0-9:-]/.test(tag[j] || "")) j++;
+      const name = tag.slice(i, j);
+      const isTag = i <= 2;
+      out.push(tok(isTag ? "kw" : "key", name));
+      i = j;
+      continue;
+    }
+    out.push(esc(c));
+    i++;
+  }
+  return out.join("");
+}
+function cheapHighlight(src, lang) {
+  lang = normalizeLang(lang);
+  if (lang === "html") return highlightHtml(src);
+  const kw = LANG_KW[lang] || {};
+  const hashCmt = lang === "python" || lang === "bash" || lang === "cmake";
+  const cCmt = !hashCmt;
+  const out = [];
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    if (lang === "python" && src[i] === src[i + 1] && src[i] === src[i + 2] && (src[i] === '"' || src[i] === "'")) {
+      const q = src.slice(i, i + 3);
+      const k = src.indexOf(q, i + 3);
+      const j = k < 0 ? n : k + 3;
+      out.push(tok("str", src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (lang === "cpp" && c === "#" && (i === 0 || src[i - 1] === "\n")) {
+      let j = i + 1;
+      while (j < n && src[j] !== "\n") {
+        if (src[j] === "\\" && src[j + 1] === "\n") { j += 2; continue; }
+        j++;
+      }
+      out.push(tok("pp", src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (cCmt && c === "/" && src[i + 1] === "/") {
+      let j = i + 2;
+      while (j < n && src[j] !== "\n") j++;
+      out.push(tok("cmt", src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (cCmt && c === "/" && src[i + 1] === "*") {
+      let j = i + 2;
+      while (j + 1 < n && !(src[j] === "*" && src[j + 1] === "/")) j++;
+      j = Math.min(n, j + 2);
+      out.push(tok("cmt", src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (hashCmt && c === "#") {
+      let j = i + 1;
+      while (j < n && src[j] !== "\n") j++;
+      out.push(tok("cmt", src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (c === '"' || c === "'" || (c === "`" && (lang === "js" || lang === "ts" || lang === "bash"))) {
+      let j = i + 1;
+      while (j < n) {
+        if (src[j] === "\\" && lang !== "bash") { j += 2; continue; }
+        if (src[j] === c) { j++; break; }
+        if (c !== "`" && src[j] === "\n") break;
+        j++;
+      }
+      const chunk = src.slice(i, j);
+      if (lang === "json") {
+        let k = j;
+        while (k < n && /[ \t\n\r]/.test(src[k])) k++;
+        if (src[k] === ":") {
+          out.push(tok("key", chunk));
+          i = j;
+          continue;
+        }
+      }
+      out.push(tok("str", chunk));
+      i = j;
+      continue;
+    }
+    if (/[0-9]/.test(c) || (c === "." && /[0-9]/.test(src[i + 1] || ""))) {
+      let j = i;
+      if (src[j] === "0" && (src[j + 1] === "x" || src[j + 1] === "X")) {
+        j += 2;
+        while (/[0-9a-fA-F]/.test(src[j] || "")) j++;
+      } else {
+        while (/[0-9]/.test(src[j] || "")) j++;
+        if (src[j] === ".") { j++; while (/[0-9]/.test(src[j] || "")) j++; }
+        if (src[j] === "e" || src[j] === "E") {
+          j++;
+          if (src[j] === "+" || src[j] === "-") j++;
+          while (/[0-9]/.test(src[j] || "")) j++;
+        }
+        if (lang === "cpp" && /[fFuUlL]/.test(src[j] || "")) j++;
+      }
+      out.push(tok("num", src.slice(i, j)));
+      i = j;
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(c)) {
+      let j = i;
+      while (/[A-Za-z0-9_$]/.test(src[j] || "")) j++;
+      const id = src.slice(i, j);
+      if (kw[id]) {
+        out.push(tok("kw", id));
+      } else {
+        let k = j;
+        while (k < n && /[ \t]/.test(src[k])) k++;
+        if (src[k] === "(") out.push(tok("fn", id));
+        else if (/^[A-Z]/.test(id) && lang !== "bash" && lang !== "json") out.push(tok("type", id));
+        else out.push(esc(id));
+      }
+      i = j;
+      continue;
+    }
+    out.push(esc(c));
+    i++;
+  }
+  return out.join("");
+}
+function fencePre(code, lang) {
+  const raw = String(code).replace(/\n$/, "");
+  const id = normalizeLang(lang) || guessLang(raw);
+  const html = cheapHighlight(raw, id);
+  const attr = id ? ' data-lang="' + esc(id) + '"' : "";
+  const cls = id ? ("language-" + id) : "";
+  const label = id ? '<span class="md-fence-lang">' + esc(id) + "</span>" : "<span></span>";
+  return '<div class="md-fence"><div class="md-fence-bar">' + label +
+    '<button type="button" class="md-copy" title="Copiar fragmento">copiar</button></div>' +
+    '<pre class="md-code"' + attr + '><code class="' + cls + '">' + html + "</code></pre></div>";
+}
+function looksLikeMermaid(code) {
+  const t = String(code || "").trim();
+  return /^(flowchart(?:\s+\w+)?|graph\s+[A-Za-z]+|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|gantt|pie|gitGraph|mindmap|timeline|journey|quadrantChart|sankey-beta|xychart-beta|block-beta|C4Context|C4Container)\b/.test(t);
+}
+function mermaidPre(code) {
+  return '<pre class="md-mermaid"><code>' + esc(String(code).replace(/\n$/, "")) + "</code></pre>";
+}
+function extractBareMermaid(s, fences) {
+  const lines = String(s).split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (looksLikeMermaid(lines[i])) {
+      const block = [lines[i]];
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() !== "" && lines[j].indexOf("```") < 0) {
+        block.push(lines[j]);
+        j++;
+      }
+      if (block.length >= 2) {
+        fences.push(mermaidPre(block.join("\n")));
+        out.push("%%FENCE" + (fences.length - 1) + "%%");
+        i = j - 1;
+        continue;
+      }
+    }
+    out.push(lines[i]);
+  }
+  return out.join("\n");
+}
+function fenceOpen(line) {
+  return String(line).match(/^ {0,3}(`{3,})([^`]*)$/);
+}
+function fenceClose(line, ticks) {
+  const m = String(line).match(/^ {0,3}(`{3,})[ \t]*$/);
+  return !!(m && m[1].length >= ticks);
+}
+function consumeFences(src, fences) {
+  fences = fences || [];
+  const lines = String(src || "").replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  const stack = [];
+  let i = 0;
+  function isWrap(lang) {
+    const x = String(lang || "").toLowerCase();
+    return x === "markdown" || x === "md";
+  }
+  function inCode() {
+    return stack.length > 0 && stack[stack.length - 1].body;
+  }
+  function emitCode(lang, code) {
+    const langN = String(lang || "").toLowerCase();
+    const mermaid = langN === "mermaid" || langN === "mmd" || looksLikeMermaid(code);
+    fences.push(mermaid ? mermaidPre(code) : fencePre(code, lang));
+    out.push("%%FENCE" + (fences.length - 1) + "%%");
+  }
+  while (i < lines.length) {
+    let line = lines[i];
+    if (!inCode()) {
+      const mid = line.match(/^(.*?\S)[ \t]*(`{3,})[\t ]*([A-Za-z][\w.+-]*)[ \t]*$/);
+      if (mid && !fenceOpen(line)) {
+        out.push(mid[1]);
+        line = mid[2] + mid[3];
+      }
+      if (stack.length && fenceClose(line, stack[stack.length - 1].ticks)) {
+        stack.pop();
+        i++;
+        continue;
+      }
+      const open = fenceOpen(line);
+      if (open) {
+        const ticks = open[1].length;
+        const info = (open[2] || "").trim();
+        const lang = (info.split(/[\t ]+/)[0] || "");
+        stack.push({ ticks: ticks, lang: lang, body: isWrap(lang) ? null : [] });
+        i++;
+        continue;
+      }
+      out.push(line);
+      i++;
+      continue;
+    }
+    const top = stack[stack.length - 1];
+    if (fenceClose(line, top.ticks)) {
+      emitCode(top.lang, top.body.join("\n"));
+      stack.pop();
+      i++;
+      continue;
+    }
+    top.body.push(line);
+    i++;
+  }
+  while (stack.length) {
+    const top = stack.pop();
+    if (top.body) emitCode(top.lang, top.body.join("\n"));
+  }
+  return out.join("\n");
+}
+function renderMd(src) {
+  const fences = [];
+  const codes = [];
+  let s = consumeFences(src, fences);
+  s = extractBareMermaid(s, fences);
+  s = s.replace(/`([^`\n]+)`/g, (_m, code) => {
+    codes.push("<code>" + esc(code) + "</code>");
+    return "%%CODE" + (codes.length - 1) + "%%";
+  });
+  s = esc(s);
+  s = s.replace(/^###### (.+)$/gm, "<h6>$1</h6>");
+  s = s.replace(/^##### (.+)$/gm, "<h5>$1</h5>");
+  s = s.replace(/^#### (.+)$/gm, "<h4>$1</h4>");
+  s = s.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+  s = s.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+  s = s.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+  s = s.replace(/^&gt; (.+)$/gm, "<blockquote>$1</blockquote>");
+  s = s.replace(/^(?:---|\*\*\*|___)$/gm, "<hr>");
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  s = s.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+  s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  s = mdTables(s);
+  s = s.replace(/(^|\n)((?:[\-\*] .+(?:\n|$))+)/g, (m, p, block) => {
+    const items = block.trim().split("\n").map(ln => "<li>" + ln.replace(/^[\-\*] /, "") + "</li>");
+    return p + "<ul>" + items.join("") + "</ul>";
+  });
+  s = s.replace(/(^|\n)((?:\d+\. .+(?:\n|$))+)/g, (m, p, block) => {
+    const items = block.trim().split("\n").map(ln => "<li>" + ln.replace(/^\d+\. /, "") + "</li>");
+    return p + "<ol>" + items.join("") + "</ol>";
+  });
+  const lines = s.split("\n");
+  const out = [];
+  let para = [];
+  const flush = () => {
+    if (para.length) {
+      out.push("<p>" + para.join("<br>") + "</p>");
+      para = [];
+    }
+  };
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^%%FENCE\d+%%$/.test(t) || /^<(h[1-6]|ul|ol|blockquote|hr|table)\b/.test(t)) {
+      flush();
+      out.push(t);
+    } else if (t === "") {
+      flush();
+    } else {
+      para.push(line);
+    }
+  }
+  flush();
+  s = out.join("\n");
+  s = s.replace(/%%CODE(\d+)%%/g, (_m, i) => codes[Number(i)] || "");
+  s = s.replace(/%%FENCE(\d+)%%/g, (_m, i) => fences[Number(i)] || "");
+  return s;
+}
+function mdTableRow(line) {
+  return /^\s*\|.+\|\s*$/.test(line);
+}
+function mdTableSep(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+function mdTableCells(line) {
+  let t = line.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|")) t = t.slice(0, -1);
+  return t.split("|").map(c => c.trim());
+}
+function mdTables(s) {
+  const lines = s.split("\n");
+  const out = [];
+  for (let i = 0; i < lines.length; ) {
+    if (mdTableRow(lines[i]) && i + 1 < lines.length && mdTableSep(lines[i + 1])) {
+      const header = mdTableCells(lines[i]);
+      const aligns = mdTableCells(lines[i + 1]).map(c => {
+        const left = c.startsWith(":");
+        const right = c.endsWith(":");
+        if (left && right) return "center";
+        if (right) return "right";
+        return "left";
+      });
+      i += 2;
+      const body = [];
+      while (i < lines.length && mdTableRow(lines[i])) {
+        body.push(mdTableCells(lines[i]));
+        i++;
+      }
+      let html = "<table><thead><tr>";
+      header.forEach((c, j) => {
+        html += '<th style="text-align:' + (aligns[j] || "left") + '">' + c + "</th>";
+      });
+      html += "</tr></thead><tbody>";
+      body.forEach(row => {
+        html += "<tr>";
+        header.forEach((_, j) => {
+          html += '<td style="text-align:' + (aligns[j] || "left") + '">' + (row[j] || "") + "</td>";
+        });
+        html += "</tr>";
+      });
+      html += "</tbody></table>";
+      out.push(html);
+      continue;
+    }
+    out.push(lines[i]);
+    i++;
+  }
+  return out.join("\n");
+}
+let mermaidPromise = null;
+let mermaidSeq = 0;
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error(src));
+    document.head.appendChild(s);
+  });
+}
+function loadMermaid() {
+  if (window.mermaid && window.mermaid.render) {
+    return Promise.resolve(window.mermaid);
+  }
+  if (!mermaidPromise) {
+    const cdns = [
+      "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js",
+      "https://unpkg.com/mermaid@11.4.1/dist/mermaid.min.js",
+    ];
+    mermaidPromise = (async () => {
+      for (const src of cdns) {
+        try {
+          await loadScript(src);
+          if (window.mermaid && window.mermaid.initialize) {
+            window.mermaid.initialize({
+              startOnLoad: false,
+              securityLevel: "strict",
+              theme: "dark",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+            });
+            return window.mermaid;
+          }
+        } catch (e) {}
+      }
+      return null;
+    })();
+  }
+  return mermaidPromise;
+}
+function markMermaidFail(el, msg) {
+  el.classList.add("md-code");
+  if (el.querySelector(".md-mermaid-fail")) return;
+  const note = document.createElement("div");
+  note.className = "md-mermaid-fail";
+  note.textContent = msg;
+  el.insertBefore(note, el.firstChild);
+}
+function hydrateMermaid(root) {
+  const nodes = root.querySelectorAll("pre.md-mermaid");
+  if (!nodes.length) return;
+  loadMermaid().then(mermaid => {
+    if (!root.isConnected) return;
+    if (!mermaid) {
+      nodes.forEach(el => markMermaidFail(el, "No se pudo cargar Mermaid (CDN / red)."));
+      return;
+    }
+    nodes.forEach(el => {
+      if (!el.isConnected) return;
+      const src = (el.textContent || "").trim();
+      if (!src) return;
+      const id = "spy-mmd-" + (++mermaidSeq);
+      const run = mermaid.render(id, src);
+      Promise.resolve(run).then(out => {
+        if (!el.isConnected) return;
+        const svg = typeof out === "string" ? out : (out && out.svg);
+        if (!svg) throw new Error("sin svg");
+        const wrap = document.createElement("div");
+        wrap.className = "md-mermaid-out";
+        wrap.innerHTML = svg;
+        el.replaceWith(wrap);
+      }).catch(() => {
+        markMermaidFail(el, "Mermaid no pudo dibujar este diagrama.");
+      });
+    });
+  });
 }
 function srcOf(r) {
   if (r.src) return r.src;
@@ -791,6 +1552,7 @@ function srcOf(r) {
 }
 function badge(r) {
   if (r.tag === "embed") return "embed";
+  if (r.log_kind === "summary" || r.kind === "summary") return "memoria";
   return srcOf(r) === "direct" ? "yo" : "vm";
 }
 function apply(ev) {
@@ -798,8 +1560,10 @@ function apply(ev) {
   if (ev.kind === "req") {
     reqs.set(ev.id, {
       id: ev.id, tag: ev.tag || "chat", src: ev.src || (ev.tag === "direct" ? "direct" : "vm"),
-      ts: ev.ts, user: ev.user || "", system: ev.system || "", response: "",
-      streaming: true, seconds: null, model: ev.model || "", kind: "chat"
+      ts: ev.ts, user: ev.user || "", system: ev.system || "", prompt: ev.prompt || "",
+      log_kind: ev.log_kind || "", response: "",
+      streaming: true, seconds: null, model: ev.model || "",
+      kind: ev.log_kind === "summary" ? "summary" : "chat"
     });
     order.push(ev.id);
   } else if (ev.kind === "tok") {
@@ -813,11 +1577,12 @@ function apply(ev) {
       r.seconds = ev.seconds;
       r.chars = ev.chars;
       r.error = ev.error || "";
+      if (ev.log_kind) r.log_kind = ev.log_kind;
     }
   } else if (ev.kind === "embed") {
     reqs.set(ev.id, {
       id: ev.id, tag: "embed", src: "vm", ts: ev.ts, kind: "embed",
-      user: (ev.samples || []).join("\n"), system: "",
+      user: (ev.samples || []).join("\n"), system: "", prompt: "", log_kind: "",
       response: "HTTP " + ev.status + "  batch=" + ev.batch + "  " + (ev.seconds || 0) + "s",
       streaming: false, seconds: ev.seconds, status: ev.status
     });
@@ -827,11 +1592,11 @@ function apply(ev) {
 function match(r) {
   const b = badge(r);
   if (filter === "vm" && b !== "vm") return false;
-  if (filter === "yo" && b !== "yo") return false;
+  if (filter === "yo" && b !== "yo" && b !== "memoria") return false;
   if (filter === "embed" && b !== "embed") return false;
   if (!query) return true;
   const q = query.toLowerCase();
-  return (r.user + "\n" + r.system + "\n" + r.response).toLowerCase().includes(q);
+  return (r.user + "\n" + r.system + "\n" + (r.prompt || "") + "\n" + r.response).toLowerCase().includes(q);
 }
 function latestMatchId() {
   for (let i = order.length - 1; i >= 0; i--) {
@@ -855,19 +1620,85 @@ function setFollow(on) {
   }
   syncFollowBtn();
 }
+function syncMdBtn() {
+  const btn = document.getElementById("f-md");
+  if (!btn) return;
+  btn.classList.toggle("on", mdView);
+  btn.textContent = mdView ? "md" : "raw";
+  btn.title = mdView ? "Mostrar texto crudo (prompt y salida)" : "Renderizar markdown (prompt y salida)";
+}
+function setMdView(on) {
+  mdView = !!on;
+  try { localStorage.setItem("tuide-spy-md", mdView ? "1" : "0"); } catch (e) {}
+  syncMdBtn();
+}
+function syncPromptBtn() {
+  const btn = document.getElementById("f-prompt");
+  const dbody = document.getElementById("dbody");
+  if (dbody) dbody.classList.toggle("hide-prompt", !promptView);
+  if (btn) {
+    btn.classList.toggle("on", promptView);
+    btn.textContent = promptView ? "prompt" : "mostrar prompt";
+    btn.title = promptView ? "Ocultar el prompt enviado y dejar solo la salida" : "Mostrar el prompt enviado";
+  }
+}
+function setPromptView(on) {
+  promptView = !!on;
+  try { localStorage.setItem("tuide-spy-prompt", promptView ? "1" : "0"); } catch (e) {}
+  syncPromptBtn();
+}
 function anyChatLive() {
   for (const r of reqs.values()) {
     if (r.streaming && r.tag !== "embed") return true;
   }
   return false;
 }
+function fmtChars(n) {
+  n = Number(n) || 0;
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k";
+  return String(n);
+}
+function applyThread(t) {
+  if (!t || typeof t !== "object") return;
+  thread = {
+    on: !!t.on,
+    turns: t.turns || 0,
+    summary_chars: t.summary_chars || 0,
+    recent_turns: t.recent_turns || 0
+  };
+}
+function setAskMode(m) {
+  askMode = m === "chat" ? "chat" : "oneshot";
+  document.getElementById("m-oneshot").classList.toggle("on", askMode === "oneshot");
+  document.getElementById("m-chat").classList.toggle("on", askMode === "chat");
+  try { localStorage.setItem("tuide-spy-ask-mode", askMode); } catch (e) {}
+  syncComposer();
+}
 function syncComposer() {
   const busy = sending || serverBusy || anyChatLive();
   const user = document.getElementById("user");
   const btn = document.getElementById("send");
+  const stop = document.getElementById("stop");
   const hint = document.getElementById("hint");
+  const meta = document.getElementById("chat-meta");
+  const reset = document.getElementById("chat-reset");
   if (!user || !btn || !hint) return;
   btn.disabled = !askEnabled || busy || !user.value.trim();
+  if (stop) {
+    stop.style.display = busy ? "inline-block" : "none";
+    stop.disabled = !busy;
+  }
+  if (reset) {
+    reset.style.display = askMode === "chat" ? "inline-block" : "none";
+    reset.disabled = !askEnabled || busy;
+  }
+  if (meta) {
+    const chatOn = askMode === "chat";
+    meta.style.display = chatOn ? "inline" : "none";
+    if (chatOn) {
+      meta.textContent = thread.turns + " turnos · resumen " + fmtChars(thread.summary_chars);
+    }
+  }
   hint.textContent = (!askEnabled || !busy) ? "" : "el modelo está ocupado (VM o tú)";
 }
 function renderList() {
@@ -907,8 +1738,8 @@ function renderDetail() {
   const nearBottom = paneResp.scrollHeight - paneResp.scrollTop - paneResp.clientHeight < 48;
   if (!r) {
     document.getElementById("dhead-meta").textContent = "ningún turno seleccionado";
-    promptEl.className = "muted";
-    respEl.className = "muted";
+    promptEl.className = "md muted";
+    respEl.className = "md muted";
     promptEl.textContent = "Selecciona un turno o escribe a la izquierda.";
     respEl.textContent = "—";
     return;
@@ -917,12 +1748,26 @@ function renderDetail() {
   const extra = r.error ? " · error" : (r.streaming ? " · generando…" : "");
   document.getElementById("dhead-meta").textContent =
     badge(r) + " · " + t + (r.model ? " · " + r.model : "") + extra;
-  const prompt = (r.system ? "—— system ——\n" + r.system + "\n\n" : "") +
-                 (r.user ? "—— user ——\n" + r.user : "(sin user)");
-  promptEl.className = "";
-  promptEl.textContent = prompt;
-  respEl.className = r.error && !r.response ? "muted" : "";
-  respEl.textContent = r.response || (r.streaming ? "…" : (r.error || "(vacío)"));
+  const prompt = r.prompt || ((r.system ? "—— system ——\n" + r.system + "\n\n" : "") +
+                 (r.user ? "—— user ——\n" + r.user : "(sin user)"));
+  if (mdView) {
+    promptEl.className = "md";
+    promptEl.innerHTML = renderMd(prompt);
+    if (promptView) hydrateMermaid(promptEl);
+  } else {
+    promptEl.className = "md";
+    promptEl.textContent = prompt;
+  }
+  const body = r.response || (r.streaming ? "…" : (r.error || "(vacío)"));
+  const mute = (!r.response && (r.error || !r.streaming));
+  if (mdView && r.response) {
+    respEl.className = "md" + (r.error ? " muted" : "");
+    respEl.innerHTML = renderMd(r.response);
+    if (!r.streaming) hydrateMermaid(respEl);
+  } else {
+    respEl.className = mute ? "md muted" : "md";
+    respEl.textContent = body;
+  }
   if (follow || (r.streaming && nearBottom)) paneResp.scrollTop = paneResp.scrollHeight;
 }
 function render() { renderList(); renderDetail(); syncComposer(); }
@@ -945,8 +1790,20 @@ async function refreshStatus() {
     const st = await res.json();
     askEnabled = !!st.ask;
     serverBusy = !!st.busy;
+    applyThread(st.thread);
     document.getElementById("compose").style.display = askEnabled ? "flex" : "none";
     document.getElementById("split-compose").style.display = askEnabled ? "block" : "none";
+    const lamp = document.getElementById("llm-lamp");
+    const lab = document.getElementById("llm-lamp-label");
+    if (lamp && lab) {
+      lamp.classList.toggle("on", askEnabled);
+      const chat = st.chat || {};
+      const name = chat.label || chat.alias || "";
+      lab.textContent = askEnabled ? (name ? "LLM · " + name : "LLM a la escucha") : "LLM off";
+      lamp.title = askEnabled
+        ? (name ? "LLM a la escucha: " + name : "LLM a la escucha")
+        : "Ningún LLM a la escucha";
+    }
     syncComposer();
   } catch (e) {}
 }
@@ -956,35 +1813,156 @@ async function sendAsk() {
   const system = document.getElementById("sys").value;
   if (!user || sending || !askEnabled) return;
   sending = true;
+  askAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
   syncComposer();
   try {
     const res = await fetch("/api/ask", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({user, system}),
+      body: JSON.stringify({user, system, mode: askMode}),
+      signal: askAbort ? askAbort.signal : undefined,
     });
     const data = await res.json();
+    if (data.thread) applyThread(data.thread);
     if (data.id) sel = data.id;
-    if (!data.ok) {
+    if (data.stopped) {
+      document.getElementById("hint").textContent = "generación detenida";
+      userEl.value = "";
+    } else if (!data.ok) {
       document.getElementById("hint").textContent = data.error || "error";
     } else {
       userEl.value = "";
     }
   } catch (e) {
-    document.getElementById("hint").textContent = "no se pudo enviar";
+    if (!e || e.name !== "AbortError") {
+      document.getElementById("hint").textContent = "no se pudo enviar";
+    }
   }
+  askAbort = null;
   sending = false;
   await poll();
   syncComposer();
 }
+async function stopGenerate() {
+  try {
+    await fetch("/api/ask/stop", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: "{}",
+    });
+  } catch (e) {}
+  try { if (askAbort) askAbort.abort(); } catch (e) {}
+}
+async function resetChat() {
+  if (sending || !askEnabled) return;
+  sending = true;
+  syncComposer();
+  try {
+    const res = await fetch("/api/ask", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mode: "chat", reset: true}),
+    });
+    const data = await res.json();
+    if (data.thread) applyThread(data.thread);
+    else applyThread({on: false, turns: 0, summary_chars: 0, recent_turns: 0});
+    if (!data.ok) {
+      document.getElementById("hint").textContent = data.error || "error";
+    }
+  } catch (e) {
+    document.getElementById("hint").textContent = "no se pudo resetear";
+  }
+  sending = false;
+  syncComposer();
+}
+async function clearHistory() {
+  if (!confirm("¿Vaciar el historial de turnos (vm, yo, embed)?")) return;
+  try {
+    const res = await fetch("/api/history/clear", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: "{}",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!data.ok) {
+      document.getElementById("hint").textContent = data.error || "no se pudo vaciar";
+      return;
+    }
+    reqs.clear();
+    order = [];
+    sel = null;
+    off = 0;
+    render();
+  } catch (e) {
+    document.getElementById("hint").textContent = "no se pudo vaciar el historial";
+  }
+}
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.left = "0";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      if (document.execCommand("copy")) resolve();
+      else reject(new Error("copy"));
+    } catch (err) { reject(err); }
+    ta.remove();
+  });
+}
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest && e.target.closest(".md-copy");
+  if (!btn) return;
+  e.preventDefault();
+  const fence = btn.closest(".md-fence");
+  const code = fence && fence.querySelector("pre.md-code code");
+  const text = code ? code.textContent : "";
+  copyText(text).then(() => {
+    btn.textContent = "copiado";
+    btn.classList.add("on");
+    setTimeout(() => {
+      if (!btn.isConnected) return;
+      btn.textContent = "copiar";
+      btn.classList.remove("on");
+    }, 1200);
+  }).catch(() => {
+    btn.textContent = "error";
+    setTimeout(() => { if (btn.isConnected) btn.textContent = "copiar"; }, 1200);
+  });
+});
 document.getElementById("q").oninput = (e) => { query = e.target.value.trim(); renderList(); };
 document.getElementById("user").oninput = syncComposer;
 document.getElementById("send").onclick = sendAsk;
-document.getElementById("user").addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+document.getElementById("stop").onclick = stopGenerate;
+document.getElementById("m-oneshot").onclick = () => setAskMode("oneshot");
+document.getElementById("m-chat").onclick = () => setAskMode("chat");
+document.getElementById("chat-reset").onclick = resetChat;
+document.getElementById("f-clear").onclick = clearHistory;
+function bindSendKeys(el) {
+  if (!el) return;
+  el.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    if (!(e.altKey || e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     sendAsk();
-  }
+  });
+}
+bindSendKeys(document.getElementById("user"));
+bindSendKeys(document.getElementById("sys"));
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!(sending || serverBusy || anyChatLive())) return;
+  e.preventDefault();
+  stopGenerate();
 });
 ["all","vm","yo","embed"].forEach(name => {
   document.getElementById("f-" + name).onclick = () => {
@@ -997,11 +1975,36 @@ document.getElementById("f-follow").onclick = () => {
   setFollow(!follow);
   render();
 };
+document.getElementById("f-md").onclick = () => {
+  setMdView(!mdView);
+  render();
+};
+document.getElementById("f-prompt").onclick = () => {
+  setPromptView(!promptView);
+};
+document.getElementById("f-prompt-pane").onclick = () => {
+  setPromptView(false);
+};
 try {
   const savedFollow = localStorage.getItem("tuide-spy-follow");
   if (savedFollow === "0") follow = false;
 } catch (e) {}
+try {
+  const savedMd = localStorage.getItem("tuide-spy-md");
+  if (savedMd === "0") mdView = false;
+} catch (e) {}
+try {
+  const savedPrompt = localStorage.getItem("tuide-spy-prompt");
+  if (savedPrompt === "0") promptView = false;
+} catch (e) {}
+try {
+  const savedMode = localStorage.getItem("tuide-spy-ask-mode");
+  if (savedMode === "chat" || savedMode === "oneshot") askMode = savedMode;
+} catch (e) {}
 syncFollowBtn();
+syncMdBtn();
+syncPromptBtn();
+setAskMode(askMode);
 refreshStatus();
 poll();
 setInterval(poll, 250);
@@ -1075,12 +2078,20 @@ ASK_SYSTEM_MAX = 12000
 ASK_BODY_MAX = 200000
 
 
-def run_direct_ask(user: str, system: str, backend_host: str, backend_port: int) -> Tuple[str, str, str]:
+def run_direct_ask(
+    user: str,
+    system: str,
+    backend_host: str,
+    backend_port: int,
+    messages: Optional[List[dict]] = None,
+    log_kind: str = "",
+) -> Tuple[str, str, str]:
     """Returns (text, req_id, error)."""
-    messages = []
-    if system.strip():
-        messages.append({"role": "system", "content": system[:ASK_SYSTEM_MAX]})
-    messages.append({"role": "user", "content": user[:ASK_USER_MAX]})
+    if messages is None:
+        messages = []
+        if system.strip():
+            messages.append({"role": "system", "content": system[:ASK_SYSTEM_MAX]})
+        messages.append({"role": "user", "content": user[:ASK_USER_MAX]})
     payload = {"messages": messages, "stream": False}
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     headers = {
@@ -1101,10 +2112,119 @@ def run_direct_ask(user: str, system: str, backend_host: str, backend_port: int)
             "direct",
             src="direct",
             reply=False,
+            log_kind=log_kind,
         )
         return text, rid, err
     finally:
         conn.close()
+
+
+def chat_thread_status() -> dict:
+    with chat_session_lock:
+        return chat_session.status()
+
+
+def reset_chat_session() -> dict:
+    with chat_turn_lock:
+        with chat_session_lock:
+            chat_session.reset()
+            clear_last_chat_ctx()
+            return chat_session.status()
+
+
+def _compact_overflow(backend_host: str, backend_port: int) -> None:
+    """Fold overflow recent turns into the rolling summary (same GGUF).
+
+    Caller holds chat_turn_lock. Session lock is not held during the LLM call.
+    """
+    with chat_session_lock:
+        if not chat_session.needs_compact():
+            if len(chat_session.summary) > chat_session.summary_max_chars:
+                chat_session.apply_summary(chat_session.summary)
+            return
+        dropped = chat_session.pop_overflow()
+        old_summary = chat_session.summary
+    if not dropped:
+        return
+    sys_p, user_p = chat_mem.summary_prompt(old_summary, dropped)
+    text, _rid, err = run_direct_ask(
+        user_p,
+        sys_p,
+        backend_host,
+        backend_port,
+        log_kind="summary",
+    )
+    with chat_session_lock:
+        if err or not (text or "").strip():
+            folded = chat_mem.extractive_fold(
+                old_summary, dropped, chat_session.summary_max_chars
+            )
+            chat_session.apply_summary(folded)
+        else:
+            chat_session.apply_summary(text)
+
+
+def _ask_result(text: str, rid: str, err: str) -> Tuple[int, dict]:
+    stopped = err == "stopped"
+    payload: dict = {
+        "ok": not err or stopped,
+        "id": rid,
+        "chars": len(text),
+        "thread": chat_thread_status(),
+    }
+    if stopped:
+        payload["stopped"] = True
+        return 200, payload
+    if err:
+        payload["error"] = err
+        return 502, payload
+    return 200, payload
+
+
+def handle_ask_post(obj: dict, backend_host: str, backend_port: int) -> Tuple[int, dict]:
+    """Shared /api/ask body handler for hub and standalone spy web."""
+    user = str(obj.get("user") or "").strip()
+    system = str(obj.get("system") or "")
+    mode = str(obj.get("mode") or "oneshot").strip().lower()
+    if mode not in ("oneshot", "chat"):
+        mode = "oneshot"
+    reset = bool(obj.get("reset"))
+
+    if mode != "chat":
+        if reset:
+            reset_chat_session()
+        if not user:
+            return 400, {"ok": False, "error": "user vacío"}
+        text, rid, err = run_direct_ask(user, system, backend_host, backend_port)
+        return _ask_result(text, rid, err)
+
+    with chat_turn_lock:
+        with chat_session_lock:
+            if reset:
+                chat_session.reset()
+                clear_last_chat_ctx()
+            if not user:
+                if reset:
+                    return 200, {"ok": True, "thread": chat_session.status()}
+                return 400, {"ok": False, "error": "user vacío"}
+            if system.strip():
+                chat_session.system = system
+        _compact_overflow(backend_host, backend_port)
+        with chat_session_lock:
+            messages = chat_session.build_messages(user[:ASK_USER_MAX])
+            sticky_system = chat_session.system
+        text, rid, err = run_direct_ask(
+            user,
+            sticky_system,
+            backend_host,
+            backend_port,
+            messages=messages,
+            log_kind="chat",
+        )
+        with chat_session_lock:
+            if not err or (err == "stopped" and (text or "").strip()):
+                chat_session.commit(user[:ASK_USER_MAX], text)
+        return _ask_result(text, rid, err)
 
 
 class _WebHandler(http.server.BaseHTTPRequestHandler):
@@ -1137,7 +2257,10 @@ class _WebHandler(http.server.BaseHTTPRequestHandler):
             self._send(200, DASHBOARD_HTML.encode("utf-8"), "text/html; charset=utf-8")
             return
         if parsed.path == "/api/status":
-            self._json(200, {"ask": self.ask_enabled, "busy": chat_busy()})
+            self._json(
+                200,
+                {"ask": self.ask_enabled, "busy": chat_busy(), "thread": chat_thread_status()},
+            )
             return
         if parsed.path == "/api/tail":
             qs = urllib.parse.parse_qs(parsed.query)
@@ -1169,6 +2292,12 @@ class _WebHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/history/clear":
+            self._json(200, clear_history())
+            return
+        if parsed.path == "/api/ask/stop":
+            self._json(200, request_stop_generation(self.backend_host, self.backend_port))
+            return
         if parsed.path != "/api/ask":
             self._send(404, b"not found\n", "text/plain")
             return
@@ -1191,23 +2320,15 @@ class _WebHandler(http.server.BaseHTTPRequestHandler):
         if not isinstance(obj, dict):
             self._json(400, {"ok": False, "error": "JSON inválido"})
             return
-        user = str(obj.get("user") or "").strip()
-        system = str(obj.get("system") or "")
-        if not user:
-            self._json(400, {"ok": False, "error": "user vacío"})
-            return
         try:
-            text, rid, err = run_direct_ask(user, system, self.backend_host, self.backend_port)
+            code, payload = handle_ask_post(obj, self.backend_host, self.backend_port)
         except (TimeoutError, socket.timeout) as ex:
             self._json(504, {"ok": False, "error": f"timeout: {ex}"})
             return
         except OSError as ex:
             self._json(502, {"ok": False, "error": str(ex)})
             return
-        if err:
-            self._json(502, {"ok": False, "id": rid, "error": err, "chars": len(text)})
-            return
-        self._json(200, {"ok": True, "id": rid, "chars": len(text)})
+        self._json(code, payload)
 
 
 def start_web(
