@@ -61,12 +61,31 @@ si el host de embeddings no es loopback: solo hace attach HTTP.
 En el **Mac**:
 
 ```bash
-# GGUF en ~/.cache/tuide/models/l2/ y embed/intent/
+# GGUF en ~/.cache/tuide/models/l2/ (y l1/) y embed/intent/
 # llama-server con Metal (PATH, TUIDE_LLAMA_SERVER, o cache runtime/llama-b10333)
-./tools/run_host_llama.sh
+./tools/run_host_llama.sh                 # hub HTML: Lanzamiento | Inspección
+./tools/run_host_llama.sh --llm 7b        # hub; preselecciona chat 7B
+./tools/run_host_llama.sh --llm 14b --no-embed
+./tools/run_host_llama.sh --foreground    # hub en esta terminal
+./tools/run_host_llama.sh --stop          # para hub/spy/llama-server en los puertos tuide
+./tools/run_host_llama.sh -y              # autoelige GGUF y abre Inspección
+./tools/run_host_llama.sh --ui gui        # listas nativas (legado)
+./tools/run_host_llama.sh --ui text       # menú TTY
 ```
 
-Levanta chat en `:8080` y embeddings en `:18765`, bound a `0.0.0.0`.
+El hub (`http://127.0.0.1:18767`) tiene dos modos:
+
+- **Lanzamiento** — catálogo (Qwen L1/L2 + nomic y GGUF ya en disco), descargar, importar URL de Hugging Face o ruta local, arrancar / parar / reiniciar chat y embed por separado.
+- **Inspección** — el visor spy (historial VM + prompts locales). No gestiona procesos.
+
+En Mac el hub corre en Terminal.app (`open -a Terminal`). El proxy imprime **tokens en vivo** en esa ventana (la VM sigue por HTTP). `--no-spy` desactiva el proxy. `--no-web` vuelve al picker legado.
+Puertos: UI `:18767` (loopback), chat `:8080`, embeddings `:18765` (bind `0.0.0.0` para la VM).
+
+`llama-server` de chat se configura en la pestaña **Lanzamiento** (flash-attn, KV `q8_0`,
+un slot, hilos P, embeddings en CPU, draft 1.5B, pensamiento en vivo en Qwen3/R1).
+Los valores se aplican al Lanzar o Reiniciar. Overrides por env: `TUIDE_HOST_FLASH_ATTN`,
+`TUIDE_HOST_CACHE_TYPE`, `TUIDE_HOST_THREADS`, `TUIDE_HOST_EMBED_NGL`, `TUIDE_HOST_DRAFT`,
+`TUIDE_HOST_DRAFT_GGUF`, `TUIDE_HOST_THINKING`.
 
 En la **VM** (Settings F10 o `.tuide/config.json`):
 
