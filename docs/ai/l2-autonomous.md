@@ -82,9 +82,10 @@ En Mac el hub corre en Terminal.app (`open -a Terminal`). El proxy imprime **tok
 Puertos: UI `:18767` (loopback), chat `:8080`, embeddings `:18765` (bind `0.0.0.0` para la VM).
 
 `llama-server` de chat se configura en la pestaña **Lanzamiento** (flash-attn, KV `q8_0`,
-un slot, hilos P, embeddings en CPU, draft 1.5B). Los valores se aplican al Lanzar o
-Reiniciar. Overrides por env: `TUIDE_HOST_FLASH_ATTN`, `TUIDE_HOST_CACHE_TYPE`,
-`TUIDE_HOST_THREADS`, `TUIDE_HOST_EMBED_NGL`, `TUIDE_HOST_DRAFT`, `TUIDE_HOST_DRAFT_GGUF`.
+un slot, hilos P, embeddings en CPU, draft 1.5B, pensamiento en vivo en Qwen3/R1).
+Los valores se aplican al Lanzar o Reiniciar. Overrides por env: `TUIDE_HOST_FLASH_ATTN`,
+`TUIDE_HOST_CACHE_TYPE`, `TUIDE_HOST_THREADS`, `TUIDE_HOST_EMBED_NGL`, `TUIDE_HOST_DRAFT`,
+`TUIDE_HOST_DRAFT_GGUF`, `TUIDE_HOST_THINKING`.
 
 En la **VM** (Settings F10 o `.tuide/config.json`):
 

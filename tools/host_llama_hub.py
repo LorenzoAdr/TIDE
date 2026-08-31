@@ -60,6 +60,21 @@ DRAFT_CATALOG_ID = "qwen2.5-1.5b-instruct-q4_k_m"
 LAUNCH_KEYS = (
     "flash_attn", "cache_type", "threads", "np", "ngl", "chat_ctx",
     "embed_ngl", "embed_ctx", "embed_np", "draft", "draft_n_max", "draft_gguf",
+    "thinking",
+)
+
+# GGUF families whose chat template emits <think> / reasoning_content.
+THINKING_MARKERS = (
+    "qwen3", "qwen-3",
+    "qwq",
+    "deepseek-r1", "deepseek_r1", "r1-distill", "r1_distill",
+    "gpt-oss", "gpt_oss",
+    "magistral",
+    "glm-4.5", "glm4.5", "glm-4.6", "glm4.6", "glm-4.7", "glm4.7",
+    "phi-4-reasoning", "phi4-reasoning",
+    "hunyuan",
+    "seed-oss",
+    "kimi-k1", "kimi_k1",
 )
 
 
@@ -962,6 +977,61 @@ def embed_ngl() -> str:
     return opt_or_env("embed_ngl", "TUIDE_HOST_EMBED_NGL", "0") or "0"
 
 
+def model_supports_thinking(path: str) -> bool:
+    name = Path(path or "").name.lower()
+    return any(marker in name for marker in THINKING_MARKERS)
+
+
+def thinking_wanted() -> bool:
+    return parse_on_off_auto(opt_or_env("thinking", "TUIDE_HOST_THINKING", "on"), "on") != "off"
+
+
+_llama_help: Dict[str, str] = {}
+
+
+def llama_server_help(server: str) -> str:
+    if server in _llama_help:
+        return _llama_help[server]
+    text = ""
+    if server and Path(server).is_file():
+        try:
+            text = subprocess.check_output(
+                [server, "--help"],
+                text=True,
+                stderr=subprocess.STDOUT,
+                timeout=8,
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            text = ""
+    _llama_help[server] = text
+    return text
+
+
+def thinking_llama_argv(server: str, model: str) -> List[str]:
+    """Jinja + reasoning split for CoT models; no-op for Llama / Qwen2.5 / etc."""
+    if not model_supports_thinking(model):
+        return []
+    on = thinking_wanted()
+    help_text = llama_server_help(server)
+
+    def has(flag: str) -> bool:
+        return True if not help_text else flag in help_text
+
+    flags: List[str] = []
+    if has("--jinja"):
+        flags.append("--jinja")
+    if has("--reasoning-format"):
+        flags += ["--reasoning-format", "deepseek"]
+    if has("--chat-template-kwargs"):
+        flags += [
+            "--chat-template-kwargs",
+            json.dumps({"enable_thinking": on}, separators=(",", ":")),
+        ]
+    if (not on) and has("--reasoning-budget"):
+        flags += ["--reasoning-budget", "0"]
+    return flags
+
+
 def chat_llama_argv(server: str, model: str, host: str, port: int, alias: str) -> List[str]:
     threads = str(performance_core_count())
     ngl = opt_or_env("ngl", "TUIDE_HOST_NGL", str(CFG["ngl"])) or str(CFG["ngl"])
@@ -977,6 +1047,7 @@ def chat_llama_argv(server: str, model: str, host: str, port: int, alias: str) -
         "-fa", flash_attn_mode(),
         "--metrics",
     ]
+    cmd += thinking_llama_argv(server, model)
     ctk = cache_type_k_v()
     if ctk:
         cmd += ["-ctk", ctk, "-ctv", ctk]
@@ -1017,6 +1088,7 @@ def perf_summary(role: str = "chat") -> str:
     ]
     draft = find_draft_gguf()
     bits.append("draft=" + (Path(draft).name if draft else "off"))
+    bits.append("think=" + ("on" if thinking_wanted() else "off"))
     if role == "embed":
         return f"ngl={embed_ngl()}"
     return " ".join(bits)
@@ -1035,7 +1107,7 @@ def _record_perf(role: str, cmd: List[str]) -> None:
             "summary": (
                 f"fa={flash_attn_mode()} kv={cache_type_k_v() or 'f16'} "
                 f"t={performance_core_count()} np={chat_slot_count()} "
-                f"draft={draft or 'off'}"
+                f"draft={draft or 'off'} think={'on' if thinking_wanted() else 'off'}"
             ),
         }
         return
@@ -1058,6 +1130,7 @@ def default_launch_opts() -> Dict[str, str]:
         "draft": env_trimmed("TUIDE_HOST_DRAFT", "auto") or "auto",
         "draft_n_max": env_trimmed("TUIDE_HOST_DRAFT_N_MAX", "16") or "16",
         "draft_gguf": env_trimmed("TUIDE_HOST_DRAFT_GGUF"),
+        "thinking": env_trimmed("TUIDE_HOST_THINKING", "on") or "on",
     }
 
 
@@ -1129,6 +1202,11 @@ def apply_launch_opts(obj: Optional[Dict[str, Any]]) -> str:
                     return "draft GGUF no encontrado"
         else:
             updates["draft_gguf"] = ""
+    if "thinking" in obj:
+        mode = parse_on_off_auto(str(obj.get("thinking") or ""), "on")
+        if mode not in ("on", "off"):
+            return "thinking debe ser on u off"
+        updates["thinking"] = mode
     if not updates:
         return ""
     with launch_lock:
@@ -1441,6 +1519,11 @@ def start_role(role: str, entry: Dict[str, Any]) -> str:
                 log("chat sin draft: descarga Qwen2.5 Instruct 1.5B (L1) para speculative decoding")
             else:
                 log("chat sin draft: modelo pequeño, mismo GGUF o RAM justa (TUIDE_HOST_DRAFT=1 fuerza)")
+    if role == "chat" and model_supports_thinking(str(path)):
+        log(
+            "chat thinking "
+            + ("on (CoT en Inspección)" if thinking_wanted() else "off")
+        )
     logf = open(log_dir() / f"{role}.log", "ab")
     proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, env=env)
     health = f"http://127.0.0.1:{backend_port}/health"
@@ -1462,6 +1545,8 @@ def start_role(role: str, entry: Dict[str, Any]) -> str:
             "--tag", "chat" if role == "chat" else "embed",
             "--jsonl", jsonl,
         ]
+        if role == "chat" and model_supports_thinking(str(path)):
+            spy_cmd += ["--thinking", "on" if thinking_wanted() else "off"]
         spy_proc = subprocess.Popen(spy_cmd, env=env)
     with state_lock:
         roles[role] = {
@@ -1683,6 +1768,12 @@ input[type=text] { min-width:280px; flex:1; }
 #perf-grid input, #perf-grid select { width:100%; min-width:0; }
 #perf-help { color:var(--muted); font-size:11px; margin:0 0 8px; }
 #perf-help code { color:var(--txt); }
+.check-row { display:flex; align-items:flex-start; gap:10px; margin:12px 0 8px;
+  color:var(--muted); font-size:12px; max-width:52rem; }
+.check-row input[type=checkbox] { width:auto; margin-top:3px; flex-shrink:0; }
+.check-row .check-copy { display:flex; flex-direction:column; gap:3px; }
+.check-row .check-copy strong { color:var(--txt); font-weight:600; letter-spacing:.04em;
+  text-transform:uppercase; font-size:11px; }
 #hint, #import-msg, #rt-msg { color:var(--warn); font-size:12px; min-height:1.2em; }
 pre.vm { background:#0c0d10; border:1px solid var(--line); border-radius:8px; padding:12px;
   overflow:auto; color:#c5c9d1; }
@@ -1708,7 +1799,7 @@ pre.vm { background:#0c0d10; border:1px solid var(--line); border-radius:8px; pa
     </div>
     <div id="rt-msg"></div>
     <h2>Rendimiento</h2>
-    <p id="perf-help">Se aplican al <b>Lanzar</b> o <b>Reiniciar</b>. Por defecto: flash-attn, KV q8_0, 1 slot, embeddings en CPU, draft 1.5B automático.</p>
+    <p id="perf-help">Se aplican al <b>Lanzar</b> o <b>Reiniciar</b>. Por defecto: flash-attn, KV q8_0, 1 slot, embeddings en CPU, draft 1.5B automático, pensamiento en vivo en Qwen3/R1.</p>
     <div id="perf-grid">
       <label><span>Flash attention</span>
         <select id="opt-fa">
@@ -1748,6 +1839,13 @@ pre.vm { background:#0c0d10; border:1px solid var(--line); border-radius:8px; pa
           <option value="">automático (1.5B L1)</option>
         </select></label>
     </div>
+    <label class="check-row" for="opt-thinking">
+      <input id="opt-thinking" type="checkbox" checked>
+      <span class="check-copy">
+        <strong>Pensamiento en vivo</strong>
+        Muestra la cadena de pensamiento en Inspección (Qwen3, DeepSeek-R1, gpt-oss, Magistral, GLM-4.5…). En Llama 70B / Qwen2.5 no aplica. Desactívalo para responder antes, sin CoT.
+      </span>
+    </label>
     <div class="row" style="margin-bottom:12px">
       <button type="button" id="opt-reset">Restaurar defaults</button>
     </div>
@@ -1864,6 +1962,7 @@ function readLaunch() {
     draft: document.getElementById("opt-draft").value,
     draft_n_max: document.getElementById("opt-draft-n").value,
     draft_gguf: document.getElementById("opt-draft-gguf").value,
+    thinking: document.getElementById("opt-thinking").checked ? "on" : "off",
   };
 }
 function fillSelect(id, value, allowed) {
@@ -1902,6 +2001,7 @@ function applyLaunchForm(o, drafts) {
   fillSelect("opt-draft", o.draft, ["auto", "on", "off"]);
   document.getElementById("opt-draft-n").value = o.draft_n_max || "16";
   syncDraftSelect(drafts == null ? lastDrafts : drafts, o.draft_gguf || "");
+  document.getElementById("opt-thinking").checked = (o.thinking || "on") !== "off";
 }
 function tierBadge(m) {
   if (m.tier === "tide-l2") return '<span class="badge l2">TIDE L2</span>';
@@ -2009,7 +2109,8 @@ document.getElementById("rt-install").onclick = async () => {
 document.getElementById("opt-reset").onclick = () => {
   const d = launchDefaults || {
     flash_attn: "on", cache_type: "q8_0", threads: "8", np: "1", ngl: "99",
-    chat_ctx: "32768", embed_ngl: "0", draft: "auto", draft_n_max: "16", draft_gguf: ""
+    chat_ctx: "32768", embed_ngl: "0", draft: "auto", draft_n_max: "16", draft_gguf: "",
+    thinking: "on"
   };
   applyLaunchForm(d, lastDrafts);
 };

@@ -36,6 +36,7 @@ class HostLlamaHubTest(unittest.TestCase):
 class HostLlamaPerfTest(unittest.TestCase):
     def setUp(self) -> None:
         hub.launch_opts.clear()
+        hub._llama_help.clear()
 
     def _env(self, **kwargs: str) -> dict:
         base = {
@@ -44,6 +45,7 @@ class HostLlamaPerfTest(unittest.TestCase):
             "TUIDE_HOST_THREADS": "8",
             "TUIDE_HOST_NP": "1",
             "TUIDE_HOST_DRAFT": "off",
+            "TUIDE_HOST_THINKING": "on",
             "TUIDE_HOST_EMBED_NGL": "0",
             "TUIDE_HOST_NGL": "99",
             "TUIDE_HOST_CHAT_CTX": "32768",
@@ -130,6 +132,61 @@ class HostLlamaPerfTest(unittest.TestCase):
                     cmd = hub.chat_llama_argv("llama-server", str(chat), "127.0.0.1", 8080, "a")
         self.assertNotIn("-md", cmd)
 
+    def test_model_supports_thinking(self) -> None:
+        self.assertTrue(hub.model_supports_thinking("qwen3.6-27b-q8_0.gguf"))
+        self.assertTrue(hub.model_supports_thinking("/cache/Qwen_Qwen3.6-27B-Q8_0.gguf"))
+        self.assertTrue(hub.model_supports_thinking("DeepSeek-R1-Distill-Qwen-32B.gguf"))
+        self.assertTrue(hub.model_supports_thinking("gpt-oss-20b-mxfp4.gguf"))
+        self.assertTrue(hub.model_supports_thinking("Magistral-Small-2509-Q4_K_M.gguf"))
+        self.assertFalse(hub.model_supports_thinking("Llama-3.3-70B-Instruct-Q4_K_M.gguf"))
+        self.assertFalse(hub.model_supports_thinking("qwen2.5-coder-32b-instruct-q4_k_m.gguf"))
+
+    def test_thinking_flags_on_qwen3(self) -> None:
+        hub._llama_help.clear()
+        hub._llama_help["llama-server"] = ""
+        with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="on"), clear=False):
+            cmd = hub.chat_llama_argv(
+                "llama-server", "/tmp/qwen3.6-27b-q8_0.gguf", "127.0.0.1", 8080, "a"
+            )
+        self.assertIn("--jinja", cmd)
+        self.assertEqual(cmd[cmd.index("--reasoning-format") + 1], "deepseek")
+        self.assertEqual(
+            cmd[cmd.index("--chat-template-kwargs") + 1],
+            '{"enable_thinking":true}',
+        )
+
+    def test_thinking_off_disables_kwargs(self) -> None:
+        hub._llama_help.clear()
+        hub._llama_help["llama-server"] = ""
+        with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="off"), clear=False):
+            cmd = hub.chat_llama_argv(
+                "llama-server", "/tmp/qwen3.6-27b-q8_0.gguf", "127.0.0.1", 8080, "a"
+            )
+        self.assertEqual(
+            cmd[cmd.index("--chat-template-kwargs") + 1],
+            '{"enable_thinking":false}',
+        )
+        self.assertEqual(cmd[cmd.index("--reasoning-budget") + 1], "0")
+
+    def test_thinking_skipped_for_llama70(self) -> None:
+        hub._llama_help.clear()
+        with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="on"), clear=False):
+            cmd = hub.chat_llama_argv(
+                "llama-server",
+                "/tmp/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
+                "127.0.0.1",
+                8080,
+                "a",
+            )
+        self.assertNotIn("--jinja", cmd)
+        self.assertNotIn("--reasoning-format", cmd)
+        self.assertNotIn("--chat-template-kwargs", cmd)
+
+    def test_apply_thinking_opt(self) -> None:
+        self.assertEqual(hub.apply_launch_opts({"thinking": "off"}), "")
+        self.assertEqual(hub.effective_launch_opts()["thinking"], "off")
+        self.assertIn("thinking", hub.apply_launch_opts({"thinking": "maybe"}))
+
     def test_parse_on_off_auto(self) -> None:
         self.assertEqual(hub.parse_on_off_auto("0"), "off")
         self.assertEqual(hub.parse_on_off_auto("yes"), "on")
@@ -167,6 +224,7 @@ class HostLlamaPerfTest(unittest.TestCase):
             "TUIDE_HOST_NP": "1",
             "TUIDE_HOST_EMBED_NGL": "0",
             "TUIDE_HOST_DRAFT": "auto",
+            "TUIDE_HOST_THINKING": "on",
         }
         with mock.patch.dict(os.environ, env, clear=False):
             opts = hub.default_launch_opts()
@@ -176,6 +234,7 @@ class HostLlamaPerfTest(unittest.TestCase):
         self.assertEqual(opts["np"], "1")
         self.assertEqual(opts["embed_ngl"], "0")
         self.assertEqual(opts["draft"], "auto")
+        self.assertEqual(opts["thinking"], "on")
         self.assertIn("launch", payload)
         self.assertIn("drafts", payload)
         self.assertIn("launch_defaults", payload)

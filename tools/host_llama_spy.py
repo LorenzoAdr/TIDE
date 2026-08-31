@@ -40,6 +40,7 @@ cancel_generation = threading.Event()
 chat_turn_lock = threading.Lock()
 chat_session_lock = threading.Lock()
 chat_session = chat_mem.ChatSession()
+thinking_inject: Optional[bool] = None
 _last_chat_ctx_lock = threading.Lock()
 _last_chat_ctx: Dict[str, int] = {
     "n_tokens": 0,
@@ -110,10 +111,6 @@ def write_tok(text: str) -> None:
 
 def stream_open(tag: str) -> None:
     write_tok(f"{tag_label(tag)} ")
-    if use_color():
-        write_tok(f"{GREEN}▸ ")
-    else:
-        write_tok("▸ ")
 
 
 def stream_close() -> None:
@@ -205,12 +202,17 @@ class TokBatch:
     def __init__(self, req_id: str, tag: str) -> None:
         self.req_id = req_id
         self.tag = tag
+        self.channel = "answer"
         self.buf: List[str] = []
         self.last = time.monotonic()
 
-    def add(self, text: str) -> None:
+    def add(self, text: str, channel: str = "answer") -> None:
         if not text:
             return
+        ch = channel or "answer"
+        if ch != self.channel and self.buf:
+            self.flush()
+        self.channel = ch
         self.buf.append(text)
         now = time.monotonic()
         if sum(len(x) for x in self.buf) >= 240 or now - self.last >= 0.12:
@@ -219,7 +221,13 @@ class TokBatch:
     def flush(self) -> None:
         if not self.buf:
             return
-        jsonl_emit({"kind": "tok", "id": self.req_id, "tag": self.tag, "text": "".join(self.buf)})
+        jsonl_emit({
+            "kind": "tok",
+            "id": self.req_id,
+            "tag": self.tag,
+            "channel": self.channel,
+            "text": "".join(self.buf),
+        })
         self.buf.clear()
         self.last = time.monotonic()
 
@@ -479,23 +487,49 @@ def clear_last_chat_ctx() -> None:
         _last_chat_ctx["cached"] = 0
 
 
-def extract_delta(obj: dict) -> str:
+def extract_delta_parts(obj: dict) -> Tuple[str, str]:
+    """Return (content, reasoning) from a chat chunk or a full completion body."""
+    if not isinstance(obj, dict):
+        return "", ""
     choices = obj.get("choices")
     if not isinstance(choices, list) or not choices:
-        return ""
+        return "", ""
     c0 = choices[0] if isinstance(choices[0], dict) else {}
-    delta = c0.get("delta") or {}
-    if isinstance(delta, dict):
-        content = delta.get("content")
-        if isinstance(content, str):
-            return content
-    text = c0.get("text")
-    if isinstance(text, str):
-        return text
-    msg = c0.get("message") or {}
-    if isinstance(msg, dict) and isinstance(msg.get("content"), str):
-        return msg["content"]
-    return ""
+    delta = c0.get("delta") if isinstance(c0.get("delta"), dict) else {}
+    msg = c0.get("message") if isinstance(c0.get("message"), dict) else {}
+    content = ""
+    if isinstance(delta.get("content"), str):
+        content = delta["content"]
+    elif isinstance(c0.get("text"), str):
+        content = c0["text"]
+    elif isinstance(msg.get("content"), str):
+        content = msg["content"]
+    reason = ""
+    for src in (delta, msg):
+        for key in ("reasoning_content", "reasoning"):
+            val = src.get(key)
+            if isinstance(val, str) and val:
+                reason = val
+                break
+        if reason:
+            break
+    return content, reason
+
+
+def extract_delta(obj: dict) -> str:
+    content, _reason = extract_delta_parts(obj)
+    return content
+
+
+def apply_thinking_payload(payload: dict) -> dict:
+    """Force enable_thinking on CoT models when the launch checkbox says so."""
+    if thinking_inject is None or not isinstance(payload, dict):
+        return payload
+    kwargs = payload.get("chat_template_kwargs")
+    merged = dict(kwargs) if isinstance(kwargs, dict) else {}
+    merged["enable_thinking"] = bool(thinking_inject)
+    payload["chat_template_kwargs"] = merged
+    return payload
 
 
 def send_http(sock: socket.socket, status: int, headers: Dict[str, str], body: bytes) -> None:
@@ -587,6 +621,7 @@ def handle_chat(
             model = str(payload.get("model") or "")
             payload = dict(payload)
             payload["stream"] = True
+            payload = apply_thinking_payload(payload)
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers = dict(headers)
             headers["content-type"] = "application/json"
@@ -618,11 +653,43 @@ def handle_chat(
     tok_batch = TokBatch(rid, tag)
     stream_open(tag)
     acc: List[str] = []
+    acc_reason: List[str] = []
+    stream_phase = ""
     raw = b""
     sse = False
     resp: Optional[http.client.HTTPResponse] = None
     err: Optional[str] = None
     ctx_snap: Dict[str, int] = {}
+
+    def emit_live(text: str, channel: str) -> None:
+        nonlocal stream_phase
+        if not text:
+            return
+        if channel != stream_phase:
+            if stream_phase == "reason" and use_color():
+                write_tok(RESET)
+            if stream_phase:
+                write_tok("\n")
+            if channel == "reason":
+                write_tok(paint(DIM, "pensando ▸ "))
+                if use_color():
+                    write_tok(DIM)
+            else:
+                write_tok(f"{GREEN}▸ " if use_color() else "▸ ")
+            stream_phase = channel
+        write_tok(text)
+
+    def take_parts(obj: dict) -> None:
+        content, reason = extract_delta_parts(obj)
+        if reason:
+            acc_reason.append(reason)
+            emit_live(reason, "reason")
+            tok_batch.add(reason, "reason")
+        if content:
+            acc.append(content)
+            emit_live(content, "answer")
+            tok_batch.add(content, "answer")
+
     with inflight_lock:
         inflight_chat += 1
         active_backend_conns.append(conn)
@@ -638,22 +705,11 @@ def handle_chat(
             raw = resp.read()
             try:
                 obj = json.loads(raw.decode("utf-8"))
-                text = ""
                 if isinstance(obj, dict):
                     snap = completion_ctx(obj)
                     if snap:
                         ctx_snap = snap
-                    text = extract_delta(obj)
-                    if not text:
-                        choices = obj.get("choices") or []
-                        if choices and isinstance(choices[0], dict):
-                            msg = choices[0].get("message") or {}
-                            if isinstance(msg, dict):
-                                text = str(msg.get("content") or "")
-                if text:
-                    acc.append(text)
-                    write_tok(text)
-                    tok_batch.add(text)
+                    take_parts(obj)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
             sse = False
@@ -687,11 +743,7 @@ def handle_chat(
                     snap = completion_ctx(obj)
                     if snap:
                         ctx_snap = snap
-                    tok = extract_delta(obj)
-                    if tok:
-                        acc.append(tok)
-                        write_tok(tok)
-                        tok_batch.add(tok)
+                    take_parts(obj)
     except (TimeoutError, socket.timeout, OSError, http.client.HTTPException) as ex:
         if cancel_generation.is_set() or str(ex) == "stopped":
             err = "stopped"
@@ -711,6 +763,7 @@ def handle_chat(
                 cancel_generation.clear()
 
     text = "".join(acc)
+    reason_text = "".join(acc_reason)
     dt = time.monotonic() - t0
     if ctx_snap and log_kind != "summary":
         record_chat_ctx(ctx_snap)
@@ -724,6 +777,7 @@ def handle_chat(
         "sse": sse,
         "error": err or "",
         "response": text[:200000],
+        "reasoning": reason_text[:200000],
     }
     if log_kind:
         done_ev["log_kind"] = log_kind
@@ -950,6 +1004,17 @@ pre.md-mermaid::before { content:"mermaid"; display:block; color:var(--muted);
   border:1px solid var(--line); border-radius:8px; padding:12px; }
 .md-mermaid-out svg { max-width:100%; height:auto; }
 .live { color:var(--warn); }
+details.think { margin:0 0 12px; border:1px solid var(--line); border-radius:8px;
+  background:#12141a; }
+details.think > summary { cursor:pointer; color:var(--warn); font-size:11px;
+  letter-spacing:.06em; text-transform:uppercase; padding:8px 12px;
+  list-style:none; display:flex; align-items:center; gap:8px; user-select:none; }
+details.think > summary::-webkit-details-marker { display:none; }
+details.think > summary::before { content:"▸"; color:var(--muted); }
+details.think[open] > summary::before { content:"▾"; }
+.think-body { padding:0 12px 12px; color:var(--muted); font-size:12px; white-space:pre-wrap; }
+#pane-resp .think-body.md { color:var(--muted); }
+#pane-resp .think-body.md td, #pane-resp .think-body.md strong { color:var(--muted); }
 #compose { display:none; flex-direction:column; padding:10px 12px 12px;
   flex-shrink:0; height:var(--compose-h, 180px); min-height:110px; overflow:auto; }
 #compose textarea { width:100%; background:#0c0d10; color:var(--txt); border:1px solid var(--line);
@@ -1561,18 +1626,23 @@ function apply(ev) {
     reqs.set(ev.id, {
       id: ev.id, tag: ev.tag || "chat", src: ev.src || (ev.tag === "direct" ? "direct" : "vm"),
       ts: ev.ts, user: ev.user || "", system: ev.system || "", prompt: ev.prompt || "",
-      log_kind: ev.log_kind || "", response: "",
+      log_kind: ev.log_kind || "", response: "", reasoning: "",
       streaming: true, seconds: null, model: ev.model || "",
       kind: ev.log_kind === "summary" ? "summary" : "chat"
     });
     order.push(ev.id);
   } else if (ev.kind === "tok") {
     const r = reqs.get(ev.id);
-    if (r) r.response += ev.text || "";
+    if (r) {
+      const ch = ev.channel || "answer";
+      if (ch === "reason") r.reasoning = (r.reasoning || "") + (ev.text || "");
+      else r.response += ev.text || "";
+    }
   } else if (ev.kind === "done") {
     const r = reqs.get(ev.id);
     if (r) {
       if (ev.response) r.response = ev.response;
+      if (ev.reasoning != null) r.reasoning = ev.reasoning;
       r.streaming = false;
       r.seconds = ev.seconds;
       r.chars = ev.chars;
@@ -1596,7 +1666,7 @@ function match(r) {
   if (filter === "embed" && b !== "embed") return false;
   if (!query) return true;
   const q = query.toLowerCase();
-  return (r.user + "\n" + r.system + "\n" + (r.prompt || "") + "\n" + r.response).toLowerCase().includes(q);
+  return (r.user + "\n" + r.system + "\n" + (r.prompt || "") + "\n" + r.response + "\n" + (r.reasoning || "")).toLowerCase().includes(q);
 }
 function latestMatchId() {
   for (let i = order.length - 1; i >= 0; i--) {
@@ -1714,7 +1784,7 @@ function renderList() {
     if (!r || !match(r)) continue;
     const t = r.ts ? new Date(r.ts * 1000).toLocaleTimeString() : "";
     const b = badge(r);
-    const sum = (r.user || r.response || "(sin texto)").replace(/\s+/g, " ").slice(0, 140);
+    const sum = (r.user || r.response || r.reasoning || "(sin texto)").replace(/\s+/g, " ").slice(0, 140);
     html.push(`<div class="item${sel===r.id?" sel":""}" data-id="${esc(r.id)}">
       <div class="meta"><span class="tag ${esc(b)}">${esc(b)}</span><span>${esc(t)}</span>
       ${r.streaming ? '<span class="live">live</span>' : (r.seconds!=null ? "<span>"+r.seconds+"s</span>" : "")}</div>
@@ -1745,7 +1815,7 @@ function renderDetail() {
     return;
   }
   const t = r.ts ? new Date(r.ts * 1000).toLocaleString() : "";
-  const extra = r.error ? " · error" : (r.streaming ? " · generando…" : "");
+  const extra = r.error ? " · error" : (r.streaming ? (r.reasoning && !r.response ? " · pensando…" : " · generando…") : "");
   document.getElementById("dhead-meta").textContent =
     badge(r) + " · " + t + (r.model ? " · " + r.model : "") + extra;
   const prompt = r.prompt || ((r.system ? "—— system ——\n" + r.system + "\n\n" : "") +
@@ -1758,15 +1828,24 @@ function renderDetail() {
     promptEl.className = "md";
     promptEl.textContent = prompt;
   }
-  const body = r.response || (r.streaming ? "…" : (r.error || "(vacío)"));
-  const mute = (!r.response && (r.error || !r.streaming));
-  if (mdView && r.response) {
-    respEl.className = "md" + (r.error ? " muted" : "");
-    respEl.innerHTML = renderMd(r.response);
-    if (!r.streaming) hydrateMermaid(respEl);
-  } else {
+  const hasReason = !!(r.reasoning);
+  const hasAnswer = !!(r.response);
+  const mute = (!hasAnswer && !hasReason && (r.error || !r.streaming));
+  if (!hasAnswer && !hasReason) {
     respEl.className = mute ? "md muted" : "md";
-    respEl.textContent = body;
+    respEl.textContent = r.streaming ? "…" : (r.error || "(vacío)");
+  } else {
+    respEl.className = "md" + (r.error ? " muted" : "");
+    const bits = [];
+    if (hasReason) {
+      const label = r.streaming && !hasAnswer ? "Pensando…" : "Pensamiento";
+      const inner = mdView ? renderMd(r.reasoning) : esc(r.reasoning);
+      bits.push('<details class="think" open><summary>' + esc(label) + '</summary><div class="think-body md">' + inner + "</div></details>");
+    }
+    if (hasAnswer) bits.push(mdView ? renderMd(r.response) : '<div style="white-space:pre-wrap">' + esc(r.response) + "</div>");
+    else if (r.streaming) bits.push('<span class="muted">…</span>');
+    respEl.innerHTML = bits.join("");
+    if (mdView && !r.streaming) hydrateMermaid(respEl);
   }
   if (follow || (r.streaming && nearBottom)) paneResp.scrollTop = paneResp.scrollHeight;
 }
@@ -2406,6 +2485,12 @@ def main() -> int:
     ap.add_argument("--tag", default="chat", help="log prefix (chat|embed)")
     ap.add_argument("--jsonl", default="", help="historial JSONL (chat y embed pueden compartir archivo)")
     ap.add_argument(
+        "--thinking",
+        default="",
+        metavar="on|off",
+        help="inyecta enable_thinking en /v1/chat/completions (modelos CoT)",
+    )
+    ap.add_argument(
         "--web",
         default="",
         metavar="HOST:PORT",
@@ -2420,8 +2505,13 @@ def main() -> int:
     elif args.color:
         configure_color(True)
 
-    global jsonl_path
+    global jsonl_path, thinking_inject
     jsonl_path = args.jsonl or ""
+    think = (args.thinking or "").strip().lower()
+    if think in ("1", "on", "true", "yes"):
+        thinking_inject = True
+    elif think in ("0", "off", "false", "no"):
+        thinking_inject = False
     lh, lp = args.listen.rsplit(":", 1)
     bh, bp = args.backend.rsplit(":", 1)
     Handler.backend_host = bh
