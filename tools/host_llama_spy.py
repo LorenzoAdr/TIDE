@@ -533,8 +533,79 @@ def rehome_think(reason: str, content: str) -> Tuple[str, str]:
     return reason, answer
 
 
-def extract_delta_parts(obj: dict) -> Tuple[str, str]:
-    """Return (content, reasoning) from a chat chunk or a full completion body."""
+def _reason_from(src: dict) -> str:
+    if not isinstance(src, dict):
+        return ""
+    for key in ("reasoning_content", "reasoning"):
+        val = src.get(key)
+        if isinstance(val, str) and val:
+            return val
+    return ""
+
+
+def _same_payload(a: str, b: str) -> bool:
+    """True when a and b are the same blob (exact or one is almost the whole other)."""
+    if not a or not b:
+        return False
+    x, y = a.strip(), b.strip()
+    if not x or not y:
+        return False
+    if x == y:
+        return len(x) >= 8
+    if len(x) < 64 or len(y) < 64:
+        return False
+    shorter, longer = (x, y) if len(x) <= len(y) else (y, x)
+    return shorter in longer and len(shorter) >= int(0.7 * len(longer))
+
+
+def _looks_like_json_blob(s: str) -> bool:
+    t = (s or "").strip()
+    if len(t) < 8 or t[0] != "{":
+        return False
+    return '"action"' in t or '"ola_v1"' in t or '"do"' in t
+
+
+def filter_stream_parts(
+    content: str,
+    reason: str,
+    acc_content: str,
+    acc_reason: str,
+) -> Tuple[str, str]:
+    """Drop EOS restatements that copy one channel into the other.
+
+    llama.cpp's Qwen3.6 PEG split can reassign fields at </think> / finish and
+    then emit the swapped full message (or string_diff of it) as another chunk.
+    Appending that inverts Inspección on the `done` event.
+    """
+    out_c, out_r = content or "", reason or ""
+    if out_c and (
+        _same_payload(out_c, acc_reason)
+        or _same_payload(out_c, acc_content)
+    ):
+        out_c = ""
+    if out_r and (
+        _same_payload(out_r, acc_content)
+        or _same_payload(out_r, acc_reason)
+    ):
+        out_r = ""
+    return out_c, out_r
+
+
+def maybe_unswap_reasoning(content: str, reason: str) -> Tuple[str, str]:
+    """If JSON landed in reasoning and prose in content, put the action back."""
+    c, r = content or "", reason or ""
+    if _looks_like_json_blob(r) and not _looks_like_json_blob(c):
+        return r, c
+    return c, r
+
+
+def extract_delta_parts(obj: dict, *, delta_only: bool = False) -> Tuple[str, str]:
+    """Return (content, reasoning) from a chat chunk or a full completion body.
+
+    When the chunk has a `delta` object (SSE), ignore `message`. llama.cpp often
+    repeats the assembled message on the finish event; with Qwen3.6 that body
+    can have content/reasoning swapped relative to the deltas already streamed.
+    """
     if not isinstance(obj, dict):
         return "", ""
     choices = obj.get("choices")
@@ -543,23 +614,34 @@ def extract_delta_parts(obj: dict) -> Tuple[str, str]:
     c0 = choices[0] if isinstance(choices[0], dict) else {}
     delta = c0.get("delta") if isinstance(c0.get("delta"), dict) else {}
     msg = c0.get("message") if isinstance(c0.get("message"), dict) else {}
+    has_delta = isinstance(c0.get("delta"), dict)
+    if delta_only or has_delta:
+        content = delta["content"] if isinstance(delta.get("content"), str) else ""
+        if not content and isinstance(c0.get("text"), str) and not has_delta:
+            content = c0["text"]
+        return content, _reason_from(delta)
     content = ""
-    if isinstance(delta.get("content"), str):
-        content = delta["content"]
+    if isinstance(msg.get("content"), str):
+        content = msg["content"]
     elif isinstance(c0.get("text"), str):
         content = c0["text"]
-    elif isinstance(msg.get("content"), str):
-        content = msg["content"]
-    reason = ""
-    for src in (delta, msg):
-        for key in ("reasoning_content", "reasoning"):
-            val = src.get(key)
-            if isinstance(val, str) and val:
-                reason = val
-                break
+    return content, _reason_from(msg)
+
+
+def fold_sse_parts(chunks: List[dict]) -> Tuple[str, str]:
+    """Accumulate SSE chunks the same way handle_chat does (for tests)."""
+    acc_c: List[str] = []
+    acc_r: List[str] = []
+    for obj in chunks:
+        content, reason = extract_delta_parts(obj, delta_only=True)
+        content, reason = filter_stream_parts(
+            content, reason, "".join(acc_c), "".join(acc_r)
+        )
+        if content:
+            acc_c.append(content)
         if reason:
-            break
-    return content, reason
+            acc_r.append(reason)
+    return maybe_unswap_reasoning("".join(acc_c), "".join(acc_r))
 
 
 def extract_delta(obj: dict) -> str:
@@ -635,13 +717,16 @@ def send_raw_response(sock: socket.socket, resp: http.client.HTTPResponse, extra
         sock.sendall(chunk)
 
 
-def chat_body_from_sse(content: str, model: str) -> bytes:
+def chat_body_from_sse(content: str, model: str, reasoning: str = "") -> bytes:
+    message = {"role": "assistant", "content": content}
+    if reasoning:
+        message["reasoning_content"] = reasoning
     payload = {
         "model": model,
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": content},
+                "message": message,
                 "finish_reason": "stop",
             }
         ],
@@ -731,9 +816,13 @@ def handle_chat(
             stream_phase = channel
         write_tok(text)
 
-    def take_parts(obj: dict) -> None:
+    def take_parts(obj: dict, *, sse: bool) -> None:
         nonlocal rehomed
-        content, reason = extract_delta_parts(obj)
+        content, reason = extract_delta_parts(obj, delta_only=sse)
+        if sse:
+            content, reason = filter_stream_parts(
+                content, reason, "".join(acc), "".join(acc_reason)
+            )
         if thinking_inject is not True and reason:
             content = reason + content
             reason = ""
@@ -783,7 +872,7 @@ def handle_chat(
                     snap = completion_ctx(obj)
                     if snap:
                         ctx_snap = snap
-                    take_parts(obj)
+                    take_parts(obj, sse=False)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
             sse = False
@@ -817,7 +906,7 @@ def handle_chat(
                     snap = completion_ctx(obj)
                     if snap:
                         ctx_snap = snap
-                    take_parts(obj)
+                    take_parts(obj, sse=True)
     except (TimeoutError, socket.timeout, OSError, http.client.HTTPException) as ex:
         if cancel_generation.is_set() or str(ex) == "stopped":
             err = "stopped"
@@ -836,7 +925,9 @@ def handle_chat(
             if inflight_chat <= 0:
                 cancel_generation.clear()
 
-    text, reason_text = rehome_think("".join(acc_reason), "".join(acc))
+    reason_text, text = rehome_think("".join(acc_reason), "".join(acc))
+    if sse:
+        text, reason_text = maybe_unswap_reasoning(text, reason_text)
     if thinking_inject is not True:
         if reason_text:
             text = reason_text + text
@@ -885,6 +976,14 @@ def handle_chat(
     if client_stream:
         # Rebuild a minimal SSE so a streaming client still works.
         events = []
+        if reason_text:
+            events.append(
+                "data: "
+                + json.dumps(
+                    {"choices": [{"delta": {"reasoning_content": reason_text}}]},
+                    ensure_ascii=False,
+                )
+            )
         if text:
             events.append(
                 "data: "
@@ -898,7 +997,7 @@ def handle_chat(
         sock,
         200,
         {"Content-Type": "application/json; charset=utf-8"},
-        chat_body_from_sse(text, model),
+        chat_body_from_sse(text, model, reason_text),
     )
     return text, rid, ""
 

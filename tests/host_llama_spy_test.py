@@ -32,6 +32,95 @@ class ExtractDeltaPartsTest(unittest.TestCase):
         self.assertEqual(spy.extract_delta_parts({}), ("", ""))
         self.assertEqual(spy.extract_delta_parts({"choices": []}), ("", ""))
 
+    def test_delta_ignores_swapped_message(self) -> None:
+        think = "Needles for busy_strip and clear_busy_spinner in the controller."
+        action = '{"action":"ola_v1","do":"needles","ids":["M2"]}'
+        obj = {
+            "choices": [
+                {
+                    "delta": {"content": None, "reasoning_content": None},
+                    "message": {"content": think, "reasoning_content": action},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+        self.assertEqual(spy.extract_delta_parts(obj), ("", ""))
+        self.assertEqual(spy.extract_delta_parts(obj, delta_only=True), ("", ""))
+
+    def test_delta_token_not_mixed_with_message(self) -> None:
+        obj = {
+            "choices": [
+                {
+                    "delta": {"reasoning_content": "mmh"},
+                    "message": {
+                        "content": "full thinking dump",
+                        "reasoning_content": '{"action":"ola_v1"}',
+                    },
+                }
+            ]
+        }
+        self.assertEqual(spy.extract_delta_parts(obj), ("", "mmh"))
+
+
+class StreamFoldTest(unittest.TestCase):
+    def test_finish_message_does_not_invert(self) -> None:
+        think = (
+            "The spinner stays because begin_thinking never pairs with "
+            "clear_busy_spinner after the L2 propose returns."
+        )
+        action = '{"action":"ola_v1","do":"needles","ids":["M2","M3"]}'
+        chunks = [
+            {"choices": [{"delta": {"reasoning_content": think}}]},
+            {"choices": [{"delta": {"content": action}}]},
+            {
+                "choices": [
+                    {
+                        "delta": {"content": None, "reasoning_content": None},
+                        "message": {"content": think, "reasoning_content": action},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        ]
+        content, reason = spy.fold_sse_parts(chunks)
+        self.assertEqual(content, action)
+        self.assertEqual(reason, think)
+
+    def test_swapped_delta_dump_dropped(self) -> None:
+        think = (
+            "The spinner stays because begin_thinking never pairs with "
+            "clear_busy_spinner after the L2 propose returns."
+        )
+        action = '{"action":"ola_v1","do":"needles","ids":["M2","M3"]}'
+        chunks = [
+            {"choices": [{"delta": {"reasoning_content": think}}]},
+            {"choices": [{"delta": {"content": action}}]},
+            {"choices": [{"delta": {"content": think, "reasoning_content": action}}]},
+        ]
+        content, reason = spy.fold_sse_parts(chunks)
+        self.assertEqual(content, action)
+        self.assertEqual(reason, think)
+
+    def test_unswap_when_only_finish_is_inverted(self) -> None:
+        think = "Long prose about the busy spinner and who clears it after propose."
+        action = '{"action":"ola_v1","do":"peek","id":"M1"}'
+        content, reason = spy.maybe_unswap_reasoning(think, action)
+        self.assertEqual(content, action)
+        self.assertEqual(reason, think)
+
+    def test_unswap_leaves_correct_split(self) -> None:
+        think = "Long prose about the busy spinner and who clears it after propose."
+        action = '{"action":"ola_v1","do":"peek","id":"M1"}'
+        self.assertEqual(spy.maybe_unswap_reasoning(action, think), (action, think))
+
+    def test_chat_body_keeps_reasoning(self) -> None:
+        import json
+        raw = spy.chat_body_from_sse("answer", "m", "think")
+        body = json.loads(raw.decode("utf-8"))
+        msg = body["choices"][0]["message"]
+        self.assertEqual(msg["content"], "answer")
+        self.assertEqual(msg["reasoning_content"], "think")
+
 
 class ThinkingPayloadTest(unittest.TestCase):
     def tearDown(self) -> None:
