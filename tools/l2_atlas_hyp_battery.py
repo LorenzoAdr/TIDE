@@ -435,6 +435,7 @@ def main() -> int:
             timeout = 900
         elif args.pilot_plan:
             extra = ["--pilot-plan"]
+            timeout = 900
         row = run_survey(cid, cards_root, survey_root, env, extra, timeout=timeout)
         if cards_ok.get("query"):
             row["query"] = cards_ok["query"]

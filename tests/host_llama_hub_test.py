@@ -150,23 +150,20 @@ class HostLlamaPerfTest(unittest.TestCase):
             )
         self.assertIn("--jinja", cmd)
         self.assertEqual(cmd[cmd.index("--reasoning-format") + 1], "deepseek")
-        self.assertEqual(
-            cmd[cmd.index("--chat-template-kwargs") + 1],
-            '{"enable_thinking":true}',
-        )
+        self.assertNotIn("--chat-template-kwargs", cmd)
+        self.assertNotIn("--reasoning-budget", cmd)
 
-    def test_thinking_off_disables_kwargs(self) -> None:
+    def test_thinking_off_keeps_jinja_no_cli_budget(self) -> None:
         hub._llama_help.clear()
         hub._llama_help["llama-server"] = ""
         with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="off"), clear=False):
             cmd = hub.chat_llama_argv(
                 "llama-server", "/tmp/qwen3.6-27b-q8_0.gguf", "127.0.0.1", 8080, "a"
             )
-        self.assertEqual(
-            cmd[cmd.index("--chat-template-kwargs") + 1],
-            '{"enable_thinking":false}',
-        )
-        self.assertEqual(cmd[cmd.index("--reasoning-budget") + 1], "0")
+        self.assertIn("--jinja", cmd)
+        self.assertEqual(cmd[cmd.index("--reasoning-format") + 1], "deepseek")
+        self.assertNotIn("--chat-template-kwargs", cmd)
+        self.assertNotIn("--reasoning-budget", cmd)
 
     def test_thinking_skipped_for_llama70(self) -> None:
         hub._llama_help.clear()

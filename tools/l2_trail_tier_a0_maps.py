@@ -100,10 +100,14 @@ def ensure_server() -> subprocess.Popen | None:
 
 
 def chat(system: str, user: str, max_tokens: int = 256, temperature: float = 0.1) -> str:
+    budget = 64  # Low: a0 sniff / micro-JSON
     payload = {
         "model": "l2",
         "temperature": temperature,
-        "max_tokens": max_tokens,
+        "max_tokens": max_tokens + budget,
+        "chat_template_kwargs": {"enable_thinking": True},
+        "thinking_budget_tokens": budget,
+        "reasoning_budget_tokens": budget,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},

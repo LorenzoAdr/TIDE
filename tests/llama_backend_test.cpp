@@ -91,6 +91,39 @@ int main() {
     }
     expect(!dumped.empty(), "replace dump ok");
   }
+  {
+    tuide::LlamaCompletionRequest req;
+    req.system_prompt = "sys";
+    req.user_prompt = "user";
+    req.max_tokens = 420;
+    req.temperature = 0.1f;
+    req.enable_thinking = true;
+    req.reasoning_budget = 1536;
+    const auto body = tuide::build_chat_completions_body(req, "l2", "user", true);
+    expect(body["chat_template_kwargs"]["enable_thinking"] == true, "kwargs thinking on");
+    expect(body["thinking_budget_tokens"] == 1536, "thinking_budget_tokens");
+    expect(body["reasoning_budget_tokens"] == 1536, "reasoning_budget_tokens");
+    expect(body["max_tokens"] == 420, "max_tokens unchanged in builder");
+    expect(body.contains("cache_prompt") && body["cache_prompt"] == true, "cache_prompt");
+  }
+  {
+    tuide::LlamaCompletionRequest req;
+    req.enable_thinking = false;
+    req.reasoning_budget = 0;
+    req.max_tokens = 512;
+    const auto body = tuide::build_chat_completions_body(req, "l2", "edit", false);
+    expect(body["chat_template_kwargs"]["enable_thinking"] == false, "edit thinking off");
+    expect(body["thinking_budget_tokens"] == 0, "edit budget 0");
+    expect(!body.contains("cache_prompt"), "no cache_prompt when false");
+  }
+  {
+    tuide::LlamaCompletionRequest req;
+    req.max_tokens = 256;
+    const auto body = tuide::build_chat_completions_body(req, "l2", "x", false);
+    expect(!body.contains("chat_template_kwargs"), "omit kwargs when unset");
+    expect(!body.contains("thinking_budget_tokens"), "omit thinking_budget when -1");
+    expect(!body.contains("reasoning_budget_tokens"), "omit reasoning_budget when -1");
+  }
   if (failures > 0) {
     std::cerr << failures << " failure(s)\n";
     return 1;

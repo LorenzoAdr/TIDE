@@ -1008,10 +1008,14 @@ def llama_server_help(server: str) -> str:
 
 
 def thinking_llama_argv(server: str, model: str) -> List[str]:
-    """Jinja + reasoning split for CoT models; no-op for Llama / Qwen2.5 / etc."""
+    """Jinja + reasoning split for CoT models; no-op for Llama / Qwen2.5 / etc.
+
+    The Lanzamiento checkbox does not put --reasoning-budget or enable_thinking
+    on the server CLI (that would override TIDE per-request profiles). Compose
+    injects thinking via the spy; the agent sends kwargs on each POST.
+    """
     if not model_supports_thinking(model):
         return []
-    on = thinking_wanted()
     help_text = llama_server_help(server)
 
     def has(flag: str) -> bool:
@@ -1022,13 +1026,6 @@ def thinking_llama_argv(server: str, model: str) -> List[str]:
         flags.append("--jinja")
     if has("--reasoning-format"):
         flags += ["--reasoning-format", "deepseek"]
-    if has("--chat-template-kwargs"):
-        flags += [
-            "--chat-template-kwargs",
-            json.dumps({"enable_thinking": on}, separators=(",", ":")),
-        ]
-    if (not on) and has("--reasoning-budget"):
-        flags += ["--reasoning-budget", "0"]
     return flags
 
 

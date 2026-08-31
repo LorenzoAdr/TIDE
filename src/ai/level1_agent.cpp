@@ -22,6 +22,7 @@
 #include "ai/l2_brain.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/l2_problem_frame.hpp"
+#include "ai/l2_think.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 
 #include <filesystem>
@@ -578,6 +579,8 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
     breq.max_tokens = req.max_tokens;
     breq.n_ctx = req.n_ctx;
     breq.temperature = req.temperature;
+    breq.enable_thinking = req.enable_thinking;
+    breq.reasoning_budget = req.reasoning_budget;
     const auto br = deps_.l2_brain->propose(breq, cancel);
     out.ok = br.ok;
     out.text = br.text;
@@ -629,6 +632,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
       user << "\nJSON:";
       req.user_prompt = user.str();
       req.max_tokens = std::min(1024, std::max(512, deps_.settings.level1.max_tokens));
+      apply_think_profile(&req, think_profile(L2ThinkLevel::High));
       {
         const int prompt_tok_est =
             static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);
@@ -810,6 +814,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
     user << "\nJSON:";
     req.user_prompt = user.str();
     req.max_tokens = std::min(480, std::max(192, deps_.settings.level1.max_tokens));
+    apply_think_profile(&req, think_profile(L2ThinkLevel::Medium));
     {
       const int prompt_tok_est =
           static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);

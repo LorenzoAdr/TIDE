@@ -22,6 +22,7 @@
 #include "ai/l2_problem_frame.hpp"
 #include "ai/l2_explore_a.hpp"
 #include "ai/l2_feat.hpp"
+#include "ai/l2_think.hpp"
 #include "ai/level2_autonomous_loop.hpp"
 #include "ai/level2_session.hpp"
 #include "ai/search_replace.hpp"
@@ -37,6 +38,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <unistd.h>
 #include <nlohmann/json.hpp>
 
 namespace fs = std::filesystem;
@@ -113,6 +115,142 @@ std::string shell_quote(const std::string& s) {
   return out;
 }
 
+bool harness_is_exec(const fs::path& p) {
+  return !p.empty() && ::access(p.c_str(), X_OK) == 0;
+}
+
+// Same lookup as tuide::resolve_rg without embedding the x86_64 blob: RG_PATH,
+// PATH, then ~/.cache/tuide/bundled/rg-*/bin/rg. Bare `rg` is not assumed.
+std::string harness_rg_binary() {
+  static std::string cached;
+  static bool once = false;
+  if (once) {
+    return cached;
+  }
+  once = true;
+  if (const char* env = std::getenv("RG_PATH"); env != nullptr && env[0] != '\0') {
+    if (harness_is_exec(env)) {
+      cached = env;
+      return cached;
+    }
+  }
+  if (const char* path_env = std::getenv("PATH"); path_env != nullptr && path_env[0] != '\0') {
+    std::stringstream stream(path_env);
+    std::string dir;
+    while (std::getline(stream, dir, ':')) {
+      if (dir.empty()) {
+        continue;
+      }
+      const fs::path cand = fs::path(dir) / "rg";
+      if (harness_is_exec(cand)) {
+        cached = cand.string();
+        return cached;
+      }
+    }
+  }
+  fs::path cache;
+  if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg != nullptr && xdg[0] != '\0') {
+    cache = fs::path(xdg) / "tuide" / "bundled";
+  } else if (const char* home = std::getenv("HOME"); home != nullptr && home[0] != '\0') {
+    cache = fs::path(home) / ".cache" / "tuide" / "bundled";
+  }
+  std::error_code ec;
+  if (!cache.empty() && fs::is_directory(cache, ec)) {
+    for (fs::directory_iterator it(cache, ec); !ec && it != fs::directory_iterator(); ++it) {
+      if (!it->is_directory(ec)) {
+        continue;
+      }
+      const std::string name = it->path().filename().string();
+      if (name.rfind("rg-", 0) != 0) {
+        continue;
+      }
+      const fs::path cand = it->path() / "bin" / "rg";
+      if (harness_is_exec(cand)) {
+        cached = cand.string();
+        return cached;
+      }
+    }
+  }
+  return cached;
+}
+
+bool harness_ident_bounded(const std::string& line, const std::string& name) {
+  if (name.empty() || line.size() < name.size()) {
+    return false;
+  }
+  auto is_id = [](unsigned char c) {
+    return std::isalnum(c) != 0 || c == '_';
+  };
+  std::size_t pos = 0;
+  while (pos < line.size()) {
+    const auto hit = line.find(name, pos);
+    if (hit == std::string::npos) {
+      return false;
+    }
+    const bool before_ok = hit == 0 || !is_id(static_cast<unsigned char>(line[hit - 1]));
+    const auto end = hit + name.size();
+    const bool after_ok = end >= line.size() || !is_id(static_cast<unsigned char>(line[end]));
+    if (before_ok && after_ok) {
+      return true;
+    }
+    pos = hit + 1;
+  }
+  return false;
+}
+
+std::vector<tuide::ATrailSearchHit> harness_scan_src(const std::string& root,
+                                                     const std::string& symbol) {
+  std::vector<tuide::ATrailSearchHit> hits;
+  if (symbol.empty() || root.empty()) {
+    return hits;
+  }
+  const fs::path src = fs::path(root) / "src";
+  std::error_code ec;
+  if (!fs::is_directory(src, ec)) {
+    return hits;
+  }
+  for (fs::recursive_directory_iterator it(src, ec), end; !ec && it != end; it.increment(ec)) {
+    if (!it->is_regular_file(ec)) {
+      continue;
+    }
+    const std::string ext = it->path().extension().string();
+    if (ext != ".cpp" && ext != ".cc" && ext != ".cxx" && ext != ".hpp" && ext != ".h" &&
+        ext != ".hh" && ext != ".c") {
+      continue;
+    }
+    std::ifstream in(it->path());
+    if (!in) {
+      continue;
+    }
+    std::string rel = it->path().lexically_relative(fs::path(root)).generic_string();
+    if (rel.empty() || rel.rfind("..", 0) == 0) {
+      rel = "src/" + it->path().filename().string();
+    }
+    std::string line;
+    int n = 0;
+    while (std::getline(in, line) && hits.size() < 80) {
+      ++n;
+      if (!harness_ident_bounded(line, symbol)) {
+        continue;
+      }
+      tuide::ATrailSearchHit h;
+      h.path = rel;
+      h.line = n;
+      h.preview = line;
+      hits.push_back(std::move(h));
+    }
+  }
+  return hits;
+}
+
+std::string harness_rg_cmd(const std::string& args) {
+  const std::string bin = harness_rg_binary();
+  if (bin.empty()) {
+    return {};
+  }
+  return shell_quote(bin) + " " + args;
+}
+
 void register_read_tools(ToolRegistry* reg, const std::string& root) {
   reg->register_tool("get_code_of", "body", [root](const std::string& arg) {
     GetCodeOfRequest req = parse_get_code_of_arg(arg, root);
@@ -146,11 +284,11 @@ void register_read_tools(ToolRegistry* reg, const std::string& root) {
     if (!fs::exists(abs)) {
       return AiToolResult{false, "no existe: " + trimmed};
     }
-    const std::string cmd =
-        "rg -n --no-heading -e "
+    const std::string cmd = harness_rg_cmd(
+        "-n --no-heading -e "
         "'^[a-zA-Z_].*\\(.*\\)\\s*\\{?\\s*$|^\\s*(class|struct|namespace|enum)\\s+' " +
-        shell_quote(abs.string()) + " | head -n 80";
-    std::string body = run_cmd(cmd);
+        shell_quote(abs.string()) + " | head -n 80");
+    std::string body = cmd.empty() ? std::string{} : run_cmd(cmd);
     if (body.empty()) {
       body = "(sin outline rg)\n";
     }
@@ -185,10 +323,10 @@ void register_read_tools(ToolRegistry* reg, const std::string& root) {
     if (query.empty()) {
       return AiToolResult{false, "search: query vacío"};
     }
-    const std::string cmd =
-        "rg -n --no-heading -S -F -g '!build/**' -g '!.git/**' -g '!third_party/**' " +
-        shell_quote(query) + " " + shell_quote(path_scope) + " | head -n 80";
-    std::string body = run_cmd(cmd);
+    const std::string cmd = harness_rg_cmd(
+        "-n --no-heading -S -F -g '!build/**' -g '!.git/**' -g '!third_party/**' " +
+        shell_quote(query) + " " + shell_quote(path_scope) + " | head -n 80");
+    std::string body = cmd.empty() ? std::string{} : run_cmd(cmd);
     if (body.empty()) {
       body = "(sin hits)\n";
     }
@@ -510,10 +648,19 @@ std::vector<tuide::ATrailSearchHit> parse_rg_hits(const std::string& body,
     h.path = line.substr(0, colon1);
     h.line = std::atoi(line_s.c_str());
     h.preview = line.substr(colon2 + 1);
-    if (!workspace_root.empty() && h.path.size() > workspace_root.size() &&
-        h.path.compare(0, workspace_root.size(), workspace_root) == 0 &&
-        (h.path[workspace_root.size()] == '/' || h.path[workspace_root.size()] == '\\')) {
-      h.path = h.path.substr(workspace_root.size() + 1);
+    if (!workspace_root.empty()) {
+      std::error_code ec;
+      const fs::path wp = fs::path(workspace_root).lexically_normal();
+      fs::path p = fs::path(h.path);
+      if (p.is_relative()) {
+        p = wp / p;
+      }
+      p = p.lexically_normal();
+      const auto rel = p.lexically_relative(wp);
+      const std::string rs = rel.generic_string();
+      if (!rs.empty() && rs != "." && rs.rfind("..", 0) != 0) {
+        h.path = rs;
+      }
     }
     if (h.path.rfind("./", 0) == 0) {
       h.path = h.path.substr(2);
@@ -539,6 +686,10 @@ std::vector<tuide::ATrailSearchHit> filter_src_trail_hits(
   return out;
 }
 
+void harness_append_symbol_hits(std::vector<tuide::ATrailSearchHit>* hits,
+                                std::unordered_set<std::string>* seen, const std::string& root,
+                                const std::string& symbol);
+
 std::vector<tuide::ATrailSearchHit> harness_search_symbol(ToolRegistry* tools,
                                                           const std::string& root,
                                                           const std::string& symbol) {
@@ -558,38 +709,40 @@ std::vector<tuide::ATrailSearchHit> harness_search_symbol(ToolRegistry* tools,
       }
     }
   }
-  if (!symbol.empty()) {
-    const fs::path src_dir = fs::path(root) / "src";
-    const std::string cmd = "rg -n --no-heading -F " + shell_quote(symbol) + " " +
-                            shell_quote(src_dir.lexically_normal().string()) +
-                            " 2>/dev/null | head -80";
-    for (auto& h : filter_src_trail_hits(parse_rg_hits(run_cmd(cmd), root))) {
-      const std::string key = h.path + ":" + std::to_string(h.line);
-      if (seen.insert(key).second) {
-        hits.push_back(std::move(h));
-      }
+  harness_append_symbol_hits(&hits, &seen, root, symbol);
+  return hits;
+}
+
+void harness_append_symbol_hits(std::vector<tuide::ATrailSearchHit>* hits,
+                                std::unordered_set<std::string>* seen, const std::string& root,
+                                const std::string& symbol) {
+  if (hits == nullptr || seen == nullptr || symbol.empty()) {
+    return;
+  }
+  const fs::path src_dir = fs::path(root) / "src";
+  const std::string cmd = harness_rg_cmd(
+      "-n --no-heading -F " + shell_quote(symbol) + " " +
+      shell_quote(src_dir.lexically_normal().string()) + " 2>/dev/null | head -80");
+  std::vector<tuide::ATrailSearchHit> raw;
+  if (!cmd.empty()) {
+    raw = filter_src_trail_hits(parse_rg_hits(run_cmd(cmd), root));
+  }
+  if (raw.empty()) {
+    raw = harness_scan_src(root, symbol);
+  }
+  for (auto& h : raw) {
+    const std::string key = h.path + ":" + std::to_string(h.line);
+    if (seen->insert(key).second) {
+      hits->push_back(std::move(h));
     }
   }
-  return hits;
 }
 
 std::vector<tuide::ATrailSearchHit> harness_rg_symbol(const std::string& root,
                                                       const std::string& symbol) {
   std::vector<tuide::ATrailSearchHit> hits;
-  if (symbol.empty()) {
-    return hits;
-  }
   std::unordered_set<std::string> seen;
-  const fs::path src_dir = fs::path(root) / "src";
-  const std::string cmd = "rg -n --no-heading -F " + shell_quote(symbol) + " " +
-                          shell_quote(src_dir.lexically_normal().string()) +
-                          " 2>/dev/null | head -80";
-  for (auto& h : filter_src_trail_hits(parse_rg_hits(run_cmd(cmd), root))) {
-    const std::string key = h.path + ":" + std::to_string(h.line);
-    if (seen.insert(key).second) {
-      hits.push_back(std::move(h));
-    }
-  }
+  harness_append_symbol_hits(&hits, &seen, root, symbol);
   return hits;
 }
 
@@ -1851,7 +2004,7 @@ int run_zone_judge_shot(const std::string& root, int argc, char** argv) {
   request.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
   request.temperature = 0.05f;
   std::cout << "L2 ▸ zone-judge-shot (" << brain.name() << ")…\n";
-  const auto response = brain.propose(request, nullptr);
+  const auto response = tuide::propose_with_think(brain, &request, nullptr);
   if (!response.ok) {
     std::cerr << "LLM FAIL: " << response.error << "\n";
     return 1;
@@ -2025,7 +2178,7 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
     }
     std::ofstream(case_out / (prefix + "_user_" + std::to_string(step) + ".md"))
         << req.user_prompt;
-    const auto response = brain.propose(req, nullptr);
+    const auto response = tuide::propose_with_think(brain, &req, nullptr);
     std::ofstream(case_out / (prefix + "_raw_" + std::to_string(step) + ".txt"))
         << response.text;
     if (!response.ok) {
@@ -2263,11 +2416,11 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
         abs = fs::path(root) / report.target;
       }
       abs = abs.lexically_normal();
-      const std::string cmd =
-          "rg -n --no-heading -e "
+      const std::string cmd = harness_rg_cmd(
+          "-n --no-heading -e "
           "'^[a-zA-Z_].*\\(.*\\)\\s*\\{?\\s*$|^\\s*(class|struct|namespace|enum)\\s+' " +
-          shell_quote(abs.string()) + " | head -n 80";
-      std::string body = fs::exists(abs) ? run_cmd(cmd) : std::string{};
+          shell_quote(abs.string()) + " | head -n 80");
+      std::string body = (fs::exists(abs) && !cmd.empty()) ? run_cmd(cmd) : std::string{};
       if (body.empty()) {
         body = "(sin outline)\n";
       }
@@ -2640,13 +2793,16 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
   req.user_prompt = "## Consulta\n" + instruction + "\n\n" +
                     tuide::registry_causal_atlas_survey_user_prompt(atlas_md);
   req.phase = "causal_atlas_survey";
-  req.max_tokens = std::min(256, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 256);
+  // CoT-in-content (hub sin --reasoning-format deepseek) necesita holgura
+  // para el razonamiento Low y el JSON. Con deepseek, EOS corta tras el JSON.
+  req.max_tokens =
+      std::min(2048, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 2048);
   req.n_ctx = std::max(4096, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 4096);
   req.temperature = 0.05f;
   std::ofstream(case_out / "survey_system.txt") << req.system_prompt;
   std::ofstream(case_out / "survey_user.md") << req.user_prompt;
   const auto t0 = std::chrono::steady_clock::now();
-  const auto response = brain.propose(req, nullptr);
+  const auto response = tuide::propose_with_think(brain, &req, nullptr);
   const int64_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                  std::chrono::steady_clock::now() - t0)
                                  .count();
@@ -2771,7 +2927,7 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
   std::ofstream(case_out / "cover_system.txt") << cover_req.system_prompt;
   std::ofstream(case_out / "cover_user.md") << cover_req.user_prompt;
   const auto cover_t0 = std::chrono::steady_clock::now();
-  const auto cover_response = brain.propose(cover_req, nullptr);
+  const auto cover_response = tuide::propose_with_think(brain, &cover_req, nullptr);
   const int64_t cover_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                std::chrono::steady_clock::now() - cover_t0)
                                .count();
@@ -2884,14 +3040,14 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
                                  atlas_md, opened_pack, rem, suggest, allow_more);
       plan_req.phase = pass == 0 ? "causal_pilot_plan" : "causal_pilot_plan_more";
       plan_req.max_tokens =
-          std::min(512, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512);
+          std::min(1024, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 1024);
       plan_req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
       plan_req.temperature = 0.05f;
       const std::string pass_tag = pass == 0 ? "" : "_more";
       std::ofstream(case_out / ("plan_system" + pass_tag + ".txt")) << plan_req.system_prompt;
       std::ofstream(case_out / ("plan_user" + pass_tag + ".md")) << plan_req.user_prompt;
       const auto plan_t0 = std::chrono::steady_clock::now();
-      const auto plan_response = brain.propose(plan_req, nullptr);
+      const auto plan_response = tuide::propose_with_think(brain, &plan_req, nullptr);
       last_plan_raw = plan_response.text;
       plan_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
                      std::chrono::steady_clock::now() - plan_t0)
@@ -3054,7 +3210,7 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
       std::ofstream(case_out / "plenary_system.txt") << plen_req.system_prompt;
       std::ofstream(case_out / "plenary_user.md") << plen_req.user_prompt;
       const auto plen_t0 = std::chrono::steady_clock::now();
-      const auto plen_response = brain.propose(plen_req, nullptr);
+      const auto plen_response = tuide::propose_with_think(brain, &plen_req, nullptr);
       const int64_t plen_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::steady_clock::now() - plen_t0)
                                   .count();
@@ -3112,7 +3268,7 @@ int run_atlas_survey(const std::string& root, int argc, char** argv) {
     std::ofstream(case_out / sys_name) << hyp_req.system_prompt;
     std::ofstream(case_out / user_name) << hyp_req.user_prompt;
     const auto hyp_t0 = std::chrono::steady_clock::now();
-    const auto hyp_response = brain.propose(hyp_req, nullptr);
+    const auto hyp_response = tuide::propose_with_think(brain, &hyp_req, nullptr);
     hyp_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - hyp_t0)
                   .count();
@@ -3366,7 +3522,7 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
             std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
         triage_request.temperature = 0.05f;
         const auto triage_t0 = std::chrono::steady_clock::now();
-        const auto triage_response = brain.propose(triage_request, nullptr);
+        const auto triage_response = tuide::propose_with_think(brain, &triage_request, nullptr);
         triage_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
                          std::chrono::steady_clock::now() - triage_t0)
                          .count();
@@ -3439,7 +3595,7 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
         request.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
         request.temperature = 0.05f;
         const auto t0 = std::chrono::steady_clock::now();
-        const auto response = brain.propose(request, nullptr);
+        const auto response = tuide::propose_with_think(brain, &request, nullptr);
         const int64_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                        std::chrono::steady_clock::now() - t0)
                                        .count();
@@ -3528,7 +3684,7 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
             req.n_ctx = std::max(4096, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 4096);
             req.temperature = 0.05f;
             const auto t0 = std::chrono::steady_clock::now();
-            const auto response = brain.propose(req, nullptr);
+            const auto response = tuide::propose_with_think(brain, &req, nullptr);
             triage_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
                              std::chrono::steady_clock::now() - t0)
                              .count();
@@ -3720,7 +3876,7 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
           req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
           req.temperature = 0.05f;
           const auto t0 = std::chrono::steady_clock::now();
-          const auto response = brain.propose(req, nullptr);
+          const auto response = tuide::propose_with_think(brain, &req, nullptr);
           triage_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
                            std::chrono::steady_clock::now() - t0)
                            .count();
@@ -4255,7 +4411,7 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
     request.temperature = 0.05f;
     std::cout << "==== zone judge " << id << " (" << total << ") ====\n";
     const auto t0 = std::chrono::steady_clock::now();
-    const auto response = brain.propose(request, nullptr);
+    const auto response = tuide::propose_with_think(brain, &request, nullptr);
     const int64_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                    std::chrono::steady_clock::now() - t0)
                                    .count();
@@ -4593,7 +4749,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   breq.temperature = 0.1f;
 
   std::cout << "L2 ▸ trail-judge-shot pidiendo a_trail_judge (" << brain.name() << ")…\n";
-  const auto bres = brain.propose(breq, nullptr);
+  const auto bres = tuide::propose_with_think(brain, &breq, nullptr);
   if (!bres.ok) {
     std::cerr << "LLM FAIL: " << bres.error << "\n";
     return 1;
@@ -4771,7 +4927,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   breq2.max_tokens = settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512;
   breq2.n_ctx = settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192;
   breq2.temperature = 0.1f;
-  const auto bres2 = brain.propose(breq2, nullptr);
+  const auto bres2 = tuide::propose_with_think(brain, &breq2, nullptr);
   if (!bres2.ok) {
     std::cerr << "LLM FAIL (suspect): " << bres2.error << "\n";
     return 1;
@@ -6114,7 +6270,7 @@ int run_a0_sniff_judge_shot(Level2Session& session, const std::string& root, int
   breq.temperature = 0.1f;
 
   std::cout << "L2 ▸ a0-sniff-judge-shot pidiendo a_judge (" << brain.name() << ")…\n";
-  const auto bres = brain.propose(breq, nullptr);
+  const auto bres = tuide::propose_with_think(brain, &breq, nullptr);
   if (!bres.ok) {
     std::cerr << "LLM FAIL: " << bres.error << "\n";
     return 1;
@@ -6607,7 +6763,7 @@ int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int
   breq.temperature = 0.1f;
 
   std::cout << "L2 ▸ a0-first-judge-shot pidiendo a_judge (" << brain.name() << ")…\n";
-  const auto bres = brain.propose(breq, nullptr);
+  const auto bres = tuide::propose_with_think(brain, &breq, nullptr);
   if (!bres.ok) {
     std::cerr << "LLM FAIL: " << bres.error << "\n";
     return 1;

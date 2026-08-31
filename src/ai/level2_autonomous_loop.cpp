@@ -17,6 +17,7 @@
 #include "ai/l2_feat.hpp"
 #include "ai/l2_grammar.hpp"
 #include "ai/l2_pack_review.hpp"
+#include "ai/l2_think.hpp"
 
 namespace tuide {
 namespace {
@@ -1110,6 +1111,12 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
   breq.max_tokens = 420;
   breq.n_ctx = std::min(opts.budget.n_ctx, 4096);
   breq.temperature = 0.05f;
+  const auto think = think_profile_for(breq.phase, false, true);
+  apply_think_profile(&breq, think);
+  if (log) {
+    log(std::string("L2 ▸ think=") + l2_think_level_name(think.level) +
+        " budget=" + std::to_string(think.budget));
+  }
   const L2BrainResult br = brain.propose(breq, cancel);
   if (!br.ok) {
     if (log) {
@@ -1655,6 +1662,10 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     if (!breq.grammar_file.empty()) {
       emit("L2 ▸ grammar=" + breq.grammar_file);
     }
+    const auto think = think_profile_for(phase, has_pack, false);
+    apply_think_profile(&breq, think);
+    emit(std::string("L2 ▸ think=") + l2_think_level_name(think.level) +
+         " budget=" + std::to_string(think.budget));
 
     const auto propose_t0 = clock::now();
     const L2BrainResult br = brain.propose(breq, cancel);

@@ -1,0 +1,28 @@
+{
+  "pack": "tree",
+  "cards_root": "tests/fixtures/pilot_worker_tree",
+  "workspace": "tests/fixtures/pilot_worker_tree",
+  "cases": [
+    {
+      "id": "tree_como_mess",
+      "kind": "como",
+      "case_id": ".",
+      "stem": "mess",
+      "zone": "L1",
+      "question": "¿cómo se controla el indicador en este barrio?",
+      "instruction": "El indicador se queda busy. ¿cómo se controla en este barrio?",
+      "trap": false,
+      "thin": false,
+      "require_tool": true,
+      "require_read": true,
+      "gold_writers": ["set_busy"],
+      "gold_clearers": ["clear_busy", "halt"],
+      "gold_fields": ["busy", "halted"],
+      "decoy_writers": ["keep_alive", "cousin", "tick"],
+      "require_inbound": true,
+      "forbid_need_code": ["chrome"],
+      "min_need_code": 4,
+      "expect": { "verdict": ["chain"] }
+    }
+  ]
+}

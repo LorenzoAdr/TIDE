@@ -3,7 +3,10 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
+
+#include <nlohmann/json.hpp>
 
 #include <sys/types.h>
 
@@ -26,6 +29,9 @@ struct LlamaCompletionRequest {
   std::string n_ctx_setting_hint = "ai.level1.n_ctx";
   // Optional GBNF grammar file for llama-cli --grammar-file / llama-server `grammar`.
   std::string grammar_file;
+  // Absent = omit from the JSON body. reasoning_budget -1 = omit.
+  std::optional<bool> enable_thinking;
+  int reasoning_budget = -1;
 };
 
 struct LlamaCompletionResult {
@@ -36,6 +42,13 @@ struct LlamaCompletionResult {
 
 // Extract assistant content from llama-server /v1/chat/completions JSON.
 bool parse_llama_chat_completion(const std::string& body, std::string* content, std::string* error);
+
+void attach_thinking_json(nlohmann::json& body, const std::optional<bool>& enable_thinking,
+                          int reasoning_budget);
+
+nlohmann::json build_chat_completions_body(const LlamaCompletionRequest& req,
+                                           const std::string& model, const std::string& user_text,
+                                           bool cache_prompt);
 
 class LlamaBackend {
  public:

@@ -1,4 +1,5 @@
 #include "ai/l2_brain.hpp"
+#include "ai/llama_backend.hpp"
 #include "ai/llama_net.hpp"
 
 #include <array>
@@ -146,15 +147,14 @@ L2BrainResult RemoteL2Brain::propose(const L2BrainRequest& req, std::atomic<bool
     return out;
   }
 
-  nlohmann::json body = {
-      {"model", cfg_.api_model},
-      {"temperature", req.temperature},
-      {"max_tokens", req.max_tokens},
-      {"messages",
-       nlohmann::json::array(
-           {{{"role", "system"}, {"content", req.system_prompt}},
-            {{"role", "user"}, {"content", req.user_prompt}}})},
-  };
+  LlamaCompletionRequest creq;
+  creq.system_prompt = req.system_prompt;
+  creq.user_prompt = req.user_prompt;
+  creq.max_tokens = req.max_tokens;
+  creq.temperature = req.temperature;
+  creq.enable_thinking = req.enable_thinking;
+  creq.reasoning_budget = req.reasoning_budget;
+  nlohmann::json body = build_chat_completions_body(creq, cfg_.api_model, req.user_prompt, false);
 
   const fs::path tmp_dir = fs::temp_directory_path() / "tuide_l2_remote";
   std::error_code ec;

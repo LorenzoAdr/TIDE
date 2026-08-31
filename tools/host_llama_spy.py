@@ -567,9 +567,14 @@ def extract_delta(obj: dict) -> str:
     return content
 
 
-def apply_thinking_payload(payload: dict) -> dict:
-    """Force enable_thinking on CoT models when the launch checkbox says so."""
+def apply_thinking_payload(payload: dict, src: str = "direct") -> dict:
+    """Inject enable_thinking for the personal Inspection compose only.
+
+    TIDE (src=vm) owns chat_template_kwargs / budget; never overwrite those.
+    """
     if thinking_inject is None or not isinstance(payload, dict):
+        return payload
+    if src != "direct":
         return payload
     kwargs = payload.get("chat_template_kwargs")
     merged = dict(kwargs) if isinstance(kwargs, dict) else {}
@@ -667,7 +672,7 @@ def handle_chat(
             model = str(payload.get("model") or "")
             payload = dict(payload)
             payload["stream"] = True
-            payload = apply_thinking_payload(payload)
+            payload = apply_thinking_payload(payload, src=src)
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers = dict(headers)
             headers["content-type"] = "application/json"

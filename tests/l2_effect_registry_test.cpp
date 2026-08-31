@@ -2281,6 +2281,105 @@ void test_pilot_worker_read_gate_a() {
              sys_md.find("cuando baste") == std::string::npos,
          "system prompt enumerates without a close semaphore");
   expect(sys_md.find("aguas_abajo") != std::string::npos, "system prompt names aguas_abajo");
+  expect(sys_md.find("FnA: escribe el campo -> FnB") == std::string::npos,
+         "como system prompt has no A->B walk template");
+  expect(sys_md.find("árbol") != std::string::npos, "como system prompt names the tree");
+}
+
+void test_pilot_worker_tree_walk() {
+  tuide::RegistryCausalPilotWorkerNotebook nb;
+  tuide::registry_causal_pilot_notebook_add_target(&nb, "src/mess.cpp:set_busy");
+  tuide::registry_causal_pilot_notebook_add_target(&nb, "src/mess.cpp:clear_busy");
+  tuide::registry_causal_pilot_notebook_add_target(&nb, "src/mess.cpp:halt");
+  tuide::registry_causal_pilot_notebook_add_target(&nb, "src/mess.cpp:arm");
+  tuide::registry_causal_pilot_notebook_add_target(&nb, "src/mess.cpp:tick");
+  tuide::registry_causal_pilot_notebook_add_target(&nb, "src/mess.cpp:keep_alive");
+  nb.n_need_code = 3;
+  nb.n_dataflow = 1;
+  nb.notes =
+      "\n----- need_code src/mess.cpp:set_busy -----\n"
+      "void set_busy(State* s) { s->busy = true; s->halted = false; keep_alive(s); }\n"
+      "----- aguas_abajo src/mess.cpp:set_busy -----\n"
+      "busy:  escribe true\n"
+      "halted:  escribe false\n"
+      "\n----- need_code src/mess.cpp:clear_busy -----\n"
+      "void clear_busy(State* s) { s->busy = false; }\n"
+      "----- aguas_abajo src/mess.cpp:clear_busy -----\n"
+      "busy:  escribe false\n"
+      "\n----- need_code src/mess.cpp:halt -----\n"
+      "void halt(State* s) { s->halted = true; s->busy = false; }\n"
+      "----- aguas_abajo src/mess.cpp:halt -----\n"
+      "halted:  escribe true\n"
+      "busy:  escribe false\n"
+      "\n----- dataflow busy -----\n"
+      "fn=`set_busy` write busy\n"
+      "fn=`clear_busy` write busy\n"
+      "fn=`halt` write busy\n";
+
+  const auto wr_tree = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("path_symbol":"src/mess.cpp:set_busy",)"
+      R"("walk":"set_busy: escribe busy -> clear_busy: limpia busy ; )"
+      R"(halt: escribe halted y baja busy ; duda:arm ; port_to:chrome",)"
+      R"("port_to":"chrome",)"
+      R"("chain":"set_busy escribe busy; clear_busy y halt lo limpian; halted en halt",)"
+      R"("why":"set_busy pone busy; clear_busy y halt lo bajan; halted sale de halt",)"
+      R"("brief":"En este barrio busy lo enciende set_busy y lo apagan clear_busy o halt. )"
+      R"(halted lo escribe halt; arm entra de chrome y no se abre."})",
+      "como", "mess", "", &nb);
+  expect(wr_tree.ok && wr_tree.verdict == "chain" && wr_tree.port_to == "chrome",
+         wr_tree.ok ? "ramified walk with two fields, duda, and port_to is a legal chain"
+                    : wr_tree.error.c_str());
+
+  const auto wr_unread = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("path_symbol":"src/mess.cpp:set_busy",)"
+      R"("walk":"set_busy: escribe busy -> keep_alive: limpia busy",)"
+      R"("why":"set_busy escribe; keep_alive limpia",)"
+      R"("brief":"Keep_alive seria el clear. No abri el cuerpo de keep_alive."})",
+      "como", "mess", "", &nb);
+  expect(!wr_unread.ok && wr_unread.error.find("no leído") != std::string::npos,
+         wr_unread.ok ? "unread keep_alive should fail"
+                      : (wr_unread.error.find("no leído") != std::string::npos
+                             ? "unread keep_alive in the walk is still a lie"
+                             : wr_unread.error.c_str()));
+
+  tuide::RegistryCausalPilotWorkerNotebook nb_latch;
+  tuide::registry_causal_pilot_notebook_add_target(&nb_latch, "src/latch.cpp:start_busy");
+  tuide::registry_causal_pilot_notebook_add_target(&nb_latch, "src/latch.cpp:halt_busy");
+  nb_latch.n_need_code = 2;
+  nb_latch.n_dataflow = 1;
+  nb_latch.notes =
+      "\n----- need_code src/latch.cpp:start_busy -----\n"
+      "void start_busy(Session* s) { s->busy = true; }\n"
+      "----- aguas_abajo src/latch.cpp:start_busy -----\n"
+      "busy:  escribe true\n"
+      "\n----- need_code src/latch.cpp:halt_busy -----\n"
+      "void halt_busy(Session* s) { s->busy = false; }\n"
+      "----- aguas_abajo src/latch.cpp:halt_busy -----\n"
+      "busy:  escribe false\n"
+      "\n----- dataflow busy -----\n"
+      "fn=`start_busy` write busy\n"
+      "fn=`halt_busy` write busy\n";
+  const auto wr_latch = tuide::registry_parse_causal_pilot_worker(
+      R"({"action":"causal_pilot_worker_v1","kind":"como","verdict":"chain",)"
+      R"("path_symbol":"src/latch.cpp:start_busy",)"
+      R"("walk":"start_busy: escribe busy -> halt_busy: limpia busy",)"
+      R"("chain":"start_busy escribe busy; halt_busy lo limpia",)"
+      R"("why":"start_busy pone busy=true; halt_busy lo baja",)"
+      R"("brief":"Este barrio es el latch busy. start_busy y halt_busy escriben el flag."})",
+      "como", "latch", "", &nb_latch);
+  expect(wr_latch.ok && wr_latch.verdict == "chain",
+         "two-hop latch walk remains a legal chain");
+
+  const auto sys_mess = tuide::registry_causal_pilot_worker_system_prompt("como", "mess");
+  expect(sys_mess.find("FnA: escribe el campo -> FnB") == std::string::npos &&
+             sys_mess.find("NombreFn: escribe el campo") == std::string::npos,
+         "como prompt for mess has no two-hop template");
+  const auto user_md = tuide::registry_causal_pilot_worker_user_prompt(
+      "como", "q", "# ficha\n", nb.notes, "", false, "mess");
+  expect(user_md.find("dudas locales") != std::string::npos,
+         "como user prompt closes on local doubts of this stem");
 }
 
 void test_pilot_worker_aguas() {
@@ -2649,6 +2748,7 @@ int main() {
   test_large_inventory_keeps_linked_fn();
   test_query_hop0_skips_ctrl();
   test_pilot_worker_read_gate_a();
+  test_pilot_worker_tree_walk();
   test_pilot_worker_aguas();
   if (failures > 0) {
     std::cerr << failures << " failure(s)\n";

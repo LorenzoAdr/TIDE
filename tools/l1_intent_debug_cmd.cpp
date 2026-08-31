@@ -13,6 +13,7 @@
 #include "ai/coding_stem_embed_index.hpp"
 #include "ai/embedding_backend.hpp"
 #include "ai/l2_brain.hpp"
+#include "ai/l2_think.hpp"
 #include "ai/level1_agent.hpp"
 #include "ai/llama_backend.hpp"
 #include "ai/llama_net.hpp"
@@ -273,6 +274,7 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
     req.n_ctx = 2048;
     req.temperature = 0.1;
     req.context_role = "L2";
+    apply_think_profile(&req, think_profile(L2ThinkLevel::High));
     const auto t0 = std::chrono::steady_clock::now();
     LlamaCompletionResult completion;
     if (l2_brain != nullptr) {
@@ -282,6 +284,8 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
       breq.max_tokens = req.max_tokens;
       breq.n_ctx = req.n_ctx;
       breq.temperature = req.temperature;
+      breq.enable_thinking = req.enable_thinking;
+      breq.reasoning_budget = req.reasoning_budget;
       const auto br = l2_brain->propose(breq, nullptr);
       completion.ok = br.ok;
       completion.text = br.text;

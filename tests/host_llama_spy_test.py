@@ -39,13 +39,33 @@ class ThinkingPayloadTest(unittest.TestCase):
 
     def test_inject_on(self) -> None:
         spy.thinking_inject = True
-        out = spy.apply_thinking_payload({"messages": []})
+        out = spy.apply_thinking_payload({"messages": []}, src="direct")
         self.assertTrue(out["chat_template_kwargs"]["enable_thinking"])
 
-    def test_inject_off_overrides(self) -> None:
+    def test_inject_off_overrides_direct(self) -> None:
         spy.thinking_inject = False
-        out = spy.apply_thinking_payload({"chat_template_kwargs": {"enable_thinking": True}})
+        out = spy.apply_thinking_payload(
+            {"chat_template_kwargs": {"enable_thinking": True}}, src="direct"
+        )
         self.assertFalse(out["chat_template_kwargs"]["enable_thinking"])
+
+    def test_vm_leaves_client_kwargs(self) -> None:
+        spy.thinking_inject = False
+        payload = {
+            "chat_template_kwargs": {"enable_thinking": True},
+            "thinking_budget_tokens": 1536,
+            "reasoning_budget_tokens": 1536,
+        }
+        out = spy.apply_thinking_payload(payload, src="vm")
+        self.assertTrue(out["chat_template_kwargs"]["enable_thinking"])
+        self.assertEqual(out["thinking_budget_tokens"], 1536)
+        self.assertEqual(out["reasoning_budget_tokens"], 1536)
+
+    def test_vm_does_not_inject(self) -> None:
+        spy.thinking_inject = True
+        payload = {"messages": []}
+        out = spy.apply_thinking_payload(payload, src="vm")
+        self.assertNotIn("chat_template_kwargs", out)
 
     def test_no_inject_leaves_payload(self) -> None:
         spy.thinking_inject = None

@@ -8996,6 +8996,11 @@ bool pilot_step_is_duda(const std::string& step) {
   return s.find("duda:") == 0 || s.find("duda ") == 0;
 }
 
+bool pilot_step_is_port(const std::string& step) {
+  const std::string s = causal_lower(pilot_trim_copy(step));
+  return s.find("port_to:") == 0 || s.find("port_to ") == 0;
+}
+
 std::vector<std::string> pilot_split_walk_steps(const std::string& walk) {
   std::vector<std::string> steps;
   std::string cur;
@@ -9032,7 +9037,7 @@ std::vector<std::string> pilot_split_walk_steps(const std::string& walk) {
 std::string pilot_walk_claimed_hay(const std::string& walk) {
   std::string hay;
   for (const auto& step : pilot_split_walk_steps(walk)) {
-    if (pilot_step_is_duda(step)) {
+    if (pilot_step_is_duda(step) || pilot_step_is_port(step)) {
       continue;
     }
     hay += ' ';
@@ -9175,7 +9180,7 @@ std::string pilot_unread_dataflow_writer(const std::string& notes, const std::st
 std::string pilot_walk_first_unread(const std::string& walk,
                                     const RegistryCausalPilotWorkerNotebook& nb) {
   for (const auto& step : pilot_split_walk_steps(walk)) {
-    if (pilot_step_is_duda(step)) {
+    if (pilot_step_is_duda(step) || pilot_step_is_port(step)) {
       continue;
     }
     const std::string ident = pilot_walk_step_symbol(step);
@@ -9929,10 +9934,13 @@ std::string registry_causal_pilot_worker_system_prompt(const std::string& kind,
   out << "{\"action\":\"causal_pilot_follow\",\"target\":\"path.cpp:Symbol\","
          "\"direction\":\"outgoing\"}\n";
   out << "PROHIBIDO inventar símbolos. PROHIBIDO why/walk de plantilla.\n";
-  out << "walk: \"FnA: escribe el campo -> FnB: limpia el campo\". Duda: "
-         "\"duda:FnB\". Nombres reales de ## Notas, nunca el placeholder sym. Si te queda una "
-         "duda, pide tool; no_cubre no es rendirse. brief: 2 frases para el PILOTO derivadas "
-         "del walk.\n\n";
+  out << "walk: enumera lo acumulado en ## Notas, no una plantilla de dos hops. "
+         "Cada variable del acto: quién la escribe, observa o limpia en este stem; "
+         "ramas con -> o ;. Duda LOCAL: duda:Symbol y pide tool. Lo que entra de "
+         "otro barrio: duda:Symbol y port_to en el JSON; no pidas su need_code. "
+         "Nombres reales de ## Notas, nunca el placeholder sym. Si te queda una duda "
+         "LOCAL, pide tool; no_cubre no es rendirse. brief: 2 frases para el PILOTO "
+         "derivadas del árbol (variables, cómo se relacionan, si algo entra de fuera).\n\n";
   if (kind == "cubre") {
     out << "cubre: los pasos del walk son o no el objeto de la consulta. No follow. Tokens "
            "temáticos (asistente, chat, panel, IA) no bastan. El encargo nombra este stem a "
@@ -9941,11 +9949,14 @@ std::string registry_causal_pilot_worker_system_prompt(const std::string& kind,
            "\"walk\":\"NombreFn: qué hace\",\"verdict\":\"cubre|no_cubre\",\"owns\":\""
         << stem << "\",\"why\":\"…símbolo…\",\"brief\":\"2 frases para el piloto\"}\n";
   } else if (kind == "como") {
-    out << "como: cada paso es quién escribe, observa o limpia el acto EN este stem. Lee el "
-           "cuerpo, no copies hops. Si no viste el clear, dataflow del campo; no emitas "
-           "no_cubre con una duda pendiente.\n";
+    out << "como: comprende el acto EN este stem. Sin saber la forma de antemano: tira del "
+           "hilo (cuerpo, aguas, dataflow, writers de ESTE stem) y rellena huecos. El walk "
+           "es el árbol de lo que leíste: cada variable del acto, quién la escribe o limpia "
+           "aquí, ramas, y duda+port_to si un hilo entra de fuera. No copies hops. Una "
+           "llamada keep-alive no es el clear. No emitas chain con una duda LOCAL pendiente. "
+           "Dos tools no bastan si aguas o dataflow aún nombran un hueco de este barrio.\n";
     out << "Informe: {\"action\":\"causal_pilot_worker_v1\",\"kind\":\"como\","
-           "\"walk\":\"NombreFn: escribe el campo -> OtraFn: limpia el campo\","
+           "\"walk\":\"…árbol de este stem…\","
            "\"verdict\":\"chain|no_cubre\","
            "\"path_symbol\":\"…\",\"chain\":\"…\",\"port_to\":\"\",\"why\":\"…símbolo…\","
            "\"brief\":\"2 frases para el piloto\"}\n";
@@ -10015,8 +10026,9 @@ std::string registry_causal_pilot_worker_user_prompt(const std::string& kind,
              "paso es un nombre que no has abierto (no hay ----- need_code ----- de ese símbolo), "
              "es duda: pide tool (no emitas no_cubre con duda pendiente). Follow no es lectura. "
              "No copies hops de la ficha al walk. "
-             "El informe causal_pilot_worker_v1 lo emites TÚ cuando el walk no tenga dudas; "
-             "no cuando haya dos tools.\n";
+             "El informe causal_pilot_worker_v1 lo emites TÚ cuando el árbol de ESTE stem no "
+             "tenga dudas locales; no cuando haya dos tools ni cuando el walk sea una cadena "
+             "de dos hops si aguas o dataflow aún nombran un hueco.\n";
       out << "Hay un cuerpo. Si la consulta pregunta quién escribe o limpia y no viste el "
              "clear en ese cuerpo, pide causal_pilot_dataflow del campo. Un hop de la ficha "
              "no cierra esa duda.\n\n";
@@ -10026,8 +10038,9 @@ std::string registry_causal_pilot_worker_user_prompt(const std::string& kind,
            "paso es un nombre que no has abierto (no hay ----- need_code ----- de ese símbolo), "
            "es duda: pide tool (no emitas no_cubre con duda pendiente). Follow no es lectura. "
            "No copies hops de la ficha al walk. "
-           "El informe causal_pilot_worker_v1 lo emites TÚ cuando el walk no tenga dudas; "
-           "no cuando haya dos tools.\n";
+           "El informe causal_pilot_worker_v1 lo emites TÚ cuando el árbol de ESTE stem no "
+           "tenga dudas locales; no cuando haya dos tools ni cuando el walk sea una cadena "
+           "de dos hops si aguas o dataflow aún nombran un hueco.\n";
     if (notes.find("----- dataflow ") == std::string::npos &&
         notes.find("----- causal ") == std::string::npos) {
       out << "Hay un cuerpo. Si la consulta pregunta quién escribe o limpia y no viste el "

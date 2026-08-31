@@ -4,7 +4,8 @@
   python3 tools/l2_worker_probe.py --kind cubre --cycle 1
   python3 tools/l2_worker_probe.py --pack robustness --cycle 1
   python3 tools/l2_worker_probe.py --pack items --cycle 0 --from .tuide/ai/l2_explore_battery/worker_tune/robustness/cycle_3
-  python3 tools/l2_worker_probe.py --pack items --cycle 1 --label follow_ficha
+  python3 tools/l2_worker_probe.py --pack synth --cycle 1
+  python3 tools/l2_worker_probe.py --pack tree --cycle 1 --label tree_accum
   python3 tools/l2_worker_probe.py --pack items --compare 0,1
 """
 from __future__ import annotations
@@ -50,6 +51,8 @@ def load_pack(name: str) -> dict:
         path = ITEMS_PATH
     elif name == "synth":
         path = ROOT / "tools/l2_battery/worker_probe/synth.json"
+    elif name == "tree":
+        path = ROOT / "tools/l2_battery/worker_probe/tree.json"
     else:
         path = CASES_PATH
     return json.loads(path.read_text(encoding="utf-8"))
@@ -200,13 +203,27 @@ def _repeat_tool(tools: list[dict]) -> bool:
     return len(keys) != len(set(keys))
 
 
+def ident_bounded(hay: str, needle: str) -> bool:
+    if not needle or not hay:
+        return False
+    return (
+        re.search(
+            r"(?<![A-Za-z0-9_])" + re.escape(needle.lower()) + r"(?![A-Za-z0-9_])",
+            hay.lower(),
+        )
+        is not None
+    )
+
+
 def walk_claimed_text(walk: str, chain: str = "") -> str:
     text = walk or chain or ""
     parts = re.split(r"\s*(?:->|→|;)\s*", text)
     claimed: list[str] = []
     for part in parts:
         pl = part.strip().lower()
-        if not pl or pl.startswith("duda:") or pl.startswith("duda "):
+        if not pl or pl.startswith("duda:") or pl.startswith("duda ") or pl.startswith(
+            "port_to:"
+        ) or pl.startswith("port_to "):
             continue
         claimed.append(pl)
     return " ".join(claimed)
@@ -328,14 +345,58 @@ def score_row(case: dict, summary: dict, out_dir: Path, zone: dict, thin_applied
     gold = [str(g) for g in (case.get("gold_writers") or [])]
     claimed = walk_claimed_text(walk, chain)
     if gold:
-        missing = [g for g in gold if g.lower() not in claimed]
+        missing = [g for g in gold if not ident_bounded(claimed, g)]
         if missing:
             pass_ok = False
             notes.append("sin_writer:" + ",".join(missing))
-        chain_l = claimed
-        if "tick" in chain_l and "halt_busy" not in claimed:
+        if ident_bounded(claimed, "tick") and not ident_bounded(claimed, "halt_busy"):
             pass_ok = False
             notes.append("hop_ficha")
+    gold_fields = [str(g) for g in (case.get("gold_fields") or [])]
+    hay_fields = " ".join([walk, brief, why])
+    if gold_fields:
+        missing_f = [g for g in gold_fields if not ident_bounded(hay_fields, g)]
+        if missing_f:
+            pass_ok = False
+            notes.append("sin_campo:" + ",".join(missing_f))
+    gold_clearers = [str(g) for g in (case.get("gold_clearers") or [])]
+    if gold_clearers and not any(ident_bounded(claimed, g) for g in gold_clearers):
+        pass_ok = False
+        notes.append("sin_clearer")
+    decoys = [str(d) for d in (case.get("decoy_writers") or [])]
+    hit_decoy = [d for d in decoys if ident_bounded(claimed, d)]
+    if hit_decoy:
+        pass_ok = False
+        notes.append("decoy:" + ",".join(hit_decoy))
+    walk_l = walk.lower()
+    port = str(summary.get("port_to") or "").lower()
+    if case.get("require_duda") and "duda:" not in walk_l:
+        pass_ok = False
+        notes.append("sin_duda")
+    if case.get("require_port_to") and not port and "port_to:" not in walk_l:
+        pass_ok = False
+        notes.append("sin_port_to")
+    if case.get("require_inbound"):
+        inbound_ok = ("duda:" in walk_l) or bool(port) or ("port_to:" in walk_l)
+        if not inbound_ok:
+            pass_ok = False
+            notes.append("sin_inbound")
+    min_nc = int(case.get("min_need_code") or 0)
+    n_nc = sum(1 for t in tools if t.get("tool") == "need_code")
+    if min_nc and n_nc < min_nc:
+        pass_ok = False
+        notes.append(f"need_code={n_nc}<{min_nc}")
+    forbid = [str(x).lower() for x in (case.get("forbid_need_code") or [])]
+    if forbid:
+        bad = [
+            str(t.get("target") or "")
+            for t in tools
+            if t.get("tool") == "need_code"
+            and any(f in str(t.get("target") or "").lower() for f in forbid)
+        ]
+        if bad:
+            pass_ok = False
+            notes.append("abrio_fuera:" + ",".join(bad))
     return {
         "id": case["id"],
         "family": case.get("family") or "",
@@ -642,7 +703,7 @@ def mode_acceptable(kind: str, rows: list[dict]) -> tuple[bool, str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--kind", default="all", choices=("cubre", "como", "gap", "all"))
-    ap.add_argument("--pack", default="tune", choices=("tune", "robustness", "items", "synth"))
+    ap.add_argument("--pack", default="tune", choices=("tune", "robustness", "items", "synth", "tree"))
     ap.add_argument("--cycle", type=int, default=1)
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--cards-root", default="")
@@ -698,6 +759,10 @@ def main() -> int:
         cycle_dir = TUNE_ROOT / "synth" / f"cycle_{args.cycle}"
         state_path = TUNE_ROOT / "synth" / "state.json"
         score_kind = "synth"
+    elif pack_name == "tree":
+        cycle_dir = TUNE_ROOT / "tree" / f"cycle_{args.cycle}"
+        state_path = TUNE_ROOT / "tree" / "state.json"
+        score_kind = "tree"
     else:
         cycle_dir = TUNE_ROOT / args.kind / f"cycle_{args.cycle}"
         state_path = TUNE_ROOT / "state.json"

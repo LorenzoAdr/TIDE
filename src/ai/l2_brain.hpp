@@ -3,6 +3,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "ai/ai_types.hpp"
@@ -19,6 +20,8 @@ struct L2BrainRequest {
   float temperature = 0.1f;
   // Absolute path to GBNF grammar; empty → unconstrained decode.
   std::string grammar_file;
+  std::optional<bool> enable_thinking;
+  int reasoning_budget = -1;
 };
 
 struct L2BrainResult {

@@ -362,6 +362,36 @@ void shrink_prompt_for_ctx(const LlamaCompletionRequest& req, int n_ctx, int* n_
 
 }  // namespace
 
+void attach_thinking_json(nlohmann::json& body, const std::optional<bool>& enable_thinking,
+                          int reasoning_budget) {
+  if (enable_thinking.has_value()) {
+    body["chat_template_kwargs"] = nlohmann::json{{"enable_thinking", *enable_thinking}};
+  }
+  if (reasoning_budget >= 0) {
+    body["thinking_budget_tokens"] = reasoning_budget;
+    body["reasoning_budget_tokens"] = reasoning_budget;
+  }
+}
+
+nlohmann::json build_chat_completions_body(const LlamaCompletionRequest& req,
+                                           const std::string& model, const std::string& user_text,
+                                           bool cache_prompt) {
+  nlohmann::json body = {
+      {"model", model},
+      {"temperature", req.temperature},
+      {"max_tokens", req.max_tokens > 0 ? req.max_tokens : 512},
+      {"messages",
+       nlohmann::json::array(
+           {{{"role", "system"}, {"content", req.system_prompt}},
+            {{"role", "user"}, {"content", user_text}}})},
+  };
+  if (cache_prompt) {
+    body["cache_prompt"] = true;
+  }
+  attach_thinking_json(body, req.enable_thinking, req.reasoning_budget);
+  return body;
+}
+
 bool parse_llama_chat_completion(const std::string& body, std::string* content, std::string* error) {
   if (content == nullptr) {
     if (error) {
@@ -970,16 +1000,12 @@ LlamaCompletionResult LlamaBackend::complete_server(const LlamaCompletionRequest
   int n_predict = req.max_tokens > 0 ? req.max_tokens : 512;
   shrink_prompt_for_ctx(req, n_ctx, &n_predict, &user_text);
 
-  nlohmann::json body = {
-      {"model", "l2"},
-      {"temperature", req.temperature},
-      {"max_tokens", n_predict},
-      {"cache_prompt", true},
-      {"messages",
-       nlohmann::json::array(
-           {{{"role", "system"}, {"content", req.system_prompt}},
-            {{"role", "user"}, {"content", user_text}}})},
-  };
+  LlamaCompletionRequest body_req = req;
+  body_req.max_tokens = n_predict;
+  if (body_req.reasoning_budget > 0 && n_predict < body_req.reasoning_budget + 128) {
+    body_req.reasoning_budget = std::max(0, n_predict - 128);
+  }
+  nlohmann::json body = build_chat_completions_body(body_req, "l2", user_text, true);
   if (!req.grammar_file.empty()) {
     const std::string grammar = read_text_file(req.grammar_file);
     if (grammar.empty()) {

@@ -1129,6 +1129,14 @@ target_include_directories(search_replace_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(l2_think_test
+  tests/l2_think_test.cpp
+)
+target_include_directories(l2_think_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
 add_executable(llama_backend_test
   tests/llama_backend_test.cpp
   src/ai/llama_backend.cpp
@@ -1552,6 +1560,7 @@ set(TUIDE_TEST_TARGETS
   l2_effect_slice_test
   l2_effect_registry_test
   l2_pack_review_test
+  l2_think_test
   search_replace_test
   llama_backend_test
   llama_host_comm_test
