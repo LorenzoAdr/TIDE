@@ -487,6 +487,52 @@ def clear_last_chat_ctx() -> None:
         _last_chat_ctx["cached"] = 0
 
 
+THINK_OPEN = "<think>"
+THINK_CLOSE = "</think>"
+
+
+def _strip_leading_nl(text: str) -> str:
+    if text.startswith("\r\n"):
+        text = text[2:]
+    elif text.startswith("\n") or text.startswith("\r"):
+        text = text[1:]
+    if text.startswith("\n") or text.startswith("\r"):
+        text = text[1:]
+    return text
+
+
+def _strip_think_open(text: str) -> str:
+    idx = text.find(THINK_OPEN)
+    if idx < 0:
+        return text
+    text = text[idx + len(THINK_OPEN) :]
+    return _strip_leading_nl(text)
+
+
+def rehome_think(reason: str, content: str) -> Tuple[str, str]:
+    """Move content before the last </think> into reasoning (llama.cpp one-shot split).
+
+    Only runs when a think block actually opened (reasoning_content already
+    started, or an explicit <think> in the body). A stray </think> in code/HTML
+    from a non-CoT model must not swallow the whole answer.
+    """
+    reason = reason or ""
+    content = content or ""
+    idx = content.rfind(THINK_CLOSE)
+    if idx < 0:
+        return reason, content
+    if not reason and THINK_OPEN not in content:
+        return reason, content
+    extra = _strip_think_open(content[:idx])
+    answer = _strip_leading_nl(content[idx + len(THINK_CLOSE) :])
+    if extra:
+        if reason and not reason.endswith(("\n", " ", "\t")) and not extra.startswith(("\n", " ", "\t")):
+            reason = reason + "\n" + extra
+        else:
+            reason = reason + extra
+    return reason, answer
+
+
 def extract_delta_parts(obj: dict) -> Tuple[str, str]:
     """Return (content, reasoning) from a chat chunk or a full completion body."""
     if not isinstance(obj, dict):
@@ -655,6 +701,7 @@ def handle_chat(
     acc: List[str] = []
     acc_reason: List[str] = []
     stream_phase = ""
+    rehomed = False
     raw = b""
     sse = False
     resp: Optional[http.client.HTTPResponse] = None
@@ -680,7 +727,11 @@ def handle_chat(
         write_tok(text)
 
     def take_parts(obj: dict) -> None:
+        nonlocal rehomed
         content, reason = extract_delta_parts(obj)
+        if thinking_inject is not True and reason:
+            content = reason + content
+            reason = ""
         if reason:
             acc_reason.append(reason)
             emit_live(reason, "reason")
@@ -689,6 +740,24 @@ def handle_chat(
             acc.append(content)
             emit_live(content, "answer")
             tok_batch.add(content, "answer")
+        if thinking_inject is not True:
+            return
+        joined_c = "".join(acc)
+        raw_r = "".join(acc_reason)
+        if rehomed or THINK_CLOSE not in joined_c:
+            return
+        split_r, split_a = rehome_think(raw_r, joined_c)
+        if (split_r, split_a) == (raw_r, joined_c):
+            return
+        tok_batch.flush()
+        jsonl_emit({
+            "kind": "rehome",
+            "id": rid,
+            "tag": tag,
+            "reasoning": split_r[:200000],
+            "response": split_a[:200000],
+        })
+        rehomed = True
 
     with inflight_lock:
         inflight_chat += 1
@@ -762,8 +831,11 @@ def handle_chat(
             if inflight_chat <= 0:
                 cancel_generation.clear()
 
-    text = "".join(acc)
-    reason_text = "".join(acc_reason)
+    text, reason_text = rehome_think("".join(acc_reason), "".join(acc))
+    if thinking_inject is not True:
+        if reason_text:
+            text = reason_text + text
+            reason_text = ""
     dt = time.monotonic() - t0
     if ctx_snap and log_kind != "summary":
         record_chat_ctx(ctx_snap)
@@ -961,10 +1033,24 @@ pre { margin:0; white-space:pre-wrap; word-break:break-word; }
 .md p:first-child { margin-top:0; }
 .md strong { color:var(--txt); font-weight:700; }
 .md em { font-style:italic; }
-.md h1,.md h2,.md h3,.md h4 { color:var(--txt); text-transform:none; letter-spacing:0;
-  font-size:13px; margin:0.85em 0 0.35em; }
+.md h1,.md h2,.md h3,.md h4,.md h5,.md h6 { color:var(--warn); text-transform:none; letter-spacing:0;
+  font-weight:650; margin:0.85em 0 0.35em; line-height:1.3;
+  border-left:2px solid var(--warn); padding-left:0.65em; }
 .md h1 { font-size:16px; }
 .md h2 { font-size:14px; }
+.md h3 { font-size:13px; }
+.md h4 { font-size:13px; }
+.md h5,.md h6 { font-size:12px; }
+.md { counter-reset: mdsec; }
+.md-sec { counter-increment: mdsec; }
+.md-sec-subs { counter-reset: mdsec; }
+.md-sec .md-sec { margin-left:0.9em; }
+.md-sec-body { margin-left:0.9em; }
+.md-sec > h1::before,.md-sec > h2::before,.md-sec > h3::before,
+.md-sec > h4::before,.md-sec > h5::before,.md-sec > h6::before {
+  content: counters(mdsec, ".") "  ";
+  font-variant-numeric: tabular-nums;
+}
 .md ul,.md ol { margin:0.4em 0; padding-left:1.4em; }
 .md li { margin:0.15em 0; }
 .md code { background:#0c0d10; border:1px solid var(--line); border-radius:4px;
@@ -1087,12 +1173,13 @@ body.resizing-h { user-select:none; cursor:row-resize; }
   </div>
 </div>
 <script>
-const reqs = new Map();
+let reqs = new Map();
 let order = [];
 let filter = "all";
 let query = "";
 let sel = null;
 let off = 0;
+let pollGen = 0;
 let sending = false;
 let askAbort = null;
 let askEnabled = false;
@@ -1424,6 +1511,42 @@ function consumeFences(src, fences) {
   }
   return out.join("\n");
 }
+function mdHeadingLevel(html) {
+  const m = String(html || "").trim().match(/^<h([1-6])\b/);
+  return m ? Number(m[1]) : 0;
+}
+function wrapMdSections(blocks) {
+  const renderSec = (sec) => {
+    const inner = [];
+    if (sec.heading) inner.push(sec.heading);
+    if (sec.body.length) {
+      inner.push('<div class="md-sec-body">' + sec.body.join("\n") + "</div>");
+    }
+    if (sec.kids.length) {
+      inner.push('<div class="md-sec-subs">' + sec.kids.join("\n") + "</div>");
+    }
+    return '<div class="md-sec md-sec-' + sec.level + '">' + inner.join("\n") + "</div>";
+  };
+  const root = {level: 0, heading: null, body: [], kids: []};
+  const stack = [root];
+  const closeTo = (lvl) => {
+    while (stack.length > 1 && stack[stack.length - 1].level >= lvl) {
+      const sec = stack.pop();
+      stack[stack.length - 1].kids.push(renderSec(sec));
+    }
+  };
+  for (const block of blocks) {
+    const lvl = mdHeadingLevel(block);
+    if (lvl) {
+      closeTo(lvl);
+      stack.push({level: lvl, heading: block, body: [], kids: []});
+    } else {
+      stack[stack.length - 1].body.push(block);
+    }
+  }
+  closeTo(1);
+  return root.body.concat(root.kids).join("\n");
+}
 function renderMd(src) {
   const fences = [];
   const codes = [];
@@ -1476,7 +1599,7 @@ function renderMd(src) {
     }
   }
   flush();
-  s = out.join("\n");
+  s = wrapMdSections(out);
   s = s.replace(/%%CODE(\d+)%%/g, (_m, i) => codes[Number(i)] || "");
   s = s.replace(/%%FENCE(\d+)%%/g, (_m, i) => fences[Number(i)] || "");
   return s;
@@ -1620,6 +1743,23 @@ function badge(r) {
   if (r.log_kind === "summary" || r.kind === "summary") return "memoria";
   return srcOf(r) === "direct" ? "yo" : "vm";
 }
+function rehomeThink(reason, content) {
+  reason = reason || "";
+  content = content || "";
+  const close = "</think>";
+  const idx = content.lastIndexOf(close);
+  if (idx < 0) return [reason, content];
+  if (!reason && content.indexOf("<think>") < 0) return [reason, content];
+  let extra = content.slice(0, idx);
+  const open = extra.indexOf("<think>");
+  if (open >= 0) extra = extra.slice(open + 7).replace(/^\r?\n/, "");
+  let answer = content.slice(idx + close.length).replace(/^\r?\n/, "").replace(/^\r?\n/, "");
+  if (extra) {
+    if (reason && !/[\n \t]$/.test(reason) && !/^[\n \t]/.test(extra)) reason += "\n";
+    reason += extra;
+  }
+  return [reason, answer];
+}
 function apply(ev) {
   if (!ev || !ev.kind) return;
   if (ev.kind === "req") {
@@ -1638,16 +1778,21 @@ function apply(ev) {
       if (ch === "reason") r.reasoning = (r.reasoning || "") + (ev.text || "");
       else r.response += ev.text || "";
     }
-  } else if (ev.kind === "done") {
+  } else if (ev.kind === "rehome" || ev.kind === "done") {
     const r = reqs.get(ev.id);
     if (r) {
-      if (ev.response) r.response = ev.response;
-      if (ev.reasoning != null) r.reasoning = ev.reasoning;
-      r.streaming = false;
-      r.seconds = ev.seconds;
-      r.chars = ev.chars;
-      r.error = ev.error || "";
-      if (ev.log_kind) r.log_kind = ev.log_kind;
+      let response = ev.response != null ? ev.response : (r.response || "");
+      let reasoning = ev.reasoning != null ? ev.reasoning : (r.reasoning || "");
+      [reasoning, response] = rehomeThink(reasoning, response);
+      r.response = response;
+      r.reasoning = reasoning;
+      if (ev.kind === "done") {
+        r.streaming = false;
+        r.seconds = ev.seconds;
+        r.chars = ev.chars;
+        r.error = ev.error || "";
+        if (ev.log_kind) r.log_kind = ev.log_kind;
+      }
     }
   } else if (ev.kind === "embed") {
     reqs.set(ev.id, {
@@ -1852,9 +1997,11 @@ function renderDetail() {
 function render() { renderList(); renderDetail(); syncComposer(); }
 
 async function poll() {
+  const gen = pollGen;
   try {
     const res = await fetch("/api/tail?off=" + off);
     const data = await res.json();
+    if (gen !== pollGen) return;
     off = data.off;
     (data.lines || []).forEach(line => {
       try { apply(JSON.parse(line)); } catch (e) {}
@@ -1956,6 +2103,7 @@ async function resetChat() {
 }
 async function clearHistory() {
   if (!confirm("¿Vaciar el historial de turnos (vm, yo, embed)?")) return;
+  pollGen++;
   try {
     const res = await fetch("/api/history/clear", {
       method: "POST",

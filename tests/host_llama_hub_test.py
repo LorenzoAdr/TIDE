@@ -438,6 +438,26 @@ class HostBrowserTest(unittest.TestCase):
                 cmd = hub.browser_launch_argv("http://127.0.0.1:18767")
         self.assertEqual(cmd, ["open", "http://127.0.0.1:18767"])
 
+    def test_webkit_window_implements_js_confirm(self) -> None:
+        src = hub.WEBAPP_SRC.read_text(encoding="utf-8")
+        self.assertIn("WKUIDelegate", src)
+        self.assertIn("runJavaScriptConfirmPanelWithMessage", src)
+
+    def test_dashboard_clear_history_drops_stale_polls(self) -> None:
+        html = hub.spy.DASHBOARD_HTML
+        self.assertIn("pollGen++", html)
+        self.assertIn("if (gen !== pollGen) return;", html)
+
+    def test_dashboard_headings_indent_and_warn_color(self) -> None:
+        html = hub.spy.DASHBOARD_HTML
+        self.assertIn(".md h1,.md h2,.md h3,.md h4,.md h5,.md h6 { color:var(--warn);", html)
+        self.assertIn(".md-sec .md-sec { margin-left:0.9em; }", html)
+        self.assertIn(".md-sec-body { margin-left:0.9em; }", html)
+        self.assertIn("counter-reset: mdsec", html)
+        self.assertIn('content: counters(mdsec, ".") "  ";', html)
+        self.assertIn("function wrapMdSections(blocks)", html)
+        self.assertIn("md-sec-subs", html)
+
 
 if __name__ == "__main__":
     unittest.main()

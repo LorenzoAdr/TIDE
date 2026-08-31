@@ -2,7 +2,7 @@ import Cocoa
 import WebKit
 
 /// Ventana WebKit (motor de Safari) sin pestañas ni barra de URL.
-final class App: NSObject, NSApplicationDelegate {
+final class App: NSObject, NSApplicationDelegate, WKUIDelegate {
     let startURL: URL
     var window: NSWindow?
 
@@ -28,6 +28,7 @@ final class App: NSObject, NSApplicationDelegate {
         let wv = WKWebView(frame: win.contentView?.bounds ?? rect)
         wv.autoresizingMask = [.width, .height]
         wv.customUserAgent = "tuide-host-webapp"
+        wv.uiDelegate = self
         win.contentView = wv
         wv.load(URLRequest(url: startURL))
 
@@ -39,6 +40,53 @@ final class App: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        completionHandler()
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancelar")
+        completionHandler(alert.runModal() == .alertFirstButtonReturn)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = prompt
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancelar")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.stringValue = defaultText ?? ""
+        alert.accessoryView = field
+        if alert.runModal() == .alertFirstButtonReturn {
+            completionHandler(field.stringValue)
+        } else {
+            completionHandler(nil)
+        }
     }
 }
 

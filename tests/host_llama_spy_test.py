@@ -79,5 +79,49 @@ class TokBatchChannelTest(unittest.TestCase):
             os.unlink(path)
 
 
+class RehomeThinkTest(unittest.TestCase):
+    def test_no_tag_unchanged(self) -> None:
+        self.assertEqual(spy.rehome_think("why", "hello"), ("why", "hello"))
+        self.assertEqual(spy.rehome_think("", "hello"), ("", "hello"))
+
+    def test_early_split_uses_last_close(self) -> None:
+        reason = "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Query:** \"cómo se cancela"
+        content = (
+            "- **Object of Query:** spinner\n"
+            "2.  **Map Query to Atlas:**\n"
+            "   All constraints verified.\n"
+            "</think>\n\n"
+            '{"action":"causal_atlas_survey_v1"}'
+        )
+        r, a = spy.rehome_think(reason, content)
+        self.assertIn("Map Query to Atlas", r)
+        self.assertNotIn("</think>", r)
+        self.assertNotIn("</think>", a)
+        self.assertEqual(a, '{"action":"causal_atlas_survey_v1"}')
+        self.assertTrue(r.startswith("Here's a thinking process:"))
+
+    def test_tags_only_in_content(self) -> None:
+        content = "<think>\nplan\n</think>\n\nfinal"
+        r, a = spy.rehome_think("", content)
+        self.assertEqual(r, "plan\n")
+        self.assertEqual(a, "final")
+
+    def test_empty_answer_after_close(self) -> None:
+        r, a = spy.rehome_think("short", "more think</think>")
+        self.assertIn("more think", r)
+        self.assertEqual(a, "")
+
+    def test_last_close_wins(self) -> None:
+        content = "aaa</think>bbb</think>\n\nans"
+        r, a = spy.rehome_think("pre", content)
+        self.assertIn("aaa", r)
+        self.assertIn("bbb", r)
+        self.assertEqual(a, "ans")
+
+    def test_stray_close_without_open_is_ignored(self) -> None:
+        content = "example uses </think> as HTML then the real answer"
+        self.assertEqual(spy.rehome_think("", content), ("", content))
+
+
 if __name__ == "__main__":
     unittest.main()
