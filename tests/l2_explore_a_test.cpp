@@ -859,6 +859,43 @@ int main() {
     expect(md.find("vuelve a cola") == std::string::npos, "do not skip cond-only");
   }
   {
+    tuide::ATrailStack s;
+    s.id = "S1";
+    tuide::ATrailHop outer;
+    outer.symbol = "paint_frame";
+    outer.anchor = "src/ui/main_layout.cpp:paint_frame";
+    outer.path = "src/ui/main_layout.cpp";
+    outer.call_line = 40;
+    outer.control_cond = "thinking";
+    outer.snippet = "if (thinking) {\n  begin_thinking();\n}\n";
+    tuide::ATrailHop mid;
+    mid.symbol = "begin_thinking";
+    mid.anchor = "src/ai/ai_controller.cpp:begin_thinking";
+    mid.path = "src/ai/ai_controller.cpp";
+    mid.call_line = 80;
+    mid.snippet = "set_busy_spinner(layout, BusyActivity::Thinking);\n";
+    tuide::ATrailHop focus;
+    focus.symbol = "set_busy_spinner";
+    focus.anchor = "src/ui/busy_strip.cpp:set_busy_spinner";
+    s.hops = {outer, mid, focus};
+    tuide::ATrailCondBranch on;
+    on.id = "ON";
+    on.when_text = "thinking";
+    on.then_text = "set_busy_spinner";
+    on.anchor = "src/ai/ai_controller.cpp:begin_thinking";
+    on.line = 80;
+    on.snippet = "if (thinking) set_busy_spinner(layout, act);\n";
+    const std::string md = tuide::a_trail_causal_flow_markdown({s}, {on});
+    expect(md.find("S1:") != std::string::npos, "causal dump S1");
+    expect(md.find("{thinking}") != std::string::npos, "causal dump cond en cadena");
+    expect(md.find("if (thinking) {") != std::string::npos, "causal dump recorte caller");
+    expect(md.find("set_busy_spinner(layout, BusyActivity::Thinking)") != std::string::npos,
+           "causal dump recorte call directo");
+    expect(md.find("ON when=thinking") != std::string::npos, "causal dump rama");
+    expect(md.find("if (thinking) set_busy_spinner") != std::string::npos, "causal dump recorte rama");
+    expect(md.find("```") != std::string::npos, "causal dump fence");
+  }
+  {
     setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "1", 1);
     setenv("L2_FEAT_L2_EXPLORE_ANCHOR_CAUSAL", "1", 1);
     tuide::ProblemFrame pf;

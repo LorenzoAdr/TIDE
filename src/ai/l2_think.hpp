@@ -50,7 +50,7 @@ inline L2ThinkProfile think_profile_for(std::string_view phase, bool has_pack,
   if (is_pack_review) {
     return think_profile(L2ThinkLevel::Low);
   }
-  if (phase == "edit") {
+  if (phase == "edit" || phase == "causal_wave_cover") {
     return think_profile(L2ThinkLevel::Off);
   }
   if (phase == "explore_a" || phase == "causal_pilot_worker" ||
@@ -59,8 +59,10 @@ inline L2ThinkProfile think_profile_for(std::string_view phase, bool has_pack,
       phase == "causal_zone_slot_hyp") {
     return think_profile(L2ThinkLevel::Low);
   }
-  if (phase == "causal_pilot_plan" || phase == "causal_zone_hyp" ||
-      phase == "causal_zone_anchor" ||
+  if (phase == "causal_pilot_plan" || phase == "causal_wave_pilot") {
+    return think_profile(L2ThinkLevel::Medium);
+  }
+  if (phase == "causal_zone_hyp" || phase == "causal_zone_anchor" ||
       ((phase == "explore" || phase == "explore_b") && !has_pack)) {
     return think_profile(L2ThinkLevel::High);
   }

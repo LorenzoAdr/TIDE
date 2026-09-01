@@ -1,4 +1,5 @@
 #include "ai/llama_backend.hpp"
+#include "ai/action_json.hpp"
 
 #include <algorithm>
 #include <array>
@@ -41,26 +42,6 @@ std::string shell_quote(const std::string& value) {
   }
   quoted.push_back('\'');
   return quoted;
-}
-
-std::size_t find_action_object_start(const std::string& raw, std::size_t from) {
-  std::size_t search = from;
-  while (search < raw.size()) {
-    const auto brace = raw.find('{', search);
-    if (brace == std::string::npos) {
-      return std::string::npos;
-    }
-    std::size_t i = brace + 1;
-    while (i < raw.size() &&
-           (raw[i] == ' ' || raw[i] == '\n' || raw[i] == '\r' || raw[i] == '\t')) {
-      ++i;
-    }
-    if (i + 8 <= raw.size() && raw.compare(i, 8, "\"action\"") == 0) {
-      return brace;
-    }
-    search = brace + 1;
-  }
-  return std::string::npos;
 }
 
 std::string scan_balanced_object(const std::string& raw, std::size_t start) {
@@ -125,21 +106,9 @@ std::string extract_model_text(const std::string& raw) {
   }
 
   // Prefer the LAST JSON object that looks like an action (models echo the prompt).
-  std::size_t search = 0;
-  std::string best;
-  while (search < raw.size()) {
-    const auto start = find_action_object_start(raw, search);
-    if (start == std::string::npos) {
-      break;
-    }
-    const std::string obj = scan_balanced_object(raw, start);
-    if (!obj.empty()) {
-      best = obj;
-    }
-    search = start + 1;
-  }
-  if (!best.empty()) {
-    return best;
+  const std::string action = extract_action_json(raw);
+  if (!action.empty()) {
+    return action;
   }
 
   const auto start = raw.find('{');
@@ -360,6 +329,51 @@ void shrink_prompt_for_ctx(const LlamaCompletionRequest& req, int n_ctx, int* n_
   }
 }
 
+std::string json_message_text(const nlohmann::json& msg, const char* key) {
+  if (!msg.contains(key)) {
+    return {};
+  }
+  const auto& v = msg[key];
+  if (v.is_string()) {
+    return v.get<std::string>();
+  }
+  if (v.is_array()) {
+    std::string acc;
+    for (const auto& part : v) {
+      if (part.is_string()) {
+        acc += part.get<std::string>();
+      } else if (part.is_object() && part.contains("text") && part["text"].is_string()) {
+        acc += part["text"].get<std::string>();
+      }
+    }
+    return acc;
+  }
+  return {};
+}
+
+std::string pick_assistant_text(const nlohmann::json& msg) {
+  const std::string content = json_message_text(msg, "content");
+  std::string reasoning = json_message_text(msg, "reasoning_content");
+  if (reasoning.empty()) {
+    reasoning = json_message_text(msg, "reasoning");
+  }
+  const std::string stripped = strip_model_think(content);
+  const std::string primary = stripped.empty() ? content : stripped;
+  if (!extract_action_json(primary).empty()) {
+    return primary;
+  }
+  if (!extract_action_json(content).empty()) {
+    return content;
+  }
+  if (!extract_action_json(reasoning).empty()) {
+    return reasoning;
+  }
+  if (!content.empty()) {
+    return content;
+  }
+  return reasoning;
+}
+
 }  // namespace
 
 void attach_thinking_json(nlohmann::json& body, const std::optional<bool>& enable_thinking,
@@ -414,10 +428,12 @@ bool parse_llama_chat_completion(const std::string& body, std::string* content, 
       return false;
     }
     const auto& c0 = j["choices"][0];
-    if (c0.contains("message") && c0["message"].contains("content") &&
-        c0["message"]["content"].is_string()) {
-      *content = c0["message"]["content"].get<std::string>();
-      return true;
+    if (c0.contains("message") && c0["message"].is_object()) {
+      const std::string text = pick_assistant_text(c0["message"]);
+      if (!text.empty()) {
+        *content = text;
+        return true;
+      }
     }
     if (c0.contains("text") && c0["text"].is_string()) {
       *content = c0["text"].get<std::string>();

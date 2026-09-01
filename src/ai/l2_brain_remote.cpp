@@ -1,4 +1,5 @@
 #include "ai/l2_brain.hpp"
+#include "ai/action_json.hpp"
 #include "ai/llama_backend.hpp"
 #include "ai/llama_net.hpp"
 
@@ -54,56 +55,6 @@ std::string resolve_api_key(const AiLevel2Settings& cfg) {
     }
   }
   return {};
-}
-
-// Prefer last {"action":…} object in noisy responses.
-std::string extract_action_json(const std::string& raw) {
-  std::size_t search = 0;
-  std::string best;
-  while (search < raw.size()) {
-    const auto start = raw.find("{\"action\"", search);
-    if (start == std::string::npos) {
-      break;
-    }
-    int depth = 0;
-    bool in_string = false;
-    bool escape = false;
-    for (std::size_t i = start; i < raw.size(); ++i) {
-      const char c = raw[i];
-      if (in_string) {
-        if (escape) {
-          escape = false;
-        } else if (c == '\\') {
-          escape = true;
-        } else if (c == '"') {
-          in_string = false;
-        }
-        continue;
-      }
-      if (c == '"') {
-        in_string = true;
-        continue;
-      }
-      if (c == '{') {
-        ++depth;
-      } else if (c == '}') {
-        --depth;
-        if (depth == 0) {
-          best = raw.substr(start, i - start + 1);
-          break;
-        }
-      }
-    }
-    search = start + 1;
-  }
-  if (!best.empty()) {
-    return best;
-  }
-  const auto brace = raw.find('{');
-  if (brace == std::string::npos) {
-    return raw;
-  }
-  return raw.substr(brace);
 }
 
 }  // namespace
@@ -204,33 +155,20 @@ L2BrainResult RemoteL2Brain::propose(const L2BrainRequest& req, std::atomic<bool
     return out;
   }
 
-  try {
-    const auto j = nlohmann::json::parse(raw.str());
-    if (j.contains("error")) {
-      out.error = j["error"].dump();
-      return out;
-    }
-    std::string content;
-    if (j.contains("choices") && j["choices"].is_array() && !j["choices"].empty()) {
-      const auto& c0 = j["choices"][0];
-      if (c0.contains("message") && c0["message"].contains("content") &&
-          c0["message"]["content"].is_string()) {
-        content = c0["message"]["content"].get<std::string>();
-      } else if (c0.contains("text") && c0["text"].is_string()) {
-        content = c0["text"].get<std::string>();
-      }
-    }
-    if (content.empty()) {
-      out.error = "respuesta remote sin content";
-      return out;
-    }
-    out.ok = true;
-    out.text = extract_action_json(content);
-    return out;
-  } catch (const std::exception& ex) {
-    out.error = std::string("parse remote: ") + ex.what() + " raw=" + raw.str().substr(0, 400);
+  std::string content;
+  std::string perr;
+  if (!parse_llama_chat_completion(raw.str(), &content, &perr)) {
+    out.error = perr.empty() ? "respuesta remote sin content" : perr;
     return out;
   }
+  if (content.empty()) {
+    out.error = "respuesta remote sin content";
+    return out;
+  }
+  out.ok = true;
+  const std::string extracted = extract_action_json(content);
+  out.text = extracted.empty() ? content : extracted;
+  return out;
 }
 
 std::unique_ptr<L2Brain> make_l2_brain(const std::string& mode, LlamaBackend* shared_backend) {

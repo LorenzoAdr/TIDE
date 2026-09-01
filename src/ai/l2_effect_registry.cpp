@@ -1826,9 +1826,16 @@ bool registry_query(EffectRegistry* r, const std::string& query, const RegistryE
       if (qlow.empty() || hay.find(qlow) == std::string::npos) {
         continue;
       }
+      const std::string sym = lower(col(3));
       Scored s;
       s.id = id;
-      s.cos = 0.9f;
+      if (sym == qlow) {
+        s.cos = 1.0f;
+      } else if (sym.size() >= qlow.size() && sym.compare(0, qlow.size(), qlow) == 0) {
+        s.cos = 0.96f;
+      } else {
+        s.cos = 0.88f;
+      }
       scored.push_back(std::move(s));
     }
     sqlite3_finalize(st);
@@ -9745,6 +9752,20 @@ std::string registry_causal_pilot_aguas_arriba_markdown(
     }
     const std::string focus_stem = registry_stem_of(focus_path);
     const std::string caller_stem = registry_stem_of(caller.path);
+    if (incoming_targets != nullptr) {
+      for (std::size_t i = 0; i + 1 < st.hops.size(); ++i) {
+        const auto& hop = st.hops[i];
+        if (hop.symbol.empty() || hop.symbol == focus_symbol) {
+          continue;
+        }
+        const std::string t =
+            hop.path.empty() ? hop.symbol : (hop.path + ":" + hop.symbol);
+        if (std::find(incoming_targets->begin(), incoming_targets->end(), t) ==
+            incoming_targets->end()) {
+          incoming_targets->push_back(t);
+        }
+      }
+    }
     if (focus_stem.empty() || caller_stem != focus_stem) {
       continue;
     }
@@ -9769,20 +9790,6 @@ std::string registry_causal_pilot_aguas_arriba_markdown(
     out << "cuando: " << cuando << "\n";
     out << "quien:  " << quien << "\n";
     ++shown;
-    if (incoming_targets != nullptr) {
-      for (std::size_t i = 0; i + 1 < st.hops.size(); ++i) {
-        const auto& hop = st.hops[i];
-        if (hop.symbol.empty() || hop.symbol == focus_symbol) {
-          continue;
-        }
-        const std::string t =
-            hop.path.empty() ? hop.symbol : (hop.path + ":" + hop.symbol);
-        if (std::find(incoming_targets->begin(), incoming_targets->end(), t) ==
-            incoming_targets->end()) {
-          incoming_targets->push_back(t);
-        }
-      }
-    }
   }
   if (shown == 0) {
     out << "(sin caller en este stem)\n";

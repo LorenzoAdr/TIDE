@@ -2634,6 +2634,99 @@ bool a_trail_judge_show_stacks(const ATrail& tr) {
   return !tr.pending_stacks.empty();
 }
 
+namespace {
+
+void a_emit_code_fence(std::ostringstream& out, const std::string& snippet) {
+  if (snippet.empty()) {
+    return;
+  }
+  out << "```\n" << snippet;
+  if (snippet.back() != '\n') {
+    out << '\n';
+  }
+  out << "```\n";
+}
+
+std::string a_cond_one_line(const std::string& cond) {
+  const auto cut = cond.find(" · ");
+  return cut == std::string::npos ? cond : cond.substr(0, cut);
+}
+
+}  // namespace
+
+std::string a_trail_causal_flow_markdown(const std::vector<ATrailStack>& stacks,
+                                         const std::vector<ATrailCondBranch>& branches) {
+  std::ostringstream out;
+  int shown = 0;
+  for (const auto& s : stacks) {
+    out << s.id << ":";
+    for (std::size_t i = 0; i < s.hops.size(); ++i) {
+      const auto& h = s.hops[i];
+      out << (i == 0 ? " " : " -> ");
+      out << (h.symbol.empty() ? (h.anchor.empty() ? "?" : h.anchor) : h.symbol);
+      if (i + 1 < s.hops.size()) {
+        if (!h.control_cond.empty()) {
+          out << "{" << a_cond_one_line(h.control_cond) << "}";
+        } else if (!h.control_chain.empty()) {
+          out << "@{" << h.control_chain << "}";
+        }
+      }
+    }
+    out << "\n";
+    ++shown;
+    if (s.hops.size() < 2) {
+      continue;
+    }
+    const ATrailHop& key = s.hops.front();
+    out << "  caller `" << (key.anchor.empty() ? key.symbol : key.anchor) << "`";
+    if (key.call_line > 0) {
+      out << " line=" << key.call_line;
+    }
+    out << "\n";
+    if (!key.signature.empty()) {
+      out << "  sig: `" << key.signature << "`\n";
+    }
+    if (!key.control_cond.empty()) {
+      out << "  cond: `" << key.control_cond << "`\n";
+    } else if (!key.control_chain.empty()) {
+      out << "  ctrl: `" << key.control_chain << "`\n";
+    }
+    a_emit_code_fence(out, key.snippet);
+    if (s.hops.size() >= 3) {
+      const ATrailHop& direct = s.hops[s.hops.size() - 2];
+      if (!(direct.symbol == key.symbol && direct.path == key.path) && !direct.snippet.empty()) {
+        out << "  call `" << (direct.anchor.empty() ? direct.symbol : direct.anchor) << "`";
+        if (direct.call_line > 0) {
+          out << " line=" << direct.call_line;
+        }
+        out << "\n";
+        if (!direct.control_cond.empty()) {
+          out << "  cond: `" << direct.control_cond << "`\n";
+        }
+        a_emit_code_fence(out, direct.snippet);
+      }
+    }
+  }
+  for (const auto& b : branches) {
+    out << b.id << " when=" << b.when_text << " then=" << b.then_text << "\n";
+    if (!b.note.empty()) {
+      out << "  note: " << b.note << "\n";
+    }
+    if (!b.anchor.empty()) {
+      out << "  site `" << b.anchor << "`";
+      if (b.line > 0) {
+        out << " line=" << b.line;
+      }
+      out << "\n";
+    }
+    a_emit_code_fence(out, b.snippet);
+  }
+  if (shown == 0 && branches.empty()) {
+    out << "(sin callers)\n";
+  }
+  return out.str();
+}
+
 std::string a_trail_stacks_markdown(const ATrail& tr) {
   std::ostringstream out;
   out << "## Trail (fase A — rama acumulativa)\n";

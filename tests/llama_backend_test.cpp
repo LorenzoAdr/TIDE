@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "ai/action_json.hpp"
 #include "ai/ai_types.hpp"
 #include "ai/llama_backend.hpp"
 #include "ai/llama_net.hpp"
@@ -49,6 +50,35 @@ int main() {
     const std::string body = R"({"choices":[{"text":"hello"}]})";
     expect(tuide::parse_llama_chat_completion(body, &content, &err), "text field");
     expect(content == "hello", "text content");
+  }
+  {
+    std::string content;
+    std::string err;
+    const std::string body =
+        R"({"choices":[{"message":{"role":"assistant","content":"{\"action\":\"done\"}","reasoning_content":"long CoT {`.` "}}]})";
+    expect(tuide::parse_llama_chat_completion(body, &content, &err), "prefers content over reasoning");
+    expect(tuide::extract_action_json(content) == "{\"action\":\"done\"}", "action from content");
+  }
+  {
+    std::string content;
+    std::string err;
+    const std::string body =
+        R"({"choices":[{"message":{"role":"assistant","content":null,"reasoning_content":"{\"action\":\"done\"}"}}]})";
+    expect(tuide::parse_llama_chat_completion(body, &content, &err), "reasoning when content null");
+    expect(tuide::extract_action_json(content) == "{\"action\":\"done\"}", "action from reasoning");
+  }
+  {
+    const std::string noisy =
+        "{`.` Single JSON format specified.\n"
+        "not an object\n"
+        "{\"action\":\"done\",\"why\":\"ok\"}";
+    expect(tuide::extract_action_json(noisy) == "{\"action\":\"done\",\"why\":\"ok\"}",
+           "extract skips leading brace junk");
+    expect(tuide::extract_ola_json(noisy).empty(), "done is not ola_v");
+    const std::string think =
+        "<think>\n{`.` atlas\n</think>\n{\"action\":\"ola_v1\",\"do\":\"juicio\"}";
+    expect(tuide::extract_ola_json(think) == "{\"action\":\"ola_v1\",\"do\":\"juicio\"}",
+           "ola after think tag");
   }
   {
     expect(tuide::llama_normalize_host("http://192.168.64.1:18765/v1") == "192.168.64.1",

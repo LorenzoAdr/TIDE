@@ -364,6 +364,7 @@ add_executable(tuide
   src/ai/coding_symbol_embed_index.cpp
   src/ai/model_store.cpp
   src/ai/ai_packages.cpp
+  src/ai/action_json.cpp
   src/ai/llama_backend.cpp
   src/ai/level1_action.cpp
   src/ai/level1_agent.cpp
@@ -1137,9 +1138,20 @@ target_include_directories(l2_think_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(l2_wave_test
+  tests/l2_wave_test.cpp
+  src/ai/l2_wave.cpp
+  src/ai/action_json.cpp
+)
+target_include_directories(l2_wave_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
 add_executable(llama_backend_test
   tests/llama_backend_test.cpp
   src/ai/llama_backend.cpp
+  src/ai/action_json.cpp
   src/ai/model_store.cpp
 )
 target_include_directories(llama_backend_test PRIVATE
@@ -1150,6 +1162,7 @@ target_include_directories(llama_backend_test PRIVATE
 add_executable(llama_host_comm_test
   tests/llama_host_comm_test.cpp
   src/ai/llama_backend.cpp
+  src/ai/action_json.cpp
   src/ai/embedding_backend.cpp
   src/ai/model_store.cpp
   src/ai/ai_trace.cpp
@@ -1175,6 +1188,7 @@ add_executable(l2_harness_cli
   src/ai/l2_graph_query_profile.cpp
   src/ai/l2_effect_slice.cpp
   src/ai/l2_effect_registry.cpp
+  src/ai/l2_wave.cpp
   src/ai/l2_entityness.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
@@ -1182,6 +1196,7 @@ add_executable(l2_harness_cli
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
   src/ai/llama_backend.cpp
+  src/ai/action_json.cpp
   src/ai/get_code_of.cpp
   src/ai/repo_map.cpp
   src/ai/coding_embed_rerank.cpp
@@ -1381,6 +1396,7 @@ add_executable(l1_intent_debug_cli
   src/ai/l2_effect_summary.cpp
   src/ai/level1_action.cpp
   src/ai/llama_backend.cpp
+  src/ai/action_json.cpp
   src/ai/model_store.cpp
   src/ai/repo_map.cpp
   src/ai/coding_embed_rerank.cpp
@@ -1561,6 +1577,7 @@ set(TUIDE_TEST_TARGETS
   l2_effect_registry_test
   l2_pack_review_test
   l2_think_test
+  l2_wave_test
   search_replace_test
   llama_backend_test
   llama_host_comm_test

@@ -472,6 +472,9 @@ bool a_state_from_json(const nlohmann::json& j, AState* out, std::string* err);
 
 std::string a_notes_markdown(const AState& st);
 std::string a_trail_stacks_markdown(const ATrail& tr);
+// Compact causal dump (worker `causal` / wave `follow`): chains + recortes, no judge chrome.
+std::string a_trail_causal_flow_markdown(const std::vector<ATrailStack>& stacks,
+                                         const std::vector<ATrailCondBranch>& branches);
 // First judge: stacks XOR cond (never both). Stacks win if nonempty.
 bool a_trail_judge_show_stacks(const ATrail& tr);
 

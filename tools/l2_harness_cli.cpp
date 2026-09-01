@@ -23,6 +23,7 @@
 #include "ai/l2_explore_a.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/l2_think.hpp"
+#include "ai/l2_wave.hpp"
 #include "ai/level2_autonomous_loop.hpp"
 #include "ai/level2_session.hpp"
 #include "ai/search_replace.hpp"
@@ -520,6 +521,7 @@ void usage() {
             << "  zone-judge-shot --cards FILE --case ID  // 1× LLM sobre causal_judge_v1\n"
             << "  zone-judge-battery --cards-root DIR --out DIR  // un LLM secuencial\n"
             << "  atlas-survey --cards-root DIR --out DIR --only ID  // atlas → LLM inspect → ficha\n"
+            << "  wave-explore --out DIR [--case ID|--prompt TEXT] [--think off|low|medium|high|close]\n"
             << "  worker-probe --kind cubre|como|gap --case ID --stem S --out DIR\n"
             << "  trail-judge-shot [SYM] // 1× LLM: trail mapa L0 → a_trail_judge (caso 17)\n"
             << "  dataflow-probe VAR     // sin LLM: writes/reads/decls vía ripgrep (no LSP)\n"
@@ -615,6 +617,8 @@ std::unique_ptr<tuide::L2Brain> ready_l2_brain(
   }
   return brain;
 }
+
+int run_wave_explore(const std::string& root, int argc, char** argv);
 
 std::vector<tuide::ATrailSearchHit> parse_rg_hits(const std::string& body,
                                                   const std::string& workspace_root) {
@@ -744,6 +748,233 @@ std::vector<tuide::ATrailSearchHit> harness_rg_symbol(const std::string& root,
   std::unordered_set<std::string> seen;
   harness_append_symbol_hits(&hits, &seen, root, symbol);
   return hits;
+}
+
+void harness_push_causal_hop(std::vector<tuide::WaveHit>* hops, const std::string& path,
+                             const std::string& symbol) {
+  if (hops == nullptr || symbol.empty()) {
+    return;
+  }
+  tuide::WaveHit w;
+  w.path = path;
+  w.symbol = symbol;
+  w.stem = tuide::registry_stem_of(path);
+  w.kind = "fn";
+  w.needle = "follow";
+  w.id = path.empty() ? symbol : (path + ":" + symbol);
+  hops->push_back(std::move(w));
+}
+
+// Same payload as worker tool `causal`: stacks + cond branches + mermaid (code edges).
+std::string harness_causal_flow_markdown(
+    const std::string& root, const std::string& focus_path, const std::string& focus_sym,
+    const std::function<std::vector<tuide::ATrailSearchHit>(const std::string&)>& search,
+    std::vector<tuide::WaveHit>* hops) {
+  const auto stacks = tuide::a_trail_build_full_stacks(root, focus_sym, focus_path, search);
+  const auto branches = tuide::a_trail_build_cond_branches(
+      root, focus_sym, focus_path, std::vector<std::string>{focus_sym}, search, stacks);
+  std::vector<std::pair<std::string, std::string>> edges;
+  for (const auto& st : stacks) {
+    for (std::size_t i = 0; i + 1 < st.hops.size(); ++i) {
+      const std::string a =
+          st.hops[i].symbol.empty() ? st.hops[i].anchor : st.hops[i].symbol;
+      const std::string b =
+          st.hops[i + 1].symbol.empty() ? st.hops[i + 1].anchor : st.hops[i + 1].symbol;
+      if (!a.empty() && !b.empty()) {
+        edges.push_back({a, b});
+      }
+    }
+    for (const auto& hop : st.hops) {
+      const std::string name = hop.symbol.empty() ? hop.anchor : hop.symbol;
+      harness_push_causal_hop(hops, hop.path, name);
+    }
+  }
+  for (const auto& b : branches) {
+    if (!b.symbol.empty() && !focus_sym.empty()) {
+      edges.push_back({focus_sym, b.symbol});
+    }
+    if (!b.path.empty() && !b.symbol.empty()) {
+      harness_push_causal_hop(hops, b.path, b.symbol);
+    }
+  }
+  std::ostringstream chunk;
+  chunk << tuide::a_trail_causal_flow_markdown(stacks, branches);
+  chunk << tuide::registry_causal_pilot_causal_mermaid(edges);
+  const std::string arg = focus_path.empty() ? focus_sym : (focus_path + ":" + focus_sym);
+  tuide::GetCodeOfRequest creq = tuide::parse_get_code_of_arg(arg, root);
+  creq.workspace_root = root;
+  if (creq.max_lines <= 0) {
+    creq.max_lines = 200;
+  }
+  const tuide::GetCodeOfResult got = tuide::get_code_of(creq);
+  if (got.ok && !got.text.empty()) {
+    std::string span = got.text;
+    const auto nl = span.find('\n');
+    if (nl != std::string::npos) {
+      const std::string head = span.substr(0, nl);
+      if (head.find('/') != std::string::npos || head.find(".cpp") != std::string::npos ||
+          head.find(".hpp") != std::string::npos) {
+        span = span.substr(nl + 1);
+      }
+    }
+    const auto outs = tuide::wave_follow_outgoing_calls(span);
+    chunk << tuide::wave_follow_outgoing_markdown(arg, outs);
+    const std::string hop_path = focus_path.empty() ? got.path : focus_path;
+    for (const auto& c : outs) {
+      harness_push_causal_hop(hops, hop_path, c.symbol);
+    }
+  }
+  return chunk.str();
+}
+
+std::vector<std::string> harness_split_lines(const std::string& text) {
+  std::vector<std::string> lines;
+  std::string cur;
+  for (char c : text) {
+    if (c == '\n') {
+      lines.push_back(std::move(cur));
+      cur.clear();
+    } else if (c != '\r') {
+      cur.push_back(c);
+    }
+  }
+  if (!cur.empty()) {
+    lines.push_back(std::move(cur));
+  }
+  return lines;
+}
+
+std::string harness_compact_src(std::string s, std::size_t n = 96) {
+  std::size_t i = 0;
+  while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) {
+    ++i;
+  }
+  s = s.substr(i);
+  if (s.size() > n) {
+    s.resize(n);
+    s += "…";
+  }
+  return s;
+}
+
+bool harness_in_body_search(const std::string& root, const std::string& path,
+                            const std::string& symbol, const std::vector<std::string>& needles,
+                            std::string* md, std::vector<int>* hits_per_needle,
+                            std::string* err) {
+  if (md == nullptr) {
+    if (err) {
+      *err = "md nulo";
+    }
+    return false;
+  }
+  const std::string arg = path.empty() ? symbol : (path + ":" + symbol);
+  tuide::GetCodeOfRequest req = tuide::parse_get_code_of_arg(arg, root);
+  req.workspace_root = root;
+  req.max_lines = 12;
+  req.window = tuide::GetCodeOfWindow::Head;
+  auto got = tuide::get_code_of(req);
+  if (!got.ok || got.symbol_start <= 0) {
+    if (err) {
+      *err = got.error.empty() ? "in: no hay span de símbolo" : got.error;
+    }
+    return false;
+  }
+  const int span = std::max(1, got.symbol_end - got.symbol_start + 1);
+  req.window = tuide::GetCodeOfWindow::Range;
+  req.range_start = got.symbol_start;
+  req.range_end = got.symbol_end;
+  req.max_lines = span;
+  got = tuide::get_code_of(req);
+  if (!got.ok || got.text.empty()) {
+    if (err) {
+      *err = got.error.empty() ? "in: cuerpo vacío" : got.error;
+    }
+    return false;
+  }
+  const auto lines = harness_split_lines(got.text);
+  const int line0 = got.sent_start > 0 ? got.sent_start : got.symbol_start;
+  const std::string rel = got.path.empty() ? path : got.path;
+  fs::path abs = fs::path(root) / rel;
+  const std::string abs_s = abs.lexically_normal().string();
+  constexpr int kHead = 8;
+  constexpr int kTail = 6;
+  constexpr int kMaxHits = 8;
+  std::ostringstream out;
+  const std::string display = rel.empty() ? symbol : (rel + ":" + symbol);
+  out << "----- in " << display << " -----\n";
+  if (!got.name.empty()) {
+    out << "sig: " << got.name;
+    if (got.symbol_start > 0) {
+      out << "  L" << got.symbol_start << "-" << got.symbol_end;
+    }
+    out << "\n";
+  }
+  auto emit_range = [&](int from_ln, int to_ln) {
+    out << "```\n";
+    for (int ln = from_ln; ln <= to_ln; ++ln) {
+      const int idx = ln - line0;
+      if (idx < 0 || idx >= static_cast<int>(lines.size())) {
+        continue;
+      }
+      out << ln << "| " << lines[static_cast<std::size_t>(idx)] << "\n";
+    }
+    out << "```\n";
+  };
+  const int last_ln = line0 + static_cast<int>(lines.size()) - 1;
+  const bool short_fn = static_cast<int>(lines.size()) <= kHead + kTail + 2;
+  if (short_fn) {
+    emit_range(line0, last_ln);
+  } else {
+    emit_range(line0, line0 + kHead - 1);
+  }
+  int total_hits = 0;
+  for (const auto& needle : needles) {
+    int n = 0;
+    std::ostringstream hits_out;
+    for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
+      if (!tuide::wave_line_has_needle(lines[static_cast<std::size_t>(i)], needle)) {
+        continue;
+      }
+      ++n;
+      if (n > kMaxHits) {
+        continue;
+      }
+      const int ln = line0 + i;
+      tuide::ATrailHop hop = tuide::a_trail_enrich_hop(abs_s, rel, ln, "");
+      std::string scopes = hop.control_chain;
+      if (scopes.empty()) {
+        scopes = hop.control_kind;
+      }
+      if (scopes.empty()) {
+        scopes = hop.scope_chain;
+      }
+      hits_out << "  L" << ln;
+      if (!scopes.empty()) {
+        hits_out << " [" << scopes << "]";
+      }
+      hits_out << "  `" << harness_compact_src(lines[static_cast<std::size_t>(i)]) << "`\n";
+    }
+    if (hits_per_needle != nullptr) {
+      hits_per_needle->push_back(n);
+    }
+    total_hits += n;
+    out << needle << " hits=" << n;
+    if (n > kMaxHits) {
+      out << " (mostrando " << kMaxHits << ")";
+    }
+    out << "\n";
+    out << hits_out.str();
+    if (n == 0) {
+      out << "  (sin match en este cuerpo)\n";
+    }
+  }
+  if (!short_fn) {
+    out << "… cuerpo L" << (line0 + kHead) << "-" << (last_ln - kTail) << " …\n";
+    emit_range(last_ln - kTail + 1, last_ln);
+  }
+  (void)total_hits;
+  *md = out.str();
+  return true;
 }
 
 int run_trail_probe(ToolRegistry* tools, const std::string& root, int argc, char** argv) {
@@ -2484,44 +2715,15 @@ tuide::RegistryCausalPilotWorkerReport run_one_pilot_worker(
       GetCodeOfRequest creq = parse_get_code_of_arg(report.target, root);
       const std::string focus_path = creq.file;
       const std::string focus_sym = creq.symbol.empty() ? report.target : creq.symbol;
-      const auto stacks =
-          tuide::a_trail_build_full_stacks(root, focus_sym, focus_path, search_fn);
-      const auto branches = tuide::a_trail_build_cond_branches(
-          root, focus_sym, focus_path, std::vector<std::string>{focus_sym}, search_fn, stacks);
-      std::vector<std::pair<std::string, std::string>> edges;
-      for (const auto& st : stacks) {
-        chunk << st.id << ":";
-        for (std::size_t i = 0; i < st.hops.size(); ++i) {
-          chunk << (i == 0 ? " " : " -> ") << st.hops[i].symbol;
-          if (i + 1 < st.hops.size()) {
-            const std::string a =
-                st.hops[i].symbol.empty() ? st.hops[i].anchor : st.hops[i].symbol;
-            const std::string b =
-                st.hops[i + 1].symbol.empty() ? st.hops[i + 1].anchor : st.hops[i + 1].symbol;
-            if (!a.empty() && !b.empty()) {
-              edges.push_back({a, b});
-            }
-          }
-        }
-        chunk << "\n";
-        for (const auto& hop : st.hops) {
-          if (!hop.symbol.empty() && !hop.path.empty()) {
-            tuide::registry_causal_pilot_notebook_add_target(&nb, hop.path + ":" + hop.symbol);
-          } else if (!hop.anchor.empty()) {
-            tuide::registry_causal_pilot_notebook_add_target(&nb, hop.anchor);
-          }
+      std::vector<tuide::WaveHit> hops;
+      chunk << harness_causal_flow_markdown(root, focus_path, focus_sym, search_fn, &hops);
+      for (const auto& h : hops) {
+        if (!h.path.empty() && !h.symbol.empty()) {
+          tuide::registry_causal_pilot_notebook_add_target(&nb, h.path + ":" + h.symbol);
+        } else if (!h.id.empty()) {
+          tuide::registry_causal_pilot_notebook_add_target(&nb, h.id);
         }
       }
-      for (const auto& b : branches) {
-        chunk << b.id << " when=" << b.when_text << " then=" << b.then_text << "\n";
-        if (!b.symbol.empty() && !focus_sym.empty()) {
-          edges.push_back({focus_sym, b.symbol});
-        }
-        if (!b.path.empty() && !b.symbol.empty()) {
-          tuide::registry_causal_pilot_notebook_add_target(&nb, b.path + ":" + b.symbol);
-        }
-      }
-      chunk << tuide::registry_causal_pilot_causal_mermaid(edges);
     } else {
       chunk << "(tool desconocida)\n";
     }
@@ -6876,6 +7078,750 @@ int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int
   return 0;
 }
 
+int run_wave_explore(const std::string& root, int argc, char** argv) {
+  std::string out_arg;
+  std::string case_id;
+  std::string prompt;
+  std::string cards_arg;
+  std::string cards_from;
+  int max_waves = tuide::kWaveMaxWaves;
+  bool think_override = false;
+  bool close_audit = false;
+  tuide::L2ThinkLevel think_level = tuide::L2ThinkLevel::Medium;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--out" && i + 1 < argc) {
+      out_arg = argv[++i];
+    } else if (a == "--case" && i + 1 < argc) {
+      case_id = argv[++i];
+    } else if (a == "--prompt" && i + 1 < argc) {
+      prompt = argv[++i];
+    } else if (a == "--cards" && i + 1 < argc) {
+      cards_arg = argv[++i];
+    } else if (a == "--cards-from" && i + 1 < argc) {
+      cards_from = argv[++i];
+    } else if (a == "--max-waves" && i + 1 < argc) {
+      max_waves = std::max(1, std::atoi(argv[++i]));
+    } else if (a == "--think" && i + 1 < argc) {
+      const std::string t = argv[++i];
+      think_override = true;
+      if (t == "off") {
+        think_level = tuide::L2ThinkLevel::Off;
+      } else if (t == "low") {
+        think_level = tuide::L2ThinkLevel::Low;
+      } else if (t == "medium") {
+        think_level = tuide::L2ThinkLevel::Medium;
+      } else if (t == "high") {
+        think_level = tuide::L2ThinkLevel::High;
+      } else if (t == "close") {
+        think_level = tuide::L2ThinkLevel::Off;
+        close_audit = true;
+      } else {
+        std::cerr << "wave-explore: --think off|low|medium|high|close (no '" << t << "')\n";
+        return 2;
+      }
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "wave-explore --out DIR [--case ID|--prompt TEXT] [--max-waves N]\n"
+                   "  [--cards FILE | --cards-from DIR] [--think off|low|medium|high|close]\n"
+                   "  Piloto adaptativo: needles | juicio | peek | cerrar. Una ola por propose.\n"
+                   "  --think fija un nivel para todas las olas (off|low|medium|high).\n"
+                   "  --think close: piloto=off; el primer cerrar se re-lanza 1× con medium "
+                   "(cerrar, peek del hueco, o follow de un locus anclado). "
+                   "Gesto inválido → se aplica el borrador.\n"
+                   "  Sin --think: cover=off, piloto=off; si una ola no avanza, la siguiente es medium.\n"
+                   "  --cards / --cards-from siembra el cuaderno con fichas de zona (hipótesis).\n"
+                   "  --case lee tests/fixtures/stem_boost_battery/prompts_nl_human.json\n";
+      return 2;
+    }
+  }
+  if (out_arg.empty()) {
+    std::cerr << "wave-explore: requiere --out DIR\n";
+    return 2;
+  }
+  if (prompt.empty() && !case_id.empty()) {
+    const fs::path prompts_path =
+        fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
+    std::ifstream in(prompts_path);
+    if (!in) {
+      std::cerr << "wave-explore: no se pudo leer " << prompts_path << "\n";
+      return 1;
+    }
+    nlohmann::json cases;
+    in >> cases;
+    for (const auto& item : cases) {
+      if (item.value("id", "") == case_id) {
+        prompt = item.value("prompt", "");
+        break;
+      }
+    }
+    if (prompt.empty()) {
+      std::cerr << "wave-explore: caso desconocido " << case_id << "\n";
+      return 2;
+    }
+  }
+  if (prompt.empty()) {
+    std::cerr << "wave-explore: falta --case o --prompt\n";
+    return 2;
+  }
+  fs::path output_root(out_arg);
+  if (!output_root.is_absolute()) {
+    output_root = fs::path(root) / output_root;
+  }
+  fs::create_directories(output_root);
+
+  AiSettings settings = load_ai_settings(root);
+  std::string err;
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  auto brain_ptr = ready_l2_brain(settings, progress, &err);
+  if (!brain_ptr) {
+    std::cerr << "wave-explore: " << err << "\n";
+    return 1;
+  }
+  tuide::L2Brain& brain = *brain_ptr;
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+
+  tuide::WaveState state;
+  state.prompt = prompt;
+  fs::path cards_path;
+  if (!cards_arg.empty()) {
+    cards_path = cards_arg;
+    if (!cards_path.is_absolute()) {
+      cards_path = fs::path(root) / cards_path;
+    }
+  } else if (!cards_from.empty()) {
+    fs::path from(cards_from);
+    if (!from.is_absolute()) {
+      from = fs::path(root) / from;
+    }
+    if (from.filename() == "judge_cards.json") {
+      cards_path = from;
+    } else if (!case_id.empty()) {
+      cards_path = from / case_id / "judge_cards.json";
+    } else {
+      cards_path = from / "judge_cards.json";
+    }
+  } else if (!case_id.empty()) {
+    cards_path = fs::path(root) / ".tuide/ai/l2_explore_battery/round_atlas20_hyp/cards" /
+                 case_id / "judge_cards.json";
+  }
+  nlohmann::json cards_payload;
+  if (!cards_path.empty() && fs::exists(cards_path)) {
+    std::ifstream cin(cards_path);
+    try {
+      cin >> cards_payload;
+    } catch (const std::exception& ex) {
+      std::cerr << "wave-explore: cards JSON inválido: " << ex.what() << "\n";
+      tuide::registry_close(&reg);
+      return 1;
+    }
+    const int nseed = tuide::wave_seed_from_atlas(&state, cards_payload);
+    std::cerr << "wave-explore: atlas seed " << nseed << " zonas desde " << cards_path << "\n";
+    state.atlas_md = tuide::registry_causal_atlas_markdown(cards_payload, prompt);
+    std::ofstream(output_root / "atlas.md") << state.atlas_md;
+  } else if (!cards_arg.empty() || !cards_from.empty()) {
+    std::cerr << "wave-explore: no se encontró " << cards_path << "\n";
+    tuide::registry_close(&reg);
+    return 1;
+  }
+  tuide::WaveOps ops;
+  ops.search_needle = [&](const std::string& needle, const std::string& campo) {
+    tuide::RegistryQueryOpts opts;
+    opts.match_surface = tuide::RegistryMatchSurface::NodeId;
+    opts.hops = 0;
+    opts.top_k = 24;
+    opts.max_per_stem = 8;
+    if (!campo.empty()) {
+      opts.boost_stems = {campo};
+    }
+    tuide::RegistryQueryResult res;
+    std::string qerr;
+    auto no_embed = [](bool, const std::string&, std::vector<float>*) { return false; };
+    std::vector<tuide::WaveHit> hits;
+    if (!tuide::registry_query(&reg, needle, no_embed, opts, &res, &qerr)) {
+      std::cerr << "wave-explore: registry_query '" << needle << "': " << qerr << "\n";
+      return hits;
+    }
+    for (const auto& h : res.hits) {
+      tuide::WaveHit w;
+      w.id = h.node.id;
+      w.path = h.node.path;
+      w.symbol = h.node.symbol;
+      w.stem = h.node.stem;
+      w.kind = h.node.kind;
+      w.needle = needle;
+      hits.push_back(std::move(w));
+    }
+    return hits;
+  };
+  ops.peek_code = [&](const std::string& peek, std::string* text, std::string* peek_err) {
+    if (text == nullptr) {
+      if (peek_err) {
+        *peek_err = "text nulo";
+      }
+      return false;
+    }
+    const std::string arg = peek;
+    const bool file_peek = peek.find(".hpp") != std::string::npos ||
+                           peek.find(".cpp") != std::string::npos ||
+                           peek.find(".h") != std::string::npos ||
+                           peek.find(".cc") != std::string::npos;
+    std::string resolved = arg;
+    if (!file_peek) {
+      if (const tuide::WaveHit* hit = tuide::wave_find_hit(state.candidatas, peek)) {
+        if (!hit->path.empty() && !hit->symbol.empty()) {
+          resolved = hit->path + ":" + hit->symbol;
+        } else if (!hit->path.empty()) {
+          resolved = hit->path;
+        }
+      }
+    }
+    tuide::GetCodeOfRequest req = tuide::parse_get_code_of_arg(resolved, root);
+    req.workspace_root = root;
+    if (req.max_lines <= 0) {
+      req.max_lines = 120;
+    }
+    const tuide::GetCodeOfResult got = tuide::get_code_of(req);
+    if (!got.ok) {
+      if (peek_err) {
+        *peek_err = got.error.empty() ? "get_code_of falló" : got.error;
+      }
+      return false;
+    }
+    std::ostringstream out;
+    if (got.sent_start > 0 && got.sent_end >= got.sent_start) {
+      out << (got.path.empty() ? arg : got.path) << ':' << got.sent_start << '-' << got.sent_end;
+    } else {
+      out << (got.path.empty() ? arg : got.path);
+      if (!got.name.empty()) {
+        out << ':' << got.name;
+      }
+    }
+    if (!got.name.empty() && got.sent_start > 0) {
+      out << " (" << got.name << ")";
+    }
+    if (got.truncated) {
+      out << " [TRUNCATED]";
+    }
+    out << '\n' << got.text;
+    *text = out.str();
+    return true;
+  };
+  ops.peek_causal = [&](const std::string& path, const std::string& symbol, const std::string& body,
+                        bool truncated, std::string* md, std::vector<tuide::WaveHit>* callers,
+                        std::string* peek_err) {
+    if (md == nullptr) {
+      if (peek_err) {
+        *peek_err = "md nulo";
+      }
+      return false;
+    }
+    auto search_fn = [&](const std::string& s) -> std::vector<tuide::ATrailSearchHit> {
+      return harness_rg_symbol(root, s);
+    };
+    std::vector<std::string> incoming;
+    const std::string display = path.empty() ? symbol : (path + ":" + symbol);
+    std::ostringstream out;
+    out << tuide::registry_causal_pilot_aguas_arriba_markdown(root, path, symbol, search_fn,
+                                                              &incoming);
+    std::string span = body;
+    const auto nl = span.find('\n');
+    if (nl != std::string::npos) {
+      const std::string head = span.substr(0, nl);
+      if (head.find('/') != std::string::npos || head.find(".cpp") != std::string::npos ||
+          head.find(".hpp") != std::string::npos) {
+        span = span.substr(nl + 1);
+      }
+    }
+    out << tuide::registry_causal_pilot_aguas_abajo_markdown(display, span, truncated);
+    *md = out.str();
+    if (callers != nullptr) {
+      for (const auto& t : incoming) {
+        tuide::WaveHit w;
+        const auto slash = t.find_last_of("/\\");
+        const auto colon = t.rfind(':');
+        if (colon != std::string::npos && (slash == std::string::npos || colon > slash)) {
+          w.path = t.substr(0, colon);
+          w.symbol = t.substr(colon + 1);
+        } else {
+          w.symbol = t;
+        }
+        w.stem = tuide::registry_stem_of(w.path.empty() ? t : w.path);
+        w.kind = "fn";
+        w.needle = "follow";
+        w.id = w.path.empty() ? w.symbol : (w.path + ":" + w.symbol);
+        callers->push_back(std::move(w));
+      }
+    }
+    return true;
+  };
+
+  ops.follow_tree = [&](const std::string& path, const std::string& symbol, std::string* md,
+                        std::vector<tuide::WaveHit>* hops, std::string* follow_err) {
+    if (md == nullptr) {
+      if (follow_err) {
+        *follow_err = "md nulo";
+      }
+      return false;
+    }
+    if (symbol.empty()) {
+      if (follow_err) {
+        *follow_err = "follow sin símbolo";
+      }
+      return false;
+    }
+    auto search_fn = [&](const std::string& s) -> std::vector<tuide::ATrailSearchHit> {
+      return harness_rg_symbol(root, s);
+    };
+    const std::string display = path.empty() ? symbol : (path + ":" + symbol);
+    std::ostringstream out;
+    out << "----- follow " << display << " causal -----\n";
+    out << harness_causal_flow_markdown(root, path, symbol, search_fn, hops);
+    *md = out.str();
+    return true;
+  };
+
+  ops.path_between = [&](const std::string& from, const std::string& to, std::string* md,
+                         std::vector<tuide::WaveHit>* hops, std::string* path_err) {
+    if (md == nullptr) {
+      if (path_err) {
+        *path_err = "md nulo";
+      }
+      return false;
+    }
+    auto reg_id = [&](const std::string& loc) -> std::string {
+      if (const tuide::WaveHit* hit = tuide::wave_find_hit(state.candidatas, loc)) {
+        if (!hit->id.empty()) {
+          return hit->id;
+        }
+        if (!hit->path.empty() && !hit->symbol.empty()) {
+          return "fn:" + hit->path + ":" + hit->symbol;
+        }
+        if (!hit->symbol.empty()) {
+          return hit->symbol;
+        }
+      }
+      return loc;
+    };
+    const std::string src = reg_id(from);
+    const std::string dst = reg_id(to);
+    std::vector<std::string> ids;
+    std::string perr;
+    std::ostringstream out;
+    out << "----- entre " << from << " → " << to << " -----\n";
+    if (!tuide::registry_path_between(&reg, src, dst, &ids, &perr)) {
+      out << "(sin camino dirigido en el registry)\n";
+      *md = out.str();
+      return true;
+    }
+    std::string chain;
+    for (const auto& id : ids) {
+      tuide::RegistryNodeRow row;
+      std::string gerr;
+      tuide::WaveHit w;
+      if (tuide::registry_get(&reg, id, &row, &gerr) && !row.id.empty()) {
+        w.id = row.id;
+        w.path = row.path;
+        w.symbol = row.symbol;
+        w.stem = row.stem.empty() ? tuide::registry_stem_of(row.path) : row.stem;
+        w.kind = row.kind;
+      } else {
+        w.id = id;
+      }
+      w.needle = "entre";
+      const std::string name = w.symbol.empty() ? w.id : w.symbol;
+      if (!chain.empty()) {
+        chain += " → ";
+      }
+      chain += name;
+      if (hops != nullptr) {
+        hops->push_back(std::move(w));
+      }
+    }
+    out << chain << "\n";
+    out << "n=" << ids.size() << " hops (registry, dirigido)\n";
+    *md = out.str();
+    return true;
+  };
+
+  ops.search_in_body = [&](const std::string& path, const std::string& symbol,
+                           const std::vector<std::string>& needles, std::string* md,
+                           std::vector<int>* hits, std::string* in_err) {
+    return harness_in_body_search(root, path, symbol, needles, md, hits, in_err);
+  };
+
+  nlohmann::json log = nlohmann::json::array();
+  int consecutive_fail = 0;
+  int first_circuit_propose = 0;
+  int max_user_chars = 0;
+  int escalate_n = 0;
+  bool escalate_think = false;
+  bool close_audit_done = false;
+  if (close_audit) {
+    std::cerr << "wave-explore: think=close (piloto=off; primer cerrar → 1× medium; "
+                 "cerrar / peek hueco / follow anclado)\n";
+  } else if (!think_override) {
+    std::cerr << "wave-explore: think=hybrid (cover=off, piloto=off, "
+                 "atasco→medium; cerrar del piloto siempre vale)\n";
+  }
+  for (int i = 0; i < max_waves && !state.done; ++i) {
+    state.propose_n = i + 1;
+    const bool cover = tuide::wave_needs_cover(state);
+    const bool last_propose = !cover && state.propose_n >= max_waves;
+    tuide::L2BrainRequest req;
+    if (cover) {
+      req.system_prompt = tuide::wave_cover_system_prompt();
+      req.user_prompt = tuide::wave_cover_user_prompt(state);
+      if (consecutive_fail > 0) {
+        req.user_prompt =
+            "Consulta:\n" + state.prompt +
+            "\n\nSOLO el JSON. El primer carácter es `{`. Cero prosa.\n";
+      }
+      req.phase = "causal_wave_cover";
+      req.max_tokens = 256;
+    } else {
+      req.system_prompt = tuide::wave_pilot_system_prompt();
+      req.user_prompt = tuide::wave_pilot_user_prompt(state);
+      req.phase = "causal_wave_pilot";
+      req.max_tokens =
+          std::min(512, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512);
+    }
+    const bool escalate_this = !think_override && !cover && escalate_think;
+    escalate_think = false;
+    if (escalate_this) {
+      ++escalate_n;
+      consecutive_fail = 0;
+      if (last_propose) {
+        req.user_prompt =
+            "Última propose. Cierra si ya entendiste; si no, un gesto que aún no hayas hecho.\n\n" +
+            req.user_prompt;
+      } else {
+        req.user_prompt =
+            "La ola anterior no avanzó. Cambia de gesto o cierra si ya entendiste. "
+            "No repitas un peek/follow ya hecho.\n\n" +
+            req.user_prompt;
+      }
+    }
+    req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+    req.temperature = 0.1f;
+    tuide::L2ThinkProfile think;
+    if (think_override) {
+      think = tuide::think_profile(think_level);
+    } else if (cover) {
+      // Qwen3.6 with thinking on dumps CoT into content and stops at the
+      // think budget — never emits the JSON. Cover is one object; think off.
+      think = tuide::think_profile(tuide::L2ThinkLevel::Off);
+    } else if (escalate_this) {
+      think = tuide::think_profile(tuide::L2ThinkLevel::Medium);
+    } else {
+      think = tuide::think_profile(tuide::L2ThinkLevel::Off);
+    }
+    tuide::apply_think_profile(&req, think);
+    const fs::path wave_dir = output_root / ("wave_" + std::to_string(i + 1));
+    fs::create_directories(wave_dir);
+    std::ofstream(wave_dir / "system.txt") << req.system_prompt;
+    std::ofstream(wave_dir / "user.md") << req.user_prompt;
+    std::ofstream(wave_dir / "think.txt")
+        << tuide::l2_think_level_name(think.level) << " budget=" << think.budget
+        << " enable=" << (think.enable_thinking ? "yes" : "no") << "\n";
+    max_user_chars = std::max(max_user_chars, static_cast<int>(req.user_prompt.size()));
+    const auto response = brain.propose(req, nullptr);
+    std::ofstream(wave_dir / "raw.txt") << response.text;
+    auto force_cerrar = [&]() {
+      tuide::WaveOla cl;
+      cl.ok = true;
+      cl.do_kind = tuide::WaveDo::Cerrar;
+      cl.why = tuide::wave_circuit_cierre(state);
+      if (cl.why.size() < 8) {
+        cl.why = "presupuesto agotado; cierre del circuito visto";
+      }
+      return cl;
+    };
+    if (!response.ok) {
+      std::ofstream(wave_dir / "error.txt") << response.error;
+      consecutive_fail++;
+      state.last_error = response.error.empty() ? "propose falló" : response.error;
+      if (last_propose && !state.done) {
+        std::string cperr;
+        const auto cl = force_cerrar();
+        (void)tuide::wave_apply(&state, cl, ops, &cperr);
+      }
+      log.push_back({{"wave", i + 1},
+                     {"phase", req.phase},
+                     {"ok", false},
+                     {"error", state.last_error}});
+      if (state.done) {
+        break;
+      }
+      if (consecutive_fail >= 3) {
+        break;
+      }
+      continue;
+    }
+    tuide::WaveOla ola = tuide::wave_parse_ola(response.text);
+    std::vector<std::string> atlas_ids;
+    for (const auto& h : state.candidatas) {
+      if (!h.id.empty() && h.needle == "atlas") {
+        atlas_ids.push_back(h.id);
+      }
+    }
+    if (cover && !ola.ok) {
+      const auto cov = tuide::registry_parse_causal_atlas_cover(response.text, atlas_ids, {});
+      if (cov.ok && !cov.add.empty()) {
+        ola = {};
+        ola.ok = true;
+        ola.do_kind = tuide::WaveDo::Juicio;
+        ola.keep = cov.add;
+        ola.why = cov.why.size() >= 8 ? cov.why : std::string("ampliar fichas del objeto");
+      }
+    }
+    if (cover && !ola.ok) {
+      const auto salvaged = tuide::wave_salvage_keep(response.text, atlas_ids);
+      if (!salvaged.empty()) {
+        ola = {};
+        ola.ok = true;
+        ola.do_kind = tuide::WaveDo::Juicio;
+        ola.keep = salvaged;
+        ola.why = "keep recuperado de una respuesta truncada";
+      }
+    }
+    auto fallback_cover_keep = [&]() {
+      std::vector<std::pair<int, std::string>> scored;
+      for (const auto& zone : cards_payload.value("zones", nlohmann::json::array())) {
+        const std::string id = zone.value("id", "");
+        if (id.empty()) {
+          continue;
+        }
+        const std::string kind = tuide::registry_causal_zone_kind(zone);
+        if (kind == "chrome" || kind == "hole") {
+          continue;
+        }
+        int ov = tuide::registry_causal_query_zone_overlap(prompt, zone);
+        if (kind == "latch" || kind == "object") {
+          ov += 10;
+        } else if (kind == "caller") {
+          ov += 3;
+        }
+        scored.push_back({ov, id});
+      }
+      std::sort(scored.begin(), scored.end(),
+                [](const auto& a, const auto& b) { return a.first > b.first; });
+      std::vector<std::string> keep;
+      for (const auto& row : scored) {
+        keep.push_back(row.second);
+        if (static_cast<int>(keep.size()) >= 2) {
+          break;
+        }
+      }
+      return keep;
+    };
+    if (cover && !ola.ok) {
+      const auto keep = fallback_cover_keep();
+      if (!keep.empty()) {
+        ola = {};
+        ola.ok = true;
+        ola.do_kind = tuide::WaveDo::Juicio;
+        ola.keep = keep;
+        ola.why = "fallback: cover sin JSON, se abren owns de mayor solape";
+      }
+    }
+    bool did_close_audit = false;
+    if (close_audit && !close_audit_done && !cover && ola.ok &&
+        ola.do_kind == tuide::WaveDo::Cerrar && !think.enable_thinking) {
+      close_audit_done = true;
+      did_close_audit = true;
+      const tuide::WaveOla draft = ola;
+      std::ofstream(wave_dir / "cerrar_draft.json")
+          << json_dump_safe(tuide::wave_ola_to_json(draft)) << "\n";
+      tuide::L2BrainRequest audit_req = req;
+      audit_req.user_prompt =
+          "Revisión de cierre (UNA tirada). Borrador:\n" + json_dump_safe(tuide::wave_ola_to_json(draft), 0) +
+          "\n\n¿El why está cubierto por Peeks/Follows, o falta el flujo de un locus anclado?\n"
+          "Completo → do=cerrar (why honesto; huecos[] = nombres afirmados y no leídos).\n"
+          "Falta UN hueco nombrado en el why y no leído → un peek de ESE locus.\n"
+          "Falta el flujo de un locus ya anclado (Peeks / Circuito / callers ON-OFF) "
+          "o nombrado en el why → UN follow de ESE locus (1; 2 solo si son callers del Circuito).\n"
+          "PROHIBIDO needles, in de archivo, tanda, juicio, peek de algo no nombrado.\n"
+          "Si dudas, do=cerrar. Un gesto inválido se descarta y se aplica el borrador.\n"
+          "No reinicies. No recites el atlas. No abras un plan de varias olas.\n\n" +
+          req.user_prompt;
+      think = tuide::think_profile(tuide::L2ThinkLevel::Medium);
+      tuide::apply_think_profile(&audit_req, think);
+      std::ofstream(wave_dir / "audit_user.md") << audit_req.user_prompt;
+      std::ofstream(wave_dir / "audit_think.txt")
+          << tuide::l2_think_level_name(think.level) << " budget=" << think.budget
+          << " enable=" << (think.enable_thinking ? "yes" : "no") << "\n";
+      const auto audit_response = brain.propose(audit_req, nullptr);
+      std::ofstream(wave_dir / "audit_raw.txt") << audit_response.text;
+      if (audit_response.ok) {
+        auto audit_ola = tuide::wave_parse_ola(audit_response.text);
+        if (audit_ola.ok && tuide::wave_close_audit_accept(draft, audit_ola, state)) {
+          ola = std::move(audit_ola);
+        } else {
+          ola = draft;
+          std::cerr << "wave " << (i + 1) << " close-audit ignorado; se aplica el borrador\n";
+        }
+      } else {
+        std::ofstream(wave_dir / "audit_error.txt") << audit_response.error;
+        ola = draft;
+      }
+      std::cerr << "wave " << (i + 1) << " close-audit do=" << tuide::wave_do_name(ola.do_kind)
+                << " think=medium\n";
+    }
+    std::ofstream(wave_dir / "ola.json") << json_dump_safe(tuide::wave_ola_to_json(ola)) << "\n";
+    std::string apply_err;
+    bool ok = false;
+    if (cover && ola.ok && ola.do_kind != tuide::WaveDo::Juicio) {
+      apply_err = "ola 0: solo juicio keep (ampliar fichas)";
+      state.last_error = apply_err;
+    } else if (cover && ola.ok && ola.keep.empty()) {
+      apply_err = "ola 0: keep 1–2 ids a ampliar";
+      state.last_error = apply_err;
+    } else {
+      if (cover && static_cast<int>(ola.keep.size()) > tuide::kWaveCoverKeepMax) {
+        ola.keep.resize(static_cast<size_t>(tuide::kWaveCoverKeepMax));
+      }
+      if (cover && ola.ok && ola.do_kind == tuide::WaveDo::Juicio) {
+        tuide::wave_cover_restore_caller(&ola, state);
+      }
+      ok = tuide::wave_apply(&state, ola, ops, &apply_err);
+    }
+    if (ok && cover) {
+      state.opened_ids = ola.keep;
+      std::string opened = tuide::registry_causal_pilot_opened_pack(cards_payload, ola.keep, prompt);
+      const auto filtered = tuide::registry_causal_payload_filter_zones(cards_payload, ola.keep);
+      const std::string inspect =
+          tuide::registry_causal_pack_markdown(filtered, tuide::GraphViewLevel::Inspect);
+      if (!inspect.empty()) {
+        opened += "\n";
+        opened += inspect;
+      }
+      constexpr std::size_t kOpenedCap = 7000;
+      if (opened.size() > kOpenedCap) {
+        opened.resize(kOpenedCap);
+        opened += "\n…\n";
+      }
+      state.opened_md = std::move(opened);
+      tuide::wave_retain_atlas_ids(&state, ola.keep);
+      tuide::wave_ingest_zone_symbols(&state, cards_payload, ola.keep);
+    }
+    if (ok && last_propose && !state.done && ola.do_kind != tuide::WaveDo::Cerrar) {
+      std::string cperr;
+      const auto cl = force_cerrar();
+      (void)tuide::wave_apply(&state, cl, ops, &cperr);
+    }
+    if (!ok && last_propose && !state.done) {
+      ola = force_cerrar();
+      ok = tuide::wave_apply(&state, ola, ops, &apply_err);
+    }
+    if (!ok && !think_override && !cover && !last_propose &&
+        !tuide::wave_circuit_complete(state)) {
+      escalate_think = true;
+    }
+    if (first_circuit_propose == 0 && tuide::wave_circuit_complete(state)) {
+      first_circuit_propose = state.propose_n;
+    }
+    std::ofstream(wave_dir / "work.md") << tuide::wave_work_markdown(state);
+    std::ofstream(wave_dir / "notebook.md") << tuide::wave_notebook_markdown(state);
+    std::ofstream(wave_dir / "state.json") << json_dump_safe(tuide::wave_state_to_json(state)) << "\n";
+    log.push_back({{"wave", i + 1},
+                   {"propose", state.propose_n},
+                   {"phase", req.phase},
+                   {"ok", ok},
+                   {"do", tuide::wave_do_name(ola.do_kind)},
+                   {"why", ola.why},
+                   {"error", ok ? "" : apply_err},
+                   {"user_chars", static_cast<int>(req.user_prompt.size())},
+                   {"circuit", tuide::wave_circuit_complete(state)},
+                   {"think", tuide::l2_think_level_name(think.level)},
+                   {"think_budget", think.budget},
+                   {"escalate", escalate_this},
+                   {"close_audit", did_close_audit}});
+    std::cerr << "wave " << (i + 1) << " phase=" << req.phase
+              << " do=" << tuide::wave_do_name(ola.do_kind) << " ok=" << (ok ? "yes" : "no")
+              << " think=" << tuide::l2_think_level_name(think.level) << " budget=" << think.budget
+              << " user_chars=" << req.user_prompt.size()
+              << " circuit=" << (tuide::wave_circuit_complete(state) ? "yes" : "no");
+    if (!ok) {
+      std::cerr << " err=" << apply_err;
+    }
+    std::cerr << "\n";
+    if (ok) {
+      consecutive_fail = 0;
+    } else if (++consecutive_fail >= 3) {
+      break;
+    }
+  }
+  tuide::registry_close(&reg);
+  std::ofstream(output_root / "log.json") << json_dump_safe(log) << "\n";
+  nlohmann::json metrics = {{"proposes", state.propose_n},
+                            {"applies", state.wave_n},
+                            {"cerró", state.done},
+                            {"circuit_complete", tuide::wave_circuit_complete(state)},
+                            {"circuit_on", state.circuit_on},
+                            {"circuit_off", state.circuit_off},
+                            {"circuit_callers_on", state.circuit_callers_on},
+                            {"first_circuit_propose", first_circuit_propose},
+                            {"waves_tras_circuito",
+                             first_circuit_propose == 0
+                                 ? 0
+                                 : std::max(0, state.propose_n - first_circuit_propose)},
+                            {"think",
+                             close_audit ? "close"
+                                         : (think_override ? tuide::l2_think_level_name(think_level)
+                                                           : "hybrid")},
+                            {"think_escalates", escalate_n},
+                            {"close_audit", close_audit_done},
+                            {"user_chars_max", max_user_chars},
+                            {"user_chars_last",
+                             log.empty() ? 0 : log.back().value("user_chars", 0)}};
+  std::ofstream(output_root / "metrics.json") << json_dump_safe(metrics) << "\n";
+  std::ofstream(output_root / "notebook.md") << tuide::wave_notebook_markdown(state);
+  std::ofstream(output_root / "state.json") << json_dump_safe(tuide::wave_state_to_json(state))
+                                           << "\n";
+  {
+    const auto packj = tuide::wave_pack_to_json(state);
+    std::ofstream(output_root / "pack.json") << json_dump_safe(packj) << "\n";
+    std::ostringstream pack_md;
+    pack_md << tuide::wave_pack_markdown(state);
+    pack_md << "\n## Código\n";
+    const auto handoff = tuide::wave_pack_handoff(state);
+    constexpr std::size_t kPackCap = 100000;
+    for (const auto& loc : handoff.visto) {
+      if (pack_md.str().size() >= kPackCap) {
+        pack_md << "\n…[pack truncado]…\n";
+        break;
+      }
+      std::string text;
+      std::string perr;
+      pack_md << "\n### `" << loc << "`\n\n";
+      if (ops.peek_code(loc, &text, &perr) && !text.empty()) {
+        pack_md << "```cpp\n" << text;
+        if (!text.empty() && text.back() != '\n') {
+          pack_md << "\n";
+        }
+        pack_md << "```\n";
+      } else {
+        pack_md << "(no se pudo leer";
+        if (!perr.empty()) {
+          pack_md << ": " << perr;
+        }
+        pack_md << ")\n";
+      }
+    }
+    std::ofstream(output_root / "pack.md") << pack_md.str();
+  }
+  if (state.done) {
+    std::ostringstream cierre;
+    cierre << state.cierre << "\n\n" << tuide::wave_pack_markdown(state);
+    std::ofstream(output_root / "cierre.md") << cierre.str();
+  }
+  std::cout << json_dump_safe(tuide::wave_state_to_json(state)) << "\n";
+  return state.done ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -6944,6 +7890,9 @@ int main(int argc, char** argv) {
   }
   if (cmd == "atlas-survey") {
     return run_atlas_survey(root, argc, argv);
+  }
+  if (cmd == "wave-explore") {
+    return run_wave_explore(root, argc, argv);
   }
   if (cmd == "worker-probe") {
     return run_worker_probe(root, argc, argv);
