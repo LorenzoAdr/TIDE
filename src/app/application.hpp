@@ -136,6 +136,8 @@ class Application {
   void restore_workspace_session();
   std::string launch_cwd_for_program(const std::string& program) const;
   void restart_lsp_for_workspace();
+  // Rebuild AI symbol map when ai_indexes_requested_. force=true restarts the scan;
+  // force never enables the pipeline (only request_ai_indexes / AI tab open does).
   void sync_symbol_workspace_indexer(bool force = false);
   // Start AI symbol map + stem embeddings (idempotent). Triggered on first AI tab open.
   void request_ai_indexes();

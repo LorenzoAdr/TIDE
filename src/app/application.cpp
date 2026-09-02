@@ -889,12 +889,9 @@ void Application::sync_symbol_workspace_indexer(bool force) {
 		symbol_indexer_.stop();
 		return;
 	}
-	if (force) {
-		ai_indexes_requested_ = true;
-	}
-	// Lazy: do not build the AI symbol map / stem pipeline until the AI tab is opened
-	// (or an explicit force reindex). Code-only editing stays free of AI background work.
-	if (!force && !ai_indexes_requested_) {
+	// Lazy: AI symbol map + stem embeddings start only when the AI console tab is opened.
+	// Status-bar reindex / LSP restart must never enable this pipeline.
+	if (!ai_indexes_requested_) {
 		return;
 	}
 	// Always keep a defs+refs index for AI/repo map (LSP does not populate it).
@@ -1021,7 +1018,10 @@ void Application::reindex_project() {
 		std::thread([this]() {
 			set_current_thread_name("reindex");
 			restart_lsp_for_workspace();
-			sync_symbol_workspace_indexer(true);
+			// Rebuild AI map only if the AI tab already requested indexes this session.
+			if (ai_indexes_requested_) {
+				sync_symbol_workspace_indexer(true);
+			}
 			restart_workspace_indexing();
 			enqueue_ui_task([this]() {
 				reopen_workspace_documents(&workspace_, symbol_provider_);
@@ -1139,7 +1139,7 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 		}
 	}
 
-	{
+	if (ai_indexes_requested_) {
 		std::size_t done = 0;
 		std::size_t total = 0;
 		const bool scanning = symbol_indexer_.scanning();
@@ -2570,7 +2570,9 @@ void Application::process_index_changes() {
 			return;
 		}
 		indexer_.remove_path_prefixes(workspace_.root, pending_removes);
-		symbol_indexer_.remove_path_prefixes(workspace_.root, pending_removes);
+		if (ai_indexes_requested_) {
+			symbol_indexer_.remove_path_prefixes(workspace_.root, pending_removes);
+		}
 		pending_removes.clear();
 	};
 	auto flush_pending_upserts = [&]() {
@@ -2578,9 +2580,11 @@ void Application::process_index_changes() {
 			return;
 		}
 		indexer_.upsert_files(workspace_.root, pending_upserts);
-		for (const FileIndexChange& change : pending_upserts) {
-			symbol_indexer_.reindex_file(workspace_.root, change.relative_path,
-			                             change.absolute_path);
+		if (ai_indexes_requested_) {
+			for (const FileIndexChange& change : pending_upserts) {
+				symbol_indexer_.reindex_file(workspace_.root, change.relative_path,
+				                             change.absolute_path);
+			}
 		}
 		pending_upserts.clear();
 	};
@@ -2603,14 +2607,16 @@ void Application::process_index_changes() {
 			flush_pending_upserts();
 			indexer_.index_directory(workspace_.root, change.relative_path,
 			                         change.absolute_path);
-			if (auto snapshot = indexer_.snapshot()) {
-				for (const std::string &file : snapshot->files) {
-					if (!path_matches_prefix(file, change.relative_path)) {
-						continue;
+			if (ai_indexes_requested_) {
+				if (auto snapshot = indexer_.snapshot()) {
+					for (const std::string &file : snapshot->files) {
+						if (!path_matches_prefix(file, change.relative_path)) {
+							continue;
+						}
+						const std::string absolute =
+						    (std::filesystem::path(workspace_.root) / file).string();
+						symbol_indexer_.reindex_file(workspace_.root, file, absolute);
 					}
-					const std::string absolute =
-					    (std::filesystem::path(workspace_.root) / file).string();
-					symbol_indexer_.reindex_file(workspace_.root, file, absolute);
 				}
 			}
 			break;
@@ -2703,6 +2709,13 @@ void Application::apply_app_settings() {
 		}
 		if (ai_missing_toast_state_.open) {
 			ai_missing_toast_state_.close();
+		}
+		// Hide AI tab ⇒ drop lazy AI map/embeds for this session until opened again.
+		if (ai_indexes_requested_) {
+			ai_indexes_requested_ = false;
+			symbol_indexer_.stop();
+			refresh_ai_mapping_busy(&layout_state_, false, 0, 0);
+			refresh_ai_embedding_busy(&layout_state_, false, 0, 0);
 		}
 	}
 	workspace_.buffer.view_token++;
@@ -3079,7 +3092,10 @@ int Application::run() {
 			if (!ec) {
 				const std::string rel_str = rel.generic_string();
 				indexer_.upsert_file(workspace_.root, rel_str, workspace_.buffer.path);
-				symbol_indexer_.reindex_file(workspace_.root, rel_str, workspace_.buffer.path);
+				if (ai_indexes_requested_) {
+					symbol_indexer_.reindex_file(workspace_.root, rel_str,
+					                             workspace_.buffer.path);
+				}
 			}
 		}
 		UI_WAKE(&layout_state_, "app");
@@ -3127,7 +3143,7 @@ int Application::run() {
 		// ANSI busy strip: update from worker so % moves without waiting for a UI click.
 		refresh_ai_mapping_busy(&layout_state_, scanning, done, total);
 		// When the workspace symbol map completes, warm coding-stem embeddings — only if
-		// the AI tab (or force reindex) requested the pipeline.
+		// the AI tab requested the pipeline.
 		if (!scanning && ai_indexes_requested_ && layout_state_.ai_controller != nullptr) {
 			layout_state_.ai_controller->on_symbol_map_ready();
 		}
