@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
 #include <sstream>
 #include <unordered_set>
+#include <utility>
 
 namespace tuide {
 
@@ -19,6 +21,8 @@ void sketch_push(std::vector<WaveSketchLink>* edges, const std::string& from, co
 std::string symbol_tail(const std::string& loc);
 bool list_has_locus(const std::vector<std::string>& done, const std::string& loc,
                     const std::vector<WaveHit>& hits);
+void resolve_locus(const WaveState& st, const std::string& loc, std::string* path,
+                   std::string* symbol);
 
 std::string ascii_lower(std::string s) {
   for (char& c : s) {
@@ -498,10 +502,65 @@ bool neighbor_call_noise(const std::string& name) {
   if (low.rfind("paint_", 0) == 0 || low.rfind("steady_", 0) == 0) {
     return true;
   }
-  if (low == "tr") {
+  if (low == "tr" || low == "now" || low == "seconds" || low == "milliseconds") {
     return true;
   }
   return false;
+}
+
+std::string stem_from_path(const std::string& path) {
+  if (path.empty()) {
+    return {};
+  }
+  const auto slash = path.find_last_of("/\\");
+  std::string file = slash == std::string::npos ? path : path.substr(slash + 1);
+  const auto dot = file.rfind('.');
+  if (dot != std::string::npos) {
+    file.resize(dot);
+  }
+  return ascii_lower(file);
+}
+
+std::string loc_stem(const WaveState& st, const std::string& loc) {
+  if (const WaveHit* h = wave_find_hit(st.candidatas, loc)) {
+    if (!h->stem.empty()) {
+      return ascii_lower(h->stem);
+    }
+    if (!h->path.empty()) {
+      return stem_from_path(h->path);
+    }
+  }
+  if (loc.find('/') != std::string::npos) {
+    std::string path;
+    std::string symbol;
+    split_path_symbol(loc, &path, &symbol);
+    if (!path.empty()) {
+      return stem_from_path(path);
+    }
+  }
+  return {};
+}
+
+int query_token_overlap(const WaveState& st, const std::string& loc) {
+  const std::string q = ascii_lower(st.prompt);
+  const std::string tail = ascii_lower(symbol_tail(loc));
+  int score = 0;
+  std::string tok;
+  auto flush = [&]() {
+    if (tok.size() >= 4 && q.find(tok) != std::string::npos) {
+      score += 4;
+    }
+    tok.clear();
+  };
+  for (char c : tail) {
+    if (c == '_' || c == '-') {
+      flush();
+    } else {
+      tok.push_back(c);
+    }
+  }
+  flush();
+  return score;
 }
 
 int neighbor_caller_score(const WaveState& st, const std::string& loc) {
@@ -531,6 +590,54 @@ int neighbor_caller_score(const WaveState& st, const std::string& loc) {
     }
   }
   return score;
+}
+
+int neighbor_hop_score(const WaveState& st, const std::string& loc, const std::string& from_loc) {
+  int score = neighbor_caller_score(st, loc);
+  const std::string a = loc_stem(st, from_loc);
+  const std::string b = loc_stem(st, loc);
+  if (!a.empty() && !b.empty() && a != b) {
+    score += 12;
+  }
+  const std::string tail = ascii_lower(symbol_tail(loc));
+  if (tail.find("restart") != std::string::npos || tail.find("stop_") != std::string::npos ||
+      tail.find("alive") != std::string::npos || tail.find("crash") != std::string::npos ||
+      tail.find("transport") != std::string::npos || tail.find("fail") != std::string::npos ||
+      tail.find("pending") != std::string::npos || tail.find("opened") != std::string::npos) {
+    score += 10;
+  }
+  if (tail.find("wake") != std::string::npos || tail.find("enqueue") != std::string::npos ||
+      tail.find("compile_commands") != std::string::npos) {
+    score -= 8;
+  }
+  score += query_token_overlap(st, loc);
+  return score;
+}
+
+void maybe_resolve_callee(WaveState* st, const WaveOps* ops, const std::string& name) {
+  if (st == nullptr || name.empty() || wave_find_hit(st->candidatas, name) != nullptr) {
+    return;
+  }
+  if (ops == nullptr || !ops->search_needle) {
+    return;
+  }
+  const auto hits = ops->search_needle(name, "");
+  std::vector<WaveHit> keep;
+  for (auto h : hits) {
+    if (h.symbol.empty()) {
+      h.symbol = name;
+    }
+    if (!locus_keys_match(h.symbol, name) && !locus_keys_match(wave_hit_key(h), name)) {
+      continue;
+    }
+    keep.push_back(std::move(h));
+    if (keep.size() >= 2) {
+      break;
+    }
+  }
+  if (!keep.empty()) {
+    wave_merge_hits(st, keep);
+  }
 }
 
 bool neighbor_is_read(const WaveState& st, const std::string& loc) {
@@ -564,7 +671,7 @@ std::string format_peek_neighbors(const WaveState& st, const WavePeekNeighbors& 
 }
 
 void record_peek_neighbors(WaveState* st, const std::string& loc, const std::string& body,
-                           const std::vector<WaveHit>& callers) {
+                           const std::vector<WaveHit>& callers, const WaveOps* ops) {
   if (st == nullptr || loc.empty()) {
     return;
   }
@@ -587,7 +694,7 @@ void record_peek_neighbors(WaveState* st, const std::string& loc, const std::str
       }
     }
     if (!dup) {
-      ranked.push_back({neighbor_caller_score(*st, label), label});
+      ranked.push_back({neighbor_hop_score(*st, label, loc), label});
     }
   }
   std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
@@ -602,12 +709,79 @@ void record_peek_neighbors(WaveState* st, const std::string& loc, const std::str
       break;
     }
   }
+  std::vector<std::pair<int, std::string>> out_ranked;
   for (const auto& c : wave_follow_outgoing_calls(body)) {
     if (c.symbol.empty() || locus_keys_match(c.symbol, loc) || neighbor_call_noise(c.symbol)) {
       continue;
     }
-    cap_unique_labels(&n.callees, c.symbol, kWavePeekNeighborMax);
+    maybe_resolve_callee(st, ops, c.symbol);
+    bool dup = false;
+    for (const auto& have : out_ranked) {
+      if (locus_keys_match(have.second, c.symbol)) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) {
+      out_ranked.push_back({neighbor_hop_score(*st, c.symbol, loc), c.symbol});
+    }
+  }
+  std::sort(out_ranked.begin(), out_ranked.end(), [](const auto& a, const auto& b) {
+    if (a.first != b.first) {
+      return a.first > b.first;
+    }
+    return a.second < b.second;
+  });
+  for (const auto& row : out_ranked) {
+    cap_unique_labels(&n.callees, row.second, kWavePeekNeighborMax);
     if (static_cast<int>(n.callees.size()) >= kWavePeekNeighborMax) {
+      break;
+    }
+  }
+  const std::string here_stem = loc_stem(*st, loc);
+  if (ops != nullptr && ops->peek_causal) {
+    for (const auto& cal : n.callees) {
+      const std::string cal_stem = loc_stem(*st, cal);
+      if (here_stem.empty() || cal_stem.empty() || here_stem == cal_stem) {
+        continue;
+      }
+      std::string path;
+      std::string symbol;
+      resolve_locus(*st, cal, &path, &symbol);
+      if (symbol.empty()) {
+        symbol = symbol_of_loc(cal);
+      }
+      if (symbol.empty()) {
+        continue;
+      }
+      std::string md;
+      std::vector<WaveHit> inc;
+      std::string cerr;
+      if (!ops->peek_causal(path, symbol, "", false, &md, &inc, &cerr) || inc.empty()) {
+        continue;
+      }
+      std::vector<std::pair<int, std::string>> fan;
+      for (const auto& h : inc) {
+        const std::string label = neighbor_label(h);
+        if (label.empty() || neighbor_id_skip(label) || locus_keys_match(label, loc) ||
+            locus_keys_match(label, cal)) {
+          continue;
+        }
+        fan.push_back({neighbor_hop_score(*st, label, cal), label});
+      }
+      std::sort(fan.begin(), fan.end(), [](const auto& a, const auto& b) {
+        if (a.first != b.first) {
+          return a.first > b.first;
+        }
+        return a.second < b.second;
+      });
+      n.export_loc = cal;
+      for (const auto& row : fan) {
+        push_unique_str(&n.export_callers, row.second);
+        if (static_cast<int>(n.export_callers.size()) >= kWaveSketchFanInMax) {
+          break;
+        }
+      }
       break;
     }
   }
@@ -626,7 +800,7 @@ void sketch_push(std::vector<WaveSketchLink>* edges, const std::string& from, co
     return;
   }
   for (const auto& e : *edges) {
-    if (locus_keys_match(e.from, from) && locus_keys_match(e.to, to) && e.via == via) {
+    if (locus_keys_match(e.from, from) && locus_keys_match(e.to, to)) {
       return;
     }
   }
@@ -1266,7 +1440,7 @@ bool apply_peeks(WaveState* st, const std::vector<std::string>& peeks, const Wav
         (!path.empty() && !symbol.empty()) ? (path + ":" + symbol) : peek;
     if (!file_only) {
       note_circuit_from_peek(st, circuit_loc, body, callers);
-      record_peek_neighbors(st, circuit_loc, body, callers);
+      record_peek_neighbors(st, circuit_loc, body, callers, &ops);
       for (const auto& n : st->peek_neighbors) {
         if (!locus_keys_match(n.loc, circuit_loc)) {
           continue;
@@ -1491,6 +1665,252 @@ bool apply_entre(WaveState* st, const std::string& from, const std::string& to, 
   return true;
 }
 
+void push_seed_fn(std::vector<std::pair<std::string, std::string>>* seeds, const std::string& path,
+                  const std::string& symbol) {
+  if (seeds == nullptr || symbol.empty()) {
+    return;
+  }
+  const std::string sl = ascii_lower(symbol);
+  const std::string pl = ascii_lower(path);
+  for (const auto& e : *seeds) {
+    if (ascii_lower(e.second) != sl) {
+      continue;
+    }
+    if (path.empty() || e.first.empty() || ascii_lower(e.first) == pl) {
+      return;
+    }
+  }
+  if (static_cast<int>(seeds->size()) >= kWaveCercaMaxSeeds) {
+    return;
+  }
+  seeds->push_back({path, symbol});
+}
+
+void push_boost_stem(std::vector<std::string>* stems, const std::string& stem) {
+  if (stems == nullptr || stem.empty()) {
+    return;
+  }
+  const std::string key = ascii_lower(stem);
+  for (const auto& s : *stems) {
+    if (ascii_lower(s) == key) {
+      return;
+    }
+  }
+  stems->push_back(stem);
+}
+
+void collect_cerca_seeds(const WaveState& st, const std::vector<std::string>& in_scopes,
+                         std::vector<std::pair<std::string, std::string>>* seed_fns,
+                         std::vector<std::string>* boost_stems) {
+  if (seed_fns == nullptr || boost_stems == nullptr) {
+    return;
+  }
+  auto add_loc = [&](const std::string& loc) {
+    if (loc.empty()) {
+      return;
+    }
+    std::string path;
+    std::string symbol;
+    resolve_locus(st, loc, &path, &symbol);
+    if (!symbol.empty()) {
+      push_seed_fn(seed_fns, path, symbol);
+    }
+  };
+  if (!in_scopes.empty()) {
+    for (const auto& sc : in_scopes) {
+      if (sc.empty()) {
+        continue;
+      }
+      if (const WaveHit* h = wave_find_hit(st.candidatas, sc)) {
+        push_seed_fn(seed_fns, h->path, h->symbol);
+        push_boost_stem(boost_stems, h->stem);
+        continue;
+      }
+      std::string path;
+      std::string symbol;
+      split_path_symbol(sc, &path, &symbol);
+      if (!symbol.empty() && sc.find('/') != std::string::npos) {
+        push_seed_fn(seed_fns, path, symbol);
+        continue;
+      }
+      push_boost_stem(boost_stems, sc);
+    }
+    return;
+  }
+  for (const auto& p : st.peeks_done) {
+    add_loc(p);
+  }
+  for (const auto& n : st.peek_neighbors) {
+    add_loc(n.loc);
+    for (const auto& c : n.callees) {
+      add_loc(c);
+    }
+    for (const auto& c : n.callers) {
+      add_loc(c);
+    }
+    if (!n.export_loc.empty()) {
+      add_loc(n.export_loc);
+    }
+    for (const auto& c : n.export_callers) {
+      add_loc(c);
+    }
+  }
+  for (const auto& z : st.zonas) {
+    if (z.verdict != "keep") {
+      continue;
+    }
+    if (const WaveHit* h = wave_find_hit(st.candidatas, z.id)) {
+      push_seed_fn(seed_fns, h->path, h->symbol);
+      push_boost_stem(boost_stems, h->stem);
+    }
+  }
+}
+
+bool cerca_already_logged(const WaveState& st, const std::vector<std::string>& needles,
+                          const std::vector<std::string>& in_scopes) {
+  const std::string q = ascii_lower(wave_cerca_query(needles));
+  auto scopes_key = [](const std::vector<std::string>& xs) {
+    std::string s;
+    for (const auto& x : xs) {
+      if (!s.empty()) {
+        s += '\t';
+      }
+      s += ascii_lower(x);
+    }
+    return s;
+  };
+  const std::string in_key = scopes_key(in_scopes);
+  for (const auto& rec : st.cerca_log) {
+    if (ascii_lower(rec.query) == q && scopes_key(rec.in_scopes) == in_key) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool needle_is_already_read_symbol(const WaveState& st, const std::string& needle) {
+  if (needle.find(' ') != std::string::npos) {
+    return false;
+  }
+  const std::string want = ascii_lower(needle);
+  auto hit_sym = [&](const std::string& loc) {
+    std::string path;
+    std::string symbol;
+    resolve_locus(st, loc, &path, &symbol);
+    return ascii_lower(symbol) == want || ascii_lower(symbol_tail(loc)) == want;
+  };
+  for (const auto& p : st.peeks_done) {
+    if (hit_sym(p)) {
+      return true;
+    }
+  }
+  for (const auto& z : st.zonas) {
+    if (z.verdict != "keep") {
+      continue;
+    }
+    if (const WaveHit* h = wave_find_hit(st.candidatas, z.id)) {
+      if (ascii_lower(h->symbol) == want) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+int clamp_cerca_hops(int hops) {
+  if (hops <= 0) {
+    return kWaveCercaHopsDefault;
+  }
+  if (hops > kWaveCercaHopsMax) {
+    return kWaveCercaHopsMax;
+  }
+  return hops;
+}
+
+bool apply_cerca(WaveState* st, const WaveOla& ola, const WaveOps& ops, std::string* detail,
+                 std::string* err) {
+  if (!ops.search_cerca) {
+    if (err) {
+      *err = "sin buscador cerca";
+    }
+    return false;
+  }
+  std::vector<std::pair<std::string, std::string>> seed_fns;
+  std::vector<std::string> boost_stems;
+  collect_cerca_seeds(*st, ola.in_scopes, &seed_fns, &boost_stems);
+  const int hops = clamp_cerca_hops(ola.hops);
+  const std::string query = wave_cerca_query(ola.needles);
+  std::vector<WaveCercaHit> rows;
+  std::string qerr;
+  std::string wake_note;
+  if (!ops.search_cerca(query, seed_fns, boost_stems, ola.in_scopes, hops, &rows, &qerr,
+                        &wake_note)) {
+    if (err) {
+      *err = qerr.empty() ? "cerca falló" : qerr;
+    }
+    return false;
+  }
+  if (static_cast<int>(rows.size()) > kWaveCercaMaxHits) {
+    rows.resize(static_cast<std::size_t>(kWaveCercaMaxHits));
+  }
+  WaveCercaLog rec;
+  rec.needles = ola.needles;
+  rec.in_scopes = ola.in_scopes;
+  rec.query = query;
+  rec.hops = hops;
+  rec.hits = static_cast<int>(rows.size());
+  rec.wake_note = wake_note;
+  std::vector<WaveHit> batch;
+  for (auto& row : rows) {
+    row.already_read = list_has_locus(st->peeks_done, row.symbol, st->candidatas) ||
+                       (!row.path.empty() && !row.symbol.empty() &&
+                        list_has_locus(st->peeks_done, row.path + ":" + row.symbol, st->candidatas));
+    WaveHit w;
+    w.id = row.id.empty() ? (row.path.empty() ? row.symbol : row.path + ":" + row.symbol) : row.id;
+    w.path = row.path;
+    w.symbol = row.symbol;
+    w.stem = row.stem;
+    w.kind = row.kind.empty() ? "fn" : row.kind;
+    w.needle = "cerca";
+    if (!w.path.empty()) {
+      add_path_and_sibling(&w.files, w.path);
+    }
+    batch.push_back(std::move(w));
+    rec.rows.push_back(row);
+  }
+  const auto n0 = st->candidatas.size();
+  wave_merge_hits(st, batch);
+  rec.added = static_cast<int>(st->candidatas.size() - n0);
+  std::ostringstream det;
+  det << "hits=" << rec.hits << " +" << rec.added << " hops=" << hops;
+  if (!rec.wake_note.empty()) {
+    det << " " << rec.wake_note;
+  }
+  if (rec.hits == 0) {
+    det << " (ausencia en el barrio)";
+  } else {
+    int shown = 0;
+    for (const auto& row : rec.rows) {
+      if (shown >= 4) {
+        break;
+      }
+      det << "; ";
+      if (!row.symbol.empty()) {
+        det << row.symbol;
+      } else {
+        det << row.id;
+      }
+      det << "@h" << row.hop;
+      ++shown;
+    }
+  }
+  if (detail != nullptr) {
+    *detail = det.str();
+  }
+  st->cerca_log.push_back(std::move(rec));
+  return true;
+}
+
 void maybe_auto_entre(WaveState* st, const WaveOps& ops) {
   if (st == nullptr || st->circuit_on.empty() || st->circuit_off.empty()) {
     return;
@@ -1677,6 +2097,296 @@ std::string wave_needle_stem_hint(const std::string& needle) {
     return {};
   }
   return needle.substr(0, pos);
+}
+
+bool wave_cerca_concept_ok(const std::string& needle) {
+  std::size_t a = 0;
+  std::size_t b = needle.size();
+  while (a < b && std::isspace(static_cast<unsigned char>(needle[a])) != 0) {
+    ++a;
+  }
+  while (b > a && std::isspace(static_cast<unsigned char>(needle[b - 1])) != 0) {
+    --b;
+  }
+  if (b - a < 2 || b - a > 48) {
+    return false;
+  }
+  int words = 0;
+  bool in_word = false;
+  for (std::size_t i = a; i < b; ++i) {
+    const unsigned char c = static_cast<unsigned char>(needle[i]);
+    if (c == '/' || c == ':' || c == '?' || c == '!' || c == ';' || c == ',') {
+      return false;
+    }
+    if (c == '.') {
+      return false;
+    }
+    if (std::isspace(c) != 0) {
+      if (in_word) {
+        ++words;
+        in_word = false;
+      }
+    } else {
+      in_word = true;
+    }
+  }
+  if (in_word) {
+    ++words;
+  }
+  return words >= 1 && words <= 3;
+}
+
+std::string wave_cerca_query(const std::vector<std::string>& needles) {
+  std::string q;
+  for (const auto& n : needles) {
+    std::size_t a = 0;
+    std::size_t b = n.size();
+    while (a < b && std::isspace(static_cast<unsigned char>(n[a])) != 0) {
+      ++a;
+    }
+    while (b > a && std::isspace(static_cast<unsigned char>(n[b - 1])) != 0) {
+      --b;
+    }
+    if (a >= b) {
+      continue;
+    }
+    if (!q.empty()) {
+      q += ' ';
+    }
+    q.append(n, a, b - a);
+  }
+  return q;
+}
+
+bool wave_cerca_needles_ok(const std::vector<std::string>& needles, std::string* err) {
+  auto set = [&](const char* m) {
+    if (err) {
+      *err = m;
+    }
+    return false;
+  };
+  if (static_cast<int>(needles.size()) < kWaveCercaMinNeedles) {
+    return set("cerca sin needles");
+  }
+  if (static_cast<int>(needles.size()) > kWaveCercaMaxNeedles) {
+    return set("cerca: máximo 6 conceptos");
+  }
+  for (const auto& n : needles) {
+    if (!wave_cerca_concept_ok(n)) {
+      return set("cerca: cada needle es un concepto de 1–3 palabras, no frase ni id");
+    }
+  }
+  return true;
+}
+
+namespace {
+
+std::string trim_ws_copy(const std::string& s) {
+  std::size_t a = 0;
+  std::size_t b = s.size();
+  while (a < b && std::isspace(static_cast<unsigned char>(s[a])) != 0) {
+    ++a;
+  }
+  while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1])) != 0) {
+    --b;
+  }
+  return s.substr(a, b - a);
+}
+
+bool wave_log_has_do(const WaveState& st, const char* name) {
+  for (const auto& e : st.olas_log) {
+    if (e.do_name == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool papel_token_is_zone_id(const std::string& t) {
+  if (t.size() < 2 || t.size() > 4) {
+    return false;
+  }
+  if (t[0] != 'M' && t[0] != 'm') {
+    return false;
+  }
+  for (std::size_t i = 1; i < t.size(); ++i) {
+    if (std::isdigit(static_cast<unsigned char>(t[i])) == 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool guion_stopword(const std::string& t) {
+  static const char* kStop[] = {
+      "a",     "al",    "como",  "con",   "cual",  "cuando", "de",    "del",  "el",
+      "en",    "es",    "esta",  "este",  "hay",   "la",    "las",   "lo",   "los",
+      "mas",   "más",   "no",    "o",     "para",  "por",   "que",   "qué",  "se",
+      "si",    "sí",    "sin",   "su",    "sus",   "the",   "un",    "una",  "unas",
+      "uno",   "unos",  "y",     "ya",    "quien", "quién", "como",  "cómo", "donde",
+      "dónde", "cual",  "cuál"};
+  const std::string low = ascii_lower(t);
+  for (const char* s : kStop) {
+    if (low == s || t == s) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<std::string> papel_words(const std::string& papel) {
+  std::vector<std::string> out;
+  std::string cur;
+  auto flush = [&]() {
+    if (cur.empty()) {
+      return;
+    }
+    out.push_back(cur);
+    cur.clear();
+  };
+  for (unsigned char c : papel) {
+    if (std::isspace(c) != 0 || c == '?' || c == '!' || c == ',' || c == ';' || c == '"') {
+      flush();
+    } else {
+      cur.push_back(static_cast<char>(c));
+    }
+  }
+  flush();
+  return out;
+}
+
+std::string guion_evidence_blob(const WaveState& st) {
+  std::string b = st.notas;
+  b.push_back('\n');
+  b += st.follow_md;
+  for (const auto& p : st.peeks_done) {
+    b.push_back(' ');
+    b += p;
+  }
+  for (const auto& p : st.follows_done) {
+    b.push_back(' ');
+    b += p;
+  }
+  for (const auto& rec : st.needles_log) {
+    b.push_back(' ');
+    b += rec.needle;
+    b.push_back(' ');
+    b += rec.in_locus;
+  }
+  for (const auto& rec : st.cerca_log) {
+    b.push_back(' ');
+    b += rec.query;
+    for (const auto& n : rec.needles) {
+      b.push_back(' ');
+      b += n;
+    }
+    for (const auto& sc : rec.in_scopes) {
+      b.push_back(' ');
+      b += sc;
+    }
+  }
+  return ascii_lower(b);
+}
+
+}  // namespace
+
+bool wave_guion_papel_ok(const std::string& papel) {
+  const std::string t = trim_ws_copy(papel);
+  if (t.size() < 2 || t.size() > static_cast<std::size_t>(kWaveGuionPapelChars)) {
+    return false;
+  }
+  for (unsigned char c : t) {
+    if (c == '/' || c == ':' || c == '.' || c == '_') {
+      return false;
+    }
+  }
+  const auto words = papel_words(t);
+  if (static_cast<int>(words.size()) < kWaveGuionWordsMin ||
+      static_cast<int>(words.size()) > kWaveGuionWordsMax) {
+    return false;
+  }
+  for (const auto& w : words) {
+    if (papel_token_is_zone_id(w)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool wave_guion_papeles_ok(const std::vector<std::string>& papeles, std::string* err) {
+  auto set = [&](const char* m) {
+    if (err) {
+      *err = m;
+    }
+    return false;
+  };
+  if (static_cast<int>(papeles.size()) < kWaveGuionMin) {
+    return set("guion: 2–6 papeles");
+  }
+  if (static_cast<int>(papeles.size()) > kWaveGuionMax) {
+    return set("guion: 2–6 papeles");
+  }
+  for (const auto& p : papeles) {
+    if (!wave_guion_papel_ok(p)) {
+      return set("guion: papel sin path, id, stem ni M*");
+    }
+  }
+  return true;
+}
+
+std::vector<std::string> wave_guion_uncovered(const WaveState& st) {
+  std::vector<std::string> miss;
+  if (st.papeles.empty()) {
+    return miss;
+  }
+  const std::string blob = guion_evidence_blob(st);
+  for (const auto& papel : st.papeles) {
+    const auto words = papel_words(trim_ws_copy(papel));
+    std::vector<std::string> content;
+    for (const auto& w : words) {
+      if (w.size() < 3 || guion_stopword(w)) {
+        continue;
+      }
+      content.push_back(ascii_lower(w));
+    }
+    bool hit = false;
+    if (content.empty()) {
+      const std::string whole = ascii_lower(trim_ws_copy(papel));
+      hit = !whole.empty() && blob.find(whole) != std::string::npos;
+    } else {
+      for (const auto& tok : content) {
+        if (blob.find(tok) != std::string::npos) {
+          hit = true;
+          break;
+        }
+      }
+    }
+    if (!hit) {
+      miss.push_back(papel);
+    }
+  }
+  return miss;
+}
+
+std::string wave_guion_markdown(const WaveState& st) {
+  std::ostringstream out;
+  out << "## Guion\n";
+  if (st.papeles.empty()) {
+    out << "(aún no hay preguntas)\n";
+    return out.str();
+  }
+  for (const auto& p : st.papeles) {
+    out << "- " << p << "\n";
+  }
+  const auto miss = wave_guion_uncovered(st);
+  if (!miss.empty()) {
+    out << "sin evidencia:";
+    for (const auto& p : miss) {
+      out << " `" << p << "`";
+    }
+    out << "\n";
+  }
+  return out.str();
 }
 
 bool wave_line_has_needle(const std::string& line, const std::string& needle) {
@@ -2121,15 +2831,20 @@ int wave_ingest_zone_symbols(WaveState* st, const nlohmann::json& payload,
   return static_cast<int>(st->candidatas.size() - before);
 }
 
+bool wave_needs_guion(const WaveState& st) {
+  return st.papeles.empty() && !st.done;
+}
+
 bool wave_needs_cover(const WaveState& st) {
-  return st.olas_log.empty() && !st.atlas_md.empty();
+  return !st.papeles.empty() && !st.atlas_md.empty() && !wave_log_has_do(st, "juicio") &&
+         !st.done;
 }
 
 int wave_cover_restore_caller(WaveOla* ola, const WaveState& st) {
   if (ola == nullptr || ola->do_kind != WaveDo::Juicio) {
     return 0;
   }
-  if (!st.olas_log.empty()) {
+  if (wave_log_has_do(st, "juicio")) {
     return 0;
   }
   auto kind_of = [&](const std::string& id) -> std::string {
@@ -2369,7 +3084,19 @@ WaveOla wave_parse_ola(const std::string& raw) {
   collect_follows(&out);
   out.from = json_str(j, "from");
   out.to = json_str(j, "to");
-  out.in_locus = json_str(j, "in");
+  if (j.contains("in") && j["in"].is_array()) {
+    out.in_scopes = json_str_array(j, "in");
+  } else if (out.do_kind == WaveDo::Cerca) {
+    const std::string in_s = json_str(j, "in");
+    if (!in_s.empty()) {
+      out.in_scopes.push_back(in_s);
+    }
+  } else {
+    out.in_locus = json_str(j, "in");
+  }
+  if (j.contains("hops") && j["hops"].is_number()) {
+    out.hops = j["hops"].get<int>();
+  }
   if (out.from.empty() || out.to.empty()) {
     const auto pair = json_str_array(j, "entre");
     if (pair.size() >= 2) {
@@ -2383,7 +3110,14 @@ WaveOla wave_parse_ola(const std::string& raw) {
   }
   out.why = json_str(j, "why");
   out.huecos = json_str_array(j, "huecos");
-  if (out.why.size() < 8) {
+  out.papeles = json_str_array(j, "papeles");
+  if (out.do_kind == WaveDo::Guion) {
+    std::string gerr;
+    if (!wave_guion_papeles_ok(out.papeles, &gerr)) {
+      out.error = gerr;
+      return out;
+    }
+  } else if (out.why.size() < 8) {
     out.error = "why demasiado corto";
     return out;
   }
@@ -2399,7 +3133,16 @@ WaveOla wave_parse_ola(const std::string& raw) {
                      out.do_kind == WaveDo::Follow || out.do_kind == WaveDo::Entre)) {
     out.do_kind = WaveDo::Tanda;
   }
-  if (static_cast<int>(out.needles.size()) > kWaveMaxNeedles) {
+  if (out.do_kind == WaveDo::Cerca) {
+    if (static_cast<int>(out.needles.size()) > kWaveCercaMaxNeedles) {
+      out.needles.resize(static_cast<size_t>(kWaveCercaMaxNeedles));
+    }
+    std::string cerr;
+    if (!wave_cerca_needles_ok(out.needles, &cerr)) {
+      out.error = cerr;
+      return out;
+    }
+  } else if (static_cast<int>(out.needles.size()) > kWaveMaxNeedles) {
     out.needles.resize(static_cast<size_t>(kWaveMaxNeedles));
   }
   if (out.do_kind == WaveDo::Needles && out.needles.empty()) {
@@ -2443,6 +3186,9 @@ bool wave_check_barriers(const WaveOla& ola, const WaveState& st, std::string* e
   }
   if (st.done) {
     return set("ya se cerró");
+  }
+  if (st.papeles.empty() && !st.atlas_md.empty() && ola.do_kind != WaveDo::Guion) {
+    return set("primero el guion (papeles de la consulta)");
   }
   auto in_ok = [&]() -> const char* {
     if (ola.in_locus.empty()) {
@@ -2610,6 +3356,35 @@ bool wave_check_barriers(const WaveOla& ola, const WaveState& st, std::string* e
     }
     return true;
   }
+  if (ola.do_kind == WaveDo::Cerca) {
+    if (!wave_cerca_needles_ok(ola.needles, err)) {
+      return false;
+    }
+    for (const auto& n : ola.needles) {
+      if (needle_is_already_read_symbol(st, n)) {
+        return set("cerca: no re-uses el símbolo ya leído; busca el papel que falta");
+      }
+    }
+    if (cerca_already_logged(st, ola.needles, ola.in_scopes)) {
+      return set("cerca ya tirada");
+    }
+    std::vector<std::pair<std::string, std::string>> seed_fns;
+    std::vector<std::string> boost_stems;
+    collect_cerca_seeds(st, ola.in_scopes, &seed_fns, &boost_stems);
+    if (seed_fns.empty() && boost_stems.empty()) {
+      return set("cerca sin barrio (peek, keep o in)");
+    }
+    return true;
+  }
+  if (ola.do_kind == WaveDo::Guion) {
+    if (!st.papeles.empty()) {
+      return set("guion ya tirado");
+    }
+    if (!wave_guion_papeles_ok(ola.papeles, err)) {
+      return false;
+    }
+    return true;
+  }
   if (ola.do_kind == WaveDo::Cerrar) {
     return true;
   }
@@ -2752,6 +3527,38 @@ bool wave_apply(WaveState* st, const WaveOla& ola_in, const WaveOps& ops, std::s
                      " drop=" + std::to_string(ola.drop.size()));
     return true;
   }
+  if (ola.do_kind == WaveDo::Cerca) {
+    std::string det;
+    std::string cerr;
+    if (!apply_cerca(st, ola, ops, &det, &cerr)) {
+      st->last_error = cerr;
+      if (err) {
+        *err = cerr;
+      }
+      return false;
+    }
+    push_ola_log(st, "cerca", ola.why, det);
+    return true;
+  }
+  if (ola.do_kind == WaveDo::Guion) {
+    st->papeles = ola.papeles;
+    std::string det;
+    for (const auto& p : ola.papeles) {
+      if (!det.empty()) {
+        det += "; ";
+      }
+      det += p;
+    }
+    push_ola_log(st, "guion", ola.why, det);
+    return true;
+  }
+  if (ola.do_kind != WaveDo::Cerrar) {
+    st->last_error = "do inválido";
+    if (err) {
+      *err = st->last_error;
+    }
+    return false;
+  }
   st->done = true;
   st->cierre = ola.why;
   st->huecos_claimed = ola.huecos;
@@ -2850,6 +3657,51 @@ std::vector<WaveSketchLink> wave_sketch_edges(const WaveState& st) {
       }
     }
   }
+  for (const auto& n : st.peek_neighbors) {
+    const std::string here = node(n.loc);
+    if (here.empty() || !lit(n.loc)) {
+      continue;
+    }
+    int out_rays = 0;
+    for (const auto& c : n.callees) {
+      if (lit(c) || node(c).empty()) {
+        continue;
+      }
+      if (neighbor_hop_score(st, c, n.loc) < 8) {
+        continue;
+      }
+      if (out_rays >= kWaveSketchRaysPerPeek) {
+        break;
+      }
+      sketch_push(&edges, here, node(c), "ray");
+      ++out_rays;
+    }
+    int in_rays = 0;
+    for (const auto& c : n.callers) {
+      if (lit(c) || node(c).empty()) {
+        continue;
+      }
+      if (neighbor_hop_score(st, c, n.loc) < 8) {
+        continue;
+      }
+      if (in_rays >= 1) {
+        break;
+      }
+      sketch_push(&edges, node(c), here, "ray");
+      ++in_rays;
+    }
+    if (!n.export_loc.empty()) {
+      const std::string dest = node(n.export_loc);
+      if (!dest.empty()) {
+        for (const auto& f : n.export_callers) {
+          if (locus_keys_match(f, n.loc) || node(f).empty()) {
+            continue;
+          }
+          sketch_push(&edges, node(f), dest, "ray");
+        }
+      }
+    }
+  }
   for (const auto& l : st.follow_links) {
     if (lit(l.from) && lit(l.to)) {
       sketch_push(&edges, node(l.from), node(l.to), "follow");
@@ -2914,12 +3766,15 @@ std::string wave_sketch_markdown(const WaveState& st) {
   for (const auto& f : st.follows_done) {
     add_lit(f);
   }
-  if (lit_nodes.size() < 2) {
+  if (lit_nodes.empty()) {
     return {};
   }
   const auto edges = wave_sketch_edges(st);
+  if (edges.empty() && lit_nodes.size() < 2) {
+    return {};
+  }
   std::ostringstream out;
-  out << "bosquejo (leído; sin arista = islas):\n";
+  out << "bosquejo (sólido = leído; rayo = no leído):\n";
   for (const auto& e : edges) {
     if (e.from.empty() || e.to.empty()) {
       continue;
@@ -2951,14 +3806,19 @@ std::string wave_sketch_markdown(const WaveState& st) {
     if (c.empty() || lit(c) || neighbor_id_skip(c)) {
       return;
     }
-    const std::string n = node(c).empty() ? c : node(c);
+    const std::string nn = node(c).empty() ? c : node(c);
+    for (const auto& e : edges) {
+      if (locus_keys_match(e.from, nn) || locus_keys_match(e.to, nn)) {
+        return;
+      }
+    }
     for (const auto& have : huecos) {
-      if (locus_keys_match(have, n)) {
+      if (locus_keys_match(have, nn)) {
         return;
       }
     }
     if (static_cast<int>(huecos.size()) < 3) {
-      huecos.push_back(n);
+      huecos.push_back(nn);
     }
   };
   for (const auto& c : st.circuit_callers_on) {
@@ -3150,14 +4010,25 @@ std::string wave_work_markdown(const WaveState& st) {
         st.last_error.find("in exige símbolo") != std::string::npos) {
       out << "Siguiente legal: follow de un símbolo anclado, in de OTRO path:fn, "
              "peek no leído. No repitas este in. campo solo con la clave JSON campo.\n";
+    } else if (st.last_error.find("cerca ya tirada") != std::string::npos ||
+               st.last_error.find("cerca: cada needle") != std::string::npos ||
+               st.last_error.find("cerca sin barrio") != std::string::npos ||
+               st.last_error.find("cerca: no re-uses") != std::string::npos) {
+      out << "Siguiente legal: cerca con otros conceptos de 1–3 palabras "
+             "(papel que falta, no el símbolo ya leído), peek de un hit, o cerrar.\n";
     } else if (st.last_error.find("follow ya hecho") != std::string::npos ||
                st.last_error.find("peek ya leído") != std::string::npos ||
                st.last_error.find("entre ya pedido") != std::string::npos) {
       out << "Siguiente legal: peek/follow/entre de un locus que no esté en ya leídos "
              "ni ya seguidos. Peeks y Follows se acumulan abajo; no vuelvas a pedir "
              "el mismo símbolo.\n";
+    } else if (st.last_error.find("primero el guion") != std::string::npos ||
+               st.last_error.find("guion ya tirado") != std::string::npos) {
+      out << "Siguiente legal: do=guion con 2–6 preguntas pequeñas de comprensión. "
+             "No un plan de peek. Sin M*, paths ni ids.\n";
     }
   }
+  out << "\n" << wave_guion_markdown(st);
   out << "\n" << wave_circuit_markdown(st);
   out << "\n## Diario\n";
   if (st.olas_log.empty()) {
@@ -3200,6 +4071,47 @@ std::string wave_work_markdown(const WaveState& st) {
         }
       }
       out << "\n";
+    }
+  }
+  out << "\n## Cerca (" << st.cerca_log.size() << ")\n";
+  if (st.cerca_log.empty()) {
+    out << "(ninguna — papel sin nombre: conceptos 1–3 palabras en el barrio; "
+           "hits=0 sí es ausencia aquí)\n";
+  } else {
+    for (const auto& rec : st.cerca_log) {
+      out << "- q=`" << rec.query << "` hops=" << rec.hops << " hits=" << rec.hits << " +"
+          << rec.added;
+      if (!rec.in_scopes.empty()) {
+        out << " in";
+        for (const auto& sc : rec.in_scopes) {
+          out << " `" << sc << "`";
+        }
+      }
+      if (!rec.wake_note.empty()) {
+        out << "  " << rec.wake_note;
+      }
+      if (rec.hits == 0) {
+        out << "  (ausencia en el barrio)";
+      }
+      out << "\n";
+      for (const auto& row : rec.rows) {
+        out << "    " << std::fixed << std::setprecision(2) << row.cosine << " h" << row.hop
+            << " ";
+        if (!row.path.empty() && !row.symbol.empty()) {
+          out << row.path << ":" << row.symbol;
+        } else if (!row.symbol.empty()) {
+          out << row.symbol;
+        } else {
+          out << row.id;
+        }
+        if (row.already_read) {
+          out << " [leído]";
+        }
+        if (!row.card.empty()) {
+          out << "  " << row.card;
+        }
+        out << "\n";
+      }
     }
   }
   const std::string peeks_md = collect_peek_sections(st.notas);
@@ -3315,6 +4227,7 @@ std::string wave_notebook_markdown(const WaveState& st) {
   if (!st.last_error.empty()) {
     out << "last_error: " << st.last_error << "\n";
   }
+  out << "\n" << wave_guion_markdown(st);
   out << "\n" << wave_circuit_markdown(st);
   out << "\n## Diario\n";
   if (st.olas_log.empty()) {
@@ -3366,6 +4279,21 @@ std::string wave_notebook_markdown(const WaveState& st) {
       out << "\n";
       for (const auto& id : rec.ids) {
         out << "    " << id << "\n";
+      }
+    }
+  }
+  out << "\n## Cerca (" << st.cerca_log.size() << ")\n";
+  if (st.cerca_log.empty()) {
+    out << "(ninguna)\n";
+  } else {
+    for (const auto& rec : st.cerca_log) {
+      out << "- q=`" << rec.query << "` hops=" << rec.hops << " hits=" << rec.hits;
+      if (!rec.wake_note.empty()) {
+        out << " " << rec.wake_note;
+      }
+      out << "\n";
+      for (const auto& row : rec.rows) {
+        out << "    " << row.symbol << " h" << row.hop << " " << row.cosine << "\n";
       }
     }
   }
@@ -3446,21 +4374,47 @@ std::string wave_notebook_markdown(const WaveState& st) {
   return out.str();
 }
 
+std::string wave_guion_system_prompt() {
+  return R"(Descompón la consulta en 2–6 preguntas pequeñas cuya respuesta haría falta para decir que entendiste el problema.
+Cada una es un aspecto distinto, no un paso. No un plan de peek/cerca.
+Si dos partes del prompt pueden ser verdad por separado, son dos preguntas.
+PROHIBIDO M*, stems, paths, ids.
+PROHIBIDO recitar atlas, traducir la consulta en un párrafo o explicar.
+Puedes pensar. Al terminar, un solo JSON:
+{"action":"ola_v1","do":"guion","papeles":["quién corta la generación","el clic fuera dispara lo mismo que Escape","qué pasa con el archivo a medias"]}
+)";
+}
+
+std::string wave_guion_user_prompt(const WaveState& st) {
+  std::ostringstream out;
+  out << "Consulta:\n" << st.prompt << "\n\n";
+  out << "JSON de las preguntas al cerrar el pensamiento.\n";
+  return out.str();
+}
+
 std::string wave_cover_system_prompt() {
-  return R"(Elige 1–2 ids M* del atlas cuyo owns/nucleus cubra el objeto de la consulta
+  return R"(Elige 1–2 ids M* del atlas cuyo owns/nucleus cubra las preguntas del guion
 (latch + caller que lo enciende). Keep AMBOS si hay latch y caller.
+Una pregunta sin zona en el atlas no se inventa: no la metas en keep.
 PROHIBIDO drop del caller porque "no posee" el LED. Un 3º solo si es hilo rival.
 PROHIBIDO chrome/holes. PROHIBIDO inventar ids.
 PROHIBIDO prosa, recap, traducir el atlas o repetir estas reglas.
 
 El primer carácter de la respuesta es `{`. Nada antes. Un solo JSON:
-{"action":"ola_v1","do":"juicio","keep":["M1","M7"],"drop":["M3"],"why":"latch y caller cubren el objeto"}
+{"action":"ola_v1","do":"juicio","keep":["M1","M7"],"drop":["M3"],"why":"latch y caller cubren las preguntas"}
 )";
 }
 
 std::string wave_cover_user_prompt(const WaveState& st) {
   std::ostringstream out;
   out << "Consulta:\n" << st.prompt << "\n\n";
+  if (!st.papeles.empty()) {
+    out << "Preguntas:\n";
+    for (const auto& p : st.papeles) {
+      out << "- " << p << "\n";
+    }
+    out << "\n";
+  }
   out << st.atlas_md;
   if (!st.atlas_md.empty() && st.atlas_md.back() != '\n') {
     out << "\n";
@@ -3477,10 +4431,13 @@ PROHIBIDO un plan congelado de varias olas. PROHIBIDO inventar ids.
 El cuaderno de trabajo es la evidencia. Peeks y Follows se ACUMULAN (cuerpos, stacks y recortes). Atlas es hipótesis de retrieval. Mermaid no está aquí.
 Si un peek/follow ya está en ya leídos / ya seguidos, léelo en Peeks/Follows; NO lo pidas otra vez.
 Peek vale sobre ids, símbolos, menciones, hops, o un archivo listado en files (el header suele bastar para ver la API).
+El guion (preguntas de comprensión) ya está en el cuaderno; no lo reescribas ni lo sustituyas por el why. Cover keep cubre esas preguntas, no "el objeto".
+Una pregunta sin M* / sin nombre en lo visto → cerca. Afirmarla sin leerla es el mismo delito que citar un símbolo sin peek.
 
 do:
 - needles: agujas de MECANISMO (símbolos, APIs), no sinónimos del prompt. El runtime busca substring en id/path/symbol/stem. `stem::simbolo` busca el símbolo recortado a ese stem.
-- `in`: locus ya anclado, SIEMPRE un símbolo (`path.cpp:fn` o el nombre de la función). PROHIBIDO `in` de un .cpp/.hpp suelto y PROHIBIDO `in":"stem::módulo"` (eso es `campo`). Con `in`, grep DENTRO de ese cuerpo. hits=0 cuenta. Un campo (`foo_`) no es un nodo del grafo.
+- cerca: buscas un PAPEL no leído (quién cancela, si el hijo murió). `needles` aquí son conceptos de 1–3 palabras, NO identificadores y NO una frase. El runtime embebe solo esos términos (el why no entra) y rankea fichas en el barrio: peeks + keep + rayos, o `in` (M*, path:fn, stem, prefijo). Un `in` de directorio o .cpp despierta el grafo ahí (rank barato del inventario; archivo entero → fichas de impacto). hops=1 (tope 2). hits=0 SÍ es ausencia en ese barrio. hits=0 de needles-grep NO. Tras peek del latch, si el otro papel no tiene nombre, cerca.
+- `in` con needles-grep: locus ya anclado, SIEMPRE un símbolo (`path.cpp:fn`). PROHIBIDO `in` de un .cpp suelto y PROHIBIDO `in":"stem::módulo"` (eso es `campo`). Con cerca, `in` es un array de barrios (`[]` = inmediaciones).
 - cerrar: tú decides cuándo termina. Si entendiste el objeto (o qué falta), cierra. El runtime no te retiene porque Circuito esté incompleto.
 - No repitas needles que ya están en el cuaderno. `foo` y `stem::foo` son la misma aguja. Si hits=0 en el grafo, cambia de SÍMBOLO, no de cualificación. Un grep `in` distinto del mismo keyword sí vale.
 - No repitas un peek o follow que ya está en ya leídos / ya seguidos. Llamadores = hops del follow, no otro follow del mismo símbolo.
@@ -3489,19 +4446,17 @@ do:
 - follow: callers (quién llama) Y callees (qué llama, con cond). Stacks, ramas ON/CXL/OFF, mermaid. Hops peekables. No es el grep ni la firma del peek.
 - entre: camino dirigido en el registry entre DOS loci ya anclados (`from` → `to`). No es el mermaid de follow. `sin camino` también es evidencia. Hops intermedios peekables. Si no sale, prueba el inverso.
 - tanda: en UNA ola, needles y/o peeks y/o follows y/o entre. Tras cover: 1 latch + 1 caller (port), NO tres funciones del mismo LED. Un `in` malo no cancela los peeks.
-- cerrar: síntesis de lo entendido / lo que falta. Termina. Legal en cualquier ola de piloto. `huecos` opcional: nombres que afirmas y no leíste (no es una lista de deberes). No recetes un parche en un símbolo no leído.
+- cerrar: síntesis de lo entendido / lo que falta. Termina. Legal en cualquier ola de piloto. `huecos` opcional: nombres que afirmas y no leíste (no es una lista de deberes). No recetes un parche en un símbolo no leído. No cierres «no existe» sin un cerca de la pregunta que falta. Una pregunta del guion sin peek/cerca no está cubierto por el why.
 
-El bosquejo del Circuito une lo ya leído (peek o follow). Sin arista = islas. PROHIBIDO inventar el camino.
-- follow: callers (quién llama) Y callees (qué llama, con cond). Stacks, ramas ON/CXL/OFF, mermaid. Hops peekables. No es el grep ni la firma del peek.
-- entre: camino dirigido en el registry entre DOS loci ya anclados (`from` → `to`). No es el mermaid de follow. `sin camino` también es evidencia. Hops intermedios peekables. Si no sale, prueba el inverso.
-- tanda: en UNA ola, needles y/o peeks y/o follows y/o entre. Tras cover: 1 latch + 1 caller (port), NO tres funciones del mismo LED. Un `in` malo no cancela los peeks.
-- cerrar: síntesis de lo entendido / lo que falta. Termina. Legal en cualquier ola de piloto. `huecos` opcional: nombres que afirmas y no leíste (no es una lista de deberes). No recetes un parche en un símbolo no leído.
+El bosquejo del Circuito une lo leído y emite rayos a hops no leídos (callers/calls). Rayo = no leído; al peekearlo pasa a sólido. Un rayo que cambia de stem puede mostrar quién más llama a ese hop. PROHIBIDO inventar el camino.
 
 Campo opcional recorta el grep (stem o prefijo de path).
 
 JSON:
 {"action":"ola_v1","do":"needles","needles":["start_job"],"why":"cazar el arranque del objeto"}
 {"action":"ola_v1","do":"needles","in":"src/pkg/mod.cpp:run_job","needles":["stop_job","start_job"],"why":"¿todos los returns paran el trabajo?"}
+{"action":"ola_v1","do":"cerca","needles":["cancel work","user abort"],"in":[],"why":"vi el arranque; busco quién cancela"}
+{"action":"ola_v1","do":"cerca","needles":["child dead","restart after fail"],"in":["src/pkg"],"why":"el latch enciende; busco detección de caída"}
 {"action":"ola_v1","do":"juicio","keep":["M1"],"drop":["M2"],"why":"esta zona cubre el objeto de la consulta"}
 {"action":"ola_v1","do":"peek","peeks":["M1","src/pkg/mod.hpp"],"why":"cuerpo del ancla y API del header"}
 {"action":"ola_v1","do":"follow","follows":["M1"],"why":"flujo: quién llama y a quién llama"}
@@ -3518,9 +4473,21 @@ std::string wave_pilot_user_prompt(const WaveState& st) {
            "El runtime cierra después si hace falta.\n\n";
   } else if (wave_circuit_complete(st)) {
     out << "Circuito ON y OFF anclado (hecho, no vallado). Cierra si te basta.\n\n";
-  } else if (st.wave_n <= 1 && !st.opened_ids.empty()) {
+  } else if (!st.opened_ids.empty() && st.peeks_done.empty()) {
     out << "Tras cover: tanda 1 latch + 1 caller (port de la ficha). "
            "No tres peeks del mismo archivo del LED.\n\n";
+  } else if (!st.peeks_done.empty() && st.cerca_log.empty() && !wave_is_last_propose(st)) {
+    out << "Si buscas un papel no leído (cancel, fallo, OFF) y no tiene nombre en lo "
+           "visto, cerca con needles de concepto (1–3 palabras), no agujas de id.\n\n";
+  }
+  const auto miss = wave_guion_uncovered(st);
+  if (!miss.empty()) {
+    out << "Preguntas del guion sin peek/cerca:";
+    for (const auto& p : miss) {
+      out << " `" << p << "`";
+    }
+    out << ". Un papel sin nombre en lo visto → cerca. Afirmarlo en el why sin leerlo "
+           "no cuenta.\n\n";
   }
   out << "Elige UNA ola. No copies plantillas.\n\n";
   out << "## Consulta\n" << st.prompt << "\n\n";
@@ -3782,7 +4749,16 @@ void wave_attach_cierre_caption(WaveState* st) {
       cap << " `" << a << "`";
     }
   }
-  cap << "\n(El why no es evidencia de lo no leído.)\n\n";
+  cap << "\n(El why no es evidencia de lo no leído.)\n";
+  const auto miss = wave_guion_uncovered(*st);
+  if (!miss.empty()) {
+    cap << "Preguntas sin evidencia:";
+    for (const auto& p : miss) {
+      cap << " `" << p << "`";
+    }
+    cap << "\n(Afirmar un papel no leído no es evidencia.)\n";
+  }
+  cap << "\n";
   st->cierre = cap.str() + st->cierre;
 }
 
@@ -3805,6 +4781,29 @@ nlohmann::json wave_state_to_json(const WaveState& st) {
                            {"added", rec.added},
                            {"ids", rec.ids}});
   }
+  nlohmann::json cerca_log = nlohmann::json::array();
+  for (const auto& rec : st.cerca_log) {
+    nlohmann::json rows = nlohmann::json::array();
+    for (const auto& row : rec.rows) {
+      rows.push_back({{"id", row.id},
+                      {"path", row.path},
+                      {"symbol", row.symbol},
+                      {"stem", row.stem},
+                      {"kind", row.kind},
+                      {"cosine", row.cosine},
+                      {"hop", row.hop},
+                      {"card", row.card},
+                      {"already_read", row.already_read}});
+    }
+    cerca_log.push_back({{"needles", rec.needles},
+                         {"in", rec.in_scopes},
+                         {"query", rec.query},
+                         {"hops", rec.hops},
+                         {"hits", rec.hits},
+                         {"added", rec.added},
+                         {"wake", rec.wake_note},
+                         {"rows", rows}});
+  }
   nlohmann::json olas_log = nlohmann::json::array();
   for (const auto& e : st.olas_log) {
     olas_log.push_back(
@@ -3824,11 +4823,13 @@ nlohmann::json wave_state_to_json(const WaveState& st) {
   }
   return {{"prompt", st.prompt},
           {"campo", st.campo},
+          {"papeles", st.papeles},
           {"atlas_md", st.atlas_md},
           {"opened_md", st.opened_md},
           {"opened_ids", st.opened_ids},
           {"candidatas", cands},
           {"needles_log", needles_log},
+          {"cerca_log", cerca_log},
           {"olas_log", olas_log},
           {"mencionados", st.mencionados},
           {"zonas", zonas},
@@ -3869,8 +4870,11 @@ nlohmann::json wave_ola_to_json(const WaveOla& ola) {
           {"from", ola.from},
           {"to", ola.to},
           {"in", ola.in_locus},
+          {"in_scopes", ola.in_scopes},
+          {"hops", ola.hops},
           {"why", ola.why},
-          {"huecos", ola.huecos}};
+          {"huecos", ola.huecos},
+          {"papeles", ola.papeles}};
 }
 
 }  // namespace tuide

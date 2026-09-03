@@ -104,6 +104,7 @@ L2BrainResult LocalL2Brain::propose(const L2BrainRequest& req, std::atomic<bool>
   const LlamaCompletionResult cr = backend_->complete(creq, cancel);
   out.ok = cr.ok;
   out.text = cr.text;
+  out.raw = cr.text;
   out.error = cr.error;
   return out;
 }

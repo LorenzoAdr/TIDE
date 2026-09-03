@@ -18,6 +18,7 @@
 #include "ai/l2_effect_summary.hpp"
 #include "ai/l2_effect_slice.hpp"
 #include "ai/l2_effect_registry.hpp"
+#include "ai/l2_cerca_wake.hpp"
 #include "ai/l2_entityness.hpp"
 #include "ai/l2_problem_frame.hpp"
 #include "ai/l2_explore_a.hpp"
@@ -39,8 +40,11 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <queue>
 #include <unistd.h>
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 namespace fs = std::filesystem;
 using tuide::AiSettings;
@@ -7078,6 +7082,256 @@ int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int
   return 0;
 }
 
+std::string cerca_ascii_lower(std::string s) {
+  for (char& c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+std::vector<float> cerca_blob_vec(const void* p, int nbytes) {
+  std::vector<float> v;
+  if (p == nullptr || nbytes < static_cast<int>(sizeof(float))) {
+    return v;
+  }
+  const std::size_t n = static_cast<std::size_t>(nbytes) / sizeof(float);
+  v.resize(n);
+  std::memcpy(v.data(), p, n * sizeof(float));
+  return v;
+}
+
+bool cerca_scope_match_one(const tuide::RegistryNodeRow& n, const std::string& sc) {
+  const std::string want = cerca_ascii_lower(sc);
+  if (want.empty()) {
+    return false;
+  }
+  const std::string stem = cerca_ascii_lower(n.stem);
+  const std::string path = cerca_ascii_lower(n.path);
+  const std::string id = cerca_ascii_lower(n.id);
+  const std::string sym = cerca_ascii_lower(n.symbol);
+  if (!stem.empty() && stem == want) {
+    return true;
+  }
+  if (!path.empty() && path.find(want) != std::string::npos) {
+    return true;
+  }
+  if (!sym.empty() && (sym == want || id.find(want) != std::string::npos)) {
+    return true;
+  }
+  return false;
+}
+
+bool cerca_scope_match(const tuide::RegistryNodeRow& n, const std::vector<std::string>& in_scopes) {
+  if (in_scopes.empty()) {
+    return true;
+  }
+  for (const auto& sc : in_scopes) {
+    if (cerca_scope_match_one(n, sc)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string cerca_clip_card(std::string p) {
+  for (char& c : p) {
+    if (c == '\n' || c == '\r') {
+      c = ' ';
+    }
+  }
+  while (!p.empty() && p.back() == ' ') {
+    p.pop_back();
+  }
+  if (p.size() > 96) {
+    p.resize(96);
+    p += "…";
+  }
+  return p;
+}
+
+void cerca_bfs_ids(tuide::EffectRegistry* r,
+                   const std::vector<std::pair<std::string, std::string>>& seed_fns, int hops,
+                   std::unordered_map<std::string, int>* dist) {
+  if (r == nullptr || dist == nullptr) {
+    return;
+  }
+  std::queue<std::string> q;
+  auto push0 = [&](const std::string& id) {
+    if (id.empty() || dist->count(id) != 0) {
+      return;
+    }
+    tuide::RegistryNodeRow row;
+    std::string err;
+    if (!tuide::registry_get(r, id, &row, &err) || !row.tombstone_reason.empty()) {
+      return;
+    }
+    (*dist)[id] = 0;
+    q.push(id);
+  };
+  for (const auto& s : seed_fns) {
+    if (s.second.empty()) {
+      continue;
+    }
+    std::string id = tuide::registry_canonical_fn_id(r->workspace_root, s.first, s.second);
+    push0(id);
+    if (dist->count(id) == 0 && !s.second.empty()) {
+      // Tail lookup via neighbors is skipped; try id as the symbol alone.
+      push0(s.second);
+    }
+  }
+  const int max_hops = std::max(0, hops);
+  const int cap = 400;
+  while (!q.empty() && static_cast<int>(dist->size()) < cap) {
+    const std::string cur = q.front();
+    q.pop();
+    const int d = (*dist)[cur];
+    if (d >= max_hops) {
+      continue;
+    }
+    std::vector<tuide::RegistryNeighbor> nbs;
+    std::string err;
+    if (!tuide::registry_neighbors(r, cur, {}, "both", &nbs, &err)) {
+      continue;
+    }
+    for (const auto& nb : nbs) {
+      if (nb.node.id.empty() || !nb.node.tombstone_reason.empty()) {
+        continue;
+      }
+      if (nb.node.kind == "ctrl") {
+        continue;
+      }
+      if (dist->count(nb.node.id) != 0) {
+        continue;
+      }
+      (*dist)[nb.node.id] = d + 1;
+      q.push(nb.node.id);
+      if (static_cast<int>(dist->size()) >= cap) {
+        break;
+      }
+    }
+  }
+}
+
+bool cerca_score_embeddings(tuide::EffectRegistry* r, const std::vector<float>& qvec,
+                            const std::string& model_key,
+                            const std::unordered_map<std::string, int>* allowed,
+                            const std::vector<std::string>& in_scopes,
+                            std::vector<tuide::WaveCercaHit>* hits, std::string* err) {
+  if (r == nullptr || r->db == nullptr || hits == nullptr || qvec.empty()) {
+    if (err) {
+      *err = "cerca: score args";
+    }
+    return false;
+  }
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(r->db,
+                         "SELECT e.node_id, e.blob, n.kind, n.path, n.symbol, n.stem, n.card_json "
+                         "FROM embeddings e JOIN nodes n ON n.id=e.node_id "
+                         "WHERE e.model=?1 AND n.tombstone_reason=''",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    if (err) {
+      *err = "cerca: embeddings";
+    }
+    return false;
+  }
+  sqlite3_bind_text(st, 1, model_key.c_str(), -1, SQLITE_TRANSIENT);
+  struct Scored {
+    tuide::RegistryNodeRow node;
+    float cos = 0.f;
+    int hop = 0;
+  };
+  std::vector<Scored> scored;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    const unsigned char* idp = sqlite3_column_text(st, 0);
+    if (idp == nullptr) {
+      continue;
+    }
+    const std::string id = reinterpret_cast<const char*>(idp);
+    auto col = [&](int i) -> std::string {
+      const unsigned char* p = sqlite3_column_text(st, i);
+      return p ? reinterpret_cast<const char*>(p) : "";
+    };
+    const std::string kind = col(2);
+    if (kind == "ctrl") {
+      continue;
+    }
+    tuide::RegistryNodeRow n;
+    n.id = id;
+    n.kind = kind;
+    n.path = col(3);
+    n.symbol = col(4);
+    n.stem = col(5);
+    n.card_json = col(6);
+    int hop = 0;
+    if (allowed != nullptr) {
+      const auto it = allowed->find(id);
+      if (it == allowed->end()) {
+        continue;
+      }
+      hop = it->second;
+    } else if (!cerca_scope_match(n, in_scopes)) {
+      continue;
+    }
+    const std::vector<float> v =
+        cerca_blob_vec(sqlite3_column_blob(st, 1), sqlite3_column_bytes(st, 1));
+    Scored s;
+    s.node = std::move(n);
+    s.cos = tuide::cosine_similarity(qvec, v);
+    s.hop = hop;
+    scored.push_back(std::move(s));
+  }
+  sqlite3_finalize(st);
+  std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) {
+    return a.cos > b.cos;
+  });
+  std::unordered_map<std::string, int> stem_n;
+  std::unordered_map<std::string, int> scope_n;
+  const int per_scope = in_scopes.size() >= 2 ? 3 : 8;
+  const int per_stem = in_scopes.size() >= 2 ? 8 : 3;
+  for (const auto& s : scored) {
+    if (static_cast<int>(hits->size()) >= tuide::kWaveCercaMaxHits) {
+      break;
+    }
+    if (in_scopes.size() >= 2) {
+      bool room = false;
+      for (const auto& sc : in_scopes) {
+        if (cerca_scope_match_one(s.node, sc) && scope_n[sc] < per_scope) {
+          room = true;
+          break;
+        }
+      }
+      if (!room) {
+        continue;
+      }
+      for (const auto& sc : in_scopes) {
+        if (cerca_scope_match_one(s.node, sc)) {
+          ++scope_n[sc];
+        }
+      }
+    } else {
+      const std::string stem = s.node.stem;
+      if (!stem.empty() && stem_n[stem] >= per_stem) {
+        continue;
+      }
+      if (!stem.empty()) {
+        ++stem_n[stem];
+      }
+    }
+    tuide::WaveCercaHit w;
+    w.id = s.node.id;
+    w.path = s.node.path;
+    w.symbol = s.node.symbol;
+    w.stem = s.node.stem;
+    w.kind = s.node.kind;
+    w.cosine = s.cos;
+    w.hop = s.hop;
+    w.card = cerca_clip_card(
+        tuide::registry_card_passage(s.node, tuide::RegistryMatchSurface::CardAttrs));
+    hits->push_back(std::move(w));
+  }
+  return true;
+}
+
 int run_wave_explore(const std::string& root, int argc, char** argv) {
   std::string out_arg;
   std::string case_id;
@@ -7123,7 +7377,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     } else if (a == "-h" || a == "--help") {
       std::cerr << "wave-explore --out DIR [--case ID|--prompt TEXT] [--max-waves N]\n"
                    "  [--cards FILE | --cards-from DIR] [--think off|low|medium|high|close]\n"
-                   "  Piloto adaptativo: needles | juicio | peek | cerrar. Una ola por propose.\n"
+                   "  Piloto adaptativo: needles | cerca | juicio | peek | follow | entre | cerrar.\n"
+                   "  Una ola por propose.\n"
                    "  --think fija un nivel para todas las olas (off|low|medium|high).\n"
                    "  --think close: piloto=off; el primer cerrar se re-lanza 1× con medium "
                    "(cerrar, peek del hueco, o follow de un locus anclado). "
@@ -7227,6 +7482,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     return 1;
   }
   tuide::WaveOps ops;
+  tuide::EmbeddingBackend embed_backend;
+  std::string embed_err;
   ops.search_needle = [&](const std::string& needle, const std::string& campo) {
     tuide::RegistryQueryOpts opts;
     opts.match_surface = tuide::RegistryMatchSurface::NodeId;
@@ -7255,6 +7512,92 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       hits.push_back(std::move(w));
     }
     return hits;
+  };
+  ops.search_cerca = [&](const std::string& query,
+                         const std::vector<std::pair<std::string, std::string>>& seed_fns,
+                         const std::vector<std::string>& boost_stems,
+                         const std::vector<std::string>& in_scopes, int hops,
+                         std::vector<tuide::WaveCercaHit>* hits, std::string* qerr,
+                         std::string* note) {
+    (void)boost_stems;
+    if (hits == nullptr) {
+      if (qerr) {
+        *qerr = "hits nulo";
+      }
+      return false;
+    }
+    hits->clear();
+    if (in_scopes.empty() && seed_fns.empty() && boost_stems.empty()) {
+      if (qerr) {
+        *qerr = "cerca sin semillas";
+      }
+      return false;
+    }
+    if (!embed_backend.ready()) {
+      if (!ensure_embed_backend(root, &embed_backend, &embed_err)) {
+        if (qerr) {
+          *qerr = embed_err.empty() ? "cerca: embed no listo" : embed_err;
+        }
+        return false;
+      }
+    }
+    auto one = [&](bool is_query, const std::string& text, std::vector<float>* outv) {
+      return is_query ? embed_backend.embed_query(text, outv, &embed_err)
+                      : embed_backend.embed_passage(text, outv, &embed_err);
+    };
+    auto many = [&](const std::vector<std::string>& texts, std::vector<std::vector<float>>* outv) {
+      return embed_backend.embed_passages(texts, outv, &embed_err);
+    };
+    if (!in_scopes.empty()) {
+      tuide::CercaWakeOpts wopts;
+      wopts.query = query;
+      wopts.embed = one;
+      wopts.embed_many = many;
+      wopts.deps.workspace_root = root;
+      wopts.deps.search = [root](const std::string& symbol) {
+        return harness_rg_symbol(root, symbol);
+      };
+      tuide::CercaWakeReport wrep;
+      std::string werr;
+      if (!tuide::registry_wake_cerca_scopes(&reg, in_scopes, wopts, &wrep, &werr)) {
+        if (qerr) {
+          *qerr = werr.empty() ? "cerca: despertar barrio falló" : werr;
+        }
+        return false;
+      }
+      if (note) {
+        *note = wrep.note;
+      }
+      if (!wrep.note.empty() && wrep.note != "wake=0") {
+        std::cerr << "wave-explore: cerca " << wrep.note << "\n";
+      }
+    }
+    std::string err2;
+    std::vector<float> qvec;
+    if (!embed_backend.embed_query(query, &qvec, &err2) || qvec.empty()) {
+      if (qerr) {
+        *qerr = err2.empty() ? "cerca: embed query falló" : err2;
+      }
+      return false;
+    }
+    const std::string model_key = tuide::registry_embed_model_key(
+        tuide::kRegistryEmbedModelDefault, tuide::RegistryMatchSurface::CardFull);
+    std::unordered_map<std::string, int> dist;
+    const std::unordered_map<std::string, int>* allowed = nullptr;
+    if (in_scopes.empty()) {
+      cerca_bfs_ids(&reg, seed_fns, hops, &dist);
+      if (dist.empty()) {
+        if (qerr) {
+          *qerr = "cerca: barrio vacío";
+        }
+        return false;
+      }
+      allowed = &dist;
+    }
+    if (!cerca_score_embeddings(&reg, qvec, model_key, allowed, in_scopes, hits, qerr)) {
+      return false;
+    }
+    return true;
   };
   ops.peek_code = [&](const std::string& peek, std::string* text, std::string* peek_err) {
     if (text == nullptr) {
@@ -7460,18 +7803,29 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
   bool escalate_think = false;
   bool close_audit_done = false;
   if (close_audit) {
-    std::cerr << "wave-explore: think=close (piloto=off; primer cerrar → 1× medium; "
-                 "cerrar / peek hueco / follow anclado)\n";
+    std::cerr << "wave-explore: think=close (guion=high; cover/piloto=off; "
+                 "primer cerrar → 1× medium; cerrar / peek hueco / follow anclado)\n";
   } else if (!think_override) {
-    std::cerr << "wave-explore: think=hybrid (cover=off, piloto=off, "
+    std::cerr << "wave-explore: think=hybrid (guion=high, cover=off, piloto=off, "
                  "atasco→medium; cerrar del piloto siempre vale)\n";
   }
   for (int i = 0; i < max_waves && !state.done; ++i) {
     state.propose_n = i + 1;
-    const bool cover = tuide::wave_needs_cover(state);
-    const bool last_propose = !cover && state.propose_n >= max_waves;
+    const bool guion = tuide::wave_needs_guion(state);
+    const bool cover = !guion && tuide::wave_needs_cover(state);
+    const bool last_propose = !guion && !cover && state.propose_n >= max_waves;
     tuide::L2BrainRequest req;
-    if (cover) {
+    if (guion) {
+      req.system_prompt = tuide::wave_guion_system_prompt();
+      req.user_prompt = tuide::wave_guion_user_prompt(state);
+      if (consecutive_fail > 0) {
+        req.user_prompt =
+            "Consulta:\n" + state.prompt +
+            "\n\nSOLO el JSON. El primer carácter es `{`. Cero prosa.\n";
+      }
+      req.phase = "causal_wave_guion";
+      req.max_tokens = 384;
+    } else if (cover) {
       req.system_prompt = tuide::wave_cover_system_prompt();
       req.user_prompt = tuide::wave_cover_user_prompt(state);
       if (consecutive_fail > 0) {
@@ -7488,7 +7842,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       req.max_tokens =
           std::min(512, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512);
     }
-    const bool escalate_this = !think_override && !cover && escalate_think;
+    const bool escalate_this = !think_override && !cover && !guion && escalate_think;
     escalate_think = false;
     if (escalate_this) {
       ++escalate_n;
@@ -7507,7 +7861,11 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
     req.temperature = 0.1f;
     tuide::L2ThinkProfile think;
-    if (think_override) {
+    if (guion) {
+      // CoT de cláusulas; max_tokens reserva JSON tras el budget (apply_think_profile suma).
+      // "primer carácter `{`" está prohibido aquí: el think va antes del JSON.
+      think = tuide::think_profile(tuide::L2ThinkLevel::High);
+    } else if (think_override) {
       think = tuide::think_profile(think_level);
     } else if (cover) {
       // Qwen3.6 with thinking on dumps CoT into content and stops at the
@@ -7528,7 +7886,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
         << " enable=" << (think.enable_thinking ? "yes" : "no") << "\n";
     max_user_chars = std::max(max_user_chars, static_cast<int>(req.user_prompt.size()));
     const auto response = brain.propose(req, nullptr);
-    std::ofstream(wave_dir / "raw.txt") << response.text;
+    std::ofstream(wave_dir / "raw.txt") << (response.raw.empty() ? response.text : response.raw);
     auto force_cerrar = [&]() {
       tuide::WaveOla cl;
       cl.ok = true;
@@ -7628,7 +7986,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       }
     }
     bool did_close_audit = false;
-    if (close_audit && !close_audit_done && !cover && ola.ok &&
+    if (close_audit && !close_audit_done && !cover && !guion && ola.ok &&
         ola.do_kind == tuide::WaveDo::Cerrar && !think.enable_thinking) {
       close_audit_done = true;
       did_close_audit = true;
@@ -7636,6 +7994,17 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       std::ofstream(wave_dir / "cerrar_draft.json")
           << json_dump_safe(tuide::wave_ola_to_json(draft)) << "\n";
       tuide::L2BrainRequest audit_req = req;
+      std::string audit_extra;
+      const auto miss = tuide::wave_guion_uncovered(state);
+      if (!miss.empty()) {
+        audit_extra = "Preguntas del guion sin peek/cerca:";
+        for (const auto& p : miss) {
+          audit_extra += " `" + p + "`";
+        }
+        audit_extra +=
+            ".\nAfirmarlos en el why sin leerlos no cuenta. Si falta uno y no tiene "
+            "nombre, do=cerrar (el piloto ya tuvo olas); no inventes un peek.\n";
+      }
       audit_req.user_prompt =
           "Revisión de cierre (UNA tirada). Borrador:\n" + json_dump_safe(tuide::wave_ola_to_json(draft), 0) +
           "\n\n¿El why está cubierto por Peeks/Follows, o falta el flujo de un locus anclado?\n"
@@ -7645,8 +8014,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
           "o nombrado en el why → UN follow de ESE locus (1; 2 solo si son callers del Circuito).\n"
           "PROHIBIDO needles, in de archivo, tanda, juicio, peek de algo no nombrado.\n"
           "Si dudas, do=cerrar. Un gesto inválido se descarta y se aplica el borrador.\n"
-          "No reinicies. No recites el atlas. No abras un plan de varias olas.\n\n" +
-          req.user_prompt;
+          "No reinicies. No recites el atlas. No abras un plan de varias olas.\n" +
+          audit_extra + "\n" + req.user_prompt;
       think = tuide::think_profile(tuide::L2ThinkLevel::Medium);
       tuide::apply_think_profile(&audit_req, think);
       std::ofstream(wave_dir / "audit_user.md") << audit_req.user_prompt;
@@ -7654,7 +8023,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
           << tuide::l2_think_level_name(think.level) << " budget=" << think.budget
           << " enable=" << (think.enable_thinking ? "yes" : "no") << "\n";
       const auto audit_response = brain.propose(audit_req, nullptr);
-      std::ofstream(wave_dir / "audit_raw.txt") << audit_response.text;
+      std::ofstream(wave_dir / "audit_raw.txt")
+          << (audit_response.raw.empty() ? audit_response.text : audit_response.raw);
       if (audit_response.ok) {
         auto audit_ola = tuide::wave_parse_ola(audit_response.text);
         if (audit_ola.ok && tuide::wave_close_audit_accept(draft, audit_ola, state)) {
@@ -7673,7 +8043,10 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     std::ofstream(wave_dir / "ola.json") << json_dump_safe(tuide::wave_ola_to_json(ola)) << "\n";
     std::string apply_err;
     bool ok = false;
-    if (cover && ola.ok && ola.do_kind != tuide::WaveDo::Juicio) {
+    if (guion && ola.ok && ola.do_kind != tuide::WaveDo::Guion) {
+      apply_err = "ola 0: solo guion (papeles de la consulta)";
+      state.last_error = apply_err;
+    } else if (cover && ola.ok && ola.do_kind != tuide::WaveDo::Juicio) {
       apply_err = "ola 0: solo juicio keep (ampliar fichas)";
       state.last_error = apply_err;
     } else if (cover && ola.ok && ola.keep.empty()) {
@@ -7716,7 +8089,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       ola = force_cerrar();
       ok = tuide::wave_apply(&state, ola, ops, &apply_err);
     }
-    if (!ok && !think_override && !cover && !last_propose &&
+    if (!ok && !think_override && !cover && !guion && !last_propose &&
         !tuide::wave_circuit_complete(state)) {
       escalate_think = true;
     }

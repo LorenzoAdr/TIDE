@@ -157,7 +157,8 @@ L2BrainResult RemoteL2Brain::propose(const L2BrainRequest& req, std::atomic<bool
 
   std::string content;
   std::string perr;
-  if (!parse_llama_chat_completion(raw.str(), &content, &perr)) {
+  std::string trace;
+  if (!parse_llama_chat_completion(raw.str(), &content, &perr, &trace)) {
     out.error = perr.empty() ? "respuesta remote sin content" : perr;
     return out;
   }
@@ -166,6 +167,7 @@ L2BrainResult RemoteL2Brain::propose(const L2BrainRequest& req, std::atomic<bool
     return out;
   }
   out.ok = true;
+  out.raw = trace.empty() ? content : trace;
   const std::string extracted = extract_action_json(content);
   out.text = extracted.empty() ? content : extracted;
   return out;

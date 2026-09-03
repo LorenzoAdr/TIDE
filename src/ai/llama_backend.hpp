@@ -41,7 +41,9 @@ struct LlamaCompletionResult {
 };
 
 // Extract assistant content from llama-server /v1/chat/completions JSON.
-bool parse_llama_chat_completion(const std::string& body, std::string* content, std::string* error);
+// trace (optional): reasoning_content + content, before JSON salvage.
+bool parse_llama_chat_completion(const std::string& body, std::string* content, std::string* error,
+                                 std::string* trace = nullptr);
 
 void attach_thinking_json(nlohmann::json& body, const std::optional<bool>& enable_thinking,
                           int reasoning_budget);

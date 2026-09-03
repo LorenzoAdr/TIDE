@@ -53,6 +53,9 @@ inline L2ThinkProfile think_profile_for(std::string_view phase, bool has_pack,
   if (phase == "edit" || phase == "causal_wave_cover") {
     return think_profile(L2ThinkLevel::Off);
   }
+  if (phase == "causal_wave_guion") {
+    return think_profile(L2ThinkLevel::High);
+  }
   if (phase == "explore_a" || phase == "causal_pilot_worker" ||
       phase == "causal_zone_judge" || phase == "causal_atlas_survey" ||
       phase == "causal_atlas_cover" || phase == "causal_zone_triage" ||

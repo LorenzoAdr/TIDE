@@ -351,6 +351,21 @@ std::string json_message_text(const nlohmann::json& msg, const char* key) {
   return {};
 }
 
+std::string message_think_trace(const nlohmann::json& msg) {
+  std::string reasoning = json_message_text(msg, "reasoning_content");
+  if (reasoning.empty()) {
+    reasoning = json_message_text(msg, "reasoning");
+  }
+  const std::string content = json_message_text(msg, "content");
+  if (reasoning.empty()) {
+    return content;
+  }
+  if (content.empty()) {
+    return reasoning;
+  }
+  return reasoning + "\n---- content ----\n" + content;
+}
+
 std::string pick_assistant_text(const nlohmann::json& msg) {
   const std::string content = json_message_text(msg, "content");
   std::string reasoning = json_message_text(msg, "reasoning_content");
@@ -406,7 +421,8 @@ nlohmann::json build_chat_completions_body(const LlamaCompletionRequest& req,
   return body;
 }
 
-bool parse_llama_chat_completion(const std::string& body, std::string* content, std::string* error) {
+bool parse_llama_chat_completion(const std::string& body, std::string* content, std::string* error,
+                                 std::string* trace) {
   if (content == nullptr) {
     if (error) {
       *error = "content nullptr";
@@ -429,6 +445,9 @@ bool parse_llama_chat_completion(const std::string& body, std::string* content, 
     }
     const auto& c0 = j["choices"][0];
     if (c0.contains("message") && c0["message"].is_object()) {
+      if (trace != nullptr) {
+        *trace = message_think_trace(c0["message"]);
+      }
       const std::string text = pick_assistant_text(c0["message"]);
       if (!text.empty()) {
         *content = text;
@@ -437,6 +456,9 @@ bool parse_llama_chat_completion(const std::string& body, std::string* content, 
     }
     if (c0.contains("text") && c0["text"].is_string()) {
       *content = c0["text"].get<std::string>();
+      if (trace != nullptr && (trace->empty())) {
+        *trace = *content;
+      }
       return true;
     }
     if (error) {

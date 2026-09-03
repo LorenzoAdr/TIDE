@@ -27,6 +27,7 @@ struct L2BrainRequest {
 struct L2BrainResult {
   bool ok = false;
   std::string text;
+  std::string raw;  // assistant message before JSON extract (includes thinking)
   std::string error;
   std::string backend;  // "local" | "remote" | "scripted"
 };

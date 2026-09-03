@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -27,9 +28,22 @@ inline constexpr int kWaveWorkFollowChars = 4000;
 inline constexpr int kWaveWorkInChars = 2000;
 inline constexpr int kWaveCoverPeekMax = 4;
 inline constexpr int kWavePeekNeighborMax = 2;
+inline constexpr int kWaveSketchRaysPerPeek = 2;
+inline constexpr int kWaveSketchFanInMax = 2;
 inline constexpr int kWaveSketchEdgesMax = 12;
+inline constexpr int kWaveCercaMaxNeedles = 6;
+inline constexpr int kWaveCercaMinNeedles = 1;
+inline constexpr int kWaveCercaMaxHits = 8;
+inline constexpr int kWaveCercaHopsDefault = 1;
+inline constexpr int kWaveCercaHopsMax = 2;
+inline constexpr int kWaveCercaMaxSeeds = 12;
+inline constexpr int kWaveGuionMin = 2;
+inline constexpr int kWaveGuionMax = 6;
+inline constexpr int kWaveGuionWordsMin = 2;
+inline constexpr int kWaveGuionWordsMax = 16;
+inline constexpr int kWaveGuionPapelChars = 120;
 
-enum class WaveDo { Needles, Juicio, Peek, Follow, Entre, Tanda, Cerrar, Invalid };
+enum class WaveDo { Needles, Juicio, Peek, Follow, Entre, Tanda, Cerca, Guion, Cerrar, Invalid };
 
 inline const char* wave_do_name(WaveDo d) {
   switch (d) {
@@ -45,6 +59,10 @@ inline const char* wave_do_name(WaveDo d) {
       return "entre";
     case WaveDo::Tanda:
       return "tanda";
+    case WaveDo::Cerca:
+      return "cerca";
+    case WaveDo::Guion:
+      return "guion";
     case WaveDo::Cerrar:
       return "cerrar";
     case WaveDo::Invalid:
@@ -71,6 +89,12 @@ inline WaveDo wave_do_parse(const std::string& s) {
   }
   if (s == "tanda") {
     return WaveDo::Tanda;
+  }
+  if (s == "cerca") {
+    return WaveDo::Cerca;
+  }
+  if (s == "guion") {
+    return WaveDo::Guion;
   }
   if (s == "cerrar") {
     return WaveDo::Cerrar;
@@ -101,6 +125,29 @@ struct WaveNeedleLog {
   std::vector<std::string> ids;
 };
 
+struct WaveCercaHit {
+  std::string id;
+  std::string path;
+  std::string symbol;
+  std::string stem;
+  std::string kind;
+  float cosine = 0.f;
+  int hop = 0;
+  std::string card;
+  bool already_read = false;
+};
+
+struct WaveCercaLog {
+  std::vector<std::string> needles;
+  std::vector<std::string> in_scopes;
+  std::string query;
+  int hops = 1;
+  int hits = 0;
+  int added = 0;
+  std::vector<WaveCercaHit> rows;
+  std::string wake_note;  // dir/archivo frío → inventario barato + oleada
+};
+
 struct WaveOlaLog {
   int n = 0;
   std::string do_name;
@@ -112,12 +159,15 @@ struct WavePeekNeighbors {
   std::string loc;
   std::vector<std::string> callers;
   std::vector<std::string> callees;
+  // Other callers of a cross-stem callee (fan-in of the exported hop).
+  std::string export_loc;
+  std::vector<std::string> export_callers;
 };
 
 struct WaveSketchLink {
   std::string from;
   std::string to;
-  std::string via;  // call | follow | entre
+  std::string via;  // call | follow | entre | ray
 };
 
 struct WaveOla {
@@ -134,19 +184,24 @@ struct WaveOla {
   std::string from;
   std::string to;
   std::string in_locus;  // grep needles inside this anchored function
+  std::vector<std::string> in_scopes;  // cerca: barrios (M*, path:fn, stem, prefijo)
+  int hops = 0;                        // cerca: 0 = default 1; tope 2
   std::string why;
   std::vector<std::string> huecos;  // optional: claimed unread (cerrar)
+  std::vector<std::string> papeles;  // guion: preguntas pequeñas de comprensión (no ids)
   nlohmann::json raw;
 };
 
 struct WaveState {
   std::string prompt;
   std::string campo;
+  std::vector<std::string> papeles;  // guion fijo; se pega en el cuaderno todas las olas
   std::string atlas_md;  // zone map (causal_atlas_v1 if seeded from cards)
   std::string opened_md;  // fichas ampliadas tras la ronda cover
   std::vector<std::string> opened_ids;
   std::vector<WaveHit> candidatas;
   std::vector<WaveNeedleLog> needles_log;
+  std::vector<WaveCercaLog> cerca_log;
   std::vector<WaveOlaLog> olas_log;
   std::vector<std::string> mencionados;
   std::vector<WaveZone> zonas;
@@ -195,6 +250,15 @@ struct WaveOps {
                      const std::vector<std::string>& needles, std::string* md,
                      std::vector<int>* hits_per_needle, std::string* err)>
       search_in_body;
+  // Semantic scan in a barrio: embed joined concept needles, rank cards, expand hops.
+  // seed_fns = {path, symbol}; in_scopes empty = inmediaciones already baked into seeds.
+  // note: opcional; el runtime lo pega al cuaderno (despertar dir/archivo).
+  std::function<bool(const std::string& query,
+                     const std::vector<std::pair<std::string, std::string>>& seed_fns,
+                     const std::vector<std::string>& boost_stems,
+                     const std::vector<std::string>& in_scopes, int hops,
+                     std::vector<WaveCercaHit>* hits, std::string* err, std::string* note)>
+      search_cerca;
 };
 
 WaveOla wave_parse_ola(const std::string& raw);
@@ -205,6 +269,13 @@ const WaveHit* wave_find_hit(const std::vector<WaveHit>& hits, const std::string
 void wave_merge_hits(WaveState* st, const std::vector<WaveHit>& incoming);
 std::vector<std::string> wave_needle_search_keys(const std::string& needle);
 std::string wave_needle_stem_hint(const std::string& needle);
+bool wave_cerca_concept_ok(const std::string& needle);
+std::string wave_cerca_query(const std::vector<std::string>& needles);
+bool wave_cerca_needles_ok(const std::vector<std::string>& needles, std::string* err);
+bool wave_guion_papel_ok(const std::string& papel);
+bool wave_guion_papeles_ok(const std::vector<std::string>& papeles, std::string* err);
+std::vector<std::string> wave_guion_uncovered(const WaveState& st);
+std::string wave_guion_markdown(const WaveState& st);
 std::vector<std::string> wave_extract_call_names(const std::string& text);
 
 struct WaveOutgoingCall {
@@ -220,6 +291,7 @@ int wave_seed_from_atlas(WaveState* st, const nlohmann::json& payload);
 int wave_ingest_zone_symbols(WaveState* st, const nlohmann::json& payload,
                              const std::vector<std::string>& zone_ids);
 void wave_retain_atlas_ids(WaveState* st, const std::vector<std::string>& ids);
+bool wave_needs_guion(const WaveState& st);
 bool wave_needs_cover(const WaveState& st);
 int wave_cover_restore_caller(WaveOla* ola, const WaveState& st);
 bool wave_close_audit_accept(const WaveOla& draft, const WaveOla& audit,
@@ -244,6 +316,8 @@ std::string wave_circuit_cierre(const WaveState& st);
 // True on the last loop slot (propose_n / wave_n >= max). Failed olas do not
 // reserve the penultimate slot for close.
 bool wave_is_last_propose(const WaveState& st);
+std::string wave_guion_system_prompt();
+std::string wave_guion_user_prompt(const WaveState& st);
 std::string wave_cover_system_prompt();
 std::string wave_cover_user_prompt(const WaveState& st);
 std::string wave_pilot_system_prompt();

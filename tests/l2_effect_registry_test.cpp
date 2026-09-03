@@ -1,4 +1,5 @@
 #include "ai/l2_effect_registry.hpp"
+#include "ai/l2_cerca_wake.hpp"
 #include "ai/l2_effect_slice.hpp"
 #include "ai/l2_explore_a.hpp"
 
@@ -2732,6 +2733,100 @@ void test_pilot_worker_aguas() {
          "cubre does not force dataflow after missing clear");
 }
 
+void test_cerca_wake_dir_and_file() {
+  const std::string tmp = make_tmp();
+  expect(tuide::cerca_classify_scope(tmp, "src/pkg/mod.cpp:run_job") == tuide::CercaScopeKind::Skip,
+         "path:fn no despierta");
+  expect(tuide::cerca_classify_scope(tmp, "lsp") == tuide::CercaScopeKind::Skip, "stem no despierta");
+  expect(tuide::cerca_classify_scope(tmp, "M3") == tuide::CercaScopeKind::Skip, "zona no despierta");
+
+  std::string noise;
+  for (int i = 0; i < 18; ++i) {
+    noise += "void util_pad_" + std::to_string(i) + "() { int pad_" + std::to_string(i) +
+             " = 0; (void)pad_" + std::to_string(i) + "; }\n";
+  }
+  write_file(tmp + "/src/pkg/noise.cpp", noise);
+  write_file(tmp + "/src/pkg/watch.cpp",
+             "void detect_process_dead() { int process_dead = 1; (void)process_dead; }\n"
+             "void workspace_opened() { int debounce_workspace = 1; (void)debounce_workspace; }\n");
+  write_file(tmp + "/src/pkg/session.cpp",
+             "void compact_session() { int session_cookie = 1; (void)session_cookie; }\n");
+  write_file(tmp + "/src/lsp/client.cpp",
+             "void start_lsp() { int server_boot = 1; (void)server_boot; }\n"
+             "void stop_lsp() { int server_halt = 1; (void)server_halt; }\n"
+             "void reader_loop() { int connection_closed = 1; (void)connection_closed; }\n");
+
+  expect(tuide::cerca_classify_scope(tmp, "src/pkg") == tuide::CercaScopeKind::Directory,
+         "dir clasifica");
+  expect(tuide::cerca_classify_scope(tmp, "src/lsp/client.cpp") == tuide::CercaScopeKind::File,
+         "archivo clasifica");
+
+  auto inv = tuide::cerca_inventory_file(tmp, "src/lsp/client.cpp");
+  expect(inv.size() == 3, "inventario 3 fns");
+  expect(tuide::cerca_cheap_passage("src/a.cpp", "foo", "void foo()").find("foo") != std::string::npos,
+         "passage L1");
+
+  std::vector<tuide::CercaWakeFn> cands;
+  cands.push_back({"src/pkg/session.cpp", "compact_session", 1,
+                   tuide::cerca_cheap_passage("src/pkg/session.cpp", "compact_session",
+                                             "void compact_session()"),
+                   -1.f});
+  cands.push_back({"src/pkg/watch.cpp", "detect_process_dead", 1,
+                   tuide::cerca_cheap_passage("src/pkg/watch.cpp", "detect_process_dead",
+                                             "void detect_process_dead() process dead"),
+                   -1.f});
+  std::string rerr;
+  auto ranked = tuide::cerca_rank_cheap(cands, "process dead", fake_embed, {}, 2, 4, &rerr);
+  expect(rerr.empty() && ranked.size() >= 1, "rank barato");
+  expect(!ranked.empty() && ranked.front().symbol == "detect_process_dead",
+         "rank barato pone process_dead primero");
+
+  tuide::EffectRegistry r;
+  std::string err;
+  expect(tuide::registry_open(tmp, &r, &err), "open wake");
+  tuide::CercaWakeOpts wopts;
+  wopts.query = "process dead";
+  wopts.embed = fake_embed;
+  wopts.deps.workspace_root = tmp;
+  tuide::CercaWakeReport rep;
+  expect(tuide::registry_wake_cerca_scopes(&r, {"src/pkg"}, wopts, &rep, &err), "wake dir");
+  if (!err.empty()) {
+    std::cerr << "wake dir err: " << err << '\n';
+  }
+  expect(rep.fns_inventoried >= 20, "inventario dir > topk");
+  expect(rep.cheap_ranked > 0, "dir usa tanda barata");
+  expect(rep.seeded > 0 && !rep.skipped_already_awake, "dir siembra");
+  tuide::RegistryNodeRow row;
+  const std::string dead_id =
+      tuide::registry_canonical_fn_id(tmp, "src/pkg/watch.cpp", "detect_process_dead");
+  expect(tuide::registry_get(&r, dead_id, &row, &err) && row.tombstone_reason.empty() &&
+             !row.card_json.empty(),
+         "dir despertó process_dead con ficha");
+
+  tuide::CercaWakeReport rep2;
+  expect(tuide::registry_wake_cerca_scopes(&r, {"src/pkg"}, wopts, &rep2, &err), "wake dir 2");
+  expect(rep2.skipped_already_awake, "segunda wake es cache");
+
+  wopts.query = "server boot";
+  tuide::CercaWakeReport frep;
+  expect(tuide::registry_wake_cerca_scopes(&r, {"src/lsp/client.cpp"}, wopts, &frep, &err),
+         "wake file");
+  if (!err.empty()) {
+    std::cerr << "wake file err: " << err << '\n';
+  }
+  expect(frep.cheap_ranked == 0, "archivo no rankea barato");
+  expect(frep.seeded == 3, "archivo siembra todas las fns");
+  const char* lsp_fns[] = {"start_lsp", "stop_lsp", "reader_loop"};
+  for (const char* fn : lsp_fns) {
+    tuide::RegistryNodeRow n;
+    const std::string id = tuide::registry_canonical_fn_id(tmp, "src/lsp/client.cpp", fn);
+    expect(tuide::registry_get(&r, id, &n, &err) && !n.card_json.empty(), "archivo embebió todas");
+  }
+
+  tuide::registry_close(&r);
+  fs::remove_all(tmp);
+}
+
 }  // namespace
 
 int main() {
@@ -2750,6 +2845,7 @@ int main() {
   test_pilot_worker_read_gate_a();
   test_pilot_worker_tree_walk();
   test_pilot_worker_aguas();
+  test_cerca_wake_dir_and_file();
   if (failures > 0) {
     std::cerr << failures << " failure(s)\n";
     return 1;
