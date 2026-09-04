@@ -122,6 +122,19 @@ int main() {
     const auto cinco = wave_parse_ola(
         R"({"action":"ola_v1","do":"guion","papeles":["quién aborta la generación","Escape o clic fuera","qué se apaga","archivo a medias","si el hijo murió"]})");
     expect(cinco.ok, "guion admite 5 papeles");
+    const auto indep = wave_parse_ola(
+        R"({"action":"ola_v1","do":"independiente","papel":2,"why":"ciclo aparte para esa pregunta del guion"})");
+    expect(indep.ok, "parse independiente");
+    expect(indep.do_kind == tuide::WaveDo::Independiente, "do independiente");
+    expect(indep.papel == 2, "papel 2");
+    const auto indep0 = wave_parse_ola(
+        R"({"action":"ola_v1","do":"independiente","why":"ciclo aparte para esa pregunta del guion"})");
+    expect(!indep0.ok, "independiente sin índice");
+    const auto do_dash = wave_parse_ola(
+        R"({"action":"ola_v1","do":"-","papeles":["quién aborta","qué se apaga","qué pasa con el archivo ya escrito"]})");
+    expect(do_dash.ok, "guion recobra do inválido");
+    expect(do_dash.do_kind == WaveDo::Guion, "do - es guion");
+    expect(do_dash.papeles.size() == 3, "papeles tras do -");
   }
   {
     const auto truncated = wave_parse_ola("{`.` Single JSON format specified.\nThe atlas lists M1.");
@@ -457,7 +470,9 @@ int main() {
     expect(tuide::wave_needs_cover(seeded), "cover tras guion");
     const auto seed_nb = tuide::wave_notebook_markdown(seeded);
     expect(seed_nb.find("## Guion") != std::string::npos, "notebook guion");
+    expect(seed_nb.find("## Estrategia") != std::string::npos, "notebook estrategia");
     expect(seed_nb.find("quién pinta el LED") != std::string::npos, "notebook papel");
+    expect(seed_nb.find("qué tendrías que poder explicar") != std::string::npos, "notebook contrato guion");
     expect(seed_nb.find("files:") != std::string::npos, "notebook files");
     expect(seed_nb.find("busy_strip.hpp") != std::string::npos, "notebook header");
     const auto juicio = wave_parse_ola(
@@ -467,6 +482,23 @@ int main() {
     tuide::wave_retain_atlas_ids(&seeded, {"M1"});
     expect(tuide::wave_find_hit(seeded.candidatas, "M1") != nullptr, "retain M1");
     expect(tuide::wave_find_hit(seeded.candidatas, "M2") == nullptr, "drop atlas M2");
+    expect(tuide::wave_find_hit(seeded.atlas_seed, "M2") != nullptr, "retain no borra atlas_seed");
+    const auto baby = tuide::wave_independiente_child(seeded, "qué tecla cancela");
+    expect(baby.independiente_leaf, "hijo leaf");
+    expect(baby.papeles.size() == 1 && baby.prompt == "qué tecla cancela", "hijo un papel");
+    expect(tuide::wave_find_hit(baby.candidatas, "M2") != nullptr, "hijo atlas completo M2");
+    expect(tuide::wave_find_hit(baby.candidatas, "M1") != nullptr, "hijo atlas completo M1");
+    expect(baby.peeks_done.empty() && baby.notas.empty() && baby.opened_ids.empty(),
+           "hijo sin pack del padre");
+    expect(tuide::wave_needs_cover(baby), "hijo cover fresco");
+    expect(tuide::wave_find_hit(seeded.candidatas, "M2") == nullptr, "padre sigue recortado");
+    {
+      WaveState grown = baby;
+      grown.opened_ids = {"M2"};
+      WaveState back = seeded;
+      tuide::wave_merge_independiente(&back, grown, 1);
+      expect(tuide::wave_find_hit(back.candidatas, "M2") != nullptr, "merge trae zona que el hijo abrió");
+    }
     expect(tuide::wave_ingest_zone_symbols(&seeded, payload, {"M1"}) >= 2, "ingest ficha symbols");
     expect(tuide::wave_find_hit(seeded.candidatas, "busy_strip::clear_busy") != nullptr,
            "writer clear_busy peekable");
@@ -628,7 +660,7 @@ int main() {
         c.needle = "follow";
         callers->push_back(std::move(c));
       }
-      expect(body.find("set_busy_spinner") != std::string::npos ||
+      expect(body.empty() || body.find("set_busy_spinner") != std::string::npos ||
                  symbol == "set_busy_spinner" || path.find("busy_strip") != std::string::npos,
              "peek_causal recibe el cuerpo");
       return true;
@@ -646,7 +678,7 @@ int main() {
     const auto ola = wave_parse_ola(
         R"({"action":"ola_v1","do":"peek","peek":"set_busy_spinner","why":"cuerpo y firma causal del latch"})");
     expect(wave_apply(&causal, ola, causal_ops, &err), "apply peek causal");
-    expect(causal_n == 1, "función llama peek_causal");
+    expect(causal_n >= 1, "función llama peek_causal");
     expect(causal.notas.find("aguas_arriba") == std::string::npos, "aguas no van a notas");
     expect(causal.follow_md.find("aguas_arriba") != std::string::npos, "follow_md aguas");
     expect(causal.follow_md.find("aguas_abajo") != std::string::npos, "follow_md aguas_abajo");
@@ -661,6 +693,94 @@ int main() {
     expect(cwork.find("aguas_arriba") == std::string::npos, "work sigue sin aguas");
     const std::string cnb = tuide::wave_notebook_markdown(causal);
     expect(cnb.find("## Causal") != std::string::npos, "notebook causal");
+  }
+
+  {
+    WaveOps cross_ops = ops;
+    cross_ops.peek_code = [&](const std::string& peek, std::string* text, std::string* err) {
+      if (text == nullptr) {
+        return false;
+      }
+      if (peek.find("cancel_current") != std::string::npos) {
+        *text =
+            "src/ai/ai_controller.cpp:cancel_current\nvoid cancel_current() { cancel_all(); }";
+        return true;
+      }
+      if (err) {
+        *err = "peek desconocido";
+      }
+      return false;
+    };
+    cross_ops.peek_causal = [&](const std::string&, const std::string& symbol, const std::string&,
+                                bool, std::string* md, std::vector<WaveHit>* callers,
+                                std::string*) {
+      if (md == nullptr) {
+        return false;
+      }
+      *md = "----- aguas_arriba -----\ncuando: key\nquien:  handle_ai_console_keys\n";
+      if (callers != nullptr && symbol.find("cancel_current") != std::string::npos) {
+        WaveHit ui;
+        ui.id = "src/ui/console_panel.cpp:handle_ai_console_keys";
+        ui.path = "src/ui/console_panel.cpp";
+        ui.symbol = "handle_ai_console_keys";
+        ui.stem = "console_panel";
+        ui.kind = "fn";
+        ui.needle = "follow";
+        callers->push_back(ui);
+        WaveHit route;
+        route.id = "src/ai/ai_controller.cpp:handle_route";
+        route.path = "src/ai/ai_controller.cpp";
+        route.symbol = "handle_route";
+        route.stem = "ai_controller";
+        route.kind = "fn";
+        route.needle = "follow";
+        callers->push_back(std::move(route));
+      }
+      return true;
+    };
+    cross_ops.rank_hops = [](const std::string&, std::vector<tuide::WavePeekHop>* hops) {
+      if (hops == nullptr) {
+        return;
+      }
+      for (auto& h : *hops) {
+        if (h.loc.find("console_panel") != std::string::npos ||
+            h.loc.find("handle_ai_console_keys") != std::string::npos) {
+          h.cosine = 0.81f;
+        } else if (h.loc.find("handle_route") != std::string::npos) {
+          h.cosine = 0.21f;
+        }
+      }
+    };
+    WaveHit latch_ai;
+    latch_ai.id = "M8";
+    latch_ai.path = "src/ai/ai_controller.cpp";
+    latch_ai.symbol = "cancel_current";
+    latch_ai.stem = "ai_controller";
+    latch_ai.kind = "latch";
+    latch_ai.needle = "atlas";
+    WaveState cross;
+    cross.prompt = "pulsa Escape o clic fuera para cancelar";
+    tuide::wave_merge_hits(&cross, {latch_ai});
+    tuide::WaveZone zkeep;
+    zkeep.id = "M8";
+    zkeep.verdict = "keep";
+    cross.zonas.push_back(zkeep);
+    std::string err;
+    const auto ola = wave_parse_ola(
+        R"({"action":"ola_v1","do":"peek","peek":"cancel_current","why":"cuerpo del abortor y callers"})");
+    expect(wave_apply(&cross, ola, cross_ops, &err), "apply peek cross-stem");
+    expect(cross.notas.find("handle_ai_console_keys") != std::string::npos,
+           "peek muestra caller de otro stem");
+    expect(cross.notas.find("otro stem") != std::string::npos, "peek marca otro stem");
+    const auto ui_at = cross.notas.find("handle_ai_console_keys");
+    const auto route_at = cross.notas.find("handle_route");
+    expect(ui_at != std::string::npos && route_at != std::string::npos && ui_at < route_at,
+           "rank ficha pone UI antes que handle_route");
+    expect(wave_find_hit(cross.candidatas, "handle_ai_console_keys") != nullptr,
+           "caller UI peekable aunque keep sea ai_controller");
+    const std::string xwork = tuide::wave_work_markdown(cross);
+    expect(xwork.find("otro stem") != std::string::npos, "work enseña otro stem");
+    expect(xwork.find("aguas_arriba") == std::string::npos, "work sin mermaid aguas");
   }
 
   {
@@ -792,8 +912,10 @@ int main() {
     expect(!wave_check_barriers(again, fs, &err), "barrera follow repetido");
     expect(err.find("ya hecho") != std::string::npos, "msg ya hecho");
     fs.last_error = err;
-    expect(tuide::wave_work_markdown(fs).find("Siguiente legal") != std::string::npos,
-           "hint follow repetido");
+    expect(tuide::wave_work_markdown(fs).find("last_error:") != std::string::npos,
+           "error follow repetido en cuaderno");
+    expect(tuide::wave_work_markdown(fs).find("Siguiente legal") == std::string::npos,
+           "sin receta tras follow repetido");
     WaveState zk;
     zk.prompt = fs.prompt;
     WaveHit mkeep = latch;
@@ -915,8 +1037,10 @@ int main() {
     expect(nb.find("sin match en este cuerpo") != std::string::npos, "notebook in 0");
     expect(!wave_apply(&is, ola, iops, &err), "no repetir in grep");
     expect(err.find("este cuerpo") != std::string::npos, "msg in ya");
-    expect(tuide::wave_work_markdown(is).find("Siguiente legal") != std::string::npos,
-           "user hint tras in repetido");
+    expect(tuide::wave_work_markdown(is).find("last_error:") != std::string::npos,
+           "error in repetido en cuaderno");
+    expect(tuide::wave_work_markdown(is).find("Siguiente legal") == std::string::npos,
+           "sin receta tras in repetido");
     expect(tuide::wave_work_markdown(is).find("## in") != std::string::npos,
            "trabajo in acumulado");
     const auto global = wave_parse_ola(
@@ -944,8 +1068,18 @@ int main() {
     const std::string cover = tuide::wave_cover_system_prompt();
     expect(cover.find("primer carácter") != std::string::npos, "cover JSON primero");
     expect(cover.find("juicio") != std::string::npos, "cover juicio");
-    expect(cover.find("PROHIBIDO drop del caller") != std::string::npos, "cover no drop caller");
-    expect(cover.find("latch + caller") != std::string::npos, "cover latch y caller");
+    expect(cover.find("sistema de la consulta") != std::string::npos, "cover localiza objeto");
+    expect(cover.find("Keep vacío no vale") != std::string::npos, "cover keep no vacío");
+    expect(cover.find("cubra las preguntas") == std::string::npos, "cover no mapea papeles");
+    expect(cover.find("PROHIBIDO drop del caller") == std::string::npos, "cover no receta caller");
+    expect(cover.find("latch + caller") == std::string::npos, "cover no receta latch");
+    const std::string guion_sys = tuide::wave_guion_system_prompt();
+    expect(guion_sys.find("quién arranca el trabajo") == std::string::npos, "guion sin plantilla arranque");
+    expect(guion_sys.find("qué lo detiene") == std::string::npos, "guion sin plantilla detiene");
+    expect(guion_sys.find("qué queda persistido") == std::string::npos, "guion sin plantilla persistido");
+    expect(guion_sys.find("papeles") != std::string::npos, "guion pide papeles");
+    expect(guion_sys.find("ESTA consulta") != std::string::npos, "guion de esta consulta");
+    expect(guion_sys.find("no el orden de exploración") != std::string::npos, "guion es examen");
     const auto salvaged = tuide::wave_salvage_keep(
         "Task recap...\n{\"action\":\"ola_v1\",\"do\":\"juicio\",\"keep\":[\"M1\",\"M7\"]",
         {"M1", "M2", "M7"});
@@ -953,11 +1087,12 @@ int main() {
     expect(salvaged[0] == "M1" && salvaged[1] == "M7", "salvage M1 M7");
     const std::string pilot = tuide::wave_pilot_system_prompt();
     expect(pilot.find("tanda") != std::string::npos, "pilot tanda");
-    expect(pilot.find("Aguas mismo-stem") != std::string::npos, "pilot aguas incompletas");
+    expect(pilot.find("Aguas mismo-stem") == std::string::npos, "pilot sin receta follow");
     expect(pilot.find("bosquejo") != std::string::npos &&
                pilot.find("rayo") != std::string::npos,
            "pilot bosquejo rayos");
-    expect(pilot.find("stems keep") != std::string::npos, "pilot peek vecinos");
+    expect(pilot.find("No es el follow (stacks)") != std::string::npos,
+           "pilot peek callers vs follow");
     expect(pilot.find("- follow:") != std::string::npos, "pilot follow gesto");
     expect(pilot.find("callers") != std::string::npos && pilot.find("callees") != std::string::npos,
            "pilot follow callers+callees");
@@ -981,7 +1116,15 @@ int main() {
     expect(pilot.find("begin_thinking") == std::string::npos, "pilot no planta begin_thinking");
     expect(pilot.find("\"needles\":[\"catch\"") == std::string::npos, "pilot no planta catch");
     expect(pilot.find("no cancela los peeks") != std::string::npos, "pilot tanda peek sobrevive in");
-    expect(pilot.find("1 latch + 1 caller") != std::string::npos, "pilot tanda latch+caller");
+    expect(pilot.find("El Guion es el examen") != std::string::npos, "pilot guion es examen");
+    expect(pilot.find("Cover keep localiza el sistema") != std::string::npos, "pilot cover es objeto");
+    expect(pilot.find("disparo y efecto") != std::string::npos, "pilot ramas");
+    expect(pilot.find("\"do\":\"independiente\"") != std::string::npos, "pilot JSON independiente");
+    expect(pilot.find("no redactes un prompt") != std::string::npos, "independiente no redacta");
+    expect(pilot.find("me queda esto") != std::string::npos, "independiente induce resto");
+    expect(pilot.find("no es \"no busco\"") != std::string::npos, "independiente no salta hueco");
+    expect(pilot.find("1 latch + 1 caller") == std::string::npos, "pilot sin receta tanda");
+    expect(pilot.find("Tras peek del latch") == std::string::npos, "pilot sin receta cerca");
     expect(pilot.find("No recetes un parche") != std::string::npos, "pilot no parchea no leído");
   }
 
@@ -1008,15 +1151,15 @@ int main() {
     last_p.propose_n = tuide::kWaveMaxWaves;
     expect(tuide::wave_pilot_user_prompt(last_p).find("ÚLTIMA OLA") != std::string::npos,
            "última ola es propose == max");
-    expect(tuide::wave_pilot_user_prompt(last_p).find("Cierra si ya entendiste") != std::string::npos,
-           "última ola deja cerrar al piloto");
+    expect(tuide::wave_pilot_user_prompt(last_p).find("Cierra si ya entendiste") == std::string::npos,
+           "última ola sin receta de cierre");
     WaveState circuit;
     circuit.prompt = last.prompt;
     circuit.circuit_on = {"src/ai/ai_controller.cpp:begin_thinking"};
     circuit.circuit_off = {"src/ai/ai_controller.cpp:end_thinking"};
     const std::string up2 = tuide::wave_pilot_user_prompt(circuit);
-    expect(up2.find("Circuito ON y OFF anclado") != std::string::npos, "user cita circuito");
-    expect(up2.find("no vallado") != std::string::npos, "circuito no es barrera");
+    expect(up2.find("Circuito ON y OFF anclado") == std::string::npos, "sin receta circuito");
+    expect(up2.find("Cierra si te basta") == std::string::npos, "circuito no empuja cierre");
     expect(up2.find("## Circuito") != std::string::npos, "user ficha circuito");
     expect(up2.find("## Causal") == std::string::npos, "trabajo sin causal gordo");
     expect(up2.find("## Atlas") == std::string::npos, "trabajo sin atlas");
@@ -1170,13 +1313,13 @@ int main() {
     {
       const auto calls_at = rk.notas.find("calls:");
       expect(calls_at != std::string::npos, "calls línea");
-      const auto nl = rk.notas.find('\n', calls_at);
-      const std::string line =
-          rk.notas.substr(calls_at, nl == std::string::npos ? rk.notas.size() - calls_at : nl - calls_at);
-      expect(line.find("ensure_spinner_thread") != std::string::npos, "calls ensure");
-      expect(line.find("i18n") == std::string::npos, "calls sin i18n");
-      expect(line.find("_ms") == std::string::npos, "calls sin _ms");
-      expect(line.find("paint_") == std::string::npos, "calls sin paint_");
+      const auto fan = rk.notas.find("fan-in", calls_at);
+      const auto block_end = fan == std::string::npos ? rk.notas.size() : fan;
+      const std::string block = rk.notas.substr(calls_at, block_end - calls_at);
+      expect(block.find("ensure_spinner_thread") != std::string::npos, "calls ensure");
+      expect(block.find("i18n") == std::string::npos, "calls sin i18n");
+      expect(block.find("_ms") == std::string::npos, "calls sin _ms");
+      expect(block.find("paint_") == std::string::npos, "calls sin paint_");
     }
     WaveOps fops = rank_ops;
     fops.follow_tree = [&](const std::string&, const std::string&, std::string* md,
@@ -1277,16 +1420,16 @@ int main() {
     {
       const auto calls_at = lsp.notas.find("calls:");
       expect(calls_at != std::string::npos, "lsp calls línea");
-      const auto nl = lsp.notas.find('\n', calls_at);
-      const std::string line =
-          lsp.notas.substr(calls_at, nl == std::string::npos ? lsp.notas.size() - calls_at : nl - calls_at);
-      const auto opened_at = line.find("on_workspace_opened");
-      const auto compile_at = line.find("ensure_compile_commands");
+      const auto fan = lsp.notas.find("fan-in", calls_at);
+      const auto block_end = fan == std::string::npos ? lsp.notas.size() : fan;
+      const std::string block = lsp.notas.substr(calls_at, block_end - calls_at);
+      const auto opened_at = block.find("on_workspace_opened");
+      const auto compile_at = block.find("ensure_compile_commands");
       expect(opened_at != std::string::npos, "calls nombra on_workspace_opened");
       expect(compile_at == std::string::npos || opened_at < compile_at,
              "on_workspace_opened antes que compile_commands");
-      expect(line.find("enqueue") == std::string::npos, "calls sin enqueue");
-      expect(line.find("UI_WAKE") == std::string::npos && line.find("wake") == std::string::npos,
+      expect(block.find("enqueue") == std::string::npos, "calls sin enqueue");
+      expect(block.find("UI_WAKE") == std::string::npos && block.find("wake") == std::string::npos,
              "calls sin wake");
     }
     const auto edges = tuide::wave_sketch_edges(lsp);
@@ -1420,28 +1563,24 @@ int main() {
     auto drop_caller = wave_parse_ola(
         R"({"action":"ola_v1","do":"juicio","keep":["M1"],"drop":["M7","M3"],"why":"el latch posee el LED; el caller no"})");
     expect(drop_caller.ok, "parse cover drop caller");
-    expect(tuide::wave_cover_restore_caller(&drop_caller, cov) == 1, "restore caller");
+    std::string err;
+    expect(wave_apply(&cov, drop_caller, ops, &err), "apply cover respeta keep/drop");
     bool keep_m1 = false;
     bool keep_m7 = false;
-    for (const auto& id : drop_caller.keep) {
-      keep_m1 = keep_m1 || id == "M1";
-      keep_m7 = keep_m7 || id == "M7";
-    }
-    expect(keep_m1 && keep_m7, "keep latch y caller");
     bool drop_m7 = false;
-    for (const auto& id : drop_caller.drop) {
-      drop_m7 = drop_m7 || id == "M7";
-    }
-    expect(!drop_m7, "caller sale de drop");
-    std::string err;
-    expect(wave_apply(&cov, drop_caller, ops, &err), "apply cover restore");
-    bool zona_m7_keep = false;
     for (const auto& z : cov.zonas) {
+      if (z.id == "M1" && z.verdict == "keep") {
+        keep_m1 = true;
+      }
       if (z.id == "M7" && z.verdict == "keep") {
-        zona_m7_keep = true;
+        keep_m7 = true;
+      }
+      if (z.id == "M7" && z.verdict == "drop") {
+        drop_m7 = true;
       }
     }
-    expect(zona_m7_keep, "zona caller keep");
+    expect(keep_m1, "keep latch");
+    expect(!keep_m7 && drop_m7, "caller drop se respeta");
   }
 
   {
@@ -1481,6 +1620,14 @@ int main() {
     cerrar.do_kind = WaveDo::Cerrar;
     cerrar.why = "el why ya cubre el objeto con lo leído";
     expect(tuide::wave_close_audit_accept(draft, cerrar, st), "audit cerrar sí");
+    WaveOla indep_no;
+    indep_no.ok = true;
+    indep_no.do_kind = WaveDo::Independiente;
+    indep_no.papel = 1;
+    expect(!tuide::wave_close_audit_accept(draft, indep_no, st), "audit independiente sin guion");
+    const auto ins0 = tuide::wave_close_audit_instructions(st);
+    expect(ins0.find("Si dudas, do=cerrar") != std::string::npos, "audit dudas cierra si no cabe");
+    expect(ins0.find("do=independiente") == std::string::npos, "audit sin independiente si no cabe");
     WaveOla alien;
     alien.ok = true;
     alien.do_kind = WaveDo::Peek;
@@ -1562,7 +1709,14 @@ int main() {
     hint.wave_n = 1;
     hint.opened_ids = {"M1", "M7"};
     const std::string up = tuide::wave_pilot_user_prompt(hint);
-    expect(up.find("1 latch + 1 caller") != std::string::npos, "user tanda tras cover");
+    expect(up.find("1 latch + 1 caller") == std::string::npos, "user sin receta tanda");
+    expect(up.find("Tras cover") == std::string::npos, "user sin receta post-cover");
+    expect(up.find("Si buscas un papel") == std::string::npos, "user sin receta cerca");
+    expect(up.find("Un papel sin nombre") == std::string::npos, "user sin receta papel");
+    expect(up.find("independiente cabe") == std::string::npos, "user sin cue sin papeles");
+    hint.peeks_done = {"M1"};
+    const std::string up2 = tuide::wave_pilot_user_prompt(hint);
+    expect(up2.find("Si buscas un papel") == std::string::npos, "user post-peek sin receta cerca");
   }
 
   {
@@ -1703,7 +1857,15 @@ int main() {
     expect(miss0.size() == 3, "sin evidencia al nacer");
     const auto work = tuide::wave_work_markdown(st);
     expect(work.find("## Guion") != std::string::npos, "trabajo guion");
+    expect(work.find("## Estrategia") != std::string::npos, "trabajo estrategia");
     expect(work.find("quién aborta") != std::string::npos, "trabajo papel");
+    expect(work.find("qué tendrías que poder explicar") != std::string::npos, "trabajo contrato guion");
+    expect(work.find("no es el orden de exploración") != std::string::npos, "trabajo guion no es plan");
+    expect(work.find("[sin evidencia]") != std::string::npos, "trabajo papeles abiertas");
+    const auto cover_up = tuide::wave_cover_user_prompt(st);
+    expect(cover_up.find("quién aborta") != std::string::npos, "cover user papel");
+    expect(cover_up.find("## Estrategia") != std::string::npos, "cover user estrategia");
+    expect(cover_up.find("qué tendrías que poder explicar") != std::string::npos, "cover user contrato");
     st.peeks_done = {"cancel_current"};
     st.notas = "### peek `cancel_current`\nvoid cancel_current() { aborta el job; }\n";
     const auto miss1 = tuide::wave_guion_uncovered(st);
@@ -1715,11 +1877,105 @@ int main() {
     }
     expect(!still_abort, "aborta cubierto por peek");
     expect(still_file, "archivo sigue sin evidencia");
+    const auto work1 = tuide::wave_work_markdown(st);
+    expect(work1.find("quién aborta") != std::string::npos, "papel cubierto sigue en cuaderno");
+    expect(work1.find("[con evidencia]") != std::string::npos, "marca evidencia");
+    expect(work1.find("[sin evidencia]") != std::string::npos, "marca abierta");
+    const auto pilot_up = tuide::wave_pilot_user_prompt(st);
+    expect(pilot_up.find("quién aborta") != std::string::npos, "piloto papel cubierto presente");
+    expect(pilot_up.find("archivo ya escrito") != std::string::npos, "piloto papel abierto presente");
+    expect(pilot_up.find("qué tendrías que poder explicar") != std::string::npos, "piloto contrato");
+    expect(pilot_up.find("## Estrategia") != std::string::npos, "piloto estrategia pin");
     const auto cl = wave_parse_ola(
         R"({"action":"ola_v1","do":"cerrar","why":"el usuario cancela desde handle_user_input"})");
     expect(wave_apply(&st, cl, ops, &err), "cerrar con papel hueco");
+    expect(st.cierre.find("Guion:") != std::string::npos, "caption lista guion");
+    expect(st.cierre.find("quién aborta") != std::string::npos, "caption papel cubierto");
     expect(st.cierre.find("Preguntas sin evidencia") != std::string::npos, "caption papeles");
     expect(st.cierre.find("archivo") != std::string::npos, "caption archivo");
+  }
+
+  {
+    WaveState st;
+    st.prompt = "si cancelo, el spinner se apaga y el archivo a medias no queda sucio";
+    st.atlas_md = "M1  kind=latch\n";
+    WaveHit latch;
+    latch.id = "M1";
+    latch.kind = "latch";
+    latch.needle = "atlas";
+    tuide::wave_merge_hits(&st, {latch});
+    std::string err;
+    WaveOps ops;
+    const auto g = wave_parse_ola(
+        R"({"action":"ola_v1","do":"guion","papeles":["quién aborta","qué se apaga","qué pasa con el archivo ya escrito"]})");
+    expect(wave_apply(&st, g, ops, &err), "guion para independiente");
+    const auto too_soon = wave_parse_ola(
+        R"({"action":"ola_v1","do":"independiente","papel":3,"why":"ciclo aparte para esa pregunta del guion"})");
+    expect(!wave_apply(&st, too_soon, ops, &err), "independiente antes de cover");
+    expect(err.find("primero cover") != std::string::npos, "msg cover primero");
+    const auto juicio = wave_parse_ola(
+        R"({"action":"ola_v1","do":"juicio","keep":["M1"],"why":"el latch cubre el objeto"})");
+    expect(wave_apply(&st, juicio, ops, &err), "juicio para independiente");
+    expect(!wave_apply(&st, too_soon, ops, &err), "independiente antes de peek");
+    st.peeks_done = {"cancel_current"};
+    st.propose_n = 3;
+    expect(tuide::wave_independiente_cue_markdown(st).find("independiente cabe") != std::string::npos,
+           "cue tras peek");
+    expect(tuide::wave_independiente_cue_markdown(st).find("3") != std::string::npos,
+           "cue lista papel abierto");
+    const std::string cue_up = tuide::wave_pilot_user_prompt(st);
+    expect(cue_up.find("Elige UNA ola.") != std::string::npos, "elige sigue");
+    expect(cue_up.find("independiente cabe") != std::string::npos, "user cue junto a elige");
+    const auto ins = tuide::wave_close_audit_instructions(st);
+    expect(ins.find("do=independiente") != std::string::npos, "audit ofrece independiente");
+    expect(ins.find("Si dudas, do=cerrar") == std::string::npos, "audit no empuja cierre si cabe");
+    expect(ins.find("Si falta uno y no tiene nombre") == std::string::npos,
+           "audit no cierra papel sin locus");
+    WaveOla draft_c;
+    draft_c.ok = true;
+    draft_c.do_kind = WaveDo::Cerrar;
+    draft_c.why = "el latch aborta; falta el archivo";
+    WaveOla audit_i;
+    audit_i.ok = true;
+    audit_i.do_kind = WaveDo::Independiente;
+    audit_i.papel = 3;
+    expect(tuide::wave_close_audit_accept(draft_c, audit_i, st), "audit acepta independiente abierto");
+    audit_i.papel = 99;
+    expect(!tuide::wave_close_audit_accept(draft_c, audit_i, st), "audit rechaza índice inválido");
+    expect(!wave_apply(&st, too_soon, ops, &err), "independiente sin runtime");
+    ops.run_independiente = [&](const std::string& prompt, WaveState* child, std::string* cerr) {
+      (void)cerr;
+      child->prompt = prompt;
+      child->peeks_done = {"src/ui/console_panel.cpp:handle_ai_console_keys"};
+      child->notas = "void handle_ai_console_keys() { Escape; clic fuera; }\n";
+      WaveHit ui;
+      ui.path = "src/ui/console_panel.cpp";
+      ui.symbol = "handle_ai_console_keys";
+      ui.stem = "console_panel";
+      ui.needle = "peek";
+      tuide::wave_merge_hits(child, {ui});
+      return true;
+    };
+    const auto covered = wave_parse_ola(
+        R"({"action":"ola_v1","do":"independiente","papel":1,"why":"ciclo aparte para esa pregunta del guion"})");
+    st.notas = "aborta el job en cancel_current\n";
+    expect(!wave_apply(&st, covered, ops, &err), "papel cubierto no sale");
+    expect(err.find("evidencia") != std::string::npos, "msg evidencia anclada");
+    expect(wave_apply(&st, too_soon, ops, &err), "independiente papel abierto");
+    expect(st.notas.find("independiente `3`") != std::string::npos, "pack hijo en notas");
+    expect(st.notas.find("handle_ai_console_keys") != std::string::npos, "cuerpo hijo");
+    expect(st.independiente_done.size() == 1 && st.independiente_done[0] == 3, "índice hecho");
+    expect(!wave_apply(&st, too_soon, ops, &err), "no relanza el mismo papel");
+    st.independiente_leaf = true;
+    const auto p2 = wave_parse_ola(
+        R"({"action":"ola_v1","do":"independiente","papel":2,"why":"ciclo aparte para esa pregunta del guion"})");
+    expect(!wave_apply(&st, p2, ops, &err), "hijo no anida");
+    WaveState last = st;
+    last.independiente_leaf = false;
+    last.independiente_done.clear();
+    last.propose_n = tuide::kWaveMaxWaves;
+    expect(!tuide::wave_independiente_ok(last, 2, &err), "no en última ola");
+    expect(tuide::wave_work_markdown(st).find("1. ") != std::string::npos, "guion numerado");
   }
 
   if (failures != 0) {

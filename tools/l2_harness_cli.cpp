@@ -7100,6 +7100,77 @@ std::vector<float> cerca_blob_vec(const void* p, int nbytes) {
   return v;
 }
 
+void wave_split_hop_loc(const std::string& loc, std::string* path, std::string* symbol) {
+  if (path == nullptr || symbol == nullptr) {
+    return;
+  }
+  const auto slash = loc.find_last_of("/\\");
+  const auto colon = loc.rfind(':');
+  if (colon != std::string::npos && (slash == std::string::npos || colon > slash)) {
+    *path = loc.substr(0, colon);
+    *symbol = loc.substr(colon + 1);
+    return;
+  }
+  const auto col2 = loc.rfind("::");
+  if (col2 != std::string::npos && col2 + 2 < loc.size()) {
+    *symbol = loc.substr(col2 + 2);
+    *path = {};
+    return;
+  }
+  *path = {};
+  *symbol = loc;
+}
+
+void wave_rank_peek_hops(tuide::EffectRegistry* r, tuide::EmbeddingBackend* embed, const std::string& root,
+                         const std::string& query, std::vector<tuide::WavePeekHop>* hops) {
+  if (r == nullptr || r->db == nullptr || hops == nullptr || hops->empty() || query.empty()) {
+    return;
+  }
+  if (embed == nullptr || !embed->ready()) {
+    return;
+  }
+  std::vector<float> qvec;
+  std::string err;
+  if (!embed->embed_query(query, &qvec, &err) || qvec.empty()) {
+    return;
+  }
+  const std::string model_key = tuide::registry_embed_model_key(
+      tuide::kRegistryEmbedModelDefault, tuide::RegistryMatchSurface::CardFull);
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(r->db,
+                         "SELECT e.blob FROM embeddings e JOIN nodes n ON n.id=e.node_id "
+                         "WHERE e.model=?1 AND n.tombstone_reason='' AND "
+                         "((n.path=?2 AND n.symbol=?3) OR n.id=?4 OR n.id=?5) LIMIT 1",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return;
+  }
+  for (auto& h : *hops) {
+    std::string path;
+    std::string symbol;
+    wave_split_hop_loc(h.loc, &path, &symbol);
+    if (symbol.empty()) {
+      continue;
+    }
+    const std::string id = tuide::registry_canonical_fn_id(root, path, symbol);
+    const std::string alt = path.empty() ? symbol : (path + ":" + symbol);
+    sqlite3_reset(st);
+    sqlite3_clear_bindings(st);
+    sqlite3_bind_text(st, 1, model_key.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, path.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, symbol.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, alt.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+      const std::vector<float> v =
+          cerca_blob_vec(sqlite3_column_blob(st, 0), sqlite3_column_bytes(st, 0));
+      if (!v.empty()) {
+        h.cosine = tuide::cosine_similarity(qvec, v);
+      }
+    }
+  }
+  sqlite3_finalize(st);
+}
+
 bool cerca_scope_match_one(const tuide::RegistryNodeRow& n, const std::string& sc) {
   const std::string want = cerca_ascii_lower(sc);
   if (want.empty()) {
@@ -7377,7 +7448,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     } else if (a == "-h" || a == "--help") {
       std::cerr << "wave-explore --out DIR [--case ID|--prompt TEXT] [--max-waves N]\n"
                    "  [--cards FILE | --cards-from DIR] [--think off|low|medium|high|close]\n"
-                   "  Piloto adaptativo: needles | cerca | juicio | peek | follow | entre | cerrar.\n"
+                   "  Piloto adaptativo: needles | cerca | juicio | peek | follow | entre | independiente | cerrar.\n"
                    "  Una ola por propose.\n"
                    "  --think fija un nivel para todas las olas (off|low|medium|high).\n"
                    "  --think close: piloto=off; el primer cerrar se re-lanza 1× con medium "
@@ -7439,6 +7510,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
   }
 
   tuide::WaveState state;
+  tuide::WaveState* live = &state;
   state.prompt = prompt;
   fs::path cards_path;
   if (!cards_arg.empty()) {
@@ -7613,7 +7685,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
                            peek.find(".cc") != std::string::npos;
     std::string resolved = arg;
     if (!file_peek) {
-      if (const tuide::WaveHit* hit = tuide::wave_find_hit(state.candidatas, peek)) {
+      if (const tuide::WaveHit* hit = tuide::wave_find_hit(live->candidatas, peek)) {
         if (!hit->path.empty() && !hit->symbol.empty()) {
           resolved = hit->path + ":" + hit->symbol;
         } else if (!hit->path.empty()) {
@@ -7701,6 +7773,13 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     return true;
   };
 
+  ops.rank_hops = [&](const std::string& query, std::vector<tuide::WavePeekHop>* hops) {
+    if (!embed_backend.ready()) {
+      (void)ensure_embed_backend(root, &embed_backend, &embed_err);
+    }
+    wave_rank_peek_hops(&reg, &embed_backend, root, query, hops);
+  };
+
   ops.follow_tree = [&](const std::string& path, const std::string& symbol, std::string* md,
                         std::vector<tuide::WaveHit>* hops, std::string* follow_err) {
     if (md == nullptr) {
@@ -7735,7 +7814,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       return false;
     }
     auto reg_id = [&](const std::string& loc) -> std::string {
-      if (const tuide::WaveHit* hit = tuide::wave_find_hit(state.candidatas, loc)) {
+      if (const tuide::WaveHit* hit = tuide::wave_find_hit(live->candidatas, loc)) {
         if (!hit->id.empty()) {
           return hit->id;
         }
@@ -7802,6 +7881,47 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
   int escalate_n = 0;
   bool escalate_think = false;
   bool close_audit_done = false;
+  std::function<void(tuide::WaveState&, const fs::path&, int)> run_waves;
+  int indep_serial = 0;
+  ops.run_independiente = [&](const std::string&, tuide::WaveState* child, std::string* ierr) {
+    if (child == nullptr) {
+      if (ierr) {
+        *ierr = "hijo nulo";
+      }
+      return false;
+    }
+    ++indep_serial;
+    const fs::path child_dir = output_root / ("indep_" + std::to_string(indep_serial));
+    fs::create_directories(child_dir);
+    std::cerr << "wave-explore: independiente #" << indep_serial << " " << child->prompt << "\n";
+    if (!cards_payload.is_null() && cards_payload.contains("zones")) {
+      if (child->candidatas.empty()) {
+        tuide::wave_seed_from_atlas(child, cards_payload);
+      }
+      const std::string md =
+          tuide::registry_causal_atlas_markdown(cards_payload, child->prompt);
+      if (!md.empty()) {
+        child->atlas_md = md;
+      }
+    }
+    tuide::WaveState* prev = live;
+    live = child;
+    const bool saved_close_done = close_audit_done;
+    const int saved_fail = consecutive_fail;
+    const bool saved_esc = escalate_think;
+    close_audit_done = false;
+    consecutive_fail = 0;
+    escalate_think = false;
+    run_waves(*child, child_dir, tuide::kWaveIndependienteMaxWaves);
+    close_audit_done = saved_close_done;
+    consecutive_fail = saved_fail;
+    escalate_think = saved_esc;
+    live = prev;
+    std::ofstream(child_dir / "notebook.md") << tuide::wave_notebook_markdown(*child);
+    std::ofstream(child_dir / "state.json") << json_dump_safe(tuide::wave_state_to_json(*child))
+                                           << "\n";
+    return true;
+  };
   if (close_audit) {
     std::cerr << "wave-explore: think=close (guion=high; cover/piloto=off; "
                  "primer cerrar → 1× medium; cerrar / peek hueco / follow anclado)\n";
@@ -7809,35 +7929,30 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     std::cerr << "wave-explore: think=hybrid (guion=high, cover=off, piloto=off, "
                  "atasco→medium; cerrar del piloto siempre vale)\n";
   }
-  for (int i = 0; i < max_waves && !state.done; ++i) {
-    state.propose_n = i + 1;
-    const bool guion = tuide::wave_needs_guion(state);
-    const bool cover = !guion && tuide::wave_needs_cover(state);
-    const bool last_propose = !guion && !cover && state.propose_n >= max_waves;
+  run_waves = [&](tuide::WaveState& st, const fs::path& waves_root, int waves_cap) {
+  for (int i = 0; i < waves_cap && !st.done; ++i) {
+    st.propose_n = i + 1;
+    const bool guion = tuide::wave_needs_guion(st);
+    const bool cover = !guion && tuide::wave_needs_cover(st);
+    const bool last_propose = !guion && !cover && st.propose_n >= waves_cap;
     tuide::L2BrainRequest req;
     if (guion) {
       req.system_prompt = tuide::wave_guion_system_prompt();
-      req.user_prompt = tuide::wave_guion_user_prompt(state);
-      if (consecutive_fail > 0) {
-        req.user_prompt =
-            "Consulta:\n" + state.prompt +
-            "\n\nSOLO el JSON. El primer carácter es `{`. Cero prosa.\n";
-      }
+      req.user_prompt = tuide::wave_guion_user_prompt(st);
       req.phase = "causal_wave_guion";
       req.max_tokens = 384;
     } else if (cover) {
       req.system_prompt = tuide::wave_cover_system_prompt();
-      req.user_prompt = tuide::wave_cover_user_prompt(state);
+      req.user_prompt = tuide::wave_cover_user_prompt(st);
       if (consecutive_fail > 0) {
-        req.user_prompt =
-            "Consulta:\n" + state.prompt +
-            "\n\nSOLO el JSON. El primer carácter es `{`. Cero prosa.\n";
+        req.user_prompt = "Keep 1–2 ids. SOLO el JSON. El primer carácter es `{`. Cero prosa.\n\n" +
+                          req.user_prompt;
       }
       req.phase = "causal_wave_cover";
       req.max_tokens = 256;
     } else {
       req.system_prompt = tuide::wave_pilot_system_prompt();
-      req.user_prompt = tuide::wave_pilot_user_prompt(state);
+      req.user_prompt = tuide::wave_pilot_user_prompt(st);
       req.phase = "causal_wave_pilot";
       req.max_tokens =
           std::min(512, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512);
@@ -7848,14 +7963,9 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       ++escalate_n;
       consecutive_fail = 0;
       if (last_propose) {
-        req.user_prompt =
-            "Última propose. Cierra si ya entendiste; si no, un gesto que aún no hayas hecho.\n\n" +
-            req.user_prompt;
+        req.user_prompt = "Última propose.\n\n" + req.user_prompt;
       } else {
-        req.user_prompt =
-            "La ola anterior no avanzó. Cambia de gesto o cierra si ya entendiste. "
-            "No repitas un peek/follow ya hecho.\n\n" +
-            req.user_prompt;
+        req.user_prompt = "La ola anterior no avanzó.\n\n" + req.user_prompt;
       }
     }
     req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
@@ -7877,7 +7987,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       think = tuide::think_profile(tuide::L2ThinkLevel::Off);
     }
     tuide::apply_think_profile(&req, think);
-    const fs::path wave_dir = output_root / ("wave_" + std::to_string(i + 1));
+    const fs::path wave_dir = waves_root / ("wave_" + std::to_string(i + 1));
     fs::create_directories(wave_dir);
     std::ofstream(wave_dir / "system.txt") << req.system_prompt;
     std::ofstream(wave_dir / "user.md") << req.user_prompt;
@@ -7891,7 +8001,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       tuide::WaveOla cl;
       cl.ok = true;
       cl.do_kind = tuide::WaveDo::Cerrar;
-      cl.why = tuide::wave_circuit_cierre(state);
+      cl.why = tuide::wave_circuit_cierre(st);
       if (cl.why.size() < 8) {
         cl.why = "presupuesto agotado; cierre del circuito visto";
       }
@@ -7900,27 +8010,36 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     if (!response.ok) {
       std::ofstream(wave_dir / "error.txt") << response.error;
       consecutive_fail++;
-      state.last_error = response.error.empty() ? "propose falló" : response.error;
-      if (last_propose && !state.done) {
+      st.last_error = response.error.empty() ? "propose falló" : response.error;
+      if (last_propose && !st.done) {
         std::string cperr;
         const auto cl = force_cerrar();
-        (void)tuide::wave_apply(&state, cl, ops, &cperr);
+        (void)tuide::wave_apply(&st, cl, ops, &cperr);
       }
       log.push_back({{"wave", i + 1},
                      {"phase", req.phase},
                      {"ok", false},
-                     {"error", state.last_error}});
-      if (state.done) {
+                     {"error", st.last_error}});
+      if (st.done) {
         break;
       }
-      if (consecutive_fail >= 3) {
+      if (guion || consecutive_fail >= 3) {
         break;
       }
       continue;
     }
     tuide::WaveOla ola = tuide::wave_parse_ola(response.text);
+    if (guion && !(ola.ok && ola.do_kind == tuide::WaveDo::Guion)) {
+      auto salv = tuide::wave_salvage_guion(response.text);
+      if (!(salv.ok && salv.do_kind == tuide::WaveDo::Guion) && !response.raw.empty()) {
+        salv = tuide::wave_salvage_guion(response.raw);
+      }
+      if (salv.ok && salv.do_kind == tuide::WaveDo::Guion) {
+        ola = std::move(salv);
+      }
+    }
     std::vector<std::string> atlas_ids;
-    for (const auto& h : state.candidatas) {
+    for (const auto& h : st.candidatas) {
       if (!h.id.empty() && h.needle == "atlas") {
         atlas_ids.push_back(h.id);
       }
@@ -7956,7 +8075,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
         if (kind == "chrome" || kind == "hole") {
           continue;
         }
-        int ov = tuide::registry_causal_query_zone_overlap(prompt, zone);
+        int ov = tuide::registry_causal_query_zone_overlap(st.prompt, zone);
         if (kind == "latch" || kind == "object") {
           ov += 10;
         } else if (kind == "caller") {
@@ -7994,28 +8113,11 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       std::ofstream(wave_dir / "cerrar_draft.json")
           << json_dump_safe(tuide::wave_ola_to_json(draft)) << "\n";
       tuide::L2BrainRequest audit_req = req;
-      std::string audit_extra;
-      const auto miss = tuide::wave_guion_uncovered(state);
-      if (!miss.empty()) {
-        audit_extra = "Preguntas del guion sin peek/cerca:";
-        for (const auto& p : miss) {
-          audit_extra += " `" + p + "`";
-        }
-        audit_extra +=
-            ".\nAfirmarlos en el why sin leerlos no cuenta. Si falta uno y no tiene "
-            "nombre, do=cerrar (el piloto ya tuvo olas); no inventes un peek.\n";
-      }
       audit_req.user_prompt =
           "Revisión de cierre (UNA tirada). Borrador:\n" + json_dump_safe(tuide::wave_ola_to_json(draft), 0) +
-          "\n\n¿El why está cubierto por Peeks/Follows, o falta el flujo de un locus anclado?\n"
-          "Completo → do=cerrar (why honesto; huecos[] = nombres afirmados y no leídos).\n"
-          "Falta UN hueco nombrado en el why y no leído → un peek de ESE locus.\n"
-          "Falta el flujo de un locus ya anclado (Peeks / Circuito / callers ON-OFF) "
-          "o nombrado en el why → UN follow de ESE locus (1; 2 solo si son callers del Circuito).\n"
-          "PROHIBIDO needles, in de archivo, tanda, juicio, peek de algo no nombrado.\n"
-          "Si dudas, do=cerrar. Un gesto inválido se descarta y se aplica el borrador.\n"
-          "No reinicies. No recites el atlas. No abras un plan de varias olas.\n" +
-          audit_extra + "\n" + req.user_prompt;
+          "\n\n" + tuide::wave_close_audit_instructions(st) +
+          "No reinicies. No recites el atlas. No abras un plan de varias olas.\n\n" +
+          req.user_prompt;
       think = tuide::think_profile(tuide::L2ThinkLevel::Medium);
       tuide::apply_think_profile(&audit_req, think);
       std::ofstream(wave_dir / "audit_user.md") << audit_req.user_prompt;
@@ -8027,7 +8129,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
           << (audit_response.raw.empty() ? audit_response.text : audit_response.raw);
       if (audit_response.ok) {
         auto audit_ola = tuide::wave_parse_ola(audit_response.text);
-        if (audit_ola.ok && tuide::wave_close_audit_accept(draft, audit_ola, state)) {
+        if (audit_ola.ok && tuide::wave_close_audit_accept(draft, audit_ola, st)) {
           ola = std::move(audit_ola);
         } else {
           ola = draft;
@@ -8045,25 +8147,22 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     bool ok = false;
     if (guion && ola.ok && ola.do_kind != tuide::WaveDo::Guion) {
       apply_err = "ola 0: solo guion (papeles de la consulta)";
-      state.last_error = apply_err;
+      st.last_error = apply_err;
     } else if (cover && ola.ok && ola.do_kind != tuide::WaveDo::Juicio) {
       apply_err = "ola 0: solo juicio keep (ampliar fichas)";
-      state.last_error = apply_err;
+      st.last_error = apply_err;
     } else if (cover && ola.ok && ola.keep.empty()) {
       apply_err = "ola 0: keep 1–2 ids a ampliar";
-      state.last_error = apply_err;
+      st.last_error = apply_err;
     } else {
       if (cover && static_cast<int>(ola.keep.size()) > tuide::kWaveCoverKeepMax) {
         ola.keep.resize(static_cast<size_t>(tuide::kWaveCoverKeepMax));
       }
-      if (cover && ola.ok && ola.do_kind == tuide::WaveDo::Juicio) {
-        tuide::wave_cover_restore_caller(&ola, state);
-      }
-      ok = tuide::wave_apply(&state, ola, ops, &apply_err);
+      ok = tuide::wave_apply(&st, ola, ops, &apply_err);
     }
     if (ok && cover) {
-      state.opened_ids = ola.keep;
-      std::string opened = tuide::registry_causal_pilot_opened_pack(cards_payload, ola.keep, prompt);
+      st.opened_ids = ola.keep;
+      std::string opened = tuide::registry_causal_pilot_opened_pack(cards_payload, ola.keep, st.prompt);
       const auto filtered = tuide::registry_causal_payload_filter_zones(cards_payload, ola.keep);
       const std::string inspect =
           tuide::registry_causal_pack_markdown(filtered, tuide::GraphViewLevel::Inspect);
@@ -8076,38 +8175,38 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
         opened.resize(kOpenedCap);
         opened += "\n…\n";
       }
-      state.opened_md = std::move(opened);
-      tuide::wave_retain_atlas_ids(&state, ola.keep);
-      tuide::wave_ingest_zone_symbols(&state, cards_payload, ola.keep);
+      st.opened_md = std::move(opened);
+      tuide::wave_retain_atlas_ids(&st, ola.keep);
+      tuide::wave_ingest_zone_symbols(&st, cards_payload, ola.keep);
     }
-    if (ok && last_propose && !state.done && ola.do_kind != tuide::WaveDo::Cerrar) {
+    if (ok && last_propose && !st.done && ola.do_kind != tuide::WaveDo::Cerrar) {
       std::string cperr;
       const auto cl = force_cerrar();
-      (void)tuide::wave_apply(&state, cl, ops, &cperr);
+      (void)tuide::wave_apply(&st, cl, ops, &cperr);
     }
-    if (!ok && last_propose && !state.done) {
+    if (!ok && last_propose && !st.done) {
       ola = force_cerrar();
-      ok = tuide::wave_apply(&state, ola, ops, &apply_err);
+      ok = tuide::wave_apply(&st, ola, ops, &apply_err);
     }
     if (!ok && !think_override && !cover && !guion && !last_propose &&
-        !tuide::wave_circuit_complete(state)) {
+        !tuide::wave_circuit_complete(st)) {
       escalate_think = true;
     }
-    if (first_circuit_propose == 0 && tuide::wave_circuit_complete(state)) {
-      first_circuit_propose = state.propose_n;
+    if (first_circuit_propose == 0 && tuide::wave_circuit_complete(st)) {
+      first_circuit_propose = st.propose_n;
     }
-    std::ofstream(wave_dir / "work.md") << tuide::wave_work_markdown(state);
-    std::ofstream(wave_dir / "notebook.md") << tuide::wave_notebook_markdown(state);
-    std::ofstream(wave_dir / "state.json") << json_dump_safe(tuide::wave_state_to_json(state)) << "\n";
+    std::ofstream(wave_dir / "work.md") << tuide::wave_work_markdown(st);
+    std::ofstream(wave_dir / "notebook.md") << tuide::wave_notebook_markdown(st);
+    std::ofstream(wave_dir / "state.json") << json_dump_safe(tuide::wave_state_to_json(st)) << "\n";
     log.push_back({{"wave", i + 1},
-                   {"propose", state.propose_n},
+                   {"propose", st.propose_n},
                    {"phase", req.phase},
                    {"ok", ok},
                    {"do", tuide::wave_do_name(ola.do_kind)},
                    {"why", ola.why},
                    {"error", ok ? "" : apply_err},
                    {"user_chars", static_cast<int>(req.user_prompt.size())},
-                   {"circuit", tuide::wave_circuit_complete(state)},
+                   {"circuit", tuide::wave_circuit_complete(st)},
                    {"think", tuide::l2_think_level_name(think.level)},
                    {"think_budget", think.budget},
                    {"escalate", escalate_this},
@@ -8116,17 +8215,23 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
               << " do=" << tuide::wave_do_name(ola.do_kind) << " ok=" << (ok ? "yes" : "no")
               << " think=" << tuide::l2_think_level_name(think.level) << " budget=" << think.budget
               << " user_chars=" << req.user_prompt.size()
-              << " circuit=" << (tuide::wave_circuit_complete(state) ? "yes" : "no");
+              << " circuit=" << (tuide::wave_circuit_complete(st) ? "yes" : "no");
     if (!ok) {
       std::cerr << " err=" << apply_err;
     }
     std::cerr << "\n";
     if (ok) {
       consecutive_fail = 0;
+    } else if (guion) {
+      std::cerr << "wave-explore: guion falló; no se reintenta el LLM\n";
+      break;
     } else if (++consecutive_fail >= 3) {
       break;
     }
   }
+  };
+  run_waves(state, output_root, max_waves);
+
   tuide::registry_close(&reg);
   std::ofstream(output_root / "log.json") << json_dump_safe(log) << "\n";
   nlohmann::json metrics = {{"proposes", state.propose_n},

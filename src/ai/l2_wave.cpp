@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <unordered_set>
@@ -39,6 +40,26 @@ std::string json_str(const nlohmann::json& j, const char* key) {
     return j[key].get<std::string>();
   }
   return {};
+}
+
+int json_int(const nlohmann::json& j, const char* key) {
+  if (!j.contains(key)) {
+    return 0;
+  }
+  if (j[key].is_number_integer()) {
+    return j[key].get<int>();
+  }
+  if (j[key].is_number()) {
+    return static_cast<int>(j[key].get<double>());
+  }
+  if (j[key].is_string()) {
+    try {
+      return std::stoi(j[key].get<std::string>());
+    } catch (...) {
+      return 0;
+    }
+  }
+  return 0;
 }
 
 std::vector<std::string> json_str_array(const nlohmann::json& j, const char* key) {
@@ -431,31 +452,6 @@ void note_circuit_from_peek(WaveState* st, const std::string& loc, const std::st
   }
 }
 
-bool hop_in_keep_stems(const WaveState& st, const WaveHit& h) {
-  std::vector<std::string> stems;
-  for (const auto& z : st.zonas) {
-    if (z.verdict != "keep") {
-      continue;
-    }
-    if (const WaveHit* hit = wave_find_hit(st.candidatas, z.id)) {
-      if (!hit->stem.empty()) {
-        stems.push_back(ascii_lower(hit->stem));
-      }
-    }
-  }
-  if (stems.empty()) {
-    return true;
-  }
-  const std::string hs = ascii_lower(h.stem);
-  const std::string hp = ascii_lower(h.path);
-  for (const auto& s : stems) {
-    if ((!hs.empty() && hs == s) || (!hp.empty() && hp.find(s) != std::string::npos)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 std::string neighbor_label(const WaveHit& h) {
   if (!h.path.empty() && !h.symbol.empty()) {
     return h.path + ":" + h.symbol;
@@ -500,6 +496,9 @@ bool neighbor_call_noise(const std::string& name) {
     return true;
   }
   if (low.rfind("paint_", 0) == 0 || low.rfind("steady_", 0) == 0) {
+    return true;
+  }
+  if (low.find("wake") != std::string::npos || low.find("enqueue") != std::string::npos) {
     return true;
   }
   if (low == "tr" || low == "now" || low == "seconds" || low == "milliseconds") {
@@ -645,29 +644,157 @@ bool neighbor_is_read(const WaveState& st, const std::string& loc) {
          list_has_locus(st.follows_done, loc, st.candidatas);
 }
 
+bool hop_dup(const std::vector<WavePeekHop>& have, const std::string& loc) {
+  for (const auto& h : have) {
+    if (locus_keys_match(h.loc, loc)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+WavePeekHop make_peek_hop(const WaveState& st, const std::string& loc, int hops) {
+  WavePeekHop h;
+  h.loc = loc;
+  h.stem = loc_stem(st, loc);
+  h.hops = hops;
+  return h;
+}
+
+void push_peek_hop(std::vector<WavePeekHop>* dst, WavePeekHop hop) {
+  if (dst == nullptr || hop.loc.empty() || neighbor_id_skip(hop.loc)) {
+    return;
+  }
+  if (hop_dup(*dst, hop.loc)) {
+    return;
+  }
+  dst->push_back(std::move(hop));
+}
+
+std::string peek_rank_query(const WaveState& st) {
+  std::ostringstream out;
+  out << st.prompt;
+  for (const auto& p : st.papeles) {
+    if (!p.empty()) {
+      out << " " << p;
+    }
+  }
+  return out.str();
+}
+
+void rank_and_trim_hops(const WaveState& st, const WaveOps* ops, const std::string& from_loc,
+                        std::vector<WavePeekHop>* hops, int keep_n) {
+  if (hops == nullptr || hops->empty()) {
+    return;
+  }
+  if (ops != nullptr && ops->rank_hops) {
+    ops->rank_hops(peek_rank_query(st), hops);
+  }
+  std::sort(hops->begin(), hops->end(), [&](const WavePeekHop& a, const WavePeekHop& b) {
+    const bool ac = a.cosine >= 0.f;
+    const bool bc = b.cosine >= 0.f;
+    if (ac != bc) {
+      return ac;
+    }
+    if (ac && std::fabs(a.cosine - b.cosine) > 0.0001f) {
+      return a.cosine > b.cosine;
+    }
+    const int as = neighbor_hop_score(st, a.loc, from_loc);
+    const int bs = neighbor_hop_score(st, b.loc, from_loc);
+    if (as != bs) {
+      return as > bs;
+    }
+    if (a.hops != b.hops) {
+      return a.hops < b.hops;
+    }
+    return a.loc < b.loc;
+  });
+  if (keep_n > 0 && static_cast<int>(hops->size()) > keep_n) {
+    hops->resize(static_cast<std::size_t>(keep_n));
+  }
+}
+
+void format_hop_flags(std::ostringstream& out, const WaveState& st, const std::string& from_loc,
+                      const WavePeekHop& h) {
+  const std::string from_st = loc_stem(st, from_loc);
+  const bool other = !from_st.empty() && !h.stem.empty() && from_st != h.stem;
+  const bool unread = !neighbor_is_read(st, h.loc);
+  if (h.cosine >= 0.f) {
+    out << " cos=" << std::fixed << std::setprecision(2) << h.cosine;
+  }
+  if (h.hops > 1) {
+    out << " hops=" << h.hops;
+  }
+  if (unread || other) {
+    out << " (";
+    if (unread) {
+      out << "no leído";
+    }
+    if (unread && other) {
+      out << ", ";
+    }
+    if (other) {
+      out << "otro stem";
+    }
+    out << ")";
+  }
+}
+
 std::string format_peek_neighbors(const WaveState& st, const WavePeekNeighbors& n) {
-  if (n.callers.empty() && n.callees.empty()) {
+  if (n.callers.empty() && n.callees.empty() && n.export_callers.empty()) {
     return {};
   }
   std::ostringstream out;
   if (!n.callers.empty()) {
     out << "callers:";
     for (const auto& c : n.callers) {
-      out << " `" << c << "`";
-      if (!neighbor_is_read(st, c)) {
-        out << " (no leído)";
+      out << "\n  ↑ `" << c.loc << "`";
+      if (!c.stem.empty()) {
+        out << " stem=" << c.stem;
       }
+      format_hop_flags(out, st, n.loc, c);
     }
     out << "\n";
   }
   if (!n.callees.empty()) {
     out << "calls:";
     for (const auto& c : n.callees) {
-      out << " `" << c << "`";
+      out << "\n  ↓ `" << c.loc << "`";
+      if (!c.stem.empty()) {
+        out << " stem=" << c.stem;
+      }
+      format_hop_flags(out, st, n.loc, c);
+    }
+    out << "\n";
+  }
+  if (!n.export_loc.empty() && !n.export_callers.empty()) {
+    out << "fan-in `" << n.export_loc << "`:";
+    for (const auto& c : n.export_callers) {
+      out << "\n  ↑ `" << c.loc << "`";
+      format_hop_flags(out, st, n.export_loc, c);
     }
     out << "\n";
   }
   return out.str();
+}
+
+void collect_causal_callers(const WaveOps& ops, const std::string& loc, const WaveState& st,
+                            std::vector<WaveHit>* out) {
+  if (out == nullptr || !ops.peek_causal) {
+    return;
+  }
+  std::string path;
+  std::string symbol;
+  resolve_locus(st, loc, &path, &symbol);
+  if (symbol.empty()) {
+    symbol = symbol_of_loc(loc);
+  }
+  if (symbol.empty()) {
+    return;
+  }
+  std::string md;
+  std::string cerr;
+  ops.peek_causal(path, symbol, "", false, &md, out, &cerr);
 }
 
 void record_peek_neighbors(WaveState* st, const std::string& loc, const std::string& body,
@@ -677,110 +804,77 @@ void record_peek_neighbors(WaveState* st, const std::string& loc, const std::str
   }
   WavePeekNeighbors n;
   n.loc = loc;
-  std::vector<std::pair<int, std::string>> ranked;
+  std::vector<WavePeekHop> in_hops;
   for (const auto& h : callers) {
-    if (!hop_in_keep_stems(*st, h)) {
-      continue;
-    }
     const std::string label = neighbor_label(h);
-    if (label.empty() || neighbor_id_skip(label)) {
+    if (label.empty() || neighbor_id_skip(label) || locus_keys_match(label, loc)) {
       continue;
     }
-    bool dup = false;
-    for (const auto& have : ranked) {
-      if (locus_keys_match(have.second, label)) {
-        dup = true;
-        break;
+    WavePeekHop hop = make_peek_hop(*st, label, 1);
+    if (hop.stem.empty() && !h.stem.empty()) {
+      hop.stem = ascii_lower(h.stem);
+    }
+    push_peek_hop(&in_hops, std::move(hop));
+  }
+  rank_and_trim_hops(*st, ops, loc, &in_hops, kWavePeekExpandCap);
+  if (ops != nullptr && ops->peek_causal && kWavePeekHopDepth >= 2) {
+    const int n1 = static_cast<int>(in_hops.size());
+    for (int i = 0; i < n1; ++i) {
+      std::vector<WaveHit> inc;
+      collect_causal_callers(*ops, in_hops[static_cast<std::size_t>(i)].loc, *st, &inc);
+      for (const auto& h : inc) {
+        const std::string label = neighbor_label(h);
+        if (label.empty() || neighbor_id_skip(label) || locus_keys_match(label, loc) ||
+            hop_dup(in_hops, label)) {
+          continue;
+        }
+        WavePeekHop hop = make_peek_hop(*st, label, 2);
+        if (hop.stem.empty() && !h.stem.empty()) {
+          hop.stem = ascii_lower(h.stem);
+        }
+        push_peek_hop(&in_hops, std::move(hop));
       }
     }
-    if (!dup) {
-      ranked.push_back({neighbor_hop_score(*st, label, loc), label});
-    }
   }
-  std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
-    if (a.first != b.first) {
-      return a.first > b.first;
-    }
-    return a.second < b.second;
-  });
-  for (const auto& row : ranked) {
-    n.callers.push_back(row.second);
-    if (static_cast<int>(n.callers.size()) >= kWavePeekNeighborMax) {
-      break;
-    }
-  }
-  std::vector<std::pair<int, std::string>> out_ranked;
+  rank_and_trim_hops(*st, ops, loc, &in_hops, kWavePeekNeighborMax);
+  n.callers = std::move(in_hops);
+
+  std::vector<WavePeekHop> out_hops;
   for (const auto& c : wave_follow_outgoing_calls(body)) {
     if (c.symbol.empty() || locus_keys_match(c.symbol, loc) || neighbor_call_noise(c.symbol)) {
       continue;
     }
     maybe_resolve_callee(st, ops, c.symbol);
-    bool dup = false;
-    for (const auto& have : out_ranked) {
-      if (locus_keys_match(have.second, c.symbol)) {
-        dup = true;
-        break;
-      }
-    }
-    if (!dup) {
-      out_ranked.push_back({neighbor_hop_score(*st, c.symbol, loc), c.symbol});
-    }
+    push_peek_hop(&out_hops, make_peek_hop(*st, c.symbol, 1));
   }
-  std::sort(out_ranked.begin(), out_ranked.end(), [](const auto& a, const auto& b) {
-    if (a.first != b.first) {
-      return a.first > b.first;
-    }
-    return a.second < b.second;
-  });
-  for (const auto& row : out_ranked) {
-    cap_unique_labels(&n.callees, row.second, kWavePeekNeighborMax);
-    if (static_cast<int>(n.callees.size()) >= kWavePeekNeighborMax) {
-      break;
-    }
-  }
+  rank_and_trim_hops(*st, ops, loc, &out_hops, kWavePeekNeighborMax);
+  n.callees = std::move(out_hops);
+
   const std::string here_stem = loc_stem(*st, loc);
   if (ops != nullptr && ops->peek_causal) {
     for (const auto& cal : n.callees) {
-      const std::string cal_stem = loc_stem(*st, cal);
+      if (cal.hops != 1) {
+        continue;
+      }
+      const std::string cal_stem = cal.stem.empty() ? loc_stem(*st, cal.loc) : cal.stem;
       if (here_stem.empty() || cal_stem.empty() || here_stem == cal_stem) {
         continue;
       }
-      std::string path;
-      std::string symbol;
-      resolve_locus(*st, cal, &path, &symbol);
-      if (symbol.empty()) {
-        symbol = symbol_of_loc(cal);
-      }
-      if (symbol.empty()) {
-        continue;
-      }
-      std::string md;
       std::vector<WaveHit> inc;
-      std::string cerr;
-      if (!ops->peek_causal(path, symbol, "", false, &md, &inc, &cerr) || inc.empty()) {
-        continue;
-      }
-      std::vector<std::pair<int, std::string>> fan;
+      collect_causal_callers(*ops, cal.loc, *st, &inc);
+      std::vector<WavePeekHop> fan;
       for (const auto& h : inc) {
         const std::string label = neighbor_label(h);
         if (label.empty() || neighbor_id_skip(label) || locus_keys_match(label, loc) ||
-            locus_keys_match(label, cal)) {
+            locus_keys_match(label, cal.loc)) {
           continue;
         }
-        fan.push_back({neighbor_hop_score(*st, label, cal), label});
+        push_peek_hop(&fan, make_peek_hop(*st, label, 2));
       }
-      std::sort(fan.begin(), fan.end(), [](const auto& a, const auto& b) {
-        if (a.first != b.first) {
-          return a.first > b.first;
-        }
-        return a.second < b.second;
-      });
-      n.export_loc = cal;
-      for (const auto& row : fan) {
-        push_unique_str(&n.export_callers, row.second);
-        if (static_cast<int>(n.export_callers.size()) >= kWaveSketchFanInMax) {
-          break;
-        }
+      rank_and_trim_hops(*st, ops, cal.loc, &fan, kWaveSketchFanInMax);
+      if (!fan.empty()) {
+        n.export_loc = cal.loc;
+        n.export_callers = std::move(fan);
       }
       break;
     }
@@ -1420,15 +1514,6 @@ bool apply_peeks(WaveState* st, const std::vector<std::string>& peeks, const Wav
             md += "\n…\n";
           }
           append_follow_md(st, md, kWaveFollowChars);
-          std::vector<WaveHit> kept;
-          for (const auto& h : callers) {
-            if (hop_in_keep_stems(*st, h)) {
-              kept.push_back(h);
-            }
-          }
-          if (!kept.empty()) {
-            callers = std::move(kept);
-          }
           merge_follow_hops(st, callers);
         }
       }
@@ -1743,16 +1828,16 @@ void collect_cerca_seeds(const WaveState& st, const std::vector<std::string>& in
   for (const auto& n : st.peek_neighbors) {
     add_loc(n.loc);
     for (const auto& c : n.callees) {
-      add_loc(c);
+      add_loc(c.loc);
     }
     for (const auto& c : n.callers) {
-      add_loc(c);
+      add_loc(c.loc);
     }
     if (!n.export_loc.empty()) {
       add_loc(n.export_loc);
     }
     for (const auto& c : n.export_callers) {
-      add_loc(c);
+      add_loc(c.loc);
     }
   }
   for (const auto& z : st.zonas) {
@@ -2368,25 +2453,178 @@ std::vector<std::string> wave_guion_uncovered(const WaveState& st) {
   return miss;
 }
 
+std::string wave_strategy_markdown() {
+  return R"(## Estrategia
+1. Localiza el sistema del que habla la consulta (el objeto).
+2. Luego el verbo derivado sobre ese sistema.
+3. Con el sistema anclado: disparo y efecto son dos ramas distintas.
+El Guion es el examen. No es el plan de olas.
+)";
+}
+
 std::string wave_guion_markdown(const WaveState& st) {
   std::ostringstream out;
   out << "## Guion\n";
+  out << "(examen: qué tendrías que poder explicar; no es el orden de exploración)\n";
   if (st.papeles.empty()) {
     out << "(aún no hay preguntas)\n";
     return out.str();
   }
-  for (const auto& p : st.papeles) {
-    out << "- " << p << "\n";
-  }
   const auto miss = wave_guion_uncovered(st);
-  if (!miss.empty()) {
-    out << "sin evidencia:";
-    for (const auto& p : miss) {
-      out << " `" << p << "`";
-    }
-    out << "\n";
+  for (std::size_t i = 0; i < st.papeles.size(); ++i) {
+    const auto& p = st.papeles[i];
+    const bool abierta = std::find(miss.begin(), miss.end(), p) != miss.end();
+    out << (i + 1) << ". " << p << (abierta ? "  [sin evidencia]" : "  [con evidencia]") << "\n";
   }
   return out.str();
+}
+
+bool wave_independiente_ok(const WaveState& st, int papel, std::string* err) {
+  auto set = [&](const char* m) {
+    if (err) {
+      *err = m;
+    }
+    return false;
+  };
+  if (st.independiente_leaf) {
+    return set("independiente no anida");
+  }
+  if (papel < 1 || papel > static_cast<int>(st.papeles.size())) {
+    return set("independiente: papel 1-based del guion");
+  }
+  if (!wave_log_has_do(st, "juicio")) {
+    return set("independiente: primero cover y un peek o cerca");
+  }
+  if (st.peeks_done.empty() && st.cerca_log.empty()) {
+    return set("independiente: primero cover y un peek o cerca");
+  }
+  if (wave_is_last_propose(st)) {
+    return set("independiente: no en la última ola");
+  }
+  for (int d : st.independiente_done) {
+    if (d == papel) {
+      return set("independiente: ese papel ya se lanzó");
+    }
+  }
+  const std::string& want = st.papeles[static_cast<std::size_t>(papel - 1)];
+  const auto miss = wave_guion_uncovered(st);
+  bool abierta = false;
+  for (const auto& p : miss) {
+    if (p == want) {
+      abierta = true;
+      break;
+    }
+  }
+  if (!abierta) {
+    return set("independiente: esa pregunta ya tiene evidencia en lo anclado");
+  }
+  return true;
+}
+
+std::vector<int> wave_independiente_open(const WaveState& st) {
+  std::vector<int> out;
+  for (int i = 1; i <= static_cast<int>(st.papeles.size()); ++i) {
+    if (wave_independiente_ok(st, i, nullptr)) {
+      out.push_back(i);
+    }
+  }
+  return out;
+}
+
+std::string wave_independiente_cue_markdown(const WaveState& st) {
+  const auto open = wave_independiente_open(st);
+  if (open.empty()) {
+    return {};
+  }
+  std::ostringstream out;
+  out << "Papeles [sin evidencia] que no salen de lo anclado:";
+  for (std::size_t i = 0; i < open.size(); ++i) {
+    out << (i == 0 ? " " : ", ") << open[i];
+  }
+  out << ". independiente cabe (papel=N).\n";
+  return out.str();
+}
+
+WaveState wave_independiente_child(const WaveState& parent, const std::string& prompt) {
+  WaveState child;
+  child.prompt = prompt;
+  child.papeles = {prompt};
+  child.independiente_leaf = true;
+  child.atlas_md = parent.atlas_md;
+  child.atlas_seed = parent.atlas_seed;
+  wave_merge_hits(&child, parent.atlas_seed);
+  return child;
+}
+
+void wave_merge_independiente(WaveState* parent, const WaveState& child, int papel) {
+  if (parent == nullptr) {
+    return;
+  }
+  const auto h = wave_pack_handoff(child);
+  std::ostringstream block;
+  block << "\n### independiente `" << papel << "`\n";
+  block << "consulta: " << child.prompt << "\n";
+  block << "### Visto (hijo)\n";
+  if (h.visto.empty()) {
+    block << "(nada)\n";
+  } else {
+    for (const auto& a : h.visto) {
+      block << "- `" << a << "`\n";
+    }
+  }
+  block << "### Huecos (hijo)\n";
+  if (h.huecos.empty()) {
+    block << "(nada)\n";
+  } else {
+    for (const auto& a : h.huecos) {
+      block << "- `" << a << "`\n";
+    }
+  }
+  if (!child.notas.empty()) {
+    block << child.notas;
+    if (child.notas.back() != '\n') {
+      block << "\n";
+    }
+  }
+  std::string add = block.str();
+  constexpr std::size_t kCap = 12000;
+  if (add.size() > kCap) {
+    add.resize(kCap);
+    add += "\n…\n";
+  }
+  parent->notas += add;
+  if (!child.follow_md.empty()) {
+    if (!parent->follow_md.empty()) {
+      parent->follow_md += "\n";
+    }
+    parent->follow_md += child.follow_md;
+  }
+  std::unordered_set<std::string> kept;
+  for (const auto& id : child.opened_ids) {
+    kept.insert(ascii_lower(id));
+  }
+  std::vector<WaveHit> bring;
+  for (const auto& h : child.candidatas) {
+    if (h.needle == "atlas") {
+      if (kept.empty() || (!kept.count(ascii_lower(h.id)) &&
+                           !kept.count(ascii_lower(wave_hit_key(h))))) {
+        continue;
+      }
+    }
+    bring.push_back(h);
+  }
+  wave_merge_hits(parent, bring);
+  for (const auto& p : child.peeks_done) {
+    if (!list_has_locus(parent->peeks_done, p, parent->candidatas)) {
+      parent->peeks_done.push_back(p);
+    }
+  }
+  for (const auto& f : child.follows_done) {
+    if (!list_has_locus(parent->follows_done, f, parent->candidatas)) {
+      parent->follows_done.push_back(f);
+    }
+  }
+  parent->independiente_done.push_back(papel);
 }
 
 bool wave_line_has_needle(const std::string& line, const std::string& needle) {
@@ -2691,6 +2929,9 @@ int wave_seed_from_atlas(WaveState* st, const nlohmann::json& payload) {
     }
   }
   wave_merge_hits(st, hits);
+  if (st->atlas_seed.empty()) {
+    st->atlas_seed = hits;
+  }
   if (st->atlas_md.empty()) {
     st->atlas_md = atlas.str();
   }
@@ -2840,73 +3081,6 @@ bool wave_needs_cover(const WaveState& st) {
          !st.done;
 }
 
-int wave_cover_restore_caller(WaveOla* ola, const WaveState& st) {
-  if (ola == nullptr || ola->do_kind != WaveDo::Juicio) {
-    return 0;
-  }
-  if (wave_log_has_do(st, "juicio")) {
-    return 0;
-  }
-  auto kind_of = [&](const std::string& id) -> std::string {
-    if (const WaveHit* h = wave_find_hit(st.candidatas, id)) {
-      return ascii_lower(h->kind);
-    }
-    return {};
-  };
-  bool have_latch = false;
-  for (const auto& id : ola->keep) {
-    const std::string k = kind_of(id);
-    if (k == "latch" || k == "object") {
-      have_latch = true;
-      break;
-    }
-  }
-  if (!have_latch) {
-    return 0;
-  }
-  std::string caller;
-  for (const auto& h : st.candidatas) {
-    if (h.needle != "atlas" || ascii_lower(h.kind) != "caller" || h.id.empty()) {
-      continue;
-    }
-    bool already = false;
-    for (const auto& id : ola->keep) {
-      if (id == h.id || locus_keys_match(id, h.id)) {
-        already = true;
-        break;
-      }
-    }
-    if (!already) {
-      caller = h.id;
-      break;
-    }
-  }
-  if (caller.empty()) {
-    return 0;
-  }
-  if (static_cast<int>(ola->keep.size()) >= kWaveCoverKeepMax) {
-    int evict = -1;
-    for (int i = static_cast<int>(ola->keep.size()) - 1; i >= 0; --i) {
-      const std::string k = kind_of(ola->keep[static_cast<std::size_t>(i)]);
-      if (k != "latch" && k != "object") {
-        evict = i;
-        break;
-      }
-    }
-    if (evict < 0) {
-      evict = static_cast<int>(ola->keep.size()) - 1;
-    }
-    ola->keep.erase(ola->keep.begin() + evict);
-  }
-  ola->keep.push_back(caller);
-  ola->drop.erase(std::remove_if(ola->drop.begin(), ola->drop.end(),
-                                 [&](const std::string& id) {
-                                   return id == caller || locus_keys_match(id, caller);
-                                 }),
-                  ola->drop.end());
-  return 1;
-}
-
 bool wave_close_audit_accept(const WaveOla& draft, const WaveOla& audit, const WaveState& st) {
   if (!audit.ok) {
     return false;
@@ -2976,6 +3150,9 @@ bool wave_close_audit_accept(const WaveOla& draft, const WaveOla& audit, const W
     }
     return true;
   }
+  if (audit.do_kind == WaveDo::Independiente) {
+    return wave_independiente_ok(st, audit.papel, nullptr);
+  }
   if (audit.do_kind != WaveDo::Follow) {
     return false;
   }
@@ -2991,6 +3168,41 @@ bool wave_close_audit_accept(const WaveOla& draft, const WaveOla& audit, const W
     }
   }
   return true;
+}
+
+std::string wave_close_audit_instructions(const WaveState& st) {
+  const auto open = wave_independiente_open(st);
+  const auto miss = wave_guion_uncovered(st);
+  std::ostringstream out;
+  out << "¿El why está cubierto por Peeks/Follows, o falta el flujo de un locus anclado?\n";
+  out << "Completo → do=cerrar (why honesto; huecos[] = nombres afirmados y no leídos).\n";
+  out << "Falta UN hueco nombrado en el why y no leído → un peek de ESE locus.\n";
+  out << "Falta el flujo de un locus ya anclado (Peeks / Circuito / callers ON-OFF) "
+         "o nombrado en el why → UN follow de ESE locus (1; 2 solo si son callers del Circuito).\n";
+  if (!open.empty()) {
+    out << "Un papel [sin evidencia] que no sale de lo anclado → do=independiente con ese "
+           "índice (1-based). El runtime usa ESA frase; no redactes un prompt.\n";
+  }
+  out << "PROHIBIDO needles, in de archivo, tanda, juicio, peek de algo no nombrado.\n";
+  if (open.empty()) {
+    out << "Si dudas, do=cerrar. Un gesto inválido se descarta y se aplica el borrador.\n";
+  } else {
+    out << "Un gesto inválido se descarta y se aplica el borrador.\n";
+  }
+  if (!miss.empty()) {
+    out << "Preguntas del guion sin peek/cerca:";
+    for (const auto& p : miss) {
+      out << " `" << p << "`";
+    }
+    out << ".\nAfirmarlos en el why sin leerlos no cuenta.\n";
+    if (open.empty()) {
+      out << "Si falta uno y no tiene nombre, do=cerrar (el piloto ya tuvo olas); no inventes "
+             "un peek.\n";
+    } else {
+      out << "No inventes un peek para un papel sin locus en lo anclado.\n";
+    }
+  }
+  return out.str();
 }
 
 std::vector<std::string> wave_salvage_keep(const std::string& raw,
@@ -3045,6 +3257,81 @@ std::vector<std::string> wave_salvage_keep(const std::string& raw,
   return out;
 }
 
+WaveOla wave_salvage_guion(const std::string& raw) {
+  WaveOla ola = wave_parse_ola(raw);
+  if (ola.ok && ola.do_kind == WaveDo::Guion) {
+    return ola;
+  }
+  const auto key = raw.rfind("\"papeles\"");
+  if (key == std::string::npos) {
+    return ola;
+  }
+  const auto bra = raw.find('[', key);
+  if (bra == std::string::npos) {
+    return ola;
+  }
+  int depth = 0;
+  bool in_string = false;
+  bool escape = false;
+  std::size_t end = std::string::npos;
+  for (std::size_t i = bra; i < raw.size(); ++i) {
+    const char c = raw[i];
+    if (in_string) {
+      if (escape) {
+        escape = false;
+      } else if (c == '\\') {
+        escape = true;
+      } else if (c == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_string = true;
+      continue;
+    }
+    if (c == '[') {
+      ++depth;
+    } else if (c == ']') {
+      --depth;
+      if (depth == 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end == std::string::npos) {
+    return ola;
+  }
+  nlohmann::json arr;
+  try {
+    arr = nlohmann::json::parse(raw.substr(bra, end - bra + 1));
+  } catch (...) {
+    return ola;
+  }
+  if (!arr.is_array()) {
+    return ola;
+  }
+  std::vector<std::string> papeles;
+  for (const auto& item : arr) {
+    if (!item.is_string()) {
+      continue;
+    }
+    const std::string p = item.get<std::string>();
+    if (wave_guion_papel_ok(p)) {
+      papeles.push_back(p);
+    }
+  }
+  if (!wave_guion_papeles_ok(papeles, nullptr)) {
+    return ola;
+  }
+  WaveOla g;
+  g.ok = true;
+  g.do_kind = WaveDo::Guion;
+  g.papeles = std::move(papeles);
+  return g;
+}
+
 WaveOla wave_parse_ola(const std::string& raw) {
   WaveOla out;
   const std::string blob = extract_ola_json(raw);
@@ -3060,15 +3347,25 @@ WaveOla wave_parse_ola(const std::string& raw) {
     return out;
   }
   out.raw = j;
+  out.papeles = json_str_array(j, "papeles");
   const std::string action = j.value("action", "");
   if (action.size() < 5 || action.compare(0, 5, "ola_v") != 0) {
+    if (wave_guion_papeles_ok(out.papeles, nullptr)) {
+      out.do_kind = WaveDo::Guion;
+      out.ok = true;
+      return out;
+    }
     out.error = "contrato ola_v1 inválido";
     return out;
   }
   out.do_kind = wave_do_parse(json_str(j, "do"));
   if (out.do_kind == WaveDo::Invalid) {
-    out.error = "do inválido";
-    return out;
+    if (wave_guion_papeles_ok(out.papeles, nullptr)) {
+      out.do_kind = WaveDo::Guion;
+    } else {
+      out.error = "do inválido";
+      return out;
+    }
   }
   out.campo = json_str(j, "campo");
   out.needles = json_str_array(j, "needles");
@@ -3110,7 +3407,10 @@ WaveOla wave_parse_ola(const std::string& raw) {
   }
   out.why = json_str(j, "why");
   out.huecos = json_str_array(j, "huecos");
-  out.papeles = json_str_array(j, "papeles");
+  if (out.papeles.empty()) {
+    out.papeles = json_str_array(j, "papeles");
+  }
+  out.papel = json_int(j, "papel");
   if (out.do_kind == WaveDo::Guion) {
     std::string gerr;
     if (!wave_guion_papeles_ok(out.papeles, &gerr)) {
@@ -3163,6 +3463,10 @@ WaveOla wave_parse_ola(const std::string& raw) {
   }
   if (out.do_kind == WaveDo::Entre && (out.from.empty() || out.to.empty())) {
     out.error = "entre sin from/to";
+    return out;
+  }
+  if (out.do_kind == WaveDo::Independiente && out.papel < 1) {
+    out.error = "independiente: papel 1-based del guion";
     return out;
   }
   if (out.do_kind == WaveDo::Tanda && out.needles.empty() && out.peeks.empty() &&
@@ -3362,7 +3666,7 @@ bool wave_check_barriers(const WaveOla& ola, const WaveState& st, std::string* e
     }
     for (const auto& n : ola.needles) {
       if (needle_is_already_read_symbol(st, n)) {
-        return set("cerca: no re-uses el símbolo ya leído; busca el papel que falta");
+        return set("cerca: no re-uses el símbolo ya leído");
       }
     }
     if (cerca_already_logged(st, ola.needles, ola.in_scopes)) {
@@ -3384,6 +3688,9 @@ bool wave_check_barriers(const WaveOla& ola, const WaveState& st, std::string* e
       return false;
     }
     return true;
+  }
+  if (ola.do_kind == WaveDo::Independiente) {
+    return wave_independiente_ok(st, ola.papel, err);
   }
   if (ola.do_kind == WaveDo::Cerrar) {
     return true;
@@ -3501,7 +3808,6 @@ bool wave_apply(WaveState* st, const WaveOla& ola_in, const WaveOps& ops, std::s
     return true;
   }
   if (ola.do_kind == WaveDo::Juicio) {
-    wave_cover_restore_caller(&ola, *st);
     auto upsert = [&](const std::string& id, const char* verdict) {
       const WaveHit* hit = wave_find_hit(st->candidatas, id);
       const std::string key = hit ? wave_hit_key(*hit) : id;
@@ -3550,6 +3856,29 @@ bool wave_apply(WaveState* st, const WaveOla& ola_in, const WaveOps& ops, std::s
       det += p;
     }
     push_ola_log(st, "guion", ola.why, det);
+    return true;
+  }
+  if (ola.do_kind == WaveDo::Independiente) {
+    if (!ops.run_independiente) {
+      st->last_error = "independiente sin runtime";
+      if (err) {
+        *err = st->last_error;
+      }
+      return false;
+    }
+    const int idx = ola.papel;
+    const std::string child_prompt = st->papeles[static_cast<std::size_t>(idx - 1)];
+    WaveState child = wave_independiente_child(*st, child_prompt);
+    std::string cerr;
+    if (!ops.run_independiente(child_prompt, &child, &cerr)) {
+      st->last_error = cerr.empty() ? "independiente: el hijo no arrancó" : cerr;
+      if (err) {
+        *err = st->last_error;
+      }
+      return false;
+    }
+    wave_merge_independiente(st, child, idx);
+    push_ola_log(st, "independiente", ola.why, child_prompt);
     return true;
   }
   if (ola.do_kind != WaveDo::Cerrar) {
@@ -3647,13 +3976,13 @@ std::vector<WaveSketchLink> wave_sketch_edges(const WaveState& st) {
       continue;
     }
     for (const auto& c : n.callees) {
-      if (lit(c)) {
-        sketch_push(&edges, here, node(c), "call");
+      if (lit(c.loc)) {
+        sketch_push(&edges, here, node(c.loc), "call");
       }
     }
     for (const auto& c : n.callers) {
-      if (lit(c)) {
-        sketch_push(&edges, node(c), here, "call");
+      if (lit(c.loc)) {
+        sketch_push(&edges, node(c.loc), here, "call");
       }
     }
   }
@@ -3662,42 +3991,53 @@ std::vector<WaveSketchLink> wave_sketch_edges(const WaveState& st) {
     if (here.empty() || !lit(n.loc)) {
       continue;
     }
+    const std::string here_stem = loc_stem(st, n.loc);
+    auto interesting = [&](const WavePeekHop& h) {
+      if (h.cosine >= 0.45f) {
+        return true;
+      }
+      const std::string hs = h.stem.empty() ? loc_stem(st, h.loc) : h.stem;
+      if (!here_stem.empty() && !hs.empty() && here_stem != hs) {
+        return true;
+      }
+      return neighbor_hop_score(st, h.loc, n.loc) >= 8;
+    };
     int out_rays = 0;
     for (const auto& c : n.callees) {
-      if (lit(c) || node(c).empty()) {
+      if (lit(c.loc) || node(c.loc).empty()) {
         continue;
       }
-      if (neighbor_hop_score(st, c, n.loc) < 8) {
+      if (!interesting(c)) {
         continue;
       }
       if (out_rays >= kWaveSketchRaysPerPeek) {
         break;
       }
-      sketch_push(&edges, here, node(c), "ray");
+      sketch_push(&edges, here, node(c.loc), "ray");
       ++out_rays;
     }
     int in_rays = 0;
     for (const auto& c : n.callers) {
-      if (lit(c) || node(c).empty()) {
+      if (lit(c.loc) || node(c.loc).empty()) {
         continue;
       }
-      if (neighbor_hop_score(st, c, n.loc) < 8) {
+      if (!interesting(c)) {
         continue;
       }
-      if (in_rays >= 1) {
+      if (in_rays >= kWaveSketchRaysPerPeek) {
         break;
       }
-      sketch_push(&edges, node(c), here, "ray");
+      sketch_push(&edges, node(c.loc), here, "ray");
       ++in_rays;
     }
     if (!n.export_loc.empty()) {
       const std::string dest = node(n.export_loc);
       if (!dest.empty()) {
         for (const auto& f : n.export_callers) {
-          if (locus_keys_match(f, n.loc) || node(f).empty()) {
+          if (locus_keys_match(f.loc, n.loc) || node(f.loc).empty()) {
             continue;
           }
-          sketch_push(&edges, node(f), dest, "ray");
+          sketch_push(&edges, node(f.loc), dest, "ray");
         }
       }
     }
@@ -4005,29 +4345,8 @@ std::string wave_work_markdown(const WaveState& st) {
   }
   if (!st.last_error.empty()) {
     out << "last_error: " << st.last_error << "\n";
-    if (st.last_error.find("in ya grep") != std::string::npos ||
-        st.last_error.find("in no es un módulo") != std::string::npos ||
-        st.last_error.find("in exige símbolo") != std::string::npos) {
-      out << "Siguiente legal: follow de un símbolo anclado, in de OTRO path:fn, "
-             "peek no leído. No repitas este in. campo solo con la clave JSON campo.\n";
-    } else if (st.last_error.find("cerca ya tirada") != std::string::npos ||
-               st.last_error.find("cerca: cada needle") != std::string::npos ||
-               st.last_error.find("cerca sin barrio") != std::string::npos ||
-               st.last_error.find("cerca: no re-uses") != std::string::npos) {
-      out << "Siguiente legal: cerca con otros conceptos de 1–3 palabras "
-             "(papel que falta, no el símbolo ya leído), peek de un hit, o cerrar.\n";
-    } else if (st.last_error.find("follow ya hecho") != std::string::npos ||
-               st.last_error.find("peek ya leído") != std::string::npos ||
-               st.last_error.find("entre ya pedido") != std::string::npos) {
-      out << "Siguiente legal: peek/follow/entre de un locus que no esté en ya leídos "
-             "ni ya seguidos. Peeks y Follows se acumulan abajo; no vuelvas a pedir "
-             "el mismo símbolo.\n";
-    } else if (st.last_error.find("primero el guion") != std::string::npos ||
-               st.last_error.find("guion ya tirado") != std::string::npos) {
-      out << "Siguiente legal: do=guion con 2–6 preguntas pequeñas de comprensión. "
-             "No un plan de peek. Sin M*, paths ni ids.\n";
-    }
   }
+  out << "\n" << wave_strategy_markdown();
   out << "\n" << wave_guion_markdown(st);
   out << "\n" << wave_circuit_markdown(st);
   out << "\n## Diario\n";
@@ -4075,8 +4394,7 @@ std::string wave_work_markdown(const WaveState& st) {
   }
   out << "\n## Cerca (" << st.cerca_log.size() << ")\n";
   if (st.cerca_log.empty()) {
-    out << "(ninguna — papel sin nombre: conceptos 1–3 palabras en el barrio; "
-           "hits=0 sí es ausencia aquí)\n";
+    out << "(ninguna)\n";
   } else {
     for (const auto& rec : st.cerca_log) {
       out << "- q=`" << rec.query << "` hops=" << rec.hops << " hits=" << rec.hits << " +"
@@ -4227,6 +4545,7 @@ std::string wave_notebook_markdown(const WaveState& st) {
   if (!st.last_error.empty()) {
     out << "last_error: " << st.last_error << "\n";
   }
+  out << "\n" << wave_strategy_markdown();
   out << "\n" << wave_guion_markdown(st);
   out << "\n" << wave_circuit_markdown(st);
   out << "\n## Diario\n";
@@ -4375,46 +4694,41 @@ std::string wave_notebook_markdown(const WaveState& st) {
 }
 
 std::string wave_guion_system_prompt() {
-  return R"(Descompón la consulta en 2–6 preguntas pequeñas cuya respuesta haría falta para decir que entendiste el problema.
-Cada una es un aspecto distinto, no un paso. No un plan de peek/cerca.
+  return R"(Descompón ESTA consulta en 2–6 preguntas pequeñas cuya respuesta haría falta para decir que entendiste el problema.
+Cada una es un aspecto distinto de la consulta, no un paso. Son el examen, no el orden de exploración.
 Si dos partes del prompt pueden ser verdad por separado, son dos preguntas.
 PROHIBIDO M*, stems, paths, ids.
 PROHIBIDO recitar atlas, traducir la consulta en un párrafo o explicar.
-Puedes pensar. Al terminar, un solo JSON:
-{"action":"ola_v1","do":"guion","papeles":["quién corta la generación","el clic fuera dispara lo mismo que Escape","qué pasa con el archivo a medias"]}
+PROHIBIDO rellenar papeles copiando un molde. Cada string sale de ESTA consulta.
+Puedes pensar. Al terminar, un solo JSON con action ola_v1, do guion, y papeles (array de 2–6 strings de ESTA consulta).
 )";
 }
 
 std::string wave_guion_user_prompt(const WaveState& st) {
   std::ostringstream out;
   out << "Consulta:\n" << st.prompt << "\n\n";
-  out << "JSON de las preguntas al cerrar el pensamiento.\n";
+  out << "Preguntas-examen cuya respuesta haría falta para decir que entendiste ESTA consulta. No un plan de olas. JSON al cerrar.\n";
   return out.str();
 }
 
 std::string wave_cover_system_prompt() {
-  return R"(Elige 1–2 ids M* del atlas cuyo owns/nucleus cubra las preguntas del guion
-(latch + caller que lo enciende). Keep AMBOS si hay latch y caller.
-Una pregunta sin zona en el atlas no se inventa: no la metas en keep.
-PROHIBIDO drop del caller porque "no posee" el LED. Un 3º solo si es hilo rival.
-PROHIBIDO chrome/holes. PROHIBIDO inventar ids.
+  return R"(Elige 1–2 ids M* cuyo owns/nucleus sea el sistema de la consulta (el objeto).
+El guion es el examen: no cubras cada pregunta. Keep vacío no vale.
+Un gesto sin zona propia no vacía el keep: primero el objeto.
+No elijas una zona solo porque un token de la consulta aparece en el peek.
+PROHIBIDO inventar ids.
 PROHIBIDO prosa, recap, traducir el atlas o repetir estas reglas.
 
 El primer carácter de la respuesta es `{`. Nada antes. Un solo JSON:
-{"action":"ola_v1","do":"juicio","keep":["M1","M7"],"drop":["M3"],"why":"latch y caller cubren las preguntas"}
+{"action":"ola_v1","do":"juicio","keep":["M1","M7"],"drop":["M3"],"why":"estas zonas son el sistema de la consulta"}
 )";
 }
 
 std::string wave_cover_user_prompt(const WaveState& st) {
   std::ostringstream out;
   out << "Consulta:\n" << st.prompt << "\n\n";
-  if (!st.papeles.empty()) {
-    out << "Preguntas:\n";
-    for (const auto& p : st.papeles) {
-      out << "- " << p << "\n";
-    }
-    out << "\n";
-  }
+  out << wave_strategy_markdown() << "\n";
+  out << wave_guion_markdown(st) << "\n";
   out << st.atlas_md;
   if (!st.atlas_md.empty() && st.atlas_md.back() != '\n') {
     out << "\n";
@@ -4431,22 +4745,25 @@ PROHIBIDO un plan congelado de varias olas. PROHIBIDO inventar ids.
 El cuaderno de trabajo es la evidencia. Peeks y Follows se ACUMULAN (cuerpos, stacks y recortes). Atlas es hipótesis de retrieval. Mermaid no está aquí.
 Si un peek/follow ya está en ya leídos / ya seguidos, léelo en Peeks/Follows; NO lo pidas otra vez.
 Peek vale sobre ids, símbolos, menciones, hops, o un archivo listado en files (el header suele bastar para ver la API).
-El guion (preguntas de comprensión) ya está en el cuaderno; no lo reescribas ni lo sustituyas por el why. Cover keep cubre esas preguntas, no "el objeto".
-Una pregunta sin M* / sin nombre en lo visto → cerca. Afirmarla sin leerla es el mismo delito que citar un símbolo sin peek.
+El Guion es el examen: permanece; no lo reescribas ni lo sustituyas por el why.
+La Estrategia es el orden de comprensión: primero el sistema, luego el verbo, luego disparo y efecto por separado. No mezcles ramas. No es un plan congelado de gestos.
+Cover keep localiza el sistema, no cada pregunta.
+Afirmar una pregunta o un símbolo sin haberlo leído es el mismo delito que citar un id inventado.
 
 do:
 - needles: agujas de MECANISMO (símbolos, APIs), no sinónimos del prompt. El runtime busca substring en id/path/symbol/stem. `stem::simbolo` busca el símbolo recortado a ese stem.
-- cerca: buscas un PAPEL no leído (quién cancela, si el hijo murió). `needles` aquí son conceptos de 1–3 palabras, NO identificadores y NO una frase. El runtime embebe solo esos términos (el why no entra) y rankea fichas en el barrio: peeks + keep + rayos, o `in` (M*, path:fn, stem, prefijo). Un `in` de directorio o .cpp despierta el grafo ahí (rank barato del inventario; archivo entero → fichas de impacto). hops=1 (tope 2). hits=0 SÍ es ausencia en ese barrio. hits=0 de needles-grep NO. Tras peek del latch, si el otro papel no tiene nombre, cerca.
+- cerca: `needles` son conceptos de 1–3 palabras, NO identificadores y NO una frase. El runtime embebe solo esos términos (el why no entra) y rankea fichas en el barrio: peeks + keep + rayos, o `in` (M*, path:fn, stem, prefijo). Un `in` de directorio o .cpp despierta el grafo ahí (rank barato del inventario; archivo entero → fichas de impacto). hops=1 (tope 2). hits=0 SÍ es ausencia en ese barrio. hits=0 de needles-grep NO.
 - `in` con needles-grep: locus ya anclado, SIEMPRE un símbolo (`path.cpp:fn`). PROHIBIDO `in` de un .cpp suelto y PROHIBIDO `in":"stem::módulo"` (eso es `campo`). Con cerca, `in` es un array de barrios (`[]` = inmediaciones).
 - cerrar: tú decides cuándo termina. Si entendiste el objeto (o qué falta), cierra. El runtime no te retiene porque Circuito esté incompleto.
 - No repitas needles que ya están en el cuaderno. `foo` y `stem::foo` son la misma aguja. Si hits=0 en el grafo, cambia de SÍMBOLO, no de cualificación. Un grep `in` distinto del mismo keyword sí vale.
 - No repitas un peek o follow que ya está en ya leídos / ya seguidos. Llamadores = hops del follow, no otro follow del mismo símbolo.
 - juicio: keep/drop solo ids que aparecen en Candidatas (vale M1 del atlas).
-- peek: leer 1–3 loci. Función = cuerpo (si es largo: firma + cola). Header = API del .hpp. Bajo el cuerpo: callers (stems keep, pueden cruzar) y calls (del cuerpo). Aguas mismo-stem son incompletas; el flujo es follow.
+- peek: leer 1–3 loci. Función = cuerpo (si es largo: firma + cola). Header = API del .hpp. Bajo el cuerpo: rayos rankeados (ficha de impacto × consulta): callers y calls, 1–2 hops. Se marcan no leído y otro stem. No es el follow (stacks).
 - follow: callers (quién llama) Y callees (qué llama, con cond). Stacks, ramas ON/CXL/OFF, mermaid. Hops peekables. No es el grep ni la firma del peek.
-- entre: camino dirigido en el registry entre DOS loci ya anclados (`from` → `to`). No es el mermaid de follow. `sin camino` también es evidencia. Hops intermedios peekables. Si no sale, prueba el inverso.
-- tanda: en UNA ola, needles y/o peeks y/o follows y/o entre. Tras cover: 1 latch + 1 caller (port), NO tres funciones del mismo LED. Un `in` malo no cancela los peeks.
-- cerrar: síntesis de lo entendido / lo que falta. Termina. Legal en cualquier ola de piloto. `huecos` opcional: nombres que afirmas y no leíste (no es una lista de deberes). No recetes un parche en un símbolo no leído. No cierres «no existe» sin un cerca de la pregunta que falta. Una pregunta del guion sin peek/cerca no está cubierto por el why.
+- entre: camino dirigido en el registry entre DOS loci ya anclados (`from` → `to`). No es el mermaid de follow. `sin camino` también es evidencia. Hops intermedios peekables.
+- tanda: en UNA ola, needles y/o peeks y/o follows y/o entre. Un `in` malo no cancela los peeks.
+- independiente: un papel del Guion sigue [sin evidencia] y peek/follow/cerca en lo anclado no te dan ese locus. Entonces: me queda esto; sácalo a un ciclo aparte. Índice 1-based. El runtime usa ESA frase como consulta; no redactes un prompt. Vuelve el pack (visto/huecos/cuerpos), no un recap. No anida. El runtime rechaza si el índice no vale o si ese papel ya tiene evidencia. [sin evidencia] no es "no busco".
+- cerrar: síntesis de lo entendido / lo que falta. Termina. Legal en cualquier ola de piloto. Un papel [sin evidencia] no se cierra como "no aplica": si no sale de lo anclado y independiente aún cabe, sácalo. `huecos` opcional: nombres que afirmas y no leíste (no es una lista de deberes). No recetes un parche en un símbolo no leído. El why no cubre una pregunta del guion que no hayas leído.
 
 El bosquejo del Circuito une lo leído y emite rayos a hops no leídos (callers/calls). Rayo = no leído; al peekearlo pasa a sólido. Un rayo que cambia de stem puede mostrar quién más llama a ese hop. PROHIBIDO inventar el camino.
 
@@ -4455,13 +4772,14 @@ Campo opcional recorta el grep (stem o prefijo de path).
 JSON:
 {"action":"ola_v1","do":"needles","needles":["start_job"],"why":"cazar el arranque del objeto"}
 {"action":"ola_v1","do":"needles","in":"src/pkg/mod.cpp:run_job","needles":["stop_job","start_job"],"why":"¿todos los returns paran el trabajo?"}
-{"action":"ola_v1","do":"cerca","needles":["cancel work","user abort"],"in":[],"why":"vi el arranque; busco quién cancela"}
-{"action":"ola_v1","do":"cerca","needles":["child dead","restart after fail"],"in":["src/pkg"],"why":"el latch enciende; busco detección de caída"}
+{"action":"ola_v1","do":"cerca","needles":["idle timeout"],"in":[],"why":"rank de conceptos en las inmediaciones"}
+{"action":"ola_v1","do":"cerca","needles":["stale handle"],"in":["src/pkg"],"why":"rank en ese barrio"}
 {"action":"ola_v1","do":"juicio","keep":["M1"],"drop":["M2"],"why":"esta zona cubre el objeto de la consulta"}
 {"action":"ola_v1","do":"peek","peeks":["M1","src/pkg/mod.hpp"],"why":"cuerpo del ancla y API del header"}
 {"action":"ola_v1","do":"follow","follows":["M1"],"why":"flujo: quién llama y a quién llama"}
 {"action":"ola_v1","do":"entre","from":"start_job","to":"stop_job","why":"hay camino del arranque a la parada"}
-{"action":"ola_v1","do":"tanda","peeks":["M1","M7"],"follows":["M7"],"why":"cuerpo del latch y caller del port"}
+{"action":"ola_v1","do":"tanda","peeks":["M1","M7"],"follows":["M7"],"why":"cuerpos y flujo en una ola"}
+{"action":"ola_v1","do":"independiente","papel":1,"why":"me queda esto; no sale de lo anclado"}
 {"action":"ola_v1","do":"cerrar","why":"el control vive en pkg::run_job","huecos":["run_job_async"]}
 )";
 }
@@ -4469,27 +4787,16 @@ JSON:
 std::string wave_pilot_user_prompt(const WaveState& st) {
   std::ostringstream out;
   if (wave_is_last_propose(st)) {
-    out << "ÚLTIMA OLA. Cierra si ya entendiste; si no, un gesto más. "
-           "El runtime cierra después si hace falta.\n\n";
-  } else if (wave_circuit_complete(st)) {
-    out << "Circuito ON y OFF anclado (hecho, no vallado). Cierra si te basta.\n\n";
-  } else if (!st.opened_ids.empty() && st.peeks_done.empty()) {
-    out << "Tras cover: tanda 1 latch + 1 caller (port de la ficha). "
-           "No tres peeks del mismo archivo del LED.\n\n";
-  } else if (!st.peeks_done.empty() && st.cerca_log.empty() && !wave_is_last_propose(st)) {
-    out << "Si buscas un papel no leído (cancel, fallo, OFF) y no tiene nombre en lo "
-           "visto, cerca con needles de concepto (1–3 palabras), no agujas de id.\n\n";
+    out << "ÚLTIMA OLA. El runtime cierra después si hace falta.\n\n";
   }
-  const auto miss = wave_guion_uncovered(st);
-  if (!miss.empty()) {
-    out << "Preguntas del guion sin peek/cerca:";
-    for (const auto& p : miss) {
-      out << " `" << p << "`";
-    }
-    out << ". Un papel sin nombre en lo visto → cerca. Afirmarlo en el why sin leerlo "
-           "no cuenta.\n\n";
+  out << wave_strategy_markdown() << "\n";
+  out << wave_guion_markdown(st) << "\n";
+  out << "Elige UNA ola.\n";
+  const std::string cue = wave_independiente_cue_markdown(st);
+  if (!cue.empty()) {
+    out << cue;
   }
-  out << "Elige UNA ola. No copies plantillas.\n\n";
+  out << "\n";
   out << "## Consulta\n" << st.prompt << "\n\n";
   out << wave_work_markdown(st);
   return out.str();
@@ -4750,13 +5057,21 @@ void wave_attach_cierre_caption(WaveState* st) {
     }
   }
   cap << "\n(El why no es evidencia de lo no leído.)\n";
-  const auto miss = wave_guion_uncovered(*st);
-  if (!miss.empty()) {
-    cap << "Preguntas sin evidencia:";
-    for (const auto& p : miss) {
-      cap << " `" << p << "`";
+  if (!st->papeles.empty()) {
+    const auto miss = wave_guion_uncovered(*st);
+    cap << "Guion:";
+    for (const auto& p : st->papeles) {
+      const bool abierta = std::find(miss.begin(), miss.end(), p) != miss.end();
+      cap << " `" << p << "`" << (abierta ? " [sin evidencia]" : " [con evidencia]");
     }
-    cap << "\n(Afirmar un papel no leído no es evidencia.)\n";
+    cap << "\n";
+    if (!miss.empty()) {
+      cap << "Preguntas sin evidencia:";
+      for (const auto& p : miss) {
+        cap << " `" << p << "`";
+      }
+      cap << "\n(Afirmar un papel no leído no es evidencia.)\n";
+    }
   }
   cap << "\n";
   st->cierre = cap.str() + st->cierre;
@@ -4814,8 +5129,22 @@ nlohmann::json wave_state_to_json(const WaveState& st) {
     zonas.push_back({{"id", z.id}, {"verdict", z.verdict}});
   }
   nlohmann::json neigh = nlohmann::json::array();
+  auto hops_json = [](const std::vector<WavePeekHop>& hops) {
+    nlohmann::json a = nlohmann::json::array();
+    for (const auto& h : hops) {
+      a.push_back({{"loc", h.loc},
+                   {"stem", h.stem},
+                   {"hops", h.hops},
+                   {"cosine", h.cosine}});
+    }
+    return a;
+  };
   for (const auto& n : st.peek_neighbors) {
-    neigh.push_back({{"loc", n.loc}, {"callers", n.callers}, {"callees", n.callees}});
+    neigh.push_back({{"loc", n.loc},
+                     {"callers", hops_json(n.callers)},
+                     {"callees", hops_json(n.callees)},
+                     {"export_loc", n.export_loc},
+                     {"export_callers", hops_json(n.export_callers)}});
   }
   nlohmann::json sketch = nlohmann::json::array();
   for (const auto& e : wave_sketch_edges(st)) {
@@ -4824,6 +5153,8 @@ nlohmann::json wave_state_to_json(const WaveState& st) {
   return {{"prompt", st.prompt},
           {"campo", st.campo},
           {"papeles", st.papeles},
+          {"independiente_done", st.independiente_done},
+          {"independiente_leaf", st.independiente_leaf},
           {"atlas_md", st.atlas_md},
           {"opened_md", st.opened_md},
           {"opened_ids", st.opened_ids},
@@ -4874,7 +5205,8 @@ nlohmann::json wave_ola_to_json(const WaveOla& ola) {
           {"hops", ola.hops},
           {"why", ola.why},
           {"huecos", ola.huecos},
-          {"papeles", ola.papeles}};
+          {"papeles", ola.papeles},
+          {"papel", ola.papel}};
 }
 
 }  // namespace tuide
