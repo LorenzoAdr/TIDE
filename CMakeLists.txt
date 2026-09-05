@@ -915,10 +915,12 @@ add_executable(level2_session_test
   src/ai/l2_pack_review.cpp
   src/ai/l2_explore_a.cpp
   src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
   tests/l2_explore_a_trail_stub.cpp
+  tests/l2_registry_entityness_stub.cpp
 )
 target_include_directories(level2_session_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -934,12 +936,14 @@ add_executable(level2_autonomous_loop_test
   src/ai/l2_action.cpp
   src/ai/l2_explore_a.cpp
   src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
   tests/l2_explore_a_trail_stub.cpp
+  tests/l2_registry_entityness_stub.cpp
 )
 target_include_directories(level2_autonomous_loop_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -1047,6 +1051,7 @@ add_executable(l2_effect_slice_test
   src/ai/l2_explore_a.cpp
   src/ai/l2_explore_a_dataflow.cpp
   src/ai/l2_explore_a_trail.cpp
+  src/ai/l2_problem_frame.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/symbols/symbol_utils.cpp
@@ -1111,10 +1116,12 @@ add_executable(level2_debrief_test
   src/ai/l2_pack_review.cpp
   src/ai/l2_explore_a.cpp
   src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
   tests/l2_explore_a_trail_stub.cpp
+  tests/l2_registry_entityness_stub.cpp
 )
 target_include_directories(level2_debrief_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -1393,6 +1400,7 @@ add_executable(l1_intent_debug_cli
   tests/tool_registry_stub.cpp
   src/ai/level1_agent.cpp
   src/ai/l2_explore_a.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/l2_effect_summary.cpp
   src/ai/level1_action.cpp
   src/ai/llama_backend.cpp
