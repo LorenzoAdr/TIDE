@@ -7350,12 +7350,60 @@ std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
   return out.str();
 }
 
+namespace {
+
+struct PilotOpenedPort {
+  std::string from_zone;
+  std::string to_zone;
+  std::string from;
+  std::string to;
+  std::string kind;
+};
+
+std::string pilot_opened_port_key(const PilotOpenedPort& p) {
+  return p.from_zone + "\n" + p.to_zone + "\n" + p.from + "\n" + p.to + "\n" + p.kind;
+}
+
+std::string pilot_opened_port_line(const PilotOpenedPort& p) {
+  std::ostringstream line;
+  line << p.from_zone << "=>" << (p.to_zone.empty() ? "?" : p.to_zone) << " "
+       << causal_short_target(p.from.empty() ? "?" : p.from) << " -" << p.kind << "-> "
+       << causal_short_target(p.to.empty() ? "?" : p.to);
+  return line.str();
+}
+
+void collect_pilot_opened_ports(const nlohmann::json& payload, std::vector<PilotOpenedPort>* out) {
+  if (out == nullptr) {
+    return;
+  }
+  for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
+    const std::string zone_id = zone.value("id", "");
+    for (const auto& edge : zone.value("ports", nlohmann::json::array())) {
+      PilotOpenedPort p;
+      p.from_zone = edge.value("from_zone", "");
+      p.to_zone = edge.value("to_zone", "");
+      if (p.from_zone.empty()) {
+        p.from_zone = zone_id;
+      }
+      p.from = edge.value("from", "");
+      p.to = edge.value("to", "");
+      p.kind = edge.value("kind", "?");
+      if (p.from_zone.empty() && p.to_zone.empty()) {
+        continue;
+      }
+      out->push_back(std::move(p));
+    }
+  }
+}
+
+}  // namespace
+
 std::string registry_causal_pilot_opened_pack(const nlohmann::json& payload,
                                              const std::vector<std::string>& ids,
                                              const std::string& query) {
   std::ostringstream out;
   out << "# pilot_opened_v1\n";
-  out << "n=" << ids.size() << "  (owns+nucleus+peek+port; sin inspect gordo)\n";
+  out << "n=" << ids.size() << "  (owns+nucleus+peek+circuito; sin inspect gordo)\n";
   std::unordered_map<std::string, nlohmann::json> by_id;
   for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
     const std::string id = zone.value("id", "");
@@ -7414,9 +7462,48 @@ std::string registry_causal_pilot_opened_pack(const nlohmann::json& payload,
     const auto ports = zone.value("ports", nlohmann::json::array());
     if (!ports.empty()) {
       const auto& edge = ports.front();
-      out << "    port: " << causal_short_target(edge.value("from", "?")) << " -"
-          << edge.value("kind", "?") << "-> " << causal_short_target(edge.value("to", "?"))
-          << "\n";
+      out << "    port: " << edge.value("from_zone", want) << "=>"
+          << edge.value("to_zone", "?") << " " << causal_short_target(edge.value("from", "?"))
+          << " -" << edge.value("kind", "?") << "-> "
+          << causal_short_target(edge.value("to", "?")) << "\n";
+    }
+  }
+  std::unordered_set<std::string> opened(ids.begin(), ids.end());
+  std::vector<PilotOpenedPort> all_ports;
+  collect_pilot_opened_ports(payload, &all_ports);
+  std::vector<std::string> entre_lines;
+  std::vector<std::string> resto_lines;
+  std::unordered_set<std::string> seen_entre;
+  std::unordered_set<std::string> seen_resto;
+  constexpr std::size_t kEntreCap = 8;
+  constexpr std::size_t kRestoCap = 6;
+  for (const auto& p : all_ports) {
+    const bool a = !p.from_zone.empty() && opened.count(p.from_zone) != 0;
+    const bool b = !p.to_zone.empty() && opened.count(p.to_zone) != 0;
+    if (a && b && p.from_zone != p.to_zone) {
+      if (seen_entre.insert(pilot_opened_port_key(p)).second && entre_lines.size() < kEntreCap) {
+        entre_lines.push_back(pilot_opened_port_line(p));
+      }
+    } else if (a != b) {
+      if (seen_resto.insert(pilot_opened_port_key(p)).second && resto_lines.size() < kRestoCap) {
+        resto_lines.push_back(pilot_opened_port_line(p));
+      }
+    }
+  }
+  if (ids.size() >= 2) {
+    out << "\nentre abiertas:\n";
+    if (entre_lines.empty()) {
+      out << "  (ningún port)\n";
+    } else {
+      for (const auto& line : entre_lines) {
+        out << "  " << line << "\n";
+      }
+    }
+  }
+  if (!resto_lines.empty()) {
+    out << "hacia el resto:\n";
+    for (const auto& line : resto_lines) {
+      out << "  " << line << "\n";
     }
   }
   return out.str();
@@ -8754,6 +8841,21 @@ nlohmann::json registry_causal_payload_filter_zones(const nlohmann::json& payloa
     }
   }
   out["zones"] = zones;
+  if (payload.contains("zone_bridges") && payload["zone_bridges"].is_array()) {
+    nlohmann::json bridges = nlohmann::json::array();
+    for (const auto& bridge : payload["zone_bridges"]) {
+      int hit = 0;
+      for (const auto& z : bridge.value("zones", nlohmann::json::array())) {
+        if (z.is_string() && want.count(z.get<std::string>()) != 0) {
+          ++hit;
+        }
+      }
+      if (hit >= 2) {
+        bridges.push_back(bridge);
+      }
+    }
+    out["zone_bridges"] = bridges;
+  }
   return out;
 }
 

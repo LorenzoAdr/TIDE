@@ -5,8 +5,13 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
 #include <iomanip>
+#include <initializer_list>
+#include <map>
 #include <sstream>
+#include <system_error>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -817,23 +822,35 @@ void record_peek_neighbors(WaveState* st, const std::string& loc, const std::str
     push_peek_hop(&in_hops, std::move(hop));
   }
   rank_and_trim_hops(*st, ops, loc, &in_hops, kWavePeekExpandCap);
-  if (ops != nullptr && ops->peek_causal && kWavePeekHopDepth >= 2) {
-    const int n1 = static_cast<int>(in_hops.size());
-    for (int i = 0; i < n1; ++i) {
-      std::vector<WaveHit> inc;
-      collect_causal_callers(*ops, in_hops[static_cast<std::size_t>(i)].loc, *st, &inc);
-      for (const auto& h : inc) {
-        const std::string label = neighbor_label(h);
-        if (label.empty() || neighbor_id_skip(label) || locus_keys_match(label, loc) ||
-            hop_dup(in_hops, label)) {
+  const int hop_depth = st->peek_hop_depth > 0 ? st->peek_hop_depth : kWavePeekHopDepth;
+  if (ops != nullptr && ops->peek_causal && hop_depth >= 2) {
+    int frontier_begin = 0;
+    for (int d = 2; d <= hop_depth; ++d) {
+      const int frontier_end = static_cast<int>(in_hops.size());
+      if (frontier_begin >= frontier_end) {
+        break;
+      }
+      for (int i = frontier_begin; i < frontier_end; ++i) {
+        if (in_hops[static_cast<std::size_t>(i)].hops != d - 1) {
           continue;
         }
-        WavePeekHop hop = make_peek_hop(*st, label, 2);
-        if (hop.stem.empty() && !h.stem.empty()) {
-          hop.stem = ascii_lower(h.stem);
+        std::vector<WaveHit> inc;
+        collect_causal_callers(*ops, in_hops[static_cast<std::size_t>(i)].loc, *st, &inc);
+        for (const auto& h : inc) {
+          const std::string label = neighbor_label(h);
+          if (label.empty() || neighbor_id_skip(label) || locus_keys_match(label, loc) ||
+              hop_dup(in_hops, label)) {
+            continue;
+          }
+          WavePeekHop hop = make_peek_hop(*st, label, d);
+          if (hop.stem.empty() && !h.stem.empty()) {
+            hop.stem = ascii_lower(h.stem);
+          }
+          push_peek_hop(&in_hops, std::move(hop));
         }
-        push_peek_hop(&in_hops, std::move(hop));
       }
+      frontier_begin = frontier_end;
+      rank_and_trim_hops(*st, ops, loc, &in_hops, kWavePeekExpandCap);
     }
   }
   rank_and_trim_hops(*st, ops, loc, &in_hops, kWavePeekNeighborMax);
@@ -1132,6 +1149,25 @@ bool peek_is_allowed(const WaveState& st, const std::string& peek) {
     return true;
   }
   if (looks_like_source_path(peek)) {
+    return true;
+  }
+  for (const auto& p : st.pin_loci) {
+    if (locus_keys_match(p, peek) || ascii_lower(p) == want) {
+      return true;
+    }
+    const std::string tail = ascii_lower(symbol_tail(p));
+    if (!tail.empty() && tail == want) {
+      return true;
+    }
+  }
+  if (!st.pin_from.empty() &&
+      (locus_keys_match(st.pin_from, peek) || ascii_lower(st.pin_from) == want ||
+       ascii_lower(symbol_tail(st.pin_from)) == want)) {
+    return true;
+  }
+  if (!st.pin_to.empty() &&
+      (locus_keys_match(st.pin_to, peek) || ascii_lower(st.pin_to) == want ||
+       ascii_lower(symbol_tail(st.pin_to)) == want)) {
     return true;
   }
   return false;
@@ -1902,12 +1938,13 @@ bool needle_is_already_read_symbol(const WaveState& st, const std::string& needl
   return false;
 }
 
-int clamp_cerca_hops(int hops) {
+int clamp_cerca_hops(int hops, const WaveState& st) {
+  const int cap = st.cerca_hops_max > 0 ? st.cerca_hops_max : kWaveCercaHopsMax;
   if (hops <= 0) {
-    return kWaveCercaHopsDefault;
+    return st.cerca_hops_max > 0 ? cap : kWaveCercaHopsDefault;
   }
-  if (hops > kWaveCercaHopsMax) {
-    return kWaveCercaHopsMax;
+  if (hops > cap) {
+    return cap;
   }
   return hops;
 }
@@ -1923,7 +1960,7 @@ bool apply_cerca(WaveState* st, const WaveOla& ola, const WaveOps& ops, std::str
   std::vector<std::pair<std::string, std::string>> seed_fns;
   std::vector<std::string> boost_stems;
   collect_cerca_seeds(*st, ola.in_scopes, &seed_fns, &boost_stems);
-  const int hops = clamp_cerca_hops(ola.hops);
+  const int hops = clamp_cerca_hops(ola.hops, *st);
   const std::string query = wave_cerca_query(ola.needles);
   std::vector<WaveCercaHit> rows;
   std::string qerr;
@@ -2486,6 +2523,9 @@ bool wave_independiente_ok(const WaveState& st, int papel, std::string* err) {
     }
     return false;
   };
+  if (st.control_worker) {
+    return set("explorador no orquesta");
+  }
   if (st.independiente_leaf) {
     return set("independiente no anida");
   }
@@ -2551,6 +2591,7 @@ WaveState wave_independiente_child(const WaveState& parent, const std::string& p
   child.papeles = {prompt};
   child.independiente_leaf = true;
   child.atlas_md = parent.atlas_md;
+  child.atlas_cards = parent.atlas_cards;
   child.atlas_seed = parent.atlas_seed;
   wave_merge_hits(&child, parent.atlas_seed);
   return child;
@@ -3073,12 +3114,20 @@ int wave_ingest_zone_symbols(WaveState* st, const nlohmann::json& payload,
 }
 
 bool wave_needs_guion(const WaveState& st) {
+  if (st.control_worker) {
+    return false;
+  }
   return st.papeles.empty() && !st.done;
 }
 
 bool wave_needs_cover(const WaveState& st) {
-  return !st.papeles.empty() && !st.atlas_md.empty() && !wave_log_has_do(st, "juicio") &&
-         !st.done;
+  if (st.done || st.atlas_md.empty() || wave_log_has_do(st, "juicio")) {
+    return false;
+  }
+  if (!st.control_worker && st.papeles.empty()) {
+    return false;
+  }
+  return true;
 }
 
 bool wave_close_audit_accept(const WaveOla& draft, const WaveOla& audit, const WaveState& st) {
@@ -3491,7 +3540,8 @@ bool wave_check_barriers(const WaveOla& ola, const WaveState& st, std::string* e
   if (st.done) {
     return set("ya se cerró");
   }
-  if (st.papeles.empty() && !st.atlas_md.empty() && ola.do_kind != WaveDo::Guion) {
+  if (!st.control_worker && st.papeles.empty() && !st.atlas_md.empty() &&
+      ola.do_kind != WaveDo::Guion) {
     return set("primero el guion (papeles de la consulta)");
   }
   auto in_ok = [&]() -> const char* {
@@ -3870,6 +3920,15 @@ bool wave_apply(WaveState* st, const WaveOla& ola_in, const WaveOps& ops, std::s
     const std::string child_prompt = st->papeles[static_cast<std::size_t>(idx - 1)];
     WaveState child = wave_independiente_child(*st, child_prompt);
     std::string cerr;
+    if (ops.rebuild_atlas) {
+      if (!ops.rebuild_atlas(child_prompt, &child, &cerr)) {
+        st->last_error = cerr.empty() ? "independiente: no se regeneró el atlas" : cerr;
+        if (err) {
+          *err = st->last_error;
+        }
+        return false;
+      }
+    }
     if (!ops.run_independiente(child_prompt, &child, &cerr)) {
       st->last_error = cerr.empty() ? "independiente: el hijo no arrancó" : cerr;
       if (err) {
@@ -4724,11 +4783,54 @@ El primer carácter de la respuesta es `{`. Nada antes. Un solo JSON:
 )";
 }
 
+std::string wave_pin_cue_markdown(const WaveState& st) {
+  if (st.pin_from.empty() && st.pin_to.empty() && st.pin_loci.empty() && st.pin_hacia.empty()) {
+    return {};
+  }
+  std::ostringstream out;
+  if (!st.pin_from.empty() && !st.pin_to.empty()) {
+    out << "Anclas de puente (ya leídas). El objeto es el camino entre ellas. "
+           "entre from/to; sin camino también es evidencia.\n";
+    out << "from: " << st.pin_from << "\n";
+    out << "to: " << st.pin_to << "\n";
+  } else if (!st.pin_from.empty()) {
+    out << "Locus semilla (ya leído). Sigue el flujo desde ahí (follow / cerca).\n";
+    out << "from: " << st.pin_from << "\n";
+  }
+  if (!st.pin_hacia.empty()) {
+    out << "Prioridad semántica (cerca):";
+    for (const auto& h : st.pin_hacia) {
+      out << " " << h;
+    }
+    out << "\n";
+  }
+  if (st.cerca_hops_max > 0) {
+    out << "cerca hops hasta " << st.cerca_hops_max << " (no el tope 1–2).\n";
+  }
+  if (!st.pin_loci.empty()) {
+    if (st.pin_from.empty() && st.pin_to.empty()) {
+      out << "Ya leídos en un trabajo anterior. PROHIBIDO volver a peekearlos. "
+             "Valen para follow/entre. El objeto es SOLO la consulta de arriba, "
+             "no un recap de lo leído.\n";
+    }
+    out << "Loci pin (peekables):";
+    for (const auto& loc : st.pin_loci) {
+      out << " " << loc;
+    }
+    out << "\n";
+  }
+  out << "\n";
+  return out.str();
+}
+
 std::string wave_cover_user_prompt(const WaveState& st) {
   std::ostringstream out;
   out << "Consulta:\n" << st.prompt << "\n\n";
+  out << wave_pin_cue_markdown(st);
   out << wave_strategy_markdown() << "\n";
-  out << wave_guion_markdown(st) << "\n";
+  if (!st.control_worker) {
+    out << wave_guion_markdown(st) << "\n";
+  }
   out << st.atlas_md;
   if (!st.atlas_md.empty() && st.atlas_md.back() != '\n') {
     out << "\n";
@@ -4790,15 +4892,2772 @@ std::string wave_pilot_user_prompt(const WaveState& st) {
     out << "ÚLTIMA OLA. El runtime cierra después si hace falta.\n\n";
   }
   out << wave_strategy_markdown() << "\n";
-  out << wave_guion_markdown(st) << "\n";
+  if (!st.control_worker) {
+    out << wave_guion_markdown(st) << "\n";
+  }
   out << "Elige UNA ola.\n";
-  const std::string cue = wave_independiente_cue_markdown(st);
-  if (!cue.empty()) {
-    out << cue;
+  if (!st.control_worker) {
+    const std::string cue = wave_independiente_cue_markdown(st);
+    if (!cue.empty()) {
+      out << cue;
+    }
   }
   out << "\n";
   out << "## Consulta\n" << st.prompt << "\n\n";
+  out << wave_pin_cue_markdown(st);
   out << wave_work_markdown(st);
+  return out.str();
+}
+
+std::string wave_explorer_system_prompt() {
+  return R"(Eres el EXPLORADOR. NO editas código. NO lanzas otros ciclos. NO independiente. NO orquestas.
+Cada respuesta es UNA ola. Tras ver el cuaderno eliges el siguiente gesto.
+PROHIBIDO un plan congelado de varias olas. PROHIBIDO inventar ids.
+
+El cuaderno de trabajo es la evidencia. Peeks y Follows se ACUMULAN (cuerpos, stacks y recortes). Atlas es hipótesis de retrieval. Mermaid no está aquí.
+Si un peek/follow ya está en ya leídos / ya seguidos, léelo en Peeks/Follows; NO lo pidas otra vez.
+Peek vale sobre ids, símbolos, menciones, hops, o un archivo listado en files (el header suele bastar para ver la API).
+La Estrategia es el orden de comprensión: primero el sistema, luego el verbo, luego disparo y efecto por separado. No mezcles ramas.
+Cover keep localiza el sistema de ESTA consulta, no un plan de varios objetos.
+Afirmar un símbolo sin haberlo leído es el mismo delito que citar un id inventado.
+
+do:
+- needles: agujas de MECANISMO (símbolos, APIs), no sinónimos del prompt. El runtime busca substring en id/path/symbol/stem. `stem::simbolo` busca el símbolo recortado a ese stem.
+- cerca: `needles` son conceptos de 1–3 palabras, NO identificadores y NO una frase. El runtime embebe solo esos términos (el why no entra) y rankea fichas en el barrio: peeks + keep + rayos, o `in` (M*, path:fn, stem, prefijo). Un `in` de directorio o .cpp despierta el grafo ahí. hops=1 (tope 2). hits=0 SÍ es ausencia en ese barrio.
+- `in` con needles-grep: locus ya anclado, SIEMPRE un símbolo (`path.cpp:fn`). PROHIBIDO `in` de un .cpp suelto.
+- No repitas needles que ya están en el cuaderno. Si hits=0 en el grafo, cambia de SÍMBOLO.
+- No repitas un peek o follow que ya está en ya leídos / ya seguidos.
+- peek: leer 1–3 loci. Función = cuerpo. Header = API del .hpp. Rayos callers/calls. No es el follow.
+- follow: callers Y callees (cond). Stacks, ramas ON/CXL/OFF. Hops peekables.
+- entre: camino dirigido entre DOS loci ya anclados. `sin camino` también es evidencia.
+- tanda: needles y/o peeks y/o follows y/o entre en UNA ola.
+- cerrar: síntesis de lo entendido / lo que falta. `huecos` opcional: nombres que afirmas y no leíste. No recetes un parche en un símbolo no leído.
+
+JSON:
+{"action":"ola_v1","do":"needles","needles":["start_job"],"why":"cazar el arranque del objeto"}
+{"action":"ola_v1","do":"cerca","needles":["idle timeout"],"in":[],"why":"rank de conceptos en las inmediaciones"}
+{"action":"ola_v1","do":"peek","peeks":["M1","src/pkg/mod.hpp"],"why":"cuerpo del ancla y API del header"}
+{"action":"ola_v1","do":"follow","follows":["M1"],"why":"flujo: quién llama y a quién llama"}
+{"action":"ola_v1","do":"entre","from":"start_job","to":"stop_job","why":"hay camino del arranque a la parada"}
+{"action":"ola_v1","do":"tanda","peeks":["M1"],"follows":["M1"],"why":"cuerpo y flujo en una ola"}
+{"action":"ola_v1","do":"cerrar","why":"el control vive en pkg::run_job","huecos":["run_job_async"]}
+)";
+}
+
+bool wave_control_bosquejar_ok(const std::vector<std::string>& conceptos, std::string* err) {
+  auto set = [&](const char* m) {
+    if (err) {
+      *err = m;
+    }
+    return false;
+  };
+  if (static_cast<int>(conceptos.size()) < kWaveControlBosquejarMin ||
+      static_cast<int>(conceptos.size()) > kWaveControlBosquejarMax) {
+    return set("control: bosquejar 2–8 conceptos");
+  }
+  std::unordered_set<std::string> seen;
+  for (const auto& n : conceptos) {
+    if (!wave_cerca_concept_ok(n)) {
+      return set("control: cada concepto es 1–3 palabras, no frase ni id");
+    }
+    const std::string key = ascii_lower(trim_ws_copy(n));
+    if (!seen.insert(key).second) {
+      return set("control: conceptos repetidos");
+    }
+  }
+  return true;
+}
+
+bool wave_control_consulta_ok(const std::string& consulta, std::string* err) {
+  auto set = [&](const char* m) {
+    if (err) {
+      *err = m;
+    }
+    return false;
+  };
+  const std::string t = trim_ws_copy(consulta);
+  if (t.size() < 8) {
+    return set("control: consulta demasiado corta");
+  }
+  if (t.size() > static_cast<std::size_t>(kWaveControlConsultaChars)) {
+    return set("control: consulta demasiado larga");
+  }
+  for (std::size_t i = 0; i < t.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(t[i]);
+    if (c == '/' || c == ':' || c == '_') {
+      return set("control: consulta sin path, id ni stem");
+    }
+    if (c == '.' && i > 0 && i + 1 < t.size() &&
+        std::isalnum(static_cast<unsigned char>(t[i - 1])) != 0 &&
+        std::isalnum(static_cast<unsigned char>(t[i + 1])) != 0) {
+      return set("control: consulta sin path, id ni stem");
+    }
+  }
+  const auto words = papel_words(t);
+  if (static_cast<int>(words.size()) < kWaveControlConsultaWordsMin ||
+      static_cast<int>(words.size()) > kWaveControlConsultaWordsMax) {
+    return set("control: consulta 4–120 palabras");
+  }
+  for (const auto& w : words) {
+    if (papel_token_is_zone_id(w)) {
+      return set("control: consulta sin M*");
+    }
+  }
+  const std::string low = ascii_lower(t);
+  auto has = [&](const char* k) { return low.find(k) != std::string::npos; };
+  const bool gesto = has("tecla") || has("escape") || has("clic") || has("click") ||
+                     has("raton") || has("ratón") || has("evento");
+  const bool archivo = has("archivo") || has("escritura") || has("escrito") ||
+                       has("a medias");
+  if (gesto && archivo) {
+    return set("control: una rama (no mezcles disparo y efecto)");
+  }
+  return true;
+}
+
+namespace {
+
+std::vector<std::string> control_content_words(const std::string& s) {
+  std::vector<std::string> out;
+  for (const auto& w : papel_words(s)) {
+    if (w.size() < 4 || guion_stopword(w)) {
+      continue;
+    }
+    out.push_back(ascii_lower(w));
+  }
+  return out;
+}
+
+int control_word_hits(const std::vector<std::string>& needle,
+                      const std::vector<std::string>& hay) {
+  int n = 0;
+  for (const auto& w : needle) {
+    for (const auto& h : hay) {
+      if (w == h) {
+        ++n;
+        break;
+      }
+    }
+  }
+  return n;
+}
+
+bool control_token_is_id(const std::string& t) {
+  if (t.empty()) {
+    return true;
+  }
+  if (t.find('_') != std::string::npos || t.find('/') != std::string::npos ||
+      t.find(':') != std::string::npos || t.find('`') != std::string::npos) {
+    return true;
+  }
+  if (papel_token_is_zone_id(t)) {
+    return true;
+  }
+  bool seen_lower = false;
+  for (unsigned char c : t) {
+    if (c >= 0x80) {
+      return false;
+    }
+    if (std::islower(c) != 0) {
+      seen_lower = true;
+    } else if (std::isupper(c) != 0 && seen_lower) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool control_hueco_is_id(const std::string& h) {
+  const std::string t = trim_ws_copy(h);
+  if (t.size() < 4) {
+    return true;
+  }
+  if (t.find(' ') == std::string::npos && t.find('\t') == std::string::npos) {
+    return true;
+  }
+  if (control_token_is_id(t)) {
+    return true;
+  }
+  for (const auto& w : papel_words(t)) {
+    if (papel_token_is_zone_id(w) || control_token_is_id(w)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool control_token_is_path_crumb(const std::string& t) {
+  const std::string low = ascii_lower(t);
+  return low == "src" || low == "cpp" || low == "hpp" || low == "hxx" || low == "cc";
+}
+
+bool control_token_is_circuit_noise(const std::string& t) {
+  const std::string low = ascii_lower(t);
+  return low == "on" || low == "off" || low == "via" || low == "entre";
+}
+
+void control_append_kept(std::string* out, const std::string& tok) {
+  if (out->empty()) {
+    *out += tok;
+    return;
+  }
+  const unsigned char last = static_cast<unsigned char>(out->back());
+  const unsigned char first = static_cast<unsigned char>(tok.front());
+  if ((std::isalnum(last) != 0 || last >= 0x80) &&
+      (std::isalnum(first) != 0 || first >= 0x80)) {
+    out->push_back(' ');
+  }
+  *out += tok;
+}
+
+std::string control_strip_id_tokens(std::string s) {
+  for (;;) {
+    const auto a = s.find('`');
+    if (a == std::string::npos) {
+      break;
+    }
+    auto b = s.find('`', a + 1);
+    if (b == std::string::npos) {
+      s.erase(a);
+      break;
+    }
+    s.erase(a, b + 1 - a);
+  }
+  std::string out;
+  std::string cur;
+  auto keep_one = [&](const std::string& tok) {
+    if (tok.empty() || control_token_is_id(tok) || control_token_is_path_crumb(tok) ||
+        control_token_is_circuit_noise(tok)) {
+      return;
+    }
+    control_append_kept(&out, tok);
+  };
+  auto flush = [&]() {
+    if (cur.empty()) {
+      return;
+    }
+    int trailing_dots = 0;
+    while (!cur.empty() && cur.back() == '.') {
+      cur.pop_back();
+      ++trailing_dots;
+    }
+    const bool slash_pair = cur.find('/') != std::string::npos &&
+                            cur.find('.') == std::string::npos &&
+                            cur.find('_') == std::string::npos &&
+                            cur.find(':') == std::string::npos;
+    const std::size_t before = out.size();
+    if (slash_pair) {
+      std::string part;
+      for (char c : cur) {
+        if (c == '/') {
+          keep_one(part);
+          part.clear();
+        } else {
+          part.push_back(c);
+        }
+      }
+      keep_one(part);
+    } else if (cur.find('/') != std::string::npos || cur.find(':') != std::string::npos ||
+               cur.find('.') != std::string::npos) {
+      // path entero: no dejar src/cpp
+    } else {
+      keep_one(cur);
+    }
+    if (trailing_dots > 0 && out.size() > before) {
+      out.push_back('.');
+    }
+    cur.clear();
+  };
+  for (unsigned char c : s) {
+    if (std::isalnum(c) != 0 || c >= 0x80 || c == '_' || c == '/' || c == ':' || c == '.') {
+      cur.push_back(static_cast<char>(c));
+    } else {
+      flush();
+      if (c == '\n') {
+        if (!out.empty() && out.back() != '\n') {
+          out.push_back('\n');
+        }
+      } else if (std::isspace(c) != 0) {
+        if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
+          out.push_back(' ');
+        }
+      } else if (c == '(' || c == ')' || c == '[' || c == ']') {
+        continue;
+      } else if (c == ',' || c == ';' || c == '!' || c == '?' || c == '\'' ||
+                 c == '"') {
+        if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
+          out.push_back(static_cast<char>(c));
+        }
+      }
+    }
+  }
+  flush();
+  return trim_ws_copy(out);
+}
+
+std::string control_strip_fences(std::string why) {
+  for (;;) {
+    const auto a = why.find("```");
+    if (a == std::string::npos) {
+      break;
+    }
+    auto b = why.find("```", a + 3);
+    if (b == std::string::npos) {
+      why.erase(a);
+      break;
+    }
+    why.erase(a, b + 3 - a);
+  }
+  return why;
+}
+
+std::string control_split_camel(const std::string& s) {
+  std::string out;
+  for (std::size_t i = 0; i < s.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(s[i]);
+    if (i > 0 && std::isupper(c) != 0 &&
+        std::islower(static_cast<unsigned char>(s[i - 1])) != 0) {
+      out.push_back(' ');
+    }
+    out.push_back(s[i]);
+  }
+  return out;
+}
+
+std::string control_locus_role(std::string loc) {
+  loc = trim_ws_copy(loc);
+  if (loc.size() >= 2 && loc.front() == '`' && loc.back() == '`') {
+    loc = loc.substr(1, loc.size() - 2);
+  }
+  const auto paren = loc.find('(');
+  if (paren != std::string::npos) {
+    loc.resize(paren);
+  }
+  const auto slash = loc.find_last_of("/\\");
+  if (slash != std::string::npos && slash + 1 < loc.size()) {
+    loc = loc.substr(slash + 1);
+  } else if (slash != std::string::npos) {
+    loc.clear();
+  }
+  const auto colon = loc.rfind(':');
+  if (colon != std::string::npos && colon + 1 < loc.size()) {
+    loc = loc.substr(colon + 1);
+  }
+  if (!loc.empty() && loc[0] == '/') {
+    loc.erase(0, 1);
+  }
+  std::string spaced;
+  for (char c : loc) {
+    if (c == '_' || c == '-' || c == '>' || c == '.') {
+      if (!spaced.empty() && spaced.back() != ' ') {
+        spaced.push_back(' ');
+      }
+    } else if (std::isalnum(static_cast<unsigned char>(c)) != 0 ||
+               static_cast<unsigned char>(c) >= 0x80) {
+      spaced.push_back(c);
+    } else if (!spaced.empty() && spaced.back() != ' ') {
+      spaced.push_back(' ');
+    }
+  }
+  spaced = trim_ws_copy(control_split_camel(spaced));
+  const std::string low = ascii_lower(spaced);
+  if (spaced.empty() || control_token_is_path_crumb(spaced) || control_token_is_circuit_noise(low) ||
+      papel_token_is_zone_id(spaced)) {
+    return {};
+  }
+  return spaced;
+}
+
+bool control_hop_is_noise(const std::string& loc, const std::string& kind) {
+  if (ascii_lower(kind) == "ctrl") {
+    return true;
+  }
+  const std::string low_loc = ascii_lower(loc);
+  if (low_loc.find(":if") != std::string::npos || low_loc.find(":else") != std::string::npos ||
+      low_loc.find(":then") != std::string::npos || low_loc.find(":case") != std::string::npos ||
+      low_loc.find("guard") != std::string::npos) {
+    return true;
+  }
+  const std::string role = control_locus_role(loc);
+  if (role.empty()) {
+    return true;
+  }
+  const std::string low = ascii_lower(role);
+  if (low == "if" || low == "else" || low == "then" || low == "case" || low == "min" ||
+      low == "max" || low == "event" || low == "busy" || low == "append" || low == "load" ||
+      low == "lock" || low == "empty" || low == "string" || low == "cancel" || low == "guard") {
+    return true;
+  }
+  if (role.find(' ') == std::string::npos && role.size() < 8) {
+    return true;
+  }
+  return false;
+}
+
+std::vector<std::string> control_extract_visto_roles(const std::string& raw) {
+  std::vector<std::string> out;
+  std::istringstream in(raw);
+  std::string line;
+  while (std::getline(in, line)) {
+    const std::string t = trim_ws_copy(line);
+    if (t.rfind("Visto:", 0) != 0) {
+      continue;
+    }
+    std::string rest = trim_ws_copy(t.substr(6));
+    if (rest == "(nada)") {
+      break;
+    }
+    for (;;) {
+      const auto a = rest.find('`');
+      if (a == std::string::npos) {
+        break;
+      }
+      const auto b = rest.find('`', a + 1);
+      if (b == std::string::npos) {
+        break;
+      }
+      const std::string role = control_locus_role(rest.substr(a + 1, b - a - 1));
+      if (!role.empty()) {
+        bool dup = false;
+        for (const auto& e : out) {
+          if (ascii_lower(e) == ascii_lower(role)) {
+            dup = true;
+            break;
+          }
+        }
+        if (!dup) {
+          out.push_back(role);
+        }
+      }
+      rest.erase(0, b + 1);
+    }
+    break;
+  }
+  return out;
+}
+
+std::string control_thesis_keep_roles(std::string s) {
+  for (;;) {
+    const auto a = s.find('`');
+    if (a == std::string::npos) {
+      break;
+    }
+    const auto b = s.find('`', a + 1);
+    if (b == std::string::npos) {
+      s.erase(a, 1);
+      break;
+    }
+    const std::string role = control_locus_role(s.substr(a + 1, b - a - 1));
+    s.replace(a, b + 1 - a, role.empty() ? std::string(" ") : (" " + role + " "));
+  }
+  std::string out;
+  std::string cur;
+  auto flush = [&]() {
+    if (cur.empty()) {
+      return;
+    }
+    std::string role = cur;
+    if (cur.find("src/") != std::string::npos || cur.find("src\\") != std::string::npos ||
+        cur.find(".cpp") != std::string::npos || cur.find(".hpp") != std::string::npos ||
+        cur.find("::") != std::string::npos ||
+        (cur.find('/') != std::string::npos && cur.find(':') != std::string::npos)) {
+      role = control_locus_role(cur);
+    } else if (cur.find('_') != std::string::npos) {
+      role = control_locus_role(cur);
+    } else if (cur.find('/') != std::string::npos) {
+      for (char& c : role) {
+        if (c == '/') {
+          c = ' ';
+        }
+      }
+      role = trim_ws_copy(role);
+    } else {
+      role = trim_ws_copy(control_split_camel(cur));
+      if (control_token_is_path_crumb(role) || papel_token_is_zone_id(role) ||
+          control_token_is_circuit_noise(ascii_lower(role))) {
+        role.clear();
+      }
+    }
+    if (!role.empty()) {
+      if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
+        out.push_back(' ');
+      }
+      out += role;
+    }
+    cur.clear();
+  };
+  for (unsigned char c : s) {
+    if (std::isalnum(c) != 0 || c >= 0x80 || c == '_' || c == '/' || c == ':' || c == '.' ||
+        c == '-') {
+      cur.push_back(static_cast<char>(c));
+    } else {
+      flush();
+      if (c == '\n') {
+        if (!out.empty() && out.back() != '\n') {
+          out.push_back('\n');
+        }
+      } else if (c == ' ' || c == '\t') {
+        if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
+          out.push_back(' ');
+        }
+      } else if (c == '.' || c == ',' || c == ';' || c == ':' || c == '!' || c == '?') {
+        if (!out.empty() && out.back() != ' ' && out.back() != '\n') {
+          out.push_back(static_cast<char>(c));
+        }
+      }
+    }
+  }
+  flush();
+  return trim_ws_copy(out);
+}
+
+bool control_thesis_is_circuit_only(const std::string& s) {
+  if (s.empty()) {
+    return true;
+  }
+  const std::string low = ascii_lower(s);
+  if (low.rfind("on ", 0) == 0 || low.rfind("off ", 0) == 0 || low == "on." || low == "off.") {
+    return true;
+  }
+  bool any = false;
+  for (unsigned char c : s) {
+    if (std::isalnum(c) != 0 || c >= 0x80) {
+      any = true;
+      break;
+    }
+  }
+  return !any;
+}
+
+std::string control_cierre_thesis(const std::string& cierre) {
+  const std::string raw = trim_ws_copy(control_strip_fences(cierre));
+  const auto visto = control_extract_visto_roles(raw);
+  std::string why = raw;
+  const auto mark = why.find("(El why no es evidencia");
+  if (mark != std::string::npos) {
+    auto nl = why.find('\n', mark);
+    why = (nl == std::string::npos) ? std::string() : why.substr(nl + 1);
+  }
+  std::istringstream in(why);
+  std::string line;
+  std::ostringstream body;
+  while (std::getline(in, line)) {
+    const std::string t = trim_ws_copy(line);
+    if (t.empty() || t.rfind("Guion:", 0) == 0 || t.rfind("Preguntas", 0) == 0 ||
+        t.rfind("(Afirmar", 0) == 0 || t.rfind("Visto:", 0) == 0 || t.rfind("Huecos:", 0) == 0) {
+      continue;
+    }
+    const std::string low = ascii_lower(t);
+    if (low.rfind("on ", 0) == 0 || low.rfind("off ", 0) == 0) {
+      continue;
+    }
+    if (!body.str().empty()) {
+      body << '\n';
+    }
+    body << t;
+  }
+  why = control_thesis_keep_roles(trim_ws_copy(body.str()));
+  if (control_thesis_is_circuit_only(why)) {
+    if (visto.empty()) {
+      return {};
+    }
+    std::ostringstream leido;
+    leido << "leído:";
+    for (std::size_t i = 0; i < visto.size() && i < 8; ++i) {
+      if (i) {
+        leido << ",";
+      }
+      leido << " " << visto[i];
+    }
+    why = leido.str();
+  }
+  if (why.size() > 1200) {
+    utf8_resize(&why, 1200);
+  }
+  return why;
+}
+
+}  // namespace
+
+bool wave_control_consulta_es_ancla(const std::string& consulta, const std::string& ancla) {
+  const std::string a = ascii_lower(trim_ws_copy(consulta));
+  const std::string b = ascii_lower(trim_ws_copy(ancla));
+  return !a.empty() && a == b;
+}
+
+bool wave_control_consulta_delta_ok(const std::string& consulta, const std::string& ancla,
+                                   const std::vector<std::string>& prev, std::string* err) {
+  auto set = [&](const char* m) {
+    if (err) {
+      *err = m;
+    }
+    return false;
+  };
+  const auto cw = control_content_words(consulta);
+  if (cw.size() >= 4) {
+    const int hit = control_word_hits(cw, control_content_words(ancla));
+    if (hit * 2 >= static_cast<int>(cw.size())) {
+      return set("control: consulta recap del ancla, no un desplazamiento");
+    }
+    for (const auto& p : prev) {
+      if (trim_ws_copy(p) == trim_ws_copy(consulta)) {
+        return set("control: consulta repetida");
+      }
+      const int ph = control_word_hits(cw, control_content_words(p));
+      if (ph * 2 >= static_cast<int>(cw.size())) {
+        return set("control: consulta recap de un trabajo ya hecho");
+      }
+    }
+  }
+  return true;
+}
+
+WaveControlOla wave_parse_control(const std::string& raw) {
+  WaveControlOla out;
+  const std::string blob = extract_action_json(raw);
+  if (blob.empty()) {
+    out.error = "control sin objeto JSON";
+    return out;
+  }
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(blob);
+  } catch (const std::exception& e) {
+    out.error = std::string("JSON control inválido: ") + e.what();
+    return out;
+  }
+  const std::string action = j.value("action", "");
+  if (action != "control_v1") {
+    out.error = "contrato control_v1 inválido";
+    return out;
+  }
+  const std::string d = json_str(j, "do");
+  if (d == "explorar") {
+    out.do_kind = WaveControlDo::Explorar;
+  } else if (d == "ampliar") {
+    out.do_kind = WaveControlDo::Ampliar;
+  } else if (d == "bosquejar") {
+    out.do_kind = WaveControlDo::Bosquejar;
+  } else if (d == "cerrar") {
+    out.do_kind = WaveControlDo::Cerrar;
+  } else if (d == "plan") {
+    out.do_kind = WaveControlDo::Plan;
+  } else if (d == "pasar") {
+    out.do_kind = WaveControlDo::Pasar;
+  } else if (d == "no_pasar") {
+    out.do_kind = WaveControlDo::NoPasar;
+  } else if (d == "revisar") {
+    out.do_kind = WaveControlDo::Revisar;
+  } else {
+    out.error = "control do inválido";
+    return out;
+  }
+  out.why = json_str(j, "why");
+  if (out.why.size() < 8) {
+    out.error = "why demasiado corto";
+    return out;
+  }
+  if (out.why.size() > 800) {
+    utf8_resize(&out.why, 800);
+  }
+  if (out.do_kind == WaveControlDo::Explorar) {
+    std::vector<std::string> raw = json_str_array(j, "consultas");
+    if (raw.empty()) {
+      const std::string one = json_str(j, "consulta");
+      if (!one.empty()) {
+        raw.push_back(one);
+      }
+    }
+    if (raw.empty()) {
+      out.error = "control: consulta o consultas";
+      return out;
+    }
+    if (static_cast<int>(raw.size()) > kWaveControlMaxConsultas) {
+      out.error = "control: máx 1 explorador por turno";
+      return out;
+    }
+    for (auto& c : raw) {
+      c = control_strip_id_tokens(c);
+    }
+    out.consultas = raw;
+    out.consulta = raw.front();
+    for (const auto& c : raw) {
+      std::string cerr;
+      if (!wave_control_consulta_ok(c, &cerr)) {
+        out.error = cerr.empty() ? "consulta inválida" : cerr;
+        return out;
+      }
+    }
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+      for (std::size_t k = i + 1; k < raw.size(); ++k) {
+        if (ascii_lower(raw[i]) == ascii_lower(raw[k])) {
+          out.error = "control: consultas repetidas";
+          return out;
+        }
+      }
+    }
+    out.hacia = json_str_array(j, "hacia");
+    if (!out.hacia.empty()) {
+      std::string herr;
+      if (!wave_cerca_needles_ok(out.hacia, &herr)) {
+        out.error = herr.empty() ? "hacia inválido" : herr;
+        return out;
+      }
+    }
+  }
+  if (out.do_kind == WaveControlDo::Revisar) {
+    out.consulta = control_strip_id_tokens(json_str(j, "consulta"));
+    out.hacia = json_str_array(j, "hacia");
+    if (out.consulta.empty() && out.hacia.empty()) {
+      out.error = "control: revisar consulta o hacia";
+      return out;
+    }
+    if (!out.consulta.empty()) {
+      std::string cerr;
+      if (!wave_control_consulta_ok(out.consulta, &cerr)) {
+        out.error = cerr.empty() ? "consulta inválida" : cerr;
+        return out;
+      }
+    }
+    if (!out.hacia.empty()) {
+      std::string cerr;
+      if (!wave_cerca_needles_ok(out.hacia, &cerr)) {
+        out.error = cerr.empty() ? "hacia inválido" : cerr;
+        return out;
+      }
+    }
+  }
+  if (out.do_kind == WaveControlDo::Bosquejar) {
+    out.hacia = json_str_array(j, "hacia");
+    if (out.hacia.empty()) {
+      out.hacia = json_str_array(j, "conceptos");
+    }
+    std::string herr;
+    if (!wave_control_bosquejar_ok(out.hacia, &herr)) {
+      out.error = herr.empty() ? "control: bosquejar 2–8 conceptos" : herr;
+      return out;
+    }
+  }
+  if (out.do_kind == WaveControlDo::Plan) {
+    if (j.contains("pasos") || (j.contains("plan") && j["plan"].is_array() &&
+                                !j["plan"].empty() && j["plan"].front().is_string())) {
+      out.error = "control: plan con fases, no pasos";
+      return out;
+    }
+    const std::string modo = ascii_lower(json_str(j, "modo"));
+    if (modo == "romper") {
+      out.plan.modo = WaveControlPlanModo::Romper;
+    } else if (modo == "seguir") {
+      out.plan.modo = WaveControlPlanModo::Seguir;
+    } else {
+      out.error = "control: plan modo romper o seguir";
+      return out;
+    }
+    if (!j.contains("fases") || !j["fases"].is_array()) {
+      out.error = "control: plan 2–4 fases";
+      return out;
+    }
+    const auto& arr = j["fases"];
+    if (static_cast<int>(arr.size()) < kWaveControlPlanFasesMin ||
+        static_cast<int>(arr.size()) > kWaveControlPlanFasesMax) {
+      out.error = "control: plan 2–4 fases";
+      return out;
+    }
+    std::unordered_set<std::string> ids;
+    int n_locator = 0;
+    int n_seguir = 0;
+    std::vector<std::string> locator_ids;
+    for (const auto& item : arr) {
+      if (!item.is_object()) {
+        out.error = "control: fase no es objeto";
+        return out;
+      }
+      WaveControlPhase ph;
+      ph.id = json_str(item, "id");
+      if (ph.id.empty() || ph.id.size() > 8) {
+        out.error = "control: id de fase 1–8";
+        return out;
+      }
+      for (char c : ph.id) {
+        if (std::isalnum(static_cast<unsigned char>(c)) == 0) {
+          out.error = "control: id de fase alfanumérico";
+          return out;
+        }
+      }
+      if (ids.count(ph.id) != 0) {
+        out.error = "control: id de fase repetido";
+        return out;
+      }
+      ids.insert(ph.id);
+      const std::string kind = ascii_lower(json_str(item, "kind"));
+      if (kind == "locator") {
+        ph.kind = WaveControlPhaseKind::Locator;
+        ++n_locator;
+      } else if (kind == "puente") {
+        ph.kind = WaveControlPhaseKind::Puente;
+      } else if (kind == "seguir") {
+        ph.kind = WaveControlPhaseKind::Seguir;
+        ++n_seguir;
+      } else {
+        out.error = "control: kind locator, puente o seguir";
+        return out;
+      }
+      ph.consulta = control_strip_id_tokens(json_str(item, "consulta"));
+      ph.need = json_str_array(item, "need");
+      ph.hacia = json_str_array(item, "hacia");
+      if (ph.kind == WaveControlPhaseKind::Locator) {
+        if (ph.consulta.empty()) {
+          out.error = "control: locator sin consulta";
+          return out;
+        }
+        std::string cerr;
+        if (!wave_control_consulta_ok(ph.consulta, &cerr)) {
+          out.error = cerr.empty() ? "locator inválido" : cerr;
+          return out;
+        }
+        locator_ids.push_back(ph.id);
+      } else {
+        if (ph.need.empty()) {
+          ph.need = locator_ids;
+        }
+        if (ph.need.empty()) {
+          out.error = "control: puente/seguir sin locator previo";
+          return out;
+        }
+        for (const auto& n : ph.need) {
+          if (ids.count(n) == 0 || n == ph.id) {
+            out.error = "control: need debe ser una fase previa";
+            return out;
+          }
+        }
+        if (ph.kind == WaveControlPhaseKind::Seguir) {
+          if (ph.hacia.empty()) {
+            out.error = "control: seguir sin hacia";
+            return out;
+          }
+          std::string cerr;
+          if (!wave_cerca_needles_ok(ph.hacia, &cerr)) {
+            out.error = cerr.empty() ? "hacia inválido" : cerr;
+            return out;
+          }
+        }
+      }
+      out.plan.fases.push_back(std::move(ph));
+    }
+    if (n_locator < 1) {
+      out.error = "control: plan sin locator";
+      return out;
+    }
+    if (out.plan.modo == WaveControlPlanModo::Seguir && n_seguir < 1) {
+      out.error = "control: modo seguir sin fase seguir";
+      return out;
+    }
+  }
+  if (out.do_kind == WaveControlDo::Ampliar) {
+    auto ids = json_str_array(j, "ids");
+    if (ids.empty()) {
+      ids = json_str_array(j, "inspect");
+    }
+    if (ids.empty()) {
+      out.error = "control: ampliar 1–3 ids M*";
+      return out;
+    }
+    if (static_cast<int>(ids.size()) > kWaveControlMaxAmpliar) {
+      out.error = "control: ampliar máx 3 fichas";
+      return out;
+    }
+    for (const auto& id : ids) {
+      if (!papel_token_is_zone_id(id)) {
+        out.error = "control: ampliar solo ids M*";
+        return out;
+      }
+    }
+    out.ids = std::move(ids);
+  }
+  out.ok = true;
+  return out;
+}
+
+void control_set_err(std::string* err, const char* m) {
+  if (err != nullptr) {
+    *err = m;
+  }
+}
+
+int wave_control_plan_current(const WaveControlPlan& plan) {
+  for (int i = 0; i < static_cast<int>(plan.fases.size()); ++i) {
+    if (plan.fases[static_cast<std::size_t>(i)].status == WaveControlPhaseStatus::EnCurso) {
+      return i;
+    }
+  }
+  for (int i = static_cast<int>(plan.fases.size()) - 1; i >= 0; --i) {
+    if (plan.fases[static_cast<std::size_t>(i)].status == WaveControlPhaseStatus::Fallo) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+const WaveControlPhase* control_find_phase(const WaveControlPlan& plan, const std::string& id) {
+  for (const auto& ph : plan.fases) {
+    if (ph.id == id) {
+      return &ph;
+    }
+  }
+  return nullptr;
+}
+
+bool control_need_met(const WaveControlPlan& plan, const WaveControlPhase& ph) {
+  if (ph.need.empty()) {
+    return true;
+  }
+  for (const auto& n : ph.need) {
+    const auto* dep = control_find_phase(plan, n);
+    if (dep == nullptr || dep->status != WaveControlPhaseStatus::Paso) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int control_next_launch_index(const WaveControlPlan& plan) {
+  for (int i = 0; i < static_cast<int>(plan.fases.size()); ++i) {
+    const auto& ph = plan.fases[static_cast<std::size_t>(i)];
+    if (ph.status != WaveControlPhaseStatus::Pendiente) {
+      continue;
+    }
+    if (ph.kind == WaveControlPhaseKind::Locator) {
+      return i;
+    }
+    if ((ph.kind == WaveControlPhaseKind::Puente || ph.kind == WaveControlPhaseKind::Seguir) &&
+        control_need_met(plan, ph)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+bool control_begin_first_locator(WaveControlPlan* plan, std::string* err) {
+  if (plan == nullptr) {
+    control_set_err(err, "control: plan nulo");
+    return false;
+  }
+  const int idx = control_next_launch_index(*plan);
+  if (idx < 0) {
+    control_set_err(err, "control: plan sin locator lanzable");
+    return false;
+  }
+  plan->fases[static_cast<std::size_t>(idx)].status = WaveControlPhaseStatus::EnCurso;
+  return true;
+}
+
+std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int jobs_run,
+                                             bool last_visto) {
+  std::vector<WaveControlDo> out;
+  if (!plan.committed) {
+    if (jobs_run <= 0) {
+      out.push_back(WaveControlDo::Bosquejar);
+      out.push_back(WaveControlDo::Explorar);
+      out.push_back(WaveControlDo::Ampliar);
+      out.push_back(WaveControlDo::Plan);
+    } else {
+      if (jobs_run < kWaveControlMaxJobs) {
+        out.push_back(WaveControlDo::Bosquejar);
+        out.push_back(WaveControlDo::Explorar);
+        out.push_back(WaveControlDo::Plan);
+      }
+      out.push_back(WaveControlDo::Cerrar);
+    }
+    return out;
+  }
+  const int cur = wave_control_plan_current(plan);
+  if (cur < 0) {
+    if (jobs_run > 0) {
+      out.push_back(WaveControlDo::Cerrar);
+    }
+    return out;
+  }
+  const auto status = plan.fases[static_cast<std::size_t>(cur)].status;
+  if (status == WaveControlPhaseStatus::EnCurso) {
+    if (last_visto) {
+      out.push_back(WaveControlDo::Pasar);
+    }
+    out.push_back(WaveControlDo::NoPasar);
+    out.push_back(WaveControlDo::Revisar);
+    if (jobs_run > 0) {
+      out.push_back(WaveControlDo::Cerrar);
+    }
+  } else if (status == WaveControlPhaseStatus::Fallo) {
+    out.push_back(WaveControlDo::Revisar);
+    if (jobs_run > 0) {
+      out.push_back(WaveControlDo::Cerrar);
+    }
+  } else if (jobs_run > 0) {
+    out.push_back(WaveControlDo::Cerrar);
+  }
+  return out;
+}
+
+bool wave_control_do_allowed(const std::vector<WaveControlDo>& legal, WaveControlDo d) {
+  return std::find(legal.begin(), legal.end(), d) != legal.end();
+}
+
+std::string wave_control_legal_markdown(const std::vector<WaveControlDo>& legal) {
+  std::ostringstream out;
+  out << "Legal ahora:";
+  if (legal.empty()) {
+    out << " (ninguno)\n";
+    return out.str();
+  }
+  for (std::size_t i = 0; i < legal.size(); ++i) {
+    out << (i == 0 ? " " : ", ") << wave_control_do_name(legal[i]);
+  }
+  out << "\n";
+  return out.str();
+}
+
+std::string wave_control_plan_markdown(const WaveControlPlan& plan) {
+  if (!plan.committed && plan.fases.empty()) {
+    return {};
+  }
+  std::ostringstream out;
+  const char* modo = wave_control_plan_modo_name(plan.modo);
+  out << "Plan de búsqueda";
+  if (modo[0] != '\0') {
+    out << " (" << modo << ")";
+  }
+  out << ":\n";
+  for (std::size_t i = 0; i < plan.fases.size(); ++i) {
+    const auto& ph = plan.fases[i];
+    out << (i + 1) << ". [" << wave_control_phase_status_name(ph.status) << "] " << ph.id << " "
+        << wave_control_phase_kind_name(ph.kind);
+    if (!ph.consulta.empty()) {
+      out << ": " << ph.consulta;
+    }
+    if (!ph.need.empty()) {
+      out << " (need";
+      for (const auto& n : ph.need) {
+        out << " " << n;
+      }
+      out << ")";
+    }
+    if (!ph.hacia.empty()) {
+      out << " (hacia";
+      for (const auto& h : ph.hacia) {
+        out << " " << h;
+      }
+      out << ")";
+    }
+    out << "\n";
+  }
+  return out.str();
+}
+
+nlohmann::json wave_control_plan_to_json(const WaveControlPlan& plan) {
+  nlohmann::json fases = nlohmann::json::array();
+  for (const auto& ph : plan.fases) {
+    fases.push_back({{"id", ph.id},
+                     {"kind", wave_control_phase_kind_name(ph.kind)},
+                     {"consulta", ph.consulta},
+                     {"need", ph.need},
+                     {"hacia", ph.hacia},
+                     {"status", wave_control_phase_status_name(ph.status)},
+                     {"ancla_visto", ph.ancla_visto}});
+  }
+  return {{"committed", plan.committed},
+          {"modo", wave_control_plan_modo_name(plan.modo)},
+          {"fases", fases}};
+}
+
+bool wave_control_plan_commit(WaveControlPlan* plan, const WaveControlOla& ola, std::string* err) {
+  if (plan == nullptr) {
+    control_set_err(err, "control: plan nulo");
+    return false;
+  }
+  if (plan->committed) {
+    control_set_err(err, "control: el plan ya está congelado");
+    return false;
+  }
+  if (ola.do_kind != WaveControlDo::Plan || ola.plan.fases.empty()) {
+    control_set_err(err, "control: plan 2–4 fases");
+    return false;
+  }
+  *plan = ola.plan;
+  plan->committed = true;
+  for (auto& ph : plan->fases) {
+    ph.status = WaveControlPhaseStatus::Pendiente;
+    ph.ancla_visto.clear();
+  }
+  return control_begin_first_locator(plan, err);
+}
+
+bool wave_control_plan_pasar(WaveControlPlan* plan, const std::vector<std::string>& visto,
+                            std::string* err) {
+  if (plan == nullptr || !plan->committed) {
+    control_set_err(err, "control: no hay plan");
+    return false;
+  }
+  const int cur = wave_control_plan_current(*plan);
+  if (cur < 0 || plan->fases[static_cast<std::size_t>(cur)].status !=
+                     WaveControlPhaseStatus::EnCurso) {
+    control_set_err(err, "control: no hay fase en curso");
+    return false;
+  }
+  if (visto.empty()) {
+    control_set_err(err, "control: pasar exige locus leído (visto)");
+    return false;
+  }
+  auto& ph = plan->fases[static_cast<std::size_t>(cur)];
+  ph.status = WaveControlPhaseStatus::Paso;
+  ph.ancla_visto = visto;
+  const int next = control_next_launch_index(*plan);
+  if (next >= 0) {
+    plan->fases[static_cast<std::size_t>(next)].status = WaveControlPhaseStatus::EnCurso;
+  }
+  return true;
+}
+
+bool wave_control_plan_no_pasar(WaveControlPlan* plan, std::string* err) {
+  if (plan == nullptr || !plan->committed) {
+    control_set_err(err, "control: no hay plan");
+    return false;
+  }
+  const int cur = wave_control_plan_current(*plan);
+  if (cur < 0 || plan->fases[static_cast<std::size_t>(cur)].status !=
+                     WaveControlPhaseStatus::EnCurso) {
+    control_set_err(err, "control: no hay fase en curso");
+    return false;
+  }
+  plan->fases[static_cast<std::size_t>(cur)].status = WaveControlPhaseStatus::Fallo;
+  plan->fases[static_cast<std::size_t>(cur)].ancla_visto.clear();
+  return true;
+}
+
+bool wave_control_plan_revisar(WaveControlPlan* plan, const std::string& consulta,
+                              const std::vector<std::string>& hacia, std::string* err) {
+  if (plan == nullptr || !plan->committed) {
+    control_set_err(err, "control: no hay plan");
+    return false;
+  }
+  const int cur = wave_control_plan_current(*plan);
+  if (cur < 0) {
+    control_set_err(err, "control: no hay fase que revisar");
+    return false;
+  }
+  auto& ph = plan->fases[static_cast<std::size_t>(cur)];
+  if (ph.status != WaveControlPhaseStatus::EnCurso &&
+      ph.status != WaveControlPhaseStatus::Fallo) {
+    control_set_err(err, "control: revisar solo la fase actual");
+    return false;
+  }
+  if (ph.kind == WaveControlPhaseKind::Locator) {
+    if (consulta.empty()) {
+      control_set_err(err, "control: revisar el locator con una consulta");
+      return false;
+    }
+    ph.consulta = consulta;
+  } else if (ph.kind == WaveControlPhaseKind::Seguir) {
+    if (!hacia.empty()) {
+      ph.hacia = hacia;
+    }
+    if (!consulta.empty()) {
+      ph.consulta = consulta;
+    }
+    if (ph.hacia.empty()) {
+      control_set_err(err, "control: seguir sin hacia");
+      return false;
+    }
+  }
+  ph.status = WaveControlPhaseStatus::EnCurso;
+  ph.ancla_visto.clear();
+  return true;
+}
+
+std::string control_pin_symbol(const std::string& loc) {
+  const std::string tail = symbol_tail(loc);
+  return tail.empty() ? loc : tail;
+}
+
+WaveControlLaunch wave_control_launch_spec(const WaveControlPlan& plan) {
+  WaveControlLaunch spec;
+  const int cur = wave_control_plan_current(plan);
+  if (cur < 0) {
+    return spec;
+  }
+  const auto& ph = plan.fases[static_cast<std::size_t>(cur)];
+  if (ph.status != WaveControlPhaseStatus::EnCurso) {
+    return spec;
+  }
+  spec.kind = ph.kind;
+  auto collect_need_visto = [&](std::vector<std::string>* all, std::string* first) {
+    for (const auto& nid : ph.need) {
+      const auto* dep = control_find_phase(plan, nid);
+      if (dep == nullptr) {
+        continue;
+      }
+      for (const auto& v : dep->ancla_visto) {
+        if (all != nullptr) {
+          all->push_back(v);
+        }
+        if (first != nullptr && first->empty() && !v.empty()) {
+          *first = v;
+        }
+      }
+    }
+  };
+  if (ph.kind == WaveControlPhaseKind::Locator) {
+    spec.consulta = ph.consulta;
+    spec.ok = !spec.consulta.empty();
+    return spec;
+  }
+  if (ph.kind == WaveControlPhaseKind::Puente) {
+    spec.consulta = "si hay camino entre los loci ya anclados";
+    std::string from_loc;
+    std::string to_loc;
+    if (ph.need.size() >= 2) {
+      const auto* a = control_find_phase(plan, ph.need[0]);
+      const auto* b = control_find_phase(plan, ph.need[1]);
+      if (a != nullptr && !a->ancla_visto.empty()) {
+        from_loc = a->ancla_visto.front();
+      }
+      if (b != nullptr && !b->ancla_visto.empty()) {
+        to_loc = b->ancla_visto.front();
+      }
+    } else {
+      collect_need_visto(&spec.pin_loci, &from_loc);
+      if (spec.pin_loci.size() >= 2) {
+        to_loc = spec.pin_loci[1];
+      }
+    }
+    collect_need_visto(&spec.pin_loci, nullptr);
+    spec.pin_from = control_pin_symbol(from_loc);
+    spec.pin_to = control_pin_symbol(to_loc);
+    spec.ok = !spec.pin_from.empty() && !spec.pin_to.empty();
+    return spec;
+  }
+  if (ph.kind == WaveControlPhaseKind::Seguir) {
+    spec.consulta = ph.consulta.empty() ? "flujo desde el locus leído hacia los conceptos pedidos"
+                                        : ph.consulta;
+    std::string from_loc;
+    collect_need_visto(&spec.pin_loci, &from_loc);
+    spec.pin_from = control_pin_symbol(from_loc);
+    spec.hacia = ph.hacia;
+    spec.cerca_hops_max = kWaveControlSeguirHops;
+    spec.peek_hop_depth = kWaveControlSeguirHops;
+    spec.ok = !spec.pin_from.empty();
+    return spec;
+  }
+  return spec;
+}
+
+void wave_control_inherit_visto(WaveControlLaunch* spec, const std::vector<std::string>& visto) {
+  if (spec == nullptr || visto.empty()) {
+    return;
+  }
+  auto has = [&](const std::string& loc) {
+    const std::string low = ascii_lower(loc);
+    if (!spec->pin_from.empty() && ascii_lower(spec->pin_from) == low) {
+      return true;
+    }
+    if (!spec->pin_to.empty() && ascii_lower(spec->pin_to) == low) {
+      return true;
+    }
+    for (const auto& e : spec->pin_loci) {
+      if (ascii_lower(e) == low) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (const auto& v : visto) {
+    if (v.empty() || has(v)) {
+      continue;
+    }
+    spec->pin_loci.push_back(v);
+    if (static_cast<int>(spec->pin_loci.size()) >= kWaveControlInheritVistoMax) {
+      break;
+    }
+  }
+}
+
+void wave_control_seed_launch(WaveState* st, const WaveControlLaunch& spec) {
+  if (st == nullptr) {
+    return;
+  }
+  st->pin_from = spec.pin_from;
+  st->pin_to = spec.pin_to;
+  st->pin_loci = spec.pin_loci;
+  st->pin_hacia = spec.hacia;
+  st->cerca_hops_max = spec.cerca_hops_max;
+  st->peek_hop_depth = spec.peek_hop_depth;
+  auto push_m = [&](const std::string& s) {
+    if (s.empty()) {
+      return;
+    }
+    for (const auto& m : st->mencionados) {
+      if (ascii_lower(m) == ascii_lower(s)) {
+        return;
+      }
+    }
+    st->mencionados.push_back(s);
+  };
+  push_m(spec.pin_from);
+  push_m(spec.pin_to);
+  for (const auto& loc : spec.pin_loci) {
+    push_m(loc);
+    push_m(control_pin_symbol(loc));
+  }
+}
+
+std::string wave_control_brief(const WaveState& st) {
+  const auto h = wave_pack_handoff(st);
+  std::ostringstream out;
+  out << "consulta: " << st.prompt << "\n";
+  out << "keep:";
+  if (st.opened_ids.empty()) {
+    out << " (ninguno)\n";
+  } else {
+    for (const auto& id : st.opened_ids) {
+      out << " " << id;
+    }
+    out << "\n";
+  }
+  const std::string thesis = control_cierre_thesis(st.cierre);
+  std::vector<std::string> leido;
+  auto push_role = [&](const std::string& r) {
+    if (r.empty()) {
+      return;
+    }
+    const std::string low = ascii_lower(r);
+    for (const auto& e : leido) {
+      if (ascii_lower(e) == low) {
+        return;
+      }
+    }
+    leido.push_back(r);
+  };
+  for (const auto& v : h.visto) {
+    push_role(control_locus_role(v));
+  }
+  for (const auto& v : control_extract_visto_roles(st.cierre)) {
+    push_role(v);
+  }
+  out << "leído:";
+  if (leido.empty()) {
+    out << " (nada)\n";
+  } else {
+    for (std::size_t i = 0; i < leido.size() && i < 8; ++i) {
+      if (i) {
+        out << ",";
+      }
+      out << " " << leido[i];
+    }
+    out << "\n";
+  }
+  out << "Cerrado:\n";
+  if (thesis.empty()) {
+    out << "(vacío)\n";
+  } else {
+    out << thesis << "\n";
+  }
+  std::vector<std::string> roles;
+  for (const auto& a : h.huecos) {
+    std::string role = control_hueco_is_id(a) ? control_locus_role(a) : a;
+    if (role.empty() || control_hueco_is_id(role)) {
+      continue;
+    }
+    const std::string low = ascii_lower(role);
+    bool dup = false;
+    for (const auto& e : roles) {
+      if (ascii_lower(e) == low) {
+        dup = true;
+        break;
+      }
+    }
+    if (dup) {
+      continue;
+    }
+    roles.push_back(role);
+    if (roles.size() >= 2) {
+      break;
+    }
+  }
+  out << "Abierto:\n";
+  if (roles.empty()) {
+    out << "(nada; no copiar ids del pack)\n";
+  } else {
+    for (const auto& a : roles) {
+      out << "- " << a << "\n";
+    }
+  }
+  return out.str();
+}
+
+WaveControlJobSnap wave_control_job_snap(int n, const WaveState& st) {
+  WaveControlJobSnap s;
+  s.n = n;
+  s.consulta = st.prompt;
+  s.cerrado = control_cierre_thesis(st.cierre);
+  const auto h = wave_pack_handoff(st);
+  s.visto = h.visto;
+  for (const auto& f : h.seguido) {
+    bool have = false;
+    for (const auto& v : s.visto) {
+      if (locus_keys_match(v, f)) {
+        have = true;
+        break;
+      }
+    }
+    if (!have && !f.empty()) {
+      s.visto.push_back(f);
+    }
+  }
+  s.peek_neighbors = st.peek_neighbors;
+  s.circuit_entre = st.circuit_entre;
+  return s;
+}
+
+namespace {
+
+bool control_job_has_loc(const std::vector<std::string>& visto, const std::string& loc) {
+  if (loc.empty()) {
+    return false;
+  }
+  for (const auto& v : visto) {
+    if (locus_keys_match(v, loc)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void control_push_role_cap(std::vector<std::string>* out, const std::string& loc, int cap) {
+  if (out == nullptr) {
+    return;
+  }
+  const std::string role = control_locus_role(loc);
+  if (role.empty()) {
+    return;
+  }
+  if (cap > 0 && static_cast<int>(out->size()) >= cap) {
+    return;
+  }
+  const std::string low = ascii_lower(role);
+  for (const auto& e : *out) {
+    if (ascii_lower(e) == low) {
+      return;
+    }
+  }
+  out->push_back(role);
+}
+
+std::string control_join_roles(const std::vector<std::string>& roles) {
+  std::ostringstream out;
+  for (std::size_t i = 0; i < roles.size(); ++i) {
+    if (i) {
+      out << ", ";
+    }
+    out << roles[i];
+  }
+  return out.str();
+}
+
+std::string control_arrow_roles(const std::string& raw) {
+  if (raw.empty()) {
+    return {};
+  }
+  if (ascii_lower(raw).find("sin camino") != std::string::npos) {
+    return {};
+  }
+  std::vector<std::string> parts;
+  std::string cur;
+  auto flush = [&]() {
+    const std::string tok = trim_ws_copy(cur);
+    cur.clear();
+    if (tok.empty() || control_hop_is_noise(tok, "")) {
+      return;
+    }
+    const std::string role = control_locus_role(tok);
+    if (role.empty()) {
+      return;
+    }
+    const std::string low = ascii_lower(role);
+    for (const auto& p : parts) {
+      if (ascii_lower(p) == low) {
+        return;
+      }
+    }
+    parts.push_back(role);
+  };
+  for (std::size_t i = 0; i < raw.size();) {
+    const unsigned char c = static_cast<unsigned char>(raw[i]);
+    if (i + 2 < raw.size() && c == 0xe2 && static_cast<unsigned char>(raw[i + 1]) == 0x86 &&
+        static_cast<unsigned char>(raw[i + 2]) == 0x92) {
+      flush();
+      i += 3;
+      continue;
+    }
+    if (i + 1 < raw.size() && raw[i] == '-' && raw[i + 1] == '>') {
+      flush();
+      i += 2;
+      continue;
+    }
+    cur.push_back(raw[i]);
+    ++i;
+  }
+  flush();
+  if (parts.size() < 2) {
+    return {};
+  }
+  std::ostringstream out;
+  for (std::size_t i = 0; i < parts.size(); ++i) {
+    if (i) {
+      out << " → ";
+    }
+    out << parts[i];
+  }
+  return out.str();
+}
+
+std::vector<std::string> control_job_extra_locs(const WaveControlJobSnap& job) {
+  std::vector<std::string> extra;
+  auto consider = [&](const std::string& loc) {
+    if (loc.empty() || control_job_has_loc(job.visto, loc) || control_hop_is_noise(loc, "")) {
+      return;
+    }
+    for (const auto& e : extra) {
+      if (locus_keys_match(e, loc)) {
+        return;
+      }
+    }
+    extra.push_back(loc);
+  };
+  for (const auto& n : job.peek_neighbors) {
+    for (const auto& c : n.callers) {
+      consider(c.loc);
+    }
+    for (const auto& c : n.callees) {
+      consider(c.loc);
+    }
+    for (const auto& c : n.export_callers) {
+      consider(c.loc);
+    }
+  }
+  return extra;
+}
+
+bool control_try_registry_entre(const WaveControlPathFn& path_between, const std::string& from,
+                                const std::string& to, std::vector<std::string>* hop_roles) {
+  if (!path_between || hop_roles == nullptr || from.empty() || to.empty()) {
+    return false;
+  }
+  if (locus_keys_match(from, to)) {
+    return false;
+  }
+  std::string md;
+  std::string err;
+  std::vector<WaveHit> hops;
+  if (!path_between(from, to, &md, &hops, &err)) {
+    return false;
+  }
+  if (hops.size() < 2) {
+    return false;
+  }
+  hop_roles->clear();
+  for (const auto& h : hops) {
+    std::string loc;
+    if (!h.path.empty() && !h.symbol.empty()) {
+      loc = h.path + ":" + h.symbol;
+    } else if (!h.symbol.empty()) {
+      loc = h.symbol;
+    } else {
+      loc = h.id;
+    }
+    if (control_hop_is_noise(loc, h.kind)) {
+      continue;
+    }
+    control_push_role_cap(hop_roles, loc, 6);
+  }
+  return hop_roles->size() >= 2;
+}
+
+}  // namespace
+
+std::string wave_control_jobs_circuit_pack(const std::vector<WaveControlJobSnap>& jobs,
+                                           const WaveControlPathFn& path_between) {
+  if (jobs.empty()) {
+    return {};
+  }
+  std::ostringstream out;
+  out << "# control_opened_v1\n";
+  out << "n=" << jobs.size() << "  (visto+hops extra+circuito; sin código)\n";
+  std::vector<std::vector<std::string>> extras(jobs.size());
+  for (std::size_t i = 0; i < jobs.size(); ++i) {
+    extras[i] = control_job_extra_locs(jobs[i]);
+    const int n = jobs[i].n > 0 ? jobs[i].n : static_cast<int>(i + 1);
+    out << "\nT" << n << "\n";
+    std::vector<std::string> visto_roles;
+    for (const auto& v : jobs[i].visto) {
+      control_push_role_cap(&visto_roles, v, kWaveControlCircuitVistoCap);
+    }
+    out << "    visto: "
+        << (visto_roles.empty() ? std::string("(nada)") : control_join_roles(visto_roles)) << "\n";
+    std::vector<std::string> extra_roles;
+    for (const auto& e : extras[i]) {
+      control_push_role_cap(&extra_roles, e, kWaveControlCircuitPeekCap);
+    }
+    if (!extra_roles.empty()) {
+      out << "    extra: " << control_join_roles(extra_roles) << "\n";
+    }
+    const std::string interno = control_arrow_roles(jobs[i].circuit_entre);
+    if (!interno.empty()) {
+      out << "    entre interno: " << interno << "\n";
+    }
+  }
+  std::vector<std::string> entre_lines;
+  std::vector<std::string> resto_lines;
+  auto push_line = [](std::vector<std::string>* dst, const std::string& line, int cap) {
+    if (dst == nullptr || line.empty()) {
+      return;
+    }
+    for (const auto& e : *dst) {
+      if (e == line) {
+        return;
+      }
+    }
+    if (static_cast<int>(dst->size()) >= cap) {
+      return;
+    }
+    dst->push_back(line);
+  };
+  for (std::size_t i = 0; i < jobs.size(); ++i) {
+    const int ni = jobs[i].n > 0 ? jobs[i].n : static_cast<int>(i + 1);
+    for (std::size_t j = i + 1; j < jobs.size(); ++j) {
+      const int nj = jobs[j].n > 0 ? jobs[j].n : static_cast<int>(j + 1);
+      std::string shared;
+      for (const auto& v : jobs[i].visto) {
+        if (control_job_has_loc(jobs[j].visto, v)) {
+          const std::string role = control_locus_role(v);
+          if (!role.empty()) {
+            shared = role;
+            break;
+          }
+        }
+      }
+      std::string sketch;
+      auto touch = [&](const std::vector<std::string>& extra,
+                       const std::vector<std::string>& visto) {
+        for (const auto& e : extra) {
+          if (control_job_has_loc(visto, e)) {
+            const std::string role = control_locus_role(e);
+            if (!role.empty()) {
+              return role;
+            }
+          }
+        }
+        return std::string{};
+      };
+      sketch = touch(extras[i], jobs[j].visto);
+      if (sketch.empty()) {
+        sketch = touch(extras[j], jobs[i].visto);
+      }
+      std::vector<std::string> a_only;
+      for (const auto& v : jobs[i].visto) {
+        if (!control_job_has_loc(jobs[j].visto, v)) {
+          a_only.push_back(v);
+        }
+      }
+      std::vector<std::string> b_only;
+      for (const auto& v : jobs[j].visto) {
+        if (!control_job_has_loc(jobs[i].visto, v)) {
+          b_only.push_back(v);
+        }
+      }
+      std::vector<std::string> hop_roles;
+      bool registry = false;
+      if (path_between) {
+        const std::size_t a_n = std::min(a_only.size(), static_cast<std::size_t>(3));
+        const std::size_t b_n = std::min(b_only.size(), static_cast<std::size_t>(3));
+        int tries = 0;
+        for (std::size_t ai = 0; ai < a_n && !registry; ++ai) {
+          for (std::size_t bi = 0; bi < b_n && !registry; ++bi) {
+            if (tries++ >= kWaveControlCircuitPairTries) {
+              break;
+            }
+            if (control_try_registry_entre(path_between, a_only[ai], b_only[bi], &hop_roles) ||
+                control_try_registry_entre(path_between, b_only[bi], a_only[ai], &hop_roles)) {
+              registry = true;
+            }
+          }
+        }
+      }
+      auto prefix = [&]() {
+        std::ostringstream line;
+        line << "  T" << ni << "=>T" << nj << "  ";
+        return line.str();
+      };
+      if (!shared.empty()) {
+        push_line(&entre_lines, prefix() + "mismo objeto: " + shared, kWaveControlCircuitEntreCap);
+      }
+      if (registry) {
+        std::ostringstream chain;
+        for (std::size_t h = 0; h < hop_roles.size(); ++h) {
+          if (h) {
+            chain << " → ";
+          }
+          chain << hop_roles[h];
+        }
+        push_line(&entre_lines, prefix() + chain.str(), kWaveControlCircuitEntreCap);
+      } else if (shared.empty()) {
+        if (!sketch.empty()) {
+          push_line(&entre_lines, prefix() + "extra toca visto: " + sketch,
+                    kWaveControlCircuitEntreCap);
+        } else if (path_between) {
+          push_line(&entre_lines, prefix() + "sin camino", kWaveControlCircuitEntreCap);
+        } else {
+          push_line(&entre_lines, prefix() + "(ningún port)", kWaveControlCircuitEntreCap);
+        }
+      }
+    }
+  }
+  if (jobs.size() >= 2) {
+    out << "\nentre abiertas:\n";
+    if (entre_lines.empty()) {
+      out << "  (ningún port)\n";
+    } else {
+      for (const auto& line : entre_lines) {
+        out << line << "\n";
+      }
+    }
+  }
+  for (std::size_t i = 0; i < jobs.size(); ++i) {
+    const int ni = jobs[i].n > 0 ? jobs[i].n : static_cast<int>(i + 1);
+    int shown = 0;
+    for (const auto& e : extras[i]) {
+      bool in_any = false;
+      for (const auto& job : jobs) {
+        if (control_job_has_loc(job.visto, e)) {
+          in_any = true;
+          break;
+        }
+      }
+      if (in_any) {
+        continue;
+      }
+      const std::string role = control_locus_role(e);
+      if (role.empty()) {
+        continue;
+      }
+      std::ostringstream line;
+      line << "  T" << ni << " → " << role;
+      push_line(&resto_lines, line.str(), kWaveControlCircuitRestoCap);
+      if (++shown >= kWaveControlCircuitPeekCap) {
+        break;
+      }
+    }
+  }
+  if (!resto_lines.empty()) {
+    out << "hacia el resto:\n";
+    for (const auto& line : resto_lines) {
+      out << line << "\n";
+    }
+  }
+  return out.str();
+}
+
+std::string wave_control_slice_exam(const std::string& ancla,
+                                   const std::vector<WaveControlJobSnap>& jobs) {
+  if (jobs.empty() || ancla.empty()) {
+    return {};
+  }
+  std::ostringstream out;
+  out << "# examen\n";
+  out << "Ancla:\n" << trim_ws_copy(ancla) << "\n";
+  for (const auto& job : jobs) {
+    const int n = job.n > 0 ? job.n : 1;
+    out << "\nT" << n << " preguntó:\n";
+    out << (job.consulta.empty() ? "(vacío)" : trim_ws_copy(job.consulta)) << "\n";
+    out << "Cerrado de T" << n << ":\n";
+    out << (job.cerrado.empty() ? "(vacío)" : trim_ws_copy(job.cerrado)) << "\n";
+  }
+  return out.str();
+}
+
+std::string wave_control_atlas_brief(const std::string& atlas_md) {
+  if (atlas_md.empty()) {
+    return {};
+  }
+  std::istringstream in(atlas_md);
+  std::ostringstream out;
+  out << "Atlas (hipótesis de retrieval, no el código. Apunta en rol; no copies M* ni stems):\n";
+  std::string line;
+  while (std::getline(in, line)) {
+    const std::string t = trim_ws_copy(line);
+    if (t.empty() || t.rfind("#", 0) == 0 || t.rfind("<!--", 0) == 0) {
+      continue;
+    }
+    if (t.rfind("view:", 0) == 0 || t.rfind("consulta:", 0) == 0 || t.rfind("search:", 0) == 0) {
+      continue;
+    }
+    if (t.rfind("peek:", 0) == 0 || t.rfind("port:", 0) == 0 || t.rfind("peek-edge:", 0) == 0 ||
+        t.rfind("nucleus:", 0) == 0 || t.rfind("gap:", 0) == 0 || t.rfind("bridges:", 0) == 0 ||
+        t.rfind("holes:", 0) == 0) {
+      continue;
+    }
+    std::string kept = t;
+    for (char& c : kept) {
+      if (c == '_') {
+        c = ' ';
+      }
+    }
+    out << kept << "\n";
+  }
+  std::string s = trim_ws_copy(out.str());
+  if (s.size() > 4000) {
+    utf8_resize(&s, 4000);
+  }
+  return s;
+}
+
+std::string wave_control_module_map(const std::string& workspace_root) {
+  namespace fs = std::filesystem;
+  if (workspace_root.empty()) {
+    return {};
+  }
+  const fs::path root(workspace_root);
+  std::error_code ec;
+  if (!fs::is_directory(root, ec)) {
+    return {};
+  }
+  auto names_in = [&](const fs::path& dir) {
+    std::vector<std::string> names;
+    if (!fs::is_directory(dir, ec)) {
+      return names;
+    }
+    for (fs::directory_iterator it(dir, ec); it != fs::directory_iterator() && !ec;
+         it.increment(ec)) {
+      const auto p = it->path();
+      const std::string n = p.filename().string();
+      if (n.empty() || n[0] == '.' || n.rfind("._", 0) == 0) {
+        continue;
+      }
+      if (n == "build" || n == "CMakeFiles" || n == "_deps") {
+        continue;
+      }
+      if (it->is_directory(ec)) {
+        names.push_back(n);
+      }
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+  };
+  std::ostringstream out;
+  out << "Mapa de barrios (nombres, no paths. Tú no compilas ni lees archivos):\n";
+  const auto src = names_in(root / "src");
+  if (!src.empty()) {
+    out << "src:";
+    for (const auto& n : src) {
+      out << " " << n;
+    }
+    out << "\n";
+  }
+  out << "repo:";
+  for (const char* extra : {"tests", "tools", "cmake", "docs", "examples"}) {
+    if (fs::is_directory(root / extra, ec)) {
+      out << " " << extra;
+    }
+  }
+  out << "\nproyecto: CMake\n";
+  return trim_ws_copy(out.str());
+}
+
+std::string wave_control_barrio_of_path(const std::string& t) {
+  auto p = t.find("src/");
+  if (p == std::string::npos) {
+    p = t.find("src\\");
+  }
+  if (p == std::string::npos) {
+    return {};
+  }
+  std::string rest = t.substr(p + 4);
+  const auto slash = rest.find_first_of("/\\");
+  if (slash == std::string::npos || slash == 0) {
+    return {};
+  }
+  return rest.substr(0, slash);
+}
+
+std::string wave_control_bosquejo_markdown(const WaveControlBosquejo& foto) {
+  std::ostringstream out;
+  out << "bosquejo (no es el código; no copies nombres ni ids):\n";
+  if (foto.olores.empty()) {
+    out << "  olores: (sin hits en el grafo)\n";
+  } else {
+    out << "  olores:\n";
+    for (const auto& o : foto.olores) {
+      out << "    " << o.concepto << " ~ ";
+      if (o.barrio.empty() || o.hits <= 0) {
+        out << "(sin olor)";
+      } else {
+        out << o.barrio;
+        if (o.concentration > 0.f) {
+          out << " (c=" << std::fixed << std::setprecision(2) << o.concentration;
+          if (o.twin && !o.twin_barrio.empty()) {
+            out << ", twin " << o.twin_barrio;
+          }
+          out << ")";
+        } else if (o.twin && !o.twin_barrio.empty()) {
+          out << " (twin " << o.twin_barrio << ")";
+        }
+      }
+      out << "\n";
+    }
+  }
+  if (foto.entre.empty()) {
+    out << "  entre: (sin arista de barrio)\n";
+  } else {
+    out << "  entre:";
+    std::unordered_set<std::string> seen;
+    int n = 0;
+    for (const auto& e : foto.entre) {
+      if (e.from.empty() || e.to.empty() || e.from == e.to) {
+        continue;
+      }
+      const std::string key = e.from < e.to ? (e.from + "→" + e.to) : (e.to + "→" + e.from);
+      if (!seen.insert(key).second) {
+        continue;
+      }
+      out << " " << e.from << "→" << e.to;
+      if (++n >= 6) {
+        break;
+      }
+    }
+    out << "\n";
+  }
+  if (!foto.nota.empty()) {
+    out << "  nota: " << foto.nota << "\n";
+  }
+  return trim_ws_copy(out.str());
+}
+
+namespace {
+
+std::string control_role_spaces(std::string s) {
+  for (char& c : s) {
+    if (c == '_') {
+      c = ' ';
+    }
+  }
+  return s;
+}
+
+std::string control_barrio_from_target(const std::string& t) {
+  return wave_control_barrio_of_path(t);
+}
+
+void control_foreach_target(const nlohmann::json& zone,
+                            const std::function<void(const std::string&)>& fn) {
+  auto wrap = [&](const nlohmann::json& o) {
+    if (!o.is_object()) {
+      return;
+    }
+    for (const char* k : {"target", "from", "to"}) {
+      const std::string t = json_str(o, k);
+      if (!t.empty()) {
+        fn(t);
+      }
+    }
+  };
+  auto walk_arr = [&](const char* key) {
+    if (!zone.contains(key) || !zone[key].is_array()) {
+      return;
+    }
+    for (const auto& item : zone[key]) {
+      if (item.is_array()) {
+        for (const auto& inner : item) {
+          wrap(inner);
+        }
+      } else {
+        wrap(item);
+      }
+    }
+  };
+  walk_arr("representatives");
+  walk_arr("anchors");
+  walk_arr("ports");
+  walk_arr("edges");
+  if (zone.contains("mechanism") && zone["mechanism"].is_object()) {
+    for (const auto& kv : zone["mechanism"].items()) {
+      wrap(kv.value());
+    }
+  }
+}
+
+std::string control_zone_barrio(const nlohmann::json& zone) {
+  std::vector<std::string> hits;
+  control_foreach_target(zone, [&](const std::string& t) {
+    const std::string b = control_barrio_from_target(t);
+    if (!b.empty()) {
+      hits.push_back(b);
+    }
+  });
+  if (hits.empty()) {
+    return "otros";
+  }
+  std::map<std::string, int> n;
+  for (const auto& b : hits) {
+    ++n[b];
+  }
+  std::string best = hits.front();
+  int best_n = 0;
+  for (const auto& kv : n) {
+    if (kv.second > best_n) {
+      best = kv.first;
+      best_n = kv.second;
+    }
+  }
+  return best;
+}
+
+std::string control_zone_owns(const nlohmann::json& zone) {
+  for (const char* key : {"primary_stems", "core_stems"}) {
+    const auto stems = json_str_array(zone, key);
+    if (!stems.empty()) {
+      return control_role_spaces(stems.front());
+    }
+  }
+  return {};
+}
+
+std::vector<std::string> control_src_dir_names(const std::string& workspace_root) {
+  namespace fs = std::filesystem;
+  std::vector<std::string> names;
+  std::error_code ec;
+  const fs::path dir = fs::path(workspace_root) / "src";
+  if (!fs::is_directory(dir, ec)) {
+    return names;
+  }
+  for (fs::directory_iterator it(dir, ec); it != fs::directory_iterator() && !ec; it.increment(ec)) {
+    const std::string n = it->path().filename().string();
+    if (n.empty() || n[0] == '.' || n.rfind("._", 0) == 0) {
+      continue;
+    }
+    if (n == "build" || n == "CMakeFiles" || n == "_deps") {
+      continue;
+    }
+    if (it->is_directory(ec)) {
+      names.push_back(n);
+    }
+  }
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
+struct ControlZoneRow {
+  std::string id;
+  std::string kind;
+  std::string owns;
+  std::string barrio;
+  int ov = 0;
+};
+
+int control_zone_ov(const nlohmann::json& zone, const std::string& consulta) {
+  if (consulta.empty()) {
+    return 0;
+  }
+  std::vector<std::string> qtoks;
+  for (const auto& w : papel_words(consulta)) {
+    const std::string low = ascii_lower(w);
+    if (low.size() < 4 || guion_stopword(w)) {
+      continue;
+    }
+    qtoks.push_back(low);
+  }
+  std::vector<std::string> hay;
+  auto push_parts = [&](std::string tok) {
+    tok = ascii_lower(std::move(tok));
+    std::string part;
+    auto flush = [&]() {
+      if (part.size() >= 4) {
+        hay.push_back(part);
+      }
+      part.clear();
+    };
+    for (char c : tok) {
+      if (c == '_' || c == ':' || c == '/' || c == '.' || c == ' ') {
+        flush();
+      } else {
+        part.push_back(c);
+      }
+    }
+    flush();
+  };
+  for (const char* key : {"primary_stems", "core_stems"}) {
+    for (const auto& s : json_str_array(zone, key)) {
+      push_parts(s);
+    }
+  }
+  control_foreach_target(zone, [&](const std::string& t) {
+    auto c = t.rfind(':');
+    if (c != std::string::npos && c + 1 < t.size()) {
+      push_parts(t.substr(c + 1));
+    }
+  });
+  auto hit = [&](const std::string& q, const std::string& h) {
+    if (q == h) {
+      return true;
+    }
+    return (q.size() >= 4 && h.size() >= 4 && (q.rfind(h, 0) == 0 || h.rfind(q, 0) == 0));
+  };
+  int n = 0;
+  for (const auto& q : qtoks) {
+    for (const auto& h : hay) {
+      if (hit(q, h)) {
+        ++n;
+        break;
+      }
+    }
+  }
+  return std::min(n, 9);
+}
+
+std::string control_zone_kind(const nlohmann::json& zone) {
+  for (const auto& risk : zone.value("risks", nlohmann::json::array())) {
+    if (risk.is_string()) {
+      const auto r = risk.get<std::string>();
+      if (r == "promoted_from_uncovered" || r == "uncovered_candidate") {
+        return "hole";
+      }
+    }
+  }
+  const std::string declared = json_str(zone, "kind");
+  if (declared == "hole") {
+    return "hole";
+  }
+  const std::string owns = ascii_lower(control_zone_owns(zone));
+  bool latch_nucleus = false;
+  bool has_nucleus = false;
+  for (const auto& nucleus : zone.value("nuclei", nlohmann::json::array())) {
+    has_nucleus = true;
+    const std::string st = ascii_lower(nucleus.value("state", ""));
+    if (st.find("pending") != std::string::npos || st.find("busy") != std::string::npos ||
+        st.find("spinner") != std::string::npos || st.find("latch") != std::string::npos ||
+        st.find("flag") != std::string::npos) {
+      latch_nucleus = true;
+    }
+  }
+  const bool has_ports = !zone.value("ports", nlohmann::json::array()).empty();
+  if (latch_nucleus) {
+    return "latch";
+  }
+  if (owns.find("panel") != std::string::npos || owns.find("gutter") != std::string::npos ||
+      owns.find("hover") != std::string::npos) {
+    return "chrome";
+  }
+  if (owns.find("modal") != std::string::npos || owns.find("overlay") != std::string::npos ||
+      owns.find("strip") != std::string::npos || owns.find("picker") != std::string::npos) {
+    return "object";
+  }
+  if (declared == "latch" || declared == "chrome" || declared == "caller" ||
+      declared == "object" || declared == "other") {
+    return declared;
+  }
+  if (has_ports || has_nucleus) {
+    return "caller";
+  }
+  return "other";
+}
+
+ControlZoneRow control_zone_row(const nlohmann::json& zone, const std::string& consulta) {
+  ControlZoneRow r;
+  r.id = zone.value("id", "");
+  r.kind = control_zone_kind(zone);
+  r.owns = control_zone_owns(zone);
+  r.barrio = control_zone_barrio(zone);
+  r.ov = control_zone_ov(zone, consulta);
+  return r;
+}
+
+std::string control_format_zone_line(const ControlZoneRow& r, bool with_barrio) {
+  std::ostringstream line;
+  line << r.id << "  kind=" << r.kind << "  ov=" << r.ov;
+  if (with_barrio && !r.barrio.empty()) {
+    line << "  barrio=" << r.barrio;
+  }
+  if (!r.owns.empty()) {
+    line << "  owns: " << r.owns;
+  }
+  return line.str();
+}
+
+std::string control_trim_us(std::string s) {
+  while (!s.empty() && s.back() == '_') {
+    s.pop_back();
+  }
+  return s;
+}
+
+std::string control_zone_nucleus(const nlohmann::json& zone) {
+  for (const auto& nucleus : zone.value("nuclei", nlohmann::json::array())) {
+    if (!nucleus.is_object()) {
+      continue;
+    }
+    const std::string st = control_trim_us(json_str(nucleus, "state"));
+    if (st.size() >= 4) {
+      return control_role_spaces(st);
+    }
+  }
+  return {};
+}
+
+std::string control_short_tiene(std::string role) {
+  role = trim_ws_copy(std::move(role));
+  std::vector<std::string> words;
+  std::string cur;
+  auto flush = [&]() {
+    if (!cur.empty()) {
+      words.push_back(cur);
+      cur.clear();
+    }
+  };
+  for (char c : role) {
+    if (c == ' ' || c == '\t') {
+      flush();
+    } else {
+      cur.push_back(c);
+    }
+  }
+  flush();
+  if (words.size() >= 3) {
+    const auto first = ascii_lower(words.front());
+    if (first == "handle" || first == "make" || first == "track" || first == "clear" ||
+        first == "try") {
+      words.erase(words.begin());
+    }
+  }
+  if (words.size() > 3) {
+    words.erase(words.begin(), words.end() - 3);
+  }
+  std::string out;
+  for (const auto& w : words) {
+    if (!out.empty()) {
+      out.push_back(' ');
+    }
+    out += w;
+  }
+  return out;
+}
+
+std::string control_zone_tiene(const nlohmann::json& zone, const std::string& owns) {
+  const std::string owns_l = ascii_lower(owns);
+  std::vector<std::string> got;
+  control_foreach_target(zone, [&](const std::string& t) {
+    if (static_cast<int>(got.size()) >= 2) {
+      return;
+    }
+    std::string role = control_short_tiene(control_role_spaces(control_trim_us(symbol_tail(t))));
+    const std::string low = ascii_lower(role);
+    if (low.size() < 4 || low == owns_l) {
+      return;
+    }
+    if (!owns_l.empty() && (low.find(owns_l) != std::string::npos ||
+                            owns_l.find(low) != std::string::npos)) {
+      return;
+    }
+    for (const auto& g : got) {
+      if (ascii_lower(g) == low) {
+        return;
+      }
+    }
+    got.push_back(std::move(role));
+  });
+  std::string out;
+  for (const auto& g : got) {
+    if (!out.empty()) {
+      out += ", ";
+    }
+    out += g;
+  }
+  return out;
+}
+
+std::string control_kind_not(const std::string& kind) {
+  if (kind == "latch") {
+    return "gesto de tecla o clic";
+  }
+  if (kind == "chrome") {
+    return "latch y disparo (layout)";
+  }
+  if (kind == "object") {
+    return "latch de generación";
+  }
+  if (kind == "caller") {
+    return "objeto del efecto";
+  }
+  return {};
+}
+
+std::string control_format_inspect_card(const nlohmann::json& zone, const std::string& consulta) {
+  const auto r = control_zone_row(zone, consulta);
+  std::ostringstream line;
+  line << r.id << "  kind=" << r.kind << "  ov=" << r.ov;
+  if (!r.barrio.empty()) {
+    line << "  barrio=" << r.barrio;
+  }
+  line << "\n";
+  const auto nuc = control_zone_nucleus(zone);
+  if (!nuc.empty()) {
+    line << "    núcleo: " << nuc << "\n";
+  }
+  const auto tiene = control_zone_tiene(zone, r.owns);
+  if (!tiene.empty()) {
+    line << "    tiene: " << tiene << "\n";
+  }
+  const auto noto = control_kind_not(r.kind);
+  if (!noto.empty()) {
+    line << "    not: " << noto << "\n";
+  }
+  return line.str();
+}
+
+}  // namespace
+
+std::string wave_control_barrio_brief(const nlohmann::json& cards, const std::string& consulta,
+                                      const std::string& workspace_root,
+                                      const std::vector<std::string>& opened_ids) {
+  if (!cards.contains("zones") || !cards["zones"].is_array()) {
+    return wave_control_module_map(workspace_root);
+  }
+  std::unordered_set<std::string> opened;
+  for (const auto& id : opened_ids) {
+    if (!id.empty()) {
+      opened.insert(id);
+    }
+  }
+  const bool showing_rest = !opened.empty();
+  std::map<std::string, std::vector<ControlZoneRow>> by;
+  std::map<std::string, int> max_ov;
+  std::unordered_set<std::string> used;
+  std::vector<ControlZoneRow> holes;
+  for (const auto& zone : cards["zones"]) {
+    if (!zone.is_object()) {
+      continue;
+    }
+    auto r = control_zone_row(zone, consulta);
+    if (r.id.empty()) {
+      continue;
+    }
+    if (opened.count(r.id)) {
+      if (r.kind != "hole") {
+        used.insert(r.barrio);
+      }
+      continue;
+    }
+    if (r.kind == "hole") {
+      holes.push_back(r);
+      continue;
+    }
+    by[r.barrio].push_back(r);
+    max_ov[r.barrio] = std::max(max_ov[r.barrio], r.ov);
+    used.insert(r.barrio);
+  }
+  std::vector<std::string> order;
+  for (const auto& kv : by) {
+    order.push_back(kv.first);
+  }
+  std::sort(order.begin(), order.end(), [&](const std::string& a, const std::string& b) {
+    if (max_ov[a] != max_ov[b]) {
+      return max_ov[a] > max_ov[b];
+    }
+    return a < b;
+  });
+  std::ostringstream out;
+  if (showing_rest) {
+    out << "Resto compacto (aún no abiertas; puedes ampliar 1–3 más o explorar. No copies ids):\n";
+  } else {
+    out << "Atlas por barrios (hipótesis de retrieval, no el código. "
+           "Si ov empatado o duda de objeto, amplia 1–3 M* antes de explorar. No copies ids):\n";
+  }
+  for (const auto& b : order) {
+    auto rows = by[b];
+    std::sort(rows.begin(), rows.end(), [](const ControlZoneRow& x, const ControlZoneRow& y) {
+      if (x.ov != y.ov) {
+        return x.ov > y.ov;
+      }
+      auto kw = [](const std::string& k) {
+        if (k == "latch") {
+          return 4;
+        }
+        if (k == "object") {
+          return 3;
+        }
+        if (k == "chrome") {
+          return 2;
+        }
+        if (k == "caller") {
+          return 1;
+        }
+        return 0;
+      };
+      if (kw(x.kind) != kw(y.kind)) {
+        return kw(x.kind) > kw(y.kind);
+      }
+      return x.id < y.id;
+    });
+    if (!showing_rest && static_cast<int>(rows.size()) > kWaveControlBarrioKeep) {
+      rows.resize(static_cast<std::size_t>(kWaveControlBarrioKeep));
+    }
+    out << b << "  ov=" << max_ov[b] << "\n";
+    for (const auto& r : rows) {
+      out << "  " << control_format_zone_line(r, false) << "\n";
+    }
+  }
+  if (showing_rest && by.empty()) {
+    out << "(ninguna compacta)\n";
+  }
+  if (!holes.empty()) {
+    std::sort(holes.begin(), holes.end(), [](const ControlZoneRow& x, const ControlZoneRow& y) {
+      return x.id < y.id;
+    });
+    out << "Huecos de retrieval (probable ruido de la consulta; no mandes explorador aquí):";
+    for (const auto& r : holes) {
+      out << " " << r.id;
+      if (!r.owns.empty()) {
+        out << "(" << r.owns << ")";
+      }
+    }
+    out << "\n";
+  }
+  std::vector<std::string> rest;
+  for (const auto& n : control_src_dir_names(workspace_root)) {
+    if (used.count(n) == 0) {
+      rest.push_back(n);
+    }
+  }
+  if (!rest.empty()) {
+    out << "También en el repo, sin ficha para esta consulta:";
+    for (const auto& n : rest) {
+      out << " " << n;
+    }
+    out << "\n";
+  }
+  out << "proyecto: CMake\n";
+  std::string s = trim_ws_copy(out.str());
+  if (s.size() > 4500) {
+    utf8_resize(&s, 4500);
+  }
+  return s;
+}
+
+std::string wave_control_inspect_brief(const nlohmann::json& cards,
+                                       const std::vector<std::string>& ids,
+                                       const std::string& consulta) {
+  if (ids.empty()) {
+    return {};
+  }
+  std::unordered_map<std::string, nlohmann::json> by_id;
+  for (const auto& zone : cards.value("zones", nlohmann::json::array())) {
+    const std::string id = zone.value("id", "");
+    if (!id.empty()) {
+      by_id[id] = zone;
+    }
+  }
+  std::ostringstream out;
+  out << "Fichas ampliadas (kind/núcleo/not. Owns no va en la consulta):\n";
+  for (const auto& want : ids) {
+    auto it = by_id.find(want);
+    if (it == by_id.end()) {
+      out << want << "  (no está en el atlas)\n";
+      continue;
+    }
+    out << control_format_inspect_card(it->second, consulta);
+  }
+  std::string s = trim_ws_copy(out.str());
+  if (s.size() > 2500) {
+    utf8_resize(&s, 2500);
+  }
+  return s;
+}
+
+std::string control_sanitize_role_md(const std::string& md, std::size_t cap) {
+  if (md.empty()) {
+    return {};
+  }
+  std::ostringstream out;
+  std::istringstream in(md);
+  std::string line;
+  while (std::getline(in, line)) {
+    const std::string t = trim_ws_copy(line);
+    if (t.empty()) {
+      continue;
+    }
+    if (t.rfind("<!--", 0) == 0) {
+      continue;
+    }
+    if (t.rfind("#", 0) == 0 && t.rfind("##", 0) != 0) {
+      continue;
+    }
+    if (t.rfind("query:", 0) == 0 || t.rfind("gate:", 0) == 0 || t.rfind("view:", 0) == 0 ||
+        t.rfind("consulta:", 0) == 0 || t.rfind("search:", 0) == 0) {
+      continue;
+    }
+    if (t.find("src/") != std::string::npos || t.find("src\\") != std::string::npos) {
+      continue;
+    }
+    std::string kept = t;
+    for (std::size_t i = 0; i + 1 < kept.size();) {
+      if (kept[i] == ':' && kept[i + 1] == ':') {
+        kept[i] = ' ';
+        kept.erase(i + 1, 1);
+        continue;
+      }
+      ++i;
+    }
+    for (char& c : kept) {
+      if (c == '_') {
+        c = ' ';
+      }
+    }
+    out << kept << "\n";
+  }
+  std::string s = trim_ws_copy(out.str());
+  if (s.size() > cap) {
+    utf8_resize(&s, cap);
+  }
+  return s;
+}
+
+std::string wave_control_opened_brief(const std::string& opened_md) {
+  if (opened_md.empty()) {
+    return {};
+  }
+  std::ostringstream out;
+  out << "Fichas ampliadas (pack+inspect del explorador. Owns/peek no van en la consulta):\n";
+  out << control_sanitize_role_md(opened_md, static_cast<std::size_t>(kWaveControlOpenedChars));
+  return trim_ws_copy(out.str());
+}
+
+std::string wave_control_atlas_pack_brief(const std::string& atlas_md) {
+  if (atlas_md.empty()) {
+    return {};
+  }
+  std::ostringstream out;
+  out << "Atlas del explorador (peek/nucleus/port de todo el mazo. Owns no va en la consulta):\n";
+  out << control_sanitize_role_md(atlas_md, static_cast<std::size_t>(kWaveControlOpenedChars));
+  return trim_ws_copy(out.str());
+}
+
+std::vector<std::string> wave_control_owns_phrases(const nlohmann::json& cards) {
+  std::vector<std::string> out;
+  for (const auto& zone : cards.value("zones", nlohmann::json::array())) {
+    if (!zone.is_object()) {
+      continue;
+    }
+    const std::string owns = control_zone_owns(zone);
+    if (owns.size() < 5 || owns.find(' ') == std::string::npos) {
+      continue;
+    }
+    const std::string low = ascii_lower(owns);
+    bool dup = false;
+    for (const auto& e : out) {
+      if (ascii_lower(e) == low) {
+        dup = true;
+        break;
+      }
+    }
+    if (!dup) {
+      out.push_back(owns);
+    }
+  }
+  return out;
+}
+
+std::string wave_control_strip_owns(std::string consulta, const std::vector<std::string>& owns) {
+  auto squeeze = [](std::string s) {
+    std::string o;
+    bool sp = false;
+    for (unsigned char c : s) {
+      if (std::isspace(c) != 0) {
+        if (!o.empty()) {
+          sp = true;
+        }
+      } else {
+        if (sp) {
+          o.push_back(' ');
+          sp = false;
+        }
+        o.push_back(static_cast<char>(c));
+      }
+    }
+    return o;
+  };
+  for (const auto& o : owns) {
+    const std::string needle = trim_ws_copy(o);
+    if (needle.size() < 5 || needle.find(' ') == std::string::npos) {
+      continue;
+    }
+    for (;;) {
+      const auto low = ascii_lower(consulta);
+      const auto nlow = ascii_lower(needle);
+      const auto p = low.find(nlow);
+      if (p == std::string::npos) {
+        break;
+      }
+      consulta.erase(p, needle.size());
+    }
+  }
+  consulta = squeeze(trim_ws_copy(consulta));
+  auto strip_tail = [&](const char* t) {
+    const auto low = ascii_lower(consulta);
+    const std::string tail(t);
+    if (low.size() >= tail.size() &&
+        low.compare(low.size() - tail.size(), tail.size(), ascii_lower(tail)) == 0) {
+      consulta.resize(consulta.size() - tail.size());
+      consulta = trim_ws_copy(consulta);
+    }
+  };
+  for (int i = 0; i < 3; ++i) {
+    strip_tail(" en el");
+    strip_tail(" en la");
+    strip_tail(" en los");
+    strip_tail(" en las");
+    strip_tail(" del");
+    strip_tail(" de la");
+  }
+  return squeeze(trim_ws_copy(consulta));
+}
+
+std::string wave_control_rama_nudge(const std::string& consulta) {
+  std::string out = "Un explorar es una sola rama; esa consulta mezcló dos. Vuelve a emitir: una rama, "
+                    "o un plan con la rotura que tú veas. No metas un objeto que no estuviera en lo "
+                    "rechazado.";
+  if (!consulta.empty()) {
+    std::string q = consulta;
+    if (q.size() > 220) {
+      utf8_resize(&q, 220);
+    }
+    out += " Rechazado: " + q;
+  }
+  return out;
+}
+
+std::string wave_control_system_prompt(WaveControlCue cue) {
+  const bool neutral = cue == WaveControlCue::Neutral;
+  std::ostringstream out;
+  out << R"(Eres el PILOTO DE CONTROL. Diriges la investigación. Despiertas al llegar la consulta del usuario.
+NO lees código. NO peek. Los exploradores leen; tú eliges qué cazar y con qué encargo.
+El pack es el atlas (peek/nucleus/port). Hipótesis, no el código.
+Tú decides: un explorador, o un plan (partir en locator / puente / seguir, 2–4 fases) si conviene romper el problema. El runtime lanza de uno en uno; tú juzgas puertas.
+El plan sale de ESTA consulta y de lo ya visto, no de una receta.
+Si el mapa no une qué está junto, puedes partir. Tú eliges la rotura.
+consulta = objeto + verbo que el atlas puede oler. why = tu estrategia (el hijo no la lee). Lo que no se caza no se nombra: el retrieval no resta.
+hacia opcional: 1–3 conceptos de cerca (no ids, no paths, no needles de grep). Prioriza el barrio; el hijo caza los símbolos.
+bosquejar: 2–8 olores de zona (clase de sitio, no los nombres del ancla). Distinto de hacia: hacia apunta a un objeto; bosquejar nombra tipos de barrio para trazar el mapa. El runtime pinta barrios y aristas; no es un job. No copies la foto ni el ancla.
+PROHIBIDO dos exploradores a la vez. Máx 3 exploradores en total (los ya hechos cuentan).
+PROHIBIDO copiar M*, paths, stems, owns, peek/nucleus.
+Si varios barrios empatan o no sabes el objeto, amplia 1–3 M* PRIMERO (puedes más de una vez).
+Lo abierto llega como inspect; entre abiertas = ports, no cosine. Chrome no es el disparo.
+Con 2+ trabajos el pack enseña visto, hops extra y entre abiertas (camino o sin camino). sin camino es evidencia, no un deber. No copies loci.
+Un explorar es una sola rama. Si mezclas disparo y efecto en la misma consulta, el runtime rechaza; tú decides cómo seguir.
+)";
+  if (!neutral) {
+    out << "El hijo cierra SU consulta. Tú cierras el ancla. Un Cerrado limpio del hijo no es el ancla.\n";
+  }
+  out << R"(No cierres sin haber lanzado al menos un explorador.
+Con plan no inventes la consulta: el runtime usa la de la fase.
+
+JSON. Primer carácter `{`:
+{"action":"control_v1","do":"bosquejar","hacia":["evento entrada","parada trabajo","archivo"],"why":"quiero ver si el ancla vive en un barrio o en varios"}
+{"action":"control_v1","do":"explorar","consulta":"dónde se registra el evento de entrada del usuario","why":"el atlas deja un objeto; un explorador basta"}
+{"action":"control_v1","do":"explorar","consulta":"dónde captura la consola el evento de entrada del usuario","hacia":["entrada usuario"],"why":"el trabajo anterior cerró la parada en el controlador; esta rama es cómo entra la señal"}
+{"action":"control_v1","do":"plan","modo":"seguir","fases":[{"id":"B","kind":"locator","consulta":"dónde se registra el evento de entrada del usuario"},{"id":"S","kind":"seguir","need":["B"],"hacia":["parada"]}],"why":"una línea; tiras del flujo"}
+{"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se registra el evento de entrada del usuario"},{"id":"B","kind":"locator","consulta":"dónde se detiene el trabajo que está en curso"},{"id":"P","kind":"puente","need":["A","B"]}],"why":"si el mapa no une, tú partes"}
+{"action":"control_v1","do":"ampliar","ids":["M7","M8"],"why":"ui vs controlador; ov no decide el objeto"}
+{"action":"control_v1","do":"pasar","why":"esta fase ya tiene un locus leído"}
+{"action":"control_v1","do":"no_pasar","why":"esta fase no encontró el objeto"}
+{"action":"control_v1","do":"revisar","consulta":"dónde se evalúa el evento de entrada del usuario","why":"el locator era demasiado ancho"}
+{"action":"control_v1","do":"cerrar","why":"el ancla queda contestada con lo que preguntamos y leímos"}
+)";
+  return out.str();
+}
+
+std::string wave_control_user_prompt(const std::string& user_consulta, const std::string& jobs_md,
+                                     const std::string& barrio_brief, const std::string& inspect_brief,
+                                     const WaveControlPlan& plan,
+                                     const std::vector<WaveControlDo>& legal_in,
+                                     const std::string& circuit_md, const std::string& exam_md,
+                                     WaveControlCue cue, const std::string& bosquejo_md) {
+  (void)cue;
+  std::ostringstream out;
+  out << "Consulta del usuario (ancla):\n" << user_consulta << "\n\n";
+  if (!bosquejo_md.empty()) {
+    out << bosquejo_md;
+    if (bosquejo_md.back() != '\n') {
+      out << "\n";
+    }
+    out << "\n";
+  }
+  if (!barrio_brief.empty()) {
+    out << barrio_brief << "\n\n";
+  }
+  if (!inspect_brief.empty()) {
+    out << inspect_brief << "\n\n";
+  }
+  const std::string board = wave_control_plan_markdown(plan);
+  if (!board.empty()) {
+    out << board << "\n";
+  }
+  out << "Trabajos ya hechos:\n";
+  out << (jobs_md.empty() ? "(ninguno)\n" : jobs_md);
+  if (!circuit_md.empty()) {
+    out << "\n" << circuit_md;
+    if (circuit_md.back() != '\n') {
+      out << "\n";
+    }
+  }
+  if (!exam_md.empty()) {
+    out << "\n" << exam_md;
+    if (exam_md.back() != '\n') {
+      out << "\n";
+    }
+  }
+  const int jobs_n = jobs_md.empty() ? 0 : 1;
+  const bool last_visto = jobs_md.find("Cerrado:") != std::string::npos &&
+                          jobs_md.find("(vacío)") == std::string::npos;
+  const auto legal =
+      legal_in.empty() ? wave_control_legal(plan, jobs_n, last_visto) : legal_in;
+  out << "\n" << wave_control_legal_markdown(legal);
+  if (!plan.committed && jobs_md.empty() && inspect_brief.empty()) {
+    out << "Aún no hay exploradores. Tú diriges: bosqueja 2–8 olores de zona (clases de sitio, "
+           "no nombres del ancla) para ver barrios, explora (consulta = objeto y verbo; why = estrategia) "
+           "o parte en plan si conviene. Si ov empatado, amplia 1–3 M*. PROHIBIDO copiar ids.\n";
+  } else if (!plan.committed && jobs_md.empty()) {
+    out << "Abiertas están completas (inspect). entre abiertas son ports, no cosine. "
+           "Tú diriges: plan si conviene partir; si ya ves un objeto, un explorador (consulta = objeto y "
+           "verbo; hacia opcional). Owns/peek no van en la consulta. Chrome no es el disparo. PROHIBIDO copiar ids.\n";
+  } else if (plan.committed) {
+    const int cur = wave_control_plan_current(plan);
+    if (cur >= 0 && plan.fases[static_cast<std::size_t>(cur)].status ==
+                        WaveControlPhaseStatus::EnCurso) {
+      out << "Puerta de la fase en curso. pasar si hay locus en visto; si no, no_pasar o revisar. "
+             "PROHIBIDO copiar ids.\n";
+    } else if (cur >= 0 && plan.fases[static_cast<std::size_t>(cur)].status ==
+                               WaveControlPhaseStatus::Fallo) {
+      out << "Esta fase falló. revisar el locator o cerrar. PROHIBIDO copiar ids.\n";
+    } else {
+      out << "Lee Cerrado. Cierra si el ancla ya se responde.\n";
+    }
+  } else if (!jobs_md.empty()) {
+    out << "Este es el estado. Tú diriges: consulta = objeto y verbo que el atlas huele; why = tu "
+           "estrategia (el hijo no la lee). Lo que no se caza no se nombra. hacia opcional: conceptos de "
+           "cerca, no ids. Un explorar es una sola rama; si mezclas, el runtime rechaza y tú eliges cómo "
+           "seguir. PROHIBIDO copiar ids.\n";
+  } else {
+    out << "Lee Cerrado y leído. Si Cerrado cubre el ancla y Abierto está vacío, cierra. "
+           "Abierto vacío no es un deber. Otro explorar solo si Abierto nombra un objeto "
+           "que no está en leído. PROHIBIDO copiar ids.\n";
+  }
+  out << "JSON ahora. Primer carácter `{`.\n";
   return out.str();
 }
 
@@ -5150,12 +8009,29 @@ nlohmann::json wave_state_to_json(const WaveState& st) {
   for (const auto& e : wave_sketch_edges(st)) {
     sketch.push_back({{"from", e.from}, {"to", e.to}, {"via", e.via}});
   }
+  std::string atlas_query;
+  int atlas_zones = 0;
+  if (st.atlas_cards.is_object()) {
+    atlas_query = st.atlas_cards.value("query", "");
+    if (st.atlas_cards.contains("zones") && st.atlas_cards["zones"].is_array()) {
+      atlas_zones = static_cast<int>(st.atlas_cards["zones"].size());
+    }
+  }
   return {{"prompt", st.prompt},
           {"campo", st.campo},
           {"papeles", st.papeles},
           {"independiente_done", st.independiente_done},
           {"independiente_leaf", st.independiente_leaf},
+          {"control_worker", st.control_worker},
+          {"pin_from", st.pin_from},
+          {"pin_to", st.pin_to},
+          {"pin_loci", st.pin_loci},
+          {"pin_hacia", st.pin_hacia},
+          {"cerca_hops_max", st.cerca_hops_max},
+          {"peek_hop_depth", st.peek_hop_depth},
           {"atlas_md", st.atlas_md},
+          {"atlas_query", atlas_query},
+          {"atlas_zones", atlas_zones},
           {"opened_md", st.opened_md},
           {"opened_ids", st.opened_ids},
           {"candidatas", cands},

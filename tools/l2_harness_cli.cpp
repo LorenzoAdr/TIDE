@@ -25,6 +25,7 @@
 #include "ai/l2_feat.hpp"
 #include "ai/l2_think.hpp"
 #include "ai/l2_wave.hpp"
+#include "ai/l2_wave_bosquejo.hpp"
 #include "ai/level2_autonomous_loop.hpp"
 #include "ai/level2_session.hpp"
 #include "ai/search_replace.hpp"
@@ -522,10 +523,12 @@ void usage() {
             << "  registry-embed [--force]   // nomic: fichas sucias → embeddings\n"
             << "  registry-query TEXT [--match-surface …] [--trails] [--map map.md]\n"
             << "  entityness-probe --query TEXT [--aliases-json F] [--out F]  // entityness table\n"
+            << "  wave-bosquejo --terms a,b,c  // sin LLM: foto de barrios para conceptos del piloto\n"
             << "  zone-judge-shot --cards FILE --case ID  // 1× LLM sobre causal_judge_v1\n"
             << "  zone-judge-battery --cards-root DIR --out DIR  // un LLM secuencial\n"
             << "  atlas-survey --cards-root DIR --out DIR --only ID  // atlas → LLM inspect → ficha\n"
-            << "  wave-explore --out DIR [--case ID|--prompt TEXT] [--think off|low|medium|high|close]\n"
+            << "  wave-explore --out DIR [--case ID|--prompt TEXT] [--think ...] [--control] [--run-jobs]\n"
+            << "  wave-control-shot --out DIR [--from DIR] [--cue default|neutral] [--think …]\n"
             << "  worker-probe --kind cubre|como|gap --case ID --stem S --out DIR\n"
             << "  trail-judge-shot [SYM] // 1× LLM: trail mapa L0 → a_trail_judge (caso 17)\n"
             << "  dataflow-probe VAR     // sin LLM: writes/reads/decls vía ripgrep (no LSP)\n"
@@ -623,6 +626,7 @@ std::unique_ptr<tuide::L2Brain> ready_l2_brain(
 }
 
 int run_wave_explore(const std::string& root, int argc, char** argv);
+int run_wave_control_shot(const std::string& root, int argc, char** argv);
 
 std::vector<tuide::ATrailSearchHit> parse_rg_hits(const std::string& body,
                                                   const std::string& workspace_root) {
@@ -1797,6 +1801,81 @@ int run_entityness_probe(const std::string& root, int argc, char** argv) {
   std::cout << j.dump(2) << "\n";
   if (!out_path.empty()) {
     std::ofstream(out_path) << j.dump(2) << "\n";
+  }
+  tuide::registry_close(&reg);
+  return 0;
+}
+
+int run_wave_bosquejo(const std::string& root, int argc, char** argv) {
+  std::vector<std::string> terms;
+  std::string out_path;
+  bool debug = false;
+  auto push_csv = [&](const std::string& csv) {
+    std::string cur;
+    for (char c : csv) {
+      if (c == ',') {
+        const std::string t = trim(cur);
+        if (!t.empty()) {
+          terms.push_back(t);
+        }
+        cur.clear();
+      } else {
+        cur.push_back(c);
+      }
+    }
+    const std::string t = trim(cur);
+    if (!t.empty()) {
+      terms.push_back(t);
+    }
+  };
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if ((a == "--terms" || a == "--term") && i + 1 < argc) {
+      push_csv(argv[++i]);
+    } else if (a == "--out" && i + 1 < argc) {
+      out_path = argv[++i];
+    } else if (a == "--debug") {
+      debug = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "wave-bosquejo --terms \"evento entrada,parada,archivo\" [--out F] [--debug]\n"
+                   "  Sin LLM. Olores de zona (1–3 palabras) → foto de barrios (concentración + aristas).\n";
+      return 2;
+    } else if (!a.empty() && a[0] != '-') {
+      push_csv(a);
+    }
+  }
+  if (terms.size() < static_cast<std::size_t>(tuide::kWaveControlBosquejarMin)) {
+    std::cerr << "wave-bosquejo: hace falta --terms con 2–8 conceptos\n";
+    return 2;
+  }
+  tuide::EmbeddingBackend backend;
+  std::string err;
+  tuide::RegistryEmbedFn embed;
+  if (ensure_embed_backend(root, &backend, &err)) {
+    embed = [&](bool is_query, const std::string& text, std::vector<float>* out) {
+      return is_query ? backend.embed_query(text, out, &err) : backend.embed_passage(text, out, &err);
+    };
+  } else {
+    std::cerr << "wave-bosquejo: embed no listo (" << err << "); solo NodeId\n";
+    err.clear();
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  tuide::WaveControlBosquejo foto;
+  if (!tuide::wave_control_bosquejo_from_registry(&reg, embed, terms, &foto, &err)) {
+    std::cerr << "wave-bosquejo: " << err << "\n";
+    tuide::registry_close(&reg);
+    return 1;
+  }
+  const std::string md = tuide::wave_control_bosquejo_markdown(foto);
+  std::cout << md << "\n";
+  if (debug && !foto.detalle.empty()) {
+    std::cerr << "detalle:\n" << foto.detalle;
+  }
+  if (!out_path.empty()) {
+    std::ofstream(out_path) << md << "\n";
   }
   tuide::registry_close(&reg);
   return 0;
@@ -7403,6 +7482,205 @@ bool cerca_score_embeddings(tuide::EffectRegistry* r, const std::vector<float>& 
   return true;
 }
 
+int run_wave_control_shot(const std::string& root, int argc, char** argv) {
+  std::string out_arg;
+  std::string from_arg;
+  std::string model_id;
+  bool dry = false;
+  tuide::WaveControlCue cue = tuide::WaveControlCue::Neutral;
+  tuide::L2ThinkLevel think_level = tuide::L2ThinkLevel::Medium;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--out" && i + 1 < argc) {
+      out_arg = argv[++i];
+    } else if (a == "--from" && i + 1 < argc) {
+      from_arg = argv[++i];
+    } else if (a == "--model-id" && i + 1 < argc) {
+      model_id = argv[++i];
+    } else if (a == "--dry") {
+      dry = true;
+    } else if (a == "--cue" && i + 1 < argc) {
+      const std::string c = argv[++i];
+      if (c == "neutral") {
+        cue = tuide::WaveControlCue::Neutral;
+      } else if (c == "default") {
+        cue = tuide::WaveControlCue::Default;
+      } else {
+        std::cerr << "wave-control-shot: --cue default|neutral (no '" << c << "')\n";
+        return 2;
+      }
+    } else if (a == "--think" && i + 1 < argc) {
+      const std::string t = argv[++i];
+      if (t == "off") {
+        think_level = tuide::L2ThinkLevel::Off;
+      } else if (t == "low") {
+        think_level = tuide::L2ThinkLevel::Low;
+      } else if (t == "medium") {
+        think_level = tuide::L2ThinkLevel::Medium;
+      } else if (t == "high") {
+        think_level = tuide::L2ThinkLevel::High;
+      } else {
+        std::cerr << "wave-control-shot: --think off|low|medium|high (no '" << t << "')\n";
+        return 2;
+      }
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "wave-control-shot --out DIR [--from DIR] [--cue default|neutral]\n"
+                   "  [--think off|low|medium|high] [--dry] [--model-id ID]\n"
+                   "  1× LLM del piloto de control sobre una foto fija (ancla + T1 + circuito +\n"
+                   "  examen + atlas). No lanza hijos. Por defecto --cue neutral (sin receta).\n"
+                   "  --from: carpeta con ancla.txt jobs.md circuit.md exam.md atlas.md\n"
+                   "  Sin --from: tests/fixtures/l2_wave/control_t1_escape_hyp\n";
+      return 2;
+    }
+  }
+  if (out_arg.empty()) {
+    std::cerr << "wave-control-shot: requiere --out DIR\n";
+    return 2;
+  }
+  fs::path from_dir(from_arg.empty()
+                        ? (fs::path(root) / "tests/fixtures/l2_wave/control_t1_escape_hyp")
+                        : fs::path(from_arg));
+  if (!from_dir.is_absolute()) {
+    from_dir = fs::path(root) / from_dir;
+  }
+  fs::path output_root(out_arg);
+  if (!output_root.is_absolute()) {
+    output_root = fs::path(root) / output_root;
+  }
+  const std::string ancla = read_file(from_dir / "ancla.txt");
+  const std::string jobs_md = read_file(from_dir / "jobs.md");
+  if (ancla.empty() || jobs_md.empty()) {
+    std::cerr << "wave-control-shot: falta ancla.txt o jobs.md en " << from_dir << "\n";
+    return 2;
+  }
+  auto trim_nl = [](std::string s) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) {
+      s.pop_back();
+    }
+    return s;
+  };
+  const std::string atlas = read_file(from_dir / "atlas.md");
+  const std::string circuit_md = read_file(from_dir / "circuit.md");
+  const std::string exam_md = read_file(from_dir / "exam.md");
+  const auto legal = tuide::wave_control_legal({}, 1, true);
+  tuide::L2BrainRequest creq;
+  creq.system_prompt = tuide::wave_control_system_prompt(cue);
+  creq.user_prompt = tuide::wave_control_user_prompt(trim_nl(ancla), jobs_md, atlas, "", {}, legal,
+                                                    circuit_md, exam_md, cue);
+  creq.phase = "causal_wave_control";
+  creq.max_tokens = 768;
+  creq.temperature = 0.1f;
+  const tuide::L2ThinkProfile cthink = tuide::think_profile(think_level);
+  tuide::apply_think_profile(&creq, cthink);
+  fs::create_directories(output_root);
+  std::ofstream(output_root / "system.txt") << creq.system_prompt;
+  std::ofstream(output_root / "user.md") << creq.user_prompt;
+  std::ofstream(output_root / "think.txt")
+      << tuide::l2_think_level_name(cthink.level) << " budget=" << cthink.budget
+      << " enable=" << (cthink.enable_thinking ? "yes" : "no") << " cue="
+      << (cue == tuide::WaveControlCue::Neutral ? "neutral" : "default") << "\n";
+  std::cout << "======== wave-control-shot ========\n"
+            << "from=" << from_dir.string() << " cue="
+            << (cue == tuide::WaveControlCue::Neutral ? "neutral" : "default")
+            << " think=" << tuide::l2_think_level_name(cthink.level)
+            << " prompt_chars=" << creq.system_prompt.size() + creq.user_prompt.size() << "\n";
+  if (dry) {
+    std::cout << creq.user_prompt << "\ndry: no LLM\n";
+    return 0;
+  }
+  AiSettings settings = load_ai_settings(root);
+  if (!model_id.empty()) {
+    settings.level2.model_id = model_id;
+    settings.level2.model_path.clear();
+  }
+  creq.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+  std::string err;
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  auto brain_ptr = ready_l2_brain(settings, progress, &err);
+  if (!brain_ptr) {
+    std::cerr << "wave-control-shot: " << err << "\n";
+    return err.find("mode") != std::string::npos ? 2 : 1;
+  }
+  tuide::L2Brain& brain = *brain_ptr;
+  std::cout << "L2 ▸ wave-control-shot (" << brain.name() << ")…\n";
+  tuide::WaveControlOla cola;
+  bool propose_ok = false;
+  for (int attempt = 1; attempt <= 2; ++attempt) {
+    const auto cresp = brain.propose(creq, nullptr);
+    propose_ok = cresp.ok;
+    const fs::path adir = output_root / ("attempt_" + std::to_string(attempt));
+    fs::create_directories(adir);
+    std::ofstream(adir / "raw.txt") << (cresp.raw.empty() ? cresp.text : cresp.raw);
+    std::ofstream(adir / "user.md") << creq.user_prompt;
+    cola = tuide::WaveControlOla{};
+    if (!cresp.ok) {
+      std::ofstream(adir / "error.txt") << cresp.error;
+      cola.error = cresp.error.empty() ? "control propose falló" : cresp.error;
+    } else {
+      cola = tuide::wave_parse_control(cresp.text);
+      if (!cola.ok && !cresp.raw.empty()) {
+        auto again = tuide::wave_parse_control(cresp.raw);
+        if (again.ok) {
+          cola = std::move(again);
+        }
+      }
+    }
+    if (cola.ok && !tuide::wave_control_do_allowed(legal, cola.do_kind)) {
+      cola.ok = false;
+      cola.error = std::string("control: do no legal ahora (") +
+                   tuide::wave_control_do_name(cola.do_kind) + ")";
+    }
+    if (cola.ok && cola.do_kind == tuide::WaveControlDo::Explorar) {
+      for (const auto& c : cola.consultas) {
+        std::string derr;
+        if (!tuide::wave_control_consulta_ok(c, &derr)) {
+          cola.ok = false;
+          cola.error = derr.empty() ? "consulta inválida" : derr;
+          break;
+        }
+      }
+    }
+    const char* do_name = tuide::wave_control_do_name(cola.do_kind);
+    nlohmann::json cola_j = {{"ok", cola.ok},
+                             {"do", do_name},
+                             {"consulta", cola.consulta},
+                             {"consultas", cola.consultas},
+                             {"ids", cola.ids},
+                             {"hacia", cola.hacia},
+                             {"plan", tuide::wave_control_plan_to_json(cola.plan)},
+                             {"why", cola.why},
+                             {"error", cola.error},
+                             {"attempt", attempt},
+                             {"cue", cue == tuide::WaveControlCue::Neutral ? "neutral" : "default"}};
+    std::ofstream(adir / "ola.json") << json_dump_safe(cola_j) << "\n";
+    std::ofstream(output_root / "raw.txt") << (cresp.raw.empty() ? cresp.text : cresp.raw);
+    std::ofstream(output_root / "ola.json") << json_dump_safe(cola_j) << "\n";
+    if (cola.ok || cola.error.find("rama") == std::string::npos || attempt == 2) {
+      break;
+    }
+    const std::string nudge = tuide::wave_control_rama_nudge(cola.consulta);
+    std::ofstream(output_root / "nudge.txt") << nudge << "\n";
+    creq.user_prompt += "\n" + nudge + "\n";
+    std::cerr << "wave-control-shot: mezcla de ramas; reintento con plan\n";
+  }
+  const char* do_name = tuide::wave_control_do_name(cola.do_kind);
+  std::cout << "do=" << do_name << " ok=" << (cola.ok ? "yes" : "no");
+  if (!cola.consulta.empty()) {
+    std::cout << " consulta=" << cola.consulta;
+  }
+  if (!cola.plan.fases.empty()) {
+    std::cout << " fases=" << cola.plan.fases.size();
+  }
+  if (!cola.why.empty()) {
+    std::cout << " why=" << cola.why;
+  }
+  if (!cola.error.empty()) {
+    std::cout << " error=" << cola.error;
+  }
+  std::cout << "\n";
+  return propose_ok ? 0 : 1;
+}
+
 int run_wave_explore(const std::string& root, int argc, char** argv) {
   std::string out_arg;
   std::string case_id;
@@ -7412,6 +7690,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
   int max_waves = tuide::kWaveMaxWaves;
   bool think_override = false;
   bool close_audit = false;
+  bool control_mode = false;
+  bool control_run_jobs = false;
   tuide::L2ThinkLevel think_level = tuide::L2ThinkLevel::Medium;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
@@ -7445,11 +7725,18 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
         std::cerr << "wave-explore: --think off|low|medium|high|close (no '" << t << "')\n";
         return 2;
       }
+    } else if (a == "--control") {
+      control_mode = true;
+    } else if (a == "--run-jobs") {
+      control_run_jobs = true;
     } else if (a == "-h" || a == "--help") {
       std::cerr << "wave-explore --out DIR [--case ID|--prompt TEXT] [--max-waves N]\n"
                    "  [--cards FILE | --cards-from DIR] [--think off|low|medium|high|close]\n"
+                   "  [--control] [--run-jobs]\n"
                    "  Piloto adaptativo: needles | cerca | juicio | peek | follow | entre | independiente | cerrar.\n"
                    "  Una ola por propose.\n"
+                   "  --control: piloto despierta primero (atlas por barrios; puede ampliar M* una vez).\n"
+                   "  Por defecto se detiene al emitir explorar (escribe plan.json). --run-jobs lanza los hijos.\n"
                    "  --think fija un nivel para todas las olas (off|low|medium|high).\n"
                    "  --think close: piloto=off; el primer cerrar se re-lanza 1× con medium "
                    "(cerrar, peek del hueco, o follow de un locus anclado). "
@@ -7546,6 +7833,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     }
     const int nseed = tuide::wave_seed_from_atlas(&state, cards_payload);
     std::cerr << "wave-explore: atlas seed " << nseed << " zonas desde " << cards_path << "\n";
+    state.atlas_cards = cards_payload;
     state.atlas_md = tuide::registry_causal_atlas_markdown(cards_payload, prompt);
     std::ofstream(output_root / "atlas.md") << state.atlas_md;
   } else if (!cards_arg.empty() || !cards_from.empty()) {
@@ -7883,6 +8171,67 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
   bool close_audit_done = false;
   std::function<void(tuide::WaveState&, const fs::path&, int)> run_waves;
   int indep_serial = 0;
+  int control_job_n = 0;
+  auto cards_for = [&](const tuide::WaveState& st) -> const nlohmann::json& {
+    if (!st.atlas_cards.is_null() && st.atlas_cards.contains("zones")) {
+      return st.atlas_cards;
+    }
+    return cards_payload;
+  };
+  auto rebuild_atlas_for = [&](const std::string& consulta, tuide::WaveState* w,
+                               std::string* aerr) -> bool {
+    if (w == nullptr) {
+      if (aerr) {
+        *aerr = "atlas nulo";
+      }
+      return false;
+    }
+    if (!embed_backend.ready()) {
+      if (!ensure_embed_backend(root, &embed_backend, &embed_err)) {
+        if (aerr) {
+          *aerr = embed_err.empty() ? "atlas hijo: embed no listo" : embed_err;
+        }
+        return false;
+      }
+    }
+    auto one = [&](bool is_query, const std::string& text, std::vector<float>* outv) {
+      return is_query ? embed_backend.embed_query(text, outv, &embed_err)
+                      : embed_backend.embed_passage(text, outv, &embed_err);
+    };
+    tuide::RegistryQueryOpts qopts;
+    qopts.match_surface = tuide::RegistryMatchSurface::CardFull;
+    qopts.hops = 2;
+    tuide::RegistryTrailResult trails;
+    std::string qerr;
+    if (!tuide::registry_query_trails(&reg, consulta, one, qopts, &trails, &qerr)) {
+      if (aerr) {
+        *aerr = qerr.empty() ? "atlas hijo: trails" : qerr;
+      }
+      return false;
+    }
+    tuide::RegistryCausalJudgeOpts jopts;
+    tuide::graph_view_profile_apply(
+        tuide::graph_view_profile_default(tuide::GraphViewLevel::Atlas), &jopts);
+    nlohmann::json payload;
+    if (!tuide::registry_causal_judge_payload(&reg, consulta, trails, jopts, &payload, &qerr)) {
+      if (aerr) {
+        *aerr = qerr.empty() ? "atlas hijo: judge" : qerr;
+      }
+      return false;
+    }
+    w->candidatas.clear();
+    w->atlas_seed.clear();
+    w->opened_ids.clear();
+    w->opened_md.clear();
+    w->atlas_cards = std::move(payload);
+    const int nseed = tuide::wave_seed_from_atlas(w, w->atlas_cards);
+    w->atlas_md = tuide::registry_causal_atlas_markdown(w->atlas_cards, consulta);
+    std::cerr << "wave-explore: atlas hijo n=" << nseed << " query=" << consulta << "\n";
+    return true;
+  };
+  ops.rebuild_atlas = [&](const std::string& query, tuide::WaveState* child, std::string* ierr) {
+    return rebuild_atlas_for(query, child, ierr);
+  };
   ops.run_independiente = [&](const std::string&, tuide::WaveState* child, std::string* ierr) {
     if (child == nullptr) {
       if (ierr) {
@@ -7894,7 +8243,12 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     const fs::path child_dir = output_root / ("indep_" + std::to_string(indep_serial));
     fs::create_directories(child_dir);
     std::cerr << "wave-explore: independiente #" << indep_serial << " " << child->prompt << "\n";
-    if (!cards_payload.is_null() && cards_payload.contains("zones")) {
+    if (!child->atlas_cards.is_null() && child->atlas_cards.contains("zones")) {
+      std::ofstream(child_dir / "judge_cards.json") << json_dump_safe(child->atlas_cards) << "\n";
+      if (!child->atlas_md.empty()) {
+        std::ofstream(child_dir / "atlas.md") << child->atlas_md;
+      }
+    } else if (!cards_payload.is_null() && cards_payload.contains("zones")) {
       if (child->candidatas.empty()) {
         tuide::wave_seed_from_atlas(child, cards_payload);
       }
@@ -7923,8 +8277,13 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     return true;
   };
   if (close_audit) {
-    std::cerr << "wave-explore: think=close (guion=high; cover/piloto=off; "
-                 "primer cerrar → 1× medium; cerrar / peek hueco / follow anclado)\n";
+    if (control_mode) {
+      std::cerr << "wave-explore: think=close (hijos --control: sin re-lanzar el cerrar; "
+                   "guion=high; cover/piloto=off)\n";
+    } else {
+      std::cerr << "wave-explore: think=close (guion=high; cover/piloto=off; "
+                   "primer cerrar → 1× medium; cerrar / peek hueco / follow anclado)\n";
+    }
   } else if (!think_override) {
     std::cerr << "wave-explore: think=hybrid (guion=high, cover=off, piloto=off, "
                  "atasco→medium; cerrar del piloto siempre vale)\n";
@@ -7951,7 +8310,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       req.phase = "causal_wave_cover";
       req.max_tokens = 256;
     } else {
-      req.system_prompt = tuide::wave_pilot_system_prompt();
+      req.system_prompt = st.control_worker ? tuide::wave_explorer_system_prompt()
+                                            : tuide::wave_pilot_system_prompt();
       req.user_prompt = tuide::wave_pilot_user_prompt(st);
       req.phase = "causal_wave_pilot";
       req.max_tokens =
@@ -8017,6 +8377,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
         (void)tuide::wave_apply(&st, cl, ops, &cperr);
       }
       log.push_back({{"wave", i + 1},
+                     {"job", control_job_n},
                      {"phase", req.phase},
                      {"ok", false},
                      {"error", st.last_error}});
@@ -8066,7 +8427,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     }
     auto fallback_cover_keep = [&]() {
       std::vector<std::pair<int, std::string>> scored;
-      for (const auto& zone : cards_payload.value("zones", nlohmann::json::array())) {
+      for (const auto& zone : cards_for(st).value("zones", nlohmann::json::array())) {
         const std::string id = zone.value("id", "");
         if (id.empty()) {
           continue;
@@ -8105,7 +8466,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       }
     }
     bool did_close_audit = false;
-    if (close_audit && !close_audit_done && !cover && !guion && ola.ok &&
+    if (close_audit && !st.control_worker && !close_audit_done && !cover && !guion && ola.ok &&
         ola.do_kind == tuide::WaveDo::Cerrar && !think.enable_thinking) {
       close_audit_done = true;
       did_close_audit = true;
@@ -8162,8 +8523,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     }
     if (ok && cover) {
       st.opened_ids = ola.keep;
-      std::string opened = tuide::registry_causal_pilot_opened_pack(cards_payload, ola.keep, st.prompt);
-      const auto filtered = tuide::registry_causal_payload_filter_zones(cards_payload, ola.keep);
+      std::string opened = tuide::registry_causal_pilot_opened_pack(cards_for(st), ola.keep, st.prompt);
+      const auto filtered = tuide::registry_causal_payload_filter_zones(cards_for(st), ola.keep);
       const std::string inspect =
           tuide::registry_causal_pack_markdown(filtered, tuide::GraphViewLevel::Inspect);
       if (!inspect.empty()) {
@@ -8177,7 +8538,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       }
       st.opened_md = std::move(opened);
       tuide::wave_retain_atlas_ids(&st, ola.keep);
-      tuide::wave_ingest_zone_symbols(&st, cards_payload, ola.keep);
+      tuide::wave_ingest_zone_symbols(&st, cards_for(st), ola.keep);
     }
     if (ok && last_propose && !st.done && ola.do_kind != tuide::WaveDo::Cerrar) {
       std::string cperr;
@@ -8199,6 +8560,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     std::ofstream(wave_dir / "notebook.md") << tuide::wave_notebook_markdown(st);
     std::ofstream(wave_dir / "state.json") << json_dump_safe(tuide::wave_state_to_json(st)) << "\n";
     log.push_back({{"wave", i + 1},
+                   {"job", control_job_n},
                    {"propose", st.propose_n},
                    {"phase", req.phase},
                    {"ok", ok},
@@ -8230,6 +8592,673 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     }
   }
   };
+  if (control_mode) {
+    std::cerr << "wave-explore: --control (piloto despierta primero; atlas por barrios; "
+              << (control_run_jobs ? "lanza exploradores" : "para al explorar") << "; max "
+              << tuide::kWaveControlMaxJobs << " trabajos)\n";
+    const std::string user_consulta = prompt;
+    state = tuide::WaveState{};
+    state.prompt = user_consulta;
+    std::string jobs_md;
+    nlohmann::json jobs = nlohmann::json::array();
+    nlohmann::json control_turns = nlohmann::json::array();
+    bool control_cerró = false;
+    std::string control_why;
+    int jobs_run = 0;
+    std::vector<std::string> prev_consultas;
+    std::vector<std::string> last_visto;
+    std::vector<std::string> all_visto;
+    std::vector<tuide::WaveControlJobSnap> job_snaps;
+    std::string circuit_md;
+    std::string exam_md;
+    auto jobs_path_between = [&](const std::string& from, const std::string& to, std::string* md,
+                                 std::vector<tuide::WaveHit>* hops, std::string* path_err) -> bool {
+      auto to_fn = [](const std::string& loc) {
+        if (loc.rfind("fn:", 0) == 0) {
+          return loc;
+        }
+        if (loc.find('/') != std::string::npos) {
+          return std::string("fn:") + loc;
+        }
+        return loc;
+      };
+      std::vector<std::string> ids;
+      std::string perr;
+      if (!tuide::registry_path_between(&reg, to_fn(from), to_fn(to), &ids, &perr)) {
+        if (path_err) {
+          *path_err = perr.empty() ? "sin camino" : perr;
+        }
+        if (md) {
+          *md = "(sin camino)";
+        }
+        return false;
+      }
+      if (hops != nullptr) {
+        hops->clear();
+      }
+      std::string chain;
+      for (const auto& id : ids) {
+        tuide::RegistryNodeRow row;
+        std::string gerr;
+        tuide::WaveHit w;
+        if (tuide::registry_get(&reg, id, &row, &gerr) && !row.id.empty()) {
+          w.id = row.id;
+          w.path = row.path;
+          w.symbol = row.symbol;
+          w.stem = row.stem.empty() ? tuide::registry_stem_of(row.path) : row.stem;
+          w.kind = row.kind;
+        } else {
+          w.id = id;
+        }
+        w.needle = "entre";
+        const std::string name = w.symbol.empty() ? w.id : w.symbol;
+        if (!chain.empty()) {
+          chain += " → ";
+        }
+        chain += name;
+        if (hops != nullptr) {
+          hops->push_back(std::move(w));
+        }
+      }
+      if (md) {
+        *md = chain;
+      }
+      return hops != nullptr && hops->size() >= 2;
+    };
+    auto refresh_circuit = [&]() {
+      circuit_md = tuide::wave_control_jobs_circuit_pack(job_snaps, jobs_path_between);
+      if (!circuit_md.empty()) {
+        std::ofstream f(output_root / "circuit.md");
+        f << circuit_md;
+        if (circuit_md.back() != '\n') {
+          f << '\n';
+        }
+      }
+      exam_md = tuide::wave_control_slice_exam(user_consulta, job_snaps);
+      if (!exam_md.empty()) {
+        std::ofstream f(output_root / "exam.md");
+        f << exam_md;
+        if (exam_md.back() != '\n') {
+          f << '\n';
+        }
+      }
+    };
+    tuide::WaveControlPlan control_plan;
+    auto seed_control_worker = [&](tuide::WaveState* w, const std::string& consulta,
+                                   const tuide::WaveControlLaunch* spec) {
+      *w = tuide::WaveState{};
+      w->prompt = consulta;
+      w->control_worker = true;
+      w->independiente_leaf = true;
+      // Con --cards-from el mazo es el del caso: se reusa y se re-pinta el atlas
+      // contra esta consulta (ov= actualizado). Sin fichas, retrieval en vivo.
+      if (!cards_payload.is_null() && cards_payload.contains("zones") &&
+          !cards_payload["zones"].empty()) {
+        tuide::wave_seed_from_atlas(w, cards_payload);
+        w->atlas_cards = cards_payload;
+        w->atlas_md = tuide::registry_causal_atlas_markdown(cards_payload, consulta);
+      } else {
+        std::string aerr;
+        if (!rebuild_atlas_for(consulta, w, &aerr)) {
+          std::cerr << "wave-explore: atlas hijo falló (" << aerr << "); sin mazo de fichas\n";
+        }
+      }
+      if (spec != nullptr) {
+        tuide::wave_control_seed_launch(w, *spec);
+      }
+    };
+    auto run_explorer_job = [&](const std::string& consulta, const tuide::WaveControlLaunch& spec) {
+      tuide::WaveControlLaunch launch = spec;
+      tuide::wave_control_inherit_visto(&launch, all_visto);
+      tuide::WaveState worker;
+      const bool seed = launch.ok || !launch.pin_loci.empty() || !launch.pin_from.empty() ||
+                        !launch.hacia.empty();
+      seed_control_worker(&worker, consulta, seed ? &launch : nullptr);
+      const int job = jobs_run + 1;
+      const fs::path job_dir = output_root / ("job_" + std::to_string(job));
+      fs::create_directories(job_dir);
+      if (!worker.atlas_md.empty()) {
+        std::ofstream(job_dir / "atlas.md") << worker.atlas_md;
+      }
+      if (!worker.atlas_cards.is_null() && worker.atlas_cards.contains("zones")) {
+        std::ofstream(job_dir / "judge_cards.json") << json_dump_safe(worker.atlas_cards) << "\n";
+      }
+      std::cerr << "wave-explore: control job #" << job << " " << consulta << "\n";
+      control_job_n = job;
+      live = &worker;
+      close_audit_done = false;
+      consecutive_fail = 0;
+      escalate_think = false;
+      first_circuit_propose = 0;
+      run_waves(worker, job_dir, max_waves);
+      const std::string brief = tuide::wave_control_brief(worker);
+      std::ofstream(job_dir / "brief.md") << brief;
+      std::ofstream(job_dir / "notebook.md") << tuide::wave_notebook_markdown(worker);
+      std::ofstream(job_dir / "state.json") << json_dump_safe(tuide::wave_state_to_json(worker))
+                                           << "\n";
+      std::ofstream(job_dir / "pack.json") << json_dump_safe(tuide::wave_pack_to_json(worker))
+                                          << "\n";
+      std::ofstream(job_dir / "pack.md") << tuide::wave_pack_markdown(worker);
+      jobs_md += "### Trabajo " + std::to_string(job) + "\n" + brief + "\n";
+      if (!state.notas.empty() && state.notas.back() != '\n') {
+        state.notas += "\n";
+      }
+      state.notas += "## Trabajo " + std::to_string(job) + "\n" + brief;
+      if (!state.notas.empty() && state.notas.back() != '\n') {
+        state.notas += "\n";
+      }
+      prev_consultas.push_back(consulta);
+      last_visto = tuide::wave_pack_handoff(worker).visto;
+      jobs.push_back({{"n", job},
+                      {"consulta", consulta},
+                      {"keep", worker.opened_ids},
+                      {"cerró", worker.done},
+                      {"proposes", worker.propose_n},
+                      {"visto", last_visto}});
+      job_snaps.push_back(tuide::wave_control_job_snap(job, worker));
+      refresh_circuit();
+      for (const auto& v : last_visto) {
+        bool have = false;
+        for (const auto& e : all_visto) {
+          if (e == v) {
+            have = true;
+            break;
+          }
+        }
+        if (!have && !v.empty()) {
+          all_visto.push_back(v);
+        }
+      }
+      ++jobs_run;
+      live = &state;
+    };
+    auto control_atlas_from = [&](const std::vector<std::string>& opened) {
+      const auto& cards =
+          cards_payload.contains("zones") ? cards_payload : nlohmann::json::object();
+      std::vector<std::string> keep;
+      std::unordered_set<std::string> skip(opened.begin(), opened.end());
+      for (const auto& zone : cards.value("zones", nlohmann::json::array())) {
+        const std::string id = zone.value("id", "");
+        if (id.empty() || skip.count(id)) {
+          continue;
+        }
+        keep.push_back(id);
+      }
+      if (keep.empty() && !opened.empty()) {
+        return std::string("Atlas del resto: (ninguna ficha compacta)\n");
+      }
+      const nlohmann::json src =
+          opened.empty() ? cards : tuide::registry_causal_payload_filter_zones(cards, keep);
+      return tuide::wave_control_atlas_pack_brief(
+          tuide::registry_causal_atlas_markdown(src, user_consulta));
+    };
+    std::string control_atlas = control_atlas_from({});
+    std::string control_inspect;
+    std::string control_bosquejo;
+    std::string control_nudge;
+    int control_rama_retries = 0;
+    int control_bosquejos = 0;
+    bool control_amplió = false;
+    std::vector<std::string> control_ampliar_ids;
+    if (!control_atlas.empty()) {
+      std::ofstream(output_root / "control_atlas.md") << control_atlas << "\n";
+    }
+    auto write_plan_files = [&](const std::string& why) {
+      std::ostringstream pmd;
+      pmd << tuide::wave_control_plan_markdown(control_plan);
+      if (!why.empty()) {
+        pmd << "why: " << why << "\n";
+      }
+      std::ofstream(output_root / "plan.md") << pmd.str();
+      std::ofstream(output_root / "plan.json")
+          << json_dump_safe(tuide::wave_control_plan_to_json(control_plan)) << "\n";
+    };
+    auto launch_current_phase = [&]() -> bool {
+      if (jobs_run >= tuide::kWaveControlMaxJobs) {
+        control_why = "presupuesto de trabajos agotado";
+        return false;
+      }
+      const auto spec = tuide::wave_control_launch_spec(control_plan);
+      if (!spec.ok) {
+        control_why = "control: fase no lanzable";
+        return false;
+      }
+      run_explorer_job(spec.consulta, spec);
+      write_plan_files({});
+      return true;
+    };
+    const int max_control_turns = tuide::kWaveControlMaxJobs + 6;
+    for (int turn = 1; turn <= max_control_turns; ++turn) {
+      tuide::L2BrainRequest creq;
+      creq.system_prompt = tuide::wave_control_system_prompt();
+      const auto legal_now =
+          tuide::wave_control_legal(control_plan, jobs_run, !last_visto.empty());
+      creq.user_prompt = tuide::wave_control_user_prompt(user_consulta, jobs_md, control_atlas,
+                                                        control_inspect, control_plan, legal_now,
+                                                        circuit_md, exam_md,
+                                                        tuide::WaveControlCue::Default,
+                                                        control_bosquejo);
+      if (!control_nudge.empty()) {
+        creq.user_prompt += "\n" + control_nudge + "\n";
+        control_nudge.clear();
+      }
+      creq.phase = "causal_wave_control";
+      creq.max_tokens = 768;
+      creq.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+      creq.temperature = 0.1f;
+      const tuide::L2ThinkProfile cthink =
+          (think_override && !close_audit)
+              ? tuide::think_profile(think_level)
+              : tuide::think_profile_for("causal_wave_control", false, false);
+      tuide::apply_think_profile(&creq, cthink);
+      const fs::path cdir = output_root / ("control_" + std::to_string(turn));
+      fs::create_directories(cdir);
+      std::ofstream(cdir / "system.txt") << creq.system_prompt;
+      std::ofstream(cdir / "user.md") << creq.user_prompt;
+      std::ofstream(cdir / "think.txt")
+          << tuide::l2_think_level_name(cthink.level) << " budget=" << cthink.budget
+          << " enable=" << (cthink.enable_thinking ? "yes" : "no") << "\n";
+      max_user_chars = std::max(max_user_chars, static_cast<int>(creq.user_prompt.size()));
+      const auto cresp = brain.propose(creq, nullptr);
+      std::ofstream(cdir / "raw.txt") << (cresp.raw.empty() ? cresp.text : cresp.raw);
+      tuide::WaveControlOla cola;
+      if (!cresp.ok) {
+        std::ofstream(cdir / "error.txt") << cresp.error;
+        cola.error = cresp.error.empty() ? "control propose falló" : cresp.error;
+      } else {
+        cola = tuide::wave_parse_control(cresp.text);
+        if (!cola.ok && !cresp.raw.empty()) {
+          auto again = tuide::wave_parse_control(cresp.raw);
+          if (again.ok) {
+            cola = std::move(again);
+          }
+        }
+      }
+      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Cerrar && jobs_run == 0) {
+        cola.ok = false;
+        cola.error = "control: lanza un explorador antes de cerrar";
+      }
+      if (cola.ok) {
+        const auto legal_apply =
+            tuide::wave_control_legal(control_plan, jobs_run, !last_visto.empty());
+        if (!tuide::wave_control_do_allowed(legal_apply, cola.do_kind)) {
+          cola.ok = false;
+          cola.error = std::string("control: do no legal ahora (") +
+                       tuide::wave_control_do_name(cola.do_kind) + ")";
+        }
+      }
+      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Ampliar) {
+        if (jobs_run > 0) {
+          cola.ok = false;
+          cola.error = "control: ampliar solo antes de explorar";
+        } else {
+          std::unordered_set<std::string> have(control_ampliar_ids.begin(),
+                                               control_ampliar_ids.end());
+          std::vector<std::string> fresh;
+          for (const auto& id : cola.ids) {
+            if (have.count(id)) {
+              continue;
+            }
+            bool found = false;
+            for (const auto& zone : cards_payload.value("zones", nlohmann::json::array())) {
+              if (zone.value("id", "") == id) {
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              cola.ok = false;
+              cola.error = "control: id no está en el atlas";
+              break;
+            }
+            have.insert(id);
+            fresh.push_back(id);
+          }
+          if (cola.ok && fresh.empty()) {
+            cola.ok = false;
+            cola.error = "control: esa ficha ya está abierta";
+          } else if (cola.ok) {
+            cola.ids = std::move(fresh);
+          }
+          if (cola.ok &&
+              static_cast<int>(control_ampliar_ids.size() + cola.ids.size()) >
+                  tuide::kWaveControlMaxOpened) {
+            cola.ok = false;
+            cola.error = "control: máx 6 fichas abiertas";
+          }
+        }
+      }
+      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Bosquejar) {
+        if (control_bosquejos >= tuide::kWaveControlMaxBosquejar) {
+          cola.ok = false;
+          cola.error = "control: bosquejar máx 2";
+        }
+      }
+      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Explorar) {
+        const auto owns = tuide::wave_control_owns_phrases(cards_payload);
+        if (!owns.empty()) {
+          for (auto& c : cola.consultas) {
+            c = tuide::wave_control_strip_owns(c, owns);
+            std::string cerr;
+            if (!tuide::wave_control_consulta_ok(c, &cerr)) {
+              cola.ok = false;
+              cola.error = cerr.empty() ? "consulta inválida" : cerr;
+              break;
+            }
+          }
+          if (cola.ok) {
+            for (std::size_t i = 0; i < cola.consultas.size(); ++i) {
+              for (std::size_t k = i + 1; k < cola.consultas.size(); ++k) {
+                if (cola.consultas[i] == cola.consultas[k]) {
+                  cola.ok = false;
+                  cola.error = "control: consultas repetidas";
+                  break;
+                }
+              }
+              if (!cola.ok) {
+                break;
+              }
+            }
+          }
+          if (cola.ok && !cola.consultas.empty()) {
+            cola.consulta = cola.consultas.front();
+          }
+        }
+      }
+      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Explorar) {
+        std::vector<std::string> seen = prev_consultas;
+        for (const auto& c : cola.consultas) {
+          std::string derr;
+          if (jobs_run > 0 && tuide::wave_control_consulta_es_ancla(c, user_consulta)) {
+            cola.ok = false;
+            cola.error = "control: no pases el ancla a un explorador";
+            break;
+          }
+          const std::string ancla_delta = jobs_run > 0 ? user_consulta : std::string{};
+          if (!tuide::wave_control_consulta_delta_ok(c, ancla_delta, seen, &derr)) {
+            cola.ok = false;
+            cola.error = derr.empty() ? "consulta no es un desplazamiento" : derr;
+            break;
+          }
+          seen.push_back(c);
+        }
+      }
+      const char* do_name = tuide::wave_control_do_name(cola.do_kind);
+      nlohmann::json cola_j = {{"ok", cola.ok},
+                               {"do", do_name},
+                               {"consulta", cola.consulta},
+                               {"consultas", cola.consultas},
+                               {"ids", cola.ids},
+                               {"hacia", cola.hacia},
+                               {"plan", tuide::wave_control_plan_to_json(cola.plan)},
+                               {"why", cola.why},
+                               {"error", cola.error}};
+      std::ofstream(cdir / "ola.json") << json_dump_safe(cola_j) << "\n";
+      control_turns.push_back({{"turn", turn},
+                               {"jobs_before", jobs_run},
+                               {"ok", cola.ok},
+                               {"do", do_name},
+                               {"consulta", cola.consulta},
+                               {"consultas", cola.consultas},
+                               {"ids", cola.ids},
+                               {"hacia", cola.hacia},
+                               {"why", cola.why},
+                               {"error", cola.error}});
+      std::cerr << "wave-explore: control turn #" << turn << " do=" << do_name
+                << " ok=" << (cola.ok ? "yes" : "no") << " jobs=" << jobs_run;
+      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Explorar) {
+        std::cerr << " n=" << cola.consultas.size();
+      }
+      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Bosquejar) {
+        std::cerr << " n=" << cola.hacia.size();
+      }
+      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Ampliar) {
+        std::cerr << " ids=" << cola.ids.size();
+      }
+      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Plan) {
+        std::cerr << " fases=" << cola.plan.fases.size();
+      }
+      if (!cola.ok) {
+        std::cerr << " err=" << cola.error;
+      }
+      std::cerr << "\n";
+      if (!cola.ok) {
+        const bool retry =
+            cola.error.find("ya está abierta") != std::string::npos ||
+            cola.error.find("máx 6") != std::string::npos ||
+            cola.error.find("plan 2") != std::string::npos ||
+            cola.error.find("plan con fases") != std::string::npos ||
+            cola.error.find("do no legal") != std::string::npos ||
+            cola.error.find("pasar exige") != std::string::npos ||
+            cola.error.find("bosquejar") != std::string::npos ||
+            cola.error.find("1–3 palabras") != std::string::npos ||
+            (cola.error.find("rama") != std::string::npos && control_rama_retries < 2);
+        if (retry) {
+          if (cola.error.find("rama") != std::string::npos) {
+            ++control_rama_retries;
+            control_nudge = tuide::wave_control_rama_nudge(cola.consulta);
+          } else if (cola.error.find("bosquejar") != std::string::npos ||
+                     cola.error.find("1–3 palabras") != std::string::npos) {
+            control_nudge =
+                "bosquejar pide 2–8 olores de zona (1–3 palabras): clase de sitio, no ids, no copiar el ancla.";
+          } else if (cola.error.find("plan 2") != std::string::npos ||
+              cola.error.find("plan con fases") != std::string::npos) {
+            control_nudge =
+                "El plan son 2–4 fases (locator / puente / seguir), no una lista de pasos.";
+          } else if (cola.error.find("do no legal") != std::string::npos ||
+                     cola.error.find("pasar exige") != std::string::npos) {
+            control_nudge = cola.error + " " + tuide::wave_control_legal_markdown(legal_now);
+          } else {
+            control_nudge =
+                "Esas fichas ya están en inspect. PROHIBIDO volver a ampliarlas. "
+                "Explora o pide ids que aún no estén abiertos.";
+          }
+          continue;
+        }
+        control_why = cola.error;
+        break;
+      }
+      if (cola.do_kind == tuide::WaveControlDo::Cerrar) {
+        control_cerró = true;
+        control_why = cola.why;
+        break;
+      }
+      if (cola.do_kind == tuide::WaveControlDo::Plan) {
+        std::string perr;
+        if (!tuide::wave_control_plan_commit(&control_plan, cola, &perr)) {
+          control_nudge = perr.empty() ? "El plan no se pudo congelar." : perr;
+          continue;
+        }
+        write_plan_files(cola.why);
+        if (!control_run_jobs) {
+          control_why = "plan: " + std::to_string(control_plan.fases.size()) +
+                        " fases (exploradores no lanzados)";
+          std::cerr << "wave-explore: " << control_why << "\n";
+          break;
+        }
+        if (!launch_current_phase()) {
+          break;
+        }
+        continue;
+      }
+      if (cola.do_kind == tuide::WaveControlDo::Pasar) {
+        std::string perr;
+        if (!tuide::wave_control_plan_pasar(&control_plan, last_visto, &perr)) {
+          control_nudge = perr.empty() ? "pasar no vale." : perr;
+          continue;
+        }
+        write_plan_files(cola.why);
+        last_visto.clear();
+        const auto next = tuide::wave_control_launch_spec(control_plan);
+        if (next.ok) {
+          if (!control_run_jobs) {
+            control_why = "plan: siguiente fase sin lanzar";
+            break;
+          }
+          if (!launch_current_phase()) {
+            break;
+          }
+        }
+        continue;
+      }
+      if (cola.do_kind == tuide::WaveControlDo::NoPasar) {
+        std::string perr;
+        if (!tuide::wave_control_plan_no_pasar(&control_plan, &perr)) {
+          control_nudge = perr.empty() ? "no_pasar no vale." : perr;
+          continue;
+        }
+        write_plan_files(cola.why);
+        last_visto.clear();
+        continue;
+      }
+      if (cola.do_kind == tuide::WaveControlDo::Revisar) {
+        std::string perr;
+        if (!tuide::wave_control_plan_revisar(&control_plan, cola.consulta, cola.hacia, &perr)) {
+          control_nudge = perr.empty() ? "revisar no vale." : perr;
+          continue;
+        }
+        write_plan_files(cola.why);
+        last_visto.clear();
+        if (!control_run_jobs) {
+          control_why = "plan: fase revisada sin lanzar";
+          break;
+        }
+        if (!launch_current_phase()) {
+          break;
+        }
+        continue;
+      }
+      if (cola.do_kind == tuide::WaveControlDo::Ampliar) {
+        for (const auto& id : cola.ids) {
+          control_ampliar_ids.push_back(id);
+        }
+        std::string opened = tuide::registry_causal_pilot_opened_pack(
+            cards_payload, control_ampliar_ids, user_consulta);
+        const auto filtered =
+            tuide::registry_causal_payload_filter_zones(cards_payload, control_ampliar_ids);
+        const std::string inspect =
+            tuide::registry_causal_pack_markdown(filtered, tuide::GraphViewLevel::Inspect);
+        if (!inspect.empty()) {
+          opened += "\n";
+          opened += inspect;
+        }
+        if (opened.size() > static_cast<std::size_t>(tuide::kWaveControlOpenedChars)) {
+          opened.resize(static_cast<std::size_t>(tuide::kWaveControlOpenedChars));
+          opened += "\n…\n";
+        }
+        std::ofstream(cdir / "opened.md") << opened << "\n";
+        control_inspect = tuide::wave_control_opened_brief(opened);
+        std::ofstream(cdir / "inspect.md") << control_inspect << "\n";
+        control_atlas = control_atlas_from(control_ampliar_ids);
+        std::ofstream(cdir / "rest.md") << control_atlas << "\n";
+        control_amplió = true;
+        continue;
+      }
+      if (cola.do_kind == tuide::WaveControlDo::Bosquejar) {
+        tuide::WaveControlBosquejo foto;
+        std::string berr;
+        tuide::RegistryEmbedFn cembed;
+        if (embed_backend.ready() || ensure_embed_backend(root, &embed_backend, &embed_err)) {
+          cembed = [&](bool is_query, const std::string& text, std::vector<float>* outv) {
+            return is_query ? embed_backend.embed_query(text, outv, &embed_err)
+                            : embed_backend.embed_passage(text, outv, &embed_err);
+          };
+        }
+        if (!tuide::wave_control_bosquejo_from_registry(&reg, cembed, cola.hacia, &foto, &berr)) {
+          control_nudge = berr.empty()
+                              ? "No pude pintar el bosquejo. Prueba otros conceptos."
+                              : berr;
+          continue;
+        }
+        control_bosquejo = tuide::wave_control_bosquejo_markdown(foto);
+        ++control_bosquejos;
+        std::ofstream(cdir / "bosquejo.md") << control_bosquejo << "\n";
+        std::ofstream(output_root / "bosquejo.md") << control_bosquejo << "\n";
+        std::cerr << "wave-explore: bosquejo #" << control_bosquejos;
+        if (!foto.nota.empty()) {
+          std::cerr << " " << foto.nota;
+        }
+        std::cerr << "\n";
+        continue;
+      }
+      if (!control_run_jobs) {
+        nlohmann::json plan = {{"consultas", cola.consultas},
+                               {"why", cola.why},
+                               {"amplió", control_amplió},
+                               {"ids", control_ampliar_ids}};
+        std::ofstream(output_root / "plan.json") << json_dump_safe(plan) << "\n";
+        std::ostringstream plan_md;
+        plan_md << "Plan (exploradores no lanzados)\n";
+        for (const auto& c : cola.consultas) {
+          plan_md << "- " << c << "\n";
+        }
+        plan_md << "why: " << cola.why << "\n";
+        std::ofstream(output_root / "plan.md") << plan_md.str();
+        control_why = "plan: " + std::to_string(cola.consultas.size()) +
+                      " consulta(s) (exploradores no lanzados)";
+        std::cerr << "wave-explore: " << control_why << "\n";
+        break;
+      }
+      bool launched = false;
+      for (const auto& c : cola.consultas) {
+        if (jobs_run >= tuide::kWaveControlMaxJobs) {
+          control_why = "presupuesto de trabajos agotado";
+          break;
+        }
+        tuide::WaveControlLaunch spec;
+        spec.consulta = c;
+        spec.hacia = cola.hacia;
+        run_explorer_job(c, spec);
+        launched = true;
+      }
+      if (!launched) {
+        if (control_why.empty()) {
+          control_why = "control: sin explorador";
+        }
+        break;
+      }
+    }
+    live = &state;
+    control_job_n = 0;
+    state.cierre = control_why;
+    state.done = jobs_run > 0 || control_why.rfind("plan:", 0) == 0;
+    std::ofstream(output_root / "jobs.md") << jobs_md;
+    if (!circuit_md.empty()) {
+      std::ofstream(output_root / "jobs.md", std::ios::app) << "\n" << circuit_md;
+      if (circuit_md.back() != '\n') {
+        std::ofstream(output_root / "jobs.md", std::ios::app) << "\n";
+      }
+    }
+    nlohmann::json control_out = {{"consulta", user_consulta},
+                                  {"jobs", jobs},
+                                  {"turns", control_turns},
+                                  {"cerró", control_cerró},
+                                  {"why", control_why},
+                                  {"jobs_run", jobs_run},
+                                  {"plan", tuide::wave_control_plan_to_json(control_plan)},
+                                  {"amplió", control_amplió},
+                                  {"bosquejos", control_bosquejos},
+                                  {"circuit", !circuit_md.empty()}};
+    std::ofstream(output_root / "control.json") << json_dump_safe(control_out) << "\n";
+    tuide::registry_close(&reg);
+    std::ofstream(output_root / "log.json") << json_dump_safe(log) << "\n";
+    nlohmann::json metrics = {{"control", true},
+                              {"jobs_run", jobs_run},
+                              {"cerró", control_cerró},
+                              {"why", control_why},
+                              {"think",
+                               close_audit ? "close"
+                                           : (think_override ? tuide::l2_think_level_name(think_level)
+                                                             : "hybrid")},
+                              {"think_escalates", escalate_n},
+                              {"user_chars_max", max_user_chars}};
+    std::ofstream(output_root / "metrics.json") << json_dump_safe(metrics) << "\n";
+    std::ofstream(output_root / "notebook.md") << jobs_md;
+    std::ofstream(output_root / "state.json") << json_dump_safe(tuide::wave_state_to_json(state))
+                                             << "\n";
+    std::cout << json_dump_safe(control_out) << "\n";
+    return (jobs_run > 0 || control_why.rfind("plan:", 0) == 0) ? 0 : 1;
+  }
   run_waves(state, output_root, max_waves);
 
   tuide::registry_close(&reg);
@@ -8366,11 +9395,17 @@ int main(int argc, char** argv) {
   if (cmd == "entityness-probe") {
     return run_entityness_probe(root, argc, argv);
   }
+  if (cmd == "wave-bosquejo") {
+    return run_wave_bosquejo(root, argc, argv);
+  }
   if (cmd == "atlas-survey") {
     return run_atlas_survey(root, argc, argv);
   }
   if (cmd == "wave-explore") {
     return run_wave_explore(root, argc, argv);
+  }
+  if (cmd == "wave-control-shot") {
+    return run_wave_control_shot(root, argc, argv);
   }
   if (cmd == "worker-probe") {
     return run_worker_probe(root, argc, argv);

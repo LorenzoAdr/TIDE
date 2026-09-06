@@ -1198,6 +1198,7 @@ add_executable(l2_harness_cli
   src/ai/l2_effect_registry.cpp
   src/ai/l2_cerca_wake.cpp
   src/ai/l2_wave.cpp
+  src/ai/l2_wave_bosquejo.cpp
   src/ai/l2_entityness.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp

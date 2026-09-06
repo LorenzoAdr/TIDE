@@ -46,6 +46,8 @@ int main() {
          "pilot plan medium");
   expect(think_profile_for("causal_wave_pilot", false, false).level == L2ThinkLevel::Medium,
          "wave pilot medium");
+  expect(think_profile_for("causal_wave_control", false, false).level == L2ThinkLevel::Medium,
+         "wave control medium");
   expect(think_profile_for("causal_pilot_plan_more", false, false).level == L2ThinkLevel::Medium,
          "pilot plan_more medium");
   expect(think_profile_for("causal_pilot_worker", false, false).level == L2ThinkLevel::Low,

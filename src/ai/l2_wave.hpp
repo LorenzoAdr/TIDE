@@ -45,6 +45,29 @@ inline constexpr int kWaveGuionWordsMin = 2;
 inline constexpr int kWaveGuionWordsMax = 16;
 inline constexpr int kWaveGuionPapelChars = 120;
 inline constexpr int kWaveIndependienteMaxWaves = 6;
+inline constexpr int kWaveControlMaxJobs = 3;
+inline constexpr int kWaveControlMaxConsultas = 1;
+inline constexpr int kWaveControlPlanFasesMin = 2;
+inline constexpr int kWaveControlPlanFasesMax = 4;
+inline constexpr int kWaveControlPlanPasosMin = kWaveControlPlanFasesMin;
+inline constexpr int kWaveControlPlanPasosMax = kWaveControlPlanFasesMax;
+inline constexpr int kWaveControlSeguirHops = 8;
+inline constexpr int kWaveControlInheritVistoMax = 12;
+inline constexpr int kWaveControlMaxAmpliar = 3;
+inline constexpr int kWaveControlMaxBosquejar = 2;
+inline constexpr int kWaveControlBosquejarMin = 2;
+inline constexpr int kWaveControlBosquejarMax = 8;
+inline constexpr int kWaveControlMaxOpened = 6;
+inline constexpr int kWaveControlOpenedChars = 7000;
+inline constexpr int kWaveControlBarrioKeep = 3;
+inline constexpr int kWaveControlConsultaChars = 720;
+inline constexpr int kWaveControlConsultaWordsMin = 4;
+inline constexpr int kWaveControlConsultaWordsMax = 120;
+inline constexpr int kWaveControlCircuitVistoCap = 4;
+inline constexpr int kWaveControlCircuitPeekCap = 2;
+inline constexpr int kWaveControlCircuitEntreCap = 8;
+inline constexpr int kWaveControlCircuitRestoCap = 6;
+inline constexpr int kWaveControlCircuitPairTries = 6;
 
 enum class WaveDo {
   Needles,
@@ -220,13 +243,145 @@ struct WaveOla {
   nlohmann::json raw;
 };
 
+enum class WaveControlDo {
+  Explorar,
+  Ampliar,
+  Bosquejar,
+  Cerrar,
+  Plan,
+  Pasar,
+  NoPasar,
+  Revisar,
+  Invalid
+};
+
+enum class WaveControlCue { Default, Neutral };
+
+enum class WaveControlPhaseKind { Locator, Puente, Seguir, Invalid };
+
+enum class WaveControlPhaseStatus { Pendiente, EnCurso, Paso, Fallo };
+
+enum class WaveControlPlanModo { Ninguno, Romper, Seguir };
+
+struct WaveControlPhase {
+  std::string id;
+  WaveControlPhaseKind kind = WaveControlPhaseKind::Invalid;
+  std::string consulta;
+  std::vector<std::string> need;
+  std::vector<std::string> hacia;
+  WaveControlPhaseStatus status = WaveControlPhaseStatus::Pendiente;
+  std::vector<std::string> ancla_visto;
+};
+
+struct WaveControlPlan {
+  bool committed = false;
+  WaveControlPlanModo modo = WaveControlPlanModo::Ninguno;
+  std::vector<WaveControlPhase> fases;
+};
+
+struct WaveControlLaunch {
+  bool ok = false;
+  std::string consulta;
+  WaveControlPhaseKind kind = WaveControlPhaseKind::Invalid;
+  std::string pin_from;
+  std::string pin_to;
+  std::vector<std::string> pin_loci;
+  std::vector<std::string> hacia;
+  int cerca_hops_max = 0;
+  int peek_hop_depth = 0;
+};
+
+struct WaveControlOla {
+  bool ok = false;
+  std::string error;
+  WaveControlDo do_kind = WaveControlDo::Invalid;
+  std::string consulta;
+  std::vector<std::string> consultas;
+  std::vector<std::string> ids;
+  std::vector<std::string> hacia;
+  WaveControlPlan plan;
+  std::string why;
+};
+
+inline const char* wave_control_do_name(WaveControlDo d) {
+  switch (d) {
+    case WaveControlDo::Explorar:
+      return "explorar";
+    case WaveControlDo::Ampliar:
+      return "ampliar";
+    case WaveControlDo::Bosquejar:
+      return "bosquejar";
+    case WaveControlDo::Cerrar:
+      return "cerrar";
+    case WaveControlDo::Plan:
+      return "plan";
+    case WaveControlDo::Pasar:
+      return "pasar";
+    case WaveControlDo::NoPasar:
+      return "no_pasar";
+    case WaveControlDo::Revisar:
+      return "revisar";
+    case WaveControlDo::Invalid:
+      break;
+  }
+  return "invalid";
+}
+
+inline const char* wave_control_phase_kind_name(WaveControlPhaseKind k) {
+  switch (k) {
+    case WaveControlPhaseKind::Locator:
+      return "locator";
+    case WaveControlPhaseKind::Puente:
+      return "puente";
+    case WaveControlPhaseKind::Seguir:
+      return "seguir";
+    case WaveControlPhaseKind::Invalid:
+      break;
+  }
+  return "invalid";
+}
+
+inline const char* wave_control_phase_status_name(WaveControlPhaseStatus s) {
+  switch (s) {
+    case WaveControlPhaseStatus::Pendiente:
+      return "pendiente";
+    case WaveControlPhaseStatus::EnCurso:
+      return "en_curso";
+    case WaveControlPhaseStatus::Paso:
+      return "paso";
+    case WaveControlPhaseStatus::Fallo:
+      return "fallo";
+  }
+  return "pendiente";
+}
+
+inline const char* wave_control_plan_modo_name(WaveControlPlanModo m) {
+  switch (m) {
+    case WaveControlPlanModo::Romper:
+      return "romper";
+    case WaveControlPlanModo::Seguir:
+      return "seguir";
+    case WaveControlPlanModo::Ninguno:
+      break;
+  }
+  return "";
+}
+
 struct WaveState {
   std::string prompt;
   std::string campo;
   std::vector<std::string> papeles;  // guion fijo: preguntas de comprensión; pin en cada ola
   std::vector<int> independiente_done;  // índices 1-based ya lanzados
   bool independiente_leaf = false;      // hijo: no anida
+  bool control_worker = false;          // explorador de --control: acumula; no orquesta
+  std::string pin_from;
+  std::string pin_to;
+  std::vector<std::string> pin_loci;
+  std::vector<std::string> pin_hacia;
+  int cerca_hops_max = 0;   // 0 = kWaveCercaHopsMax
+  int peek_hop_depth = 0;   // 0 = kWavePeekHopDepth
   std::string atlas_md;  // zone map (causal_atlas_v1 if seeded from cards)
+  nlohmann::json atlas_cards;  // judge payload de ESTA consulta (no el mazo del padre)
   std::vector<WaveHit> atlas_seed;  // zonas originales; retain no las toca
   std::string opened_md;  // fichas ampliadas tras la ronda cover
   std::vector<std::string> opened_ids;
@@ -292,6 +447,8 @@ struct WaveOps {
       search_cerca;
   // Optional: fill cosine on peek hops from impact-card embeddings vs query.
   std::function<void(const std::string& query, std::vector<WavePeekHop>* hops)> rank_hops;
+  // Optional: re-retrieve + judge cards for the child query. Replaces atlas_seed.
+  std::function<bool(const std::string& query, WaveState* child, std::string* err)> rebuild_atlas;
   // Ciclo hijo: prompt ya es el papel. Rellena *child (visto/notas/peeks). No anida.
   std::function<bool(const std::string& prompt, WaveState* child, std::string* err)>
       run_independiente;
@@ -364,7 +521,95 @@ std::string wave_guion_user_prompt(const WaveState& st);
 std::string wave_cover_system_prompt();
 std::string wave_cover_user_prompt(const WaveState& st);
 std::string wave_pilot_system_prompt();
+std::string wave_explorer_system_prompt();
 std::string wave_pilot_user_prompt(const WaveState& st);
+struct WaveControlOlor {
+  std::string concepto;
+  std::string barrio;
+  float concentration = 0.f;
+  bool twin = false;
+  std::string twin_barrio;
+  int hits = 0;
+};
+
+struct WaveControlBosquejoEdge {
+  std::string from;
+  std::string to;
+};
+
+struct WaveControlBosquejo {
+  std::vector<WaveControlOlor> olores;
+  std::vector<WaveControlBosquejoEdge> entre;
+  std::string nota;
+  std::string detalle;  // diagnóstico; no va al prompt
+};
+
+WaveControlOla wave_parse_control(const std::string& raw);
+bool wave_control_consulta_ok(const std::string& consulta, std::string* err);
+bool wave_control_bosquejar_ok(const std::vector<std::string>& conceptos, std::string* err);
+std::string wave_control_barrio_of_path(const std::string& path);
+std::string wave_control_bosquejo_markdown(const WaveControlBosquejo& foto);
+bool wave_control_consulta_es_ancla(const std::string& consulta, const std::string& ancla);
+bool wave_control_consulta_delta_ok(const std::string& consulta, const std::string& ancla,
+                                   const std::vector<std::string>& prev, std::string* err);
+std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int jobs_run,
+                                             bool last_visto);
+bool wave_control_do_allowed(const std::vector<WaveControlDo>& legal, WaveControlDo d);
+std::string wave_control_legal_markdown(const std::vector<WaveControlDo>& legal);
+std::string wave_control_plan_markdown(const WaveControlPlan& plan);
+nlohmann::json wave_control_plan_to_json(const WaveControlPlan& plan);
+int wave_control_plan_current(const WaveControlPlan& plan);
+bool wave_control_plan_commit(WaveControlPlan* plan, const WaveControlOla& ola, std::string* err);
+bool wave_control_plan_pasar(WaveControlPlan* plan, const std::vector<std::string>& visto,
+                            std::string* err);
+bool wave_control_plan_no_pasar(WaveControlPlan* plan, std::string* err);
+bool wave_control_plan_revisar(WaveControlPlan* plan, const std::string& consulta,
+                              const std::vector<std::string>& hacia, std::string* err);
+WaveControlLaunch wave_control_launch_spec(const WaveControlPlan& plan);
+void wave_control_inherit_visto(WaveControlLaunch* spec, const std::vector<std::string>& visto);
+void wave_control_seed_launch(WaveState* st, const WaveControlLaunch& spec);
+std::string wave_control_brief(const WaveState& st);
+
+// Foto causal entre exploradores (mismo dialecto que pilot_opened_v1).
+struct WaveControlJobSnap {
+  int n = 0;
+  std::string consulta;
+  std::string cerrado;
+  std::vector<std::string> visto;  // path:symbol consultados
+  std::vector<WavePeekNeighbors> peek_neighbors;
+  std::string circuit_entre;
+};
+using WaveControlPathFn =
+    std::function<bool(const std::string& from, const std::string& to, std::string* md,
+                       std::vector<WaveHit>* hops, std::string* err)>;
+WaveControlJobSnap wave_control_job_snap(int n, const WaveState& st);
+std::string wave_control_jobs_circuit_pack(const std::vector<WaveControlJobSnap>& jobs,
+                                           const WaveControlPathFn& path_between = {});
+std::string wave_control_slice_exam(const std::string& ancla,
+                                   const std::vector<WaveControlJobSnap>& jobs);
+std::string wave_control_atlas_brief(const std::string& atlas_md);
+std::string wave_control_module_map(const std::string& workspace_root);
+std::string wave_control_barrio_brief(const nlohmann::json& cards, const std::string& consulta,
+                                      const std::string& workspace_root,
+                                      const std::vector<std::string>& opened_ids = {});
+std::string wave_control_inspect_brief(const nlohmann::json& cards,
+                                       const std::vector<std::string>& ids,
+                                       const std::string& consulta);
+std::string wave_control_opened_brief(const std::string& opened_md);
+std::string wave_control_atlas_pack_brief(const std::string& atlas_md);
+std::vector<std::string> wave_control_owns_phrases(const nlohmann::json& cards);
+std::string wave_control_strip_owns(std::string consulta, const std::vector<std::string>& owns);
+std::string wave_control_system_prompt(WaveControlCue cue = WaveControlCue::Default);
+std::string wave_control_rama_nudge(const std::string& consulta = {});
+std::string wave_control_user_prompt(const std::string& user_consulta, const std::string& jobs_md,
+                                     const std::string& barrio_brief = {},
+                                     const std::string& inspect_brief = {},
+                                     const WaveControlPlan& plan = {},
+                                     const std::vector<WaveControlDo>& legal = {},
+                                     const std::string& circuit_md = {},
+                                     const std::string& exam_md = {},
+                                     WaveControlCue cue = WaveControlCue::Default,
+                                     const std::string& bosquejo_md = {});
 nlohmann::json wave_state_to_json(const WaveState& st);
 nlohmann::json wave_ola_to_json(const WaveOla& ola);
 

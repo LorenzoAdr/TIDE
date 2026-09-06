@@ -62,7 +62,8 @@ inline L2ThinkProfile think_profile_for(std::string_view phase, bool has_pack,
       phase == "causal_zone_slot_hyp") {
     return think_profile(L2ThinkLevel::Low);
   }
-  if (phase == "causal_pilot_plan" || phase == "causal_wave_pilot") {
+  if (phase == "causal_pilot_plan" || phase == "causal_wave_pilot" ||
+      phase == "causal_wave_control") {
     return think_profile(L2ThinkLevel::Medium);
   }
   if (phase == "causal_zone_hyp" || phase == "causal_zone_anchor" ||

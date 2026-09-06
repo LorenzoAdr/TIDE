@@ -1005,6 +1005,82 @@ void test_query_constellations() {
                opened_pack.find("spinner_frame") != std::string::npos,
            "opened pack keeps nucleus");
     expect(opened_pack.find("mini-cards") == std::string::npos, "opened pack omits mini-cards");
+    expect(opened_pack.find("entre abiertas:") == std::string::npos, "una abierta no pide circuito");
+    expect(opened_pack.find("hacia el resto:") != std::string::npos &&
+               opened_pack.find("M5=>M6") != std::string::npos,
+           "una abierta enseña port hacia el resto");
+    nlohmann::json circuit_payload = {
+        {"zones",
+         nlohmann::json::array(
+             {nlohmann::json{{"id", "M2"},
+                             {"primary_stems", {"ai_trace"}},
+                             {"ports",
+                              nlohmann::json::array(
+                                  {nlohmann::json{{"from_zone", "M2"},
+                                                  {"to_zone", "M8"},
+                                                  {"from", "src/ai/ai_controller.cpp:handle_route"},
+                                                  {"kind", "call"},
+                                                  {"to", "src/ai/ai_controller.cpp:ai_trace_escape"}},
+                                   nlohmann::json{{"from_zone", "M2"},
+                                                  {"to_zone", "M3"},
+                                                  {"from", "src/ai/ai_controller.cpp:json_escape"},
+                                                  {"kind", "call"},
+                                                  {"to", "src/ai/ai_controller.cpp:ai_trace_escape"}}})}},
+              nlohmann::json{{"id", "M8"},
+                             {"primary_stems", {"ai_controller"}},
+                             {"nuclei", nlohmann::json::array({nlohmann::json{{"id", "C1"},
+                                                                             {"state", "pending_insert_"}}})},
+                             {"ports",
+                              nlohmann::json::array({nlohmann::json{
+                                  {"from_zone", "M8"},
+                                  {"to_zone", "M6"},
+                                  {"from", "src/ai/ai_controller.cpp:cancel_level1"},
+                                  {"kind", "call"},
+                                  {"to", "src/app/workspace_config.cpp:load"}}})}},
+              nlohmann::json{{"id", "M5"},
+                             {"primary_stems", {"console_panel"}},
+                             {"ports",
+                              nlohmann::json::array({nlohmann::json{
+                                  {"from_zone", "M5"},
+                                  {"to_zone", "M6"},
+                                  {"from", "src/ui/console_panel.cpp:handle_ai_console_keys"},
+                                  {"kind", "call"},
+                                  {"to", "src/ai/ai_controller.cpp:clear"}}})}}})},
+        {"zone_bridges",
+         nlohmann::json::array({nlohmann::json{{"trail", "T1"},
+                                               {"zones", nlohmann::json::array({"M6", "M8"})},
+                                               {"why", "media cosine"}},
+                                  nlohmann::json{{"trail", "T2"},
+                                               {"zones", nlohmann::json::array({"M2", "M8"})},
+                                               {"why", "media cosine"}}})}};
+    const auto circuit_pack =
+        tuide::registry_causal_pilot_opened_pack(circuit_payload, {"M2", "M8"}, "");
+    expect(circuit_pack.find("entre abiertas:") != std::string::npos &&
+               circuit_pack.find("M2=>M8") != std::string::npos &&
+               circuit_pack.find("handle_route") != std::string::npos,
+           "entre abiertas lista el port M2-M8");
+    expect(circuit_pack.find("hacia el resto:") != std::string::npos &&
+               circuit_pack.find("M2=>M3") != std::string::npos &&
+               circuit_pack.find("M8=>M6") != std::string::npos,
+           "hacia el resto lista extremos no abiertos");
+    expect(circuit_pack.find("M5=>M6") == std::string::npos,
+           "port entre no abiertas no entra al circuito");
+    nlohmann::json lonely = {
+        {"zones", nlohmann::json::array({nlohmann::json{{"id", "M2"}, {"primary_stems", {"ai_trace"}}},
+                                         nlohmann::json{{"id", "M8"},
+                                                        {"primary_stems", {"ai_controller"}}}})}};
+    const auto lonely_pack = tuide::registry_causal_pilot_opened_pack(lonely, {"M2", "M8"}, "");
+    expect(lonely_pack.find("entre abiertas:") != std::string::npos &&
+               lonely_pack.find("(ningún port)") != std::string::npos,
+           "dos abiertas sin port lo dicen");
+    nlohmann::json filtered_circuit =
+        tuide::registry_causal_payload_filter_zones(circuit_payload, {"M2", "M8"});
+    expect(filtered_circuit["zone_bridges"].size() == 1 &&
+               filtered_circuit["zone_bridges"][0]["trail"] == "T2",
+           "filter keeps cosine bridge with both ends open");
+    nlohmann::json filtered_one =
+        tuide::registry_causal_payload_filter_zones(circuit_payload, {"M8"});
+    expect(filtered_one["zone_bridges"].empty(), "filter drops cosine with one open end");
     const auto plan_need = tuide::registry_parse_causal_pilot_plan(
         R"({"action":"causal_pilot_need_more","add":["M6","M99"],)"
         R"("why":"el latch del spinner está en restantes no en abiertos"})",
