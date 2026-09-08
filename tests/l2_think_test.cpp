@@ -46,8 +46,10 @@ int main() {
          "pilot plan medium");
   expect(think_profile_for("causal_wave_pilot", false, false).level == L2ThinkLevel::Medium,
          "wave pilot medium");
-  expect(think_profile_for("causal_wave_control", false, false).level == L2ThinkLevel::Medium,
-         "wave control medium");
+  expect(think_profile_for("causal_wave_control", false, false).level == L2ThinkLevel::Off,
+         "wave control off");
+  expect(!think_profile_for("causal_wave_control", false, false).enable_thinking,
+         "wave control no thinking");
   expect(think_profile_for("causal_pilot_plan_more", false, false).level == L2ThinkLevel::Medium,
          "pilot plan_more medium");
   expect(think_profile_for("causal_pilot_worker", false, false).level == L2ThinkLevel::Low,
@@ -84,8 +86,8 @@ int main() {
     p.phase = "causal_pilot_plan";
     p.max_tokens = 512;
     tuide::apply_think_for_request(&p);
-    expect(p.reasoning_budget == 512, "apply_think_for_request plan budget");
-    expect(p.max_tokens == 512 + 512, "apply_think_for_request plan max_tokens");
+    expect(p.reasoning_budget == 128, "apply_think_for_request plan budget");
+    expect(p.max_tokens == 512 + 128, "apply_think_for_request plan max_tokens");
   }
   {
     tuide::L2BrainRequest w;
@@ -97,18 +99,18 @@ int main() {
   }
 
   const auto high = think_profile(L2ThinkLevel::High);
-  expect(high.budget == 1536, "high budget");
+  expect(high.budget == 256, "high budget");
   expect(std::string(l2_think_level_name(high.level)) == "high", "high name");
 
   tuide::LlamaCompletionRequest req;
   req.max_tokens = 512;
   req.grammar_file = "/tmp/x.gbnf";
   apply_think_profile(&req, high);
-  expect(req.max_tokens == 512 + 1536, "distill max_tokens += high budget");
-  expect(req.max_tokens >= 512 + 1536, "distill max_tokens >= 512+1536");
+  expect(req.max_tokens == 512 + 256, "distill max_tokens += high budget");
+  expect(req.max_tokens >= 512 + 256, "distill max_tokens >= 512+256");
   expect(req.grammar_file.empty(), "grammar cleared when budget > 0");
   expect(req.enable_thinking.has_value() && *req.enable_thinking, "high thinking on");
-  expect(req.reasoning_budget == 1536, "high budget field");
+  expect(req.reasoning_budget == 256, "high budget field");
 
   tuide::L2BrainRequest edit;
   edit.max_tokens = 2048;

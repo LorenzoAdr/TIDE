@@ -54,11 +54,22 @@ inline constexpr int kWaveControlPlanPasosMax = kWaveControlPlanFasesMax;
 inline constexpr int kWaveControlSeguirHops = 8;
 inline constexpr int kWaveControlInheritVistoMax = 12;
 inline constexpr int kWaveControlMaxAmpliar = 3;
+inline constexpr int kWaveControlMaxAmpliarTurns = 2;
+inline constexpr int kWaveControlMaxZoom = 3;
 inline constexpr int kWaveControlMaxBosquejar = 2;
 inline constexpr int kWaveControlBosquejarMin = 2;
 inline constexpr int kWaveControlBosquejarMax = 8;
+inline constexpr int kWaveControlMaxAgujas = 1;
+inline constexpr int kWaveControlAgujasMin = 2;
+inline constexpr int kWaveControlAgujasMax = 8;
+// Parse, CLI y tests del censo (agujas/plano/zoom de barrio) siguen vivos.
+// El piloto de control no los ofrece: planifica con fichas M* (ampliar → explorar).
+inline constexpr bool kWaveControlCatalogLive = false;
+// Foto de olores → barrios del grafo. Parse y `wave-bosquejo` siguen; el piloto no la pide.
+inline constexpr bool kWaveControlBosquejoLive = false;
 inline constexpr int kWaveControlMaxOpened = 6;
-inline constexpr int kWaveControlOpenedChars = 7000;
+inline constexpr int kWaveControlOpenedChars = 8000;
+inline constexpr int kWaveControlRestChars = 1800;
 inline constexpr int kWaveControlBarrioKeep = 3;
 inline constexpr int kWaveControlConsultaChars = 720;
 inline constexpr int kWaveControlConsultaWordsMin = 4;
@@ -68,6 +79,7 @@ inline constexpr int kWaveControlCircuitPeekCap = 2;
 inline constexpr int kWaveControlCircuitEntreCap = 8;
 inline constexpr int kWaveControlCircuitRestoCap = 6;
 inline constexpr int kWaveControlCircuitPairTries = 6;
+inline constexpr int kWaveControlAbiertoCap = 6;
 
 enum class WaveDo {
   Needles,
@@ -246,6 +258,8 @@ struct WaveOla {
 enum class WaveControlDo {
   Explorar,
   Ampliar,
+  Zoom,
+  Agujas,
   Bosquejar,
   Cerrar,
   Plan,
@@ -309,6 +323,10 @@ inline const char* wave_control_do_name(WaveControlDo d) {
       return "explorar";
     case WaveControlDo::Ampliar:
       return "ampliar";
+    case WaveControlDo::Zoom:
+      return "zoom";
+    case WaveControlDo::Agujas:
+      return "agujas";
     case WaveControlDo::Bosquejar:
       return "bosquejar";
     case WaveControlDo::Cerrar:
@@ -547,13 +565,20 @@ struct WaveControlBosquejo {
 WaveControlOla wave_parse_control(const std::string& raw);
 bool wave_control_consulta_ok(const std::string& consulta, std::string* err);
 bool wave_control_bosquejar_ok(const std::vector<std::string>& conceptos, std::string* err);
+bool wave_control_aguja_ok(const std::string& tok);
+bool wave_control_agujas_ok(const std::vector<std::string>& agujas, std::string* err);
+int wave_control_agujas_merge(std::vector<std::string>* acc, const std::vector<std::string>& add);
+bool wave_control_zoom_id_ok(const std::string& id);
 std::string wave_control_barrio_of_path(const std::string& path);
 std::string wave_control_bosquejo_markdown(const WaveControlBosquejo& foto);
 bool wave_control_consulta_es_ancla(const std::string& consulta, const std::string& ancla);
 bool wave_control_consulta_delta_ok(const std::string& consulta, const std::string& ancla,
                                    const std::vector<std::string>& prev, std::string* err);
+std::string wave_control_consulta_misma_caza(const std::string& consulta,
+                                            const std::vector<std::string>& prev);
 std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int jobs_run,
-                                             bool last_visto);
+                                             bool last_visto, int agujas_n = 0, int zoom_n = 0,
+                                             int ampliar_n = 0);
 bool wave_control_do_allowed(const std::vector<WaveControlDo>& legal, WaveControlDo d);
 std::string wave_control_legal_markdown(const std::vector<WaveControlDo>& legal);
 std::string wave_control_plan_markdown(const WaveControlPlan& plan);
@@ -596,11 +621,12 @@ std::string wave_control_inspect_brief(const nlohmann::json& cards,
                                        const std::vector<std::string>& ids,
                                        const std::string& consulta);
 std::string wave_control_opened_brief(const std::string& opened_md);
-std::string wave_control_atlas_pack_brief(const std::string& atlas_md);
+std::string wave_control_atlas_pack_brief(const std::string& atlas_md, std::size_t cap = 0);
 std::vector<std::string> wave_control_owns_phrases(const nlohmann::json& cards);
 std::string wave_control_strip_owns(std::string consulta, const std::vector<std::string>& owns);
 std::string wave_control_system_prompt(WaveControlCue cue = WaveControlCue::Default);
 std::string wave_control_rama_nudge(const std::string& consulta = {});
+std::string wave_control_misma_caza_nudge(const std::string& prev, const std::string& proposed);
 std::string wave_control_user_prompt(const std::string& user_consulta, const std::string& jobs_md,
                                      const std::string& barrio_brief = {},
                                      const std::string& inspect_brief = {},
@@ -609,7 +635,9 @@ std::string wave_control_user_prompt(const std::string& user_consulta, const std
                                      const std::string& circuit_md = {},
                                      const std::string& exam_md = {},
                                      WaveControlCue cue = WaveControlCue::Default,
-                                     const std::string& bosquejo_md = {});
+                                     const std::string& bosquejo_md = {},
+                                     const std::string& plano_md = {},
+                                     const std::string& zoom_md = {});
 nlohmann::json wave_state_to_json(const WaveState& st);
 nlohmann::json wave_ola_to_json(const WaveOla& ola);
 

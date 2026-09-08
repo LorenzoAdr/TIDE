@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "ai/l2_catalog.hpp"
 #include "ai/l2_explore_a.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "parser/tree_sitter_ast_utils.hpp"
@@ -477,6 +478,7 @@ struct BodyScan {
   std::unordered_map<std::string, int> calls;
   std::unordered_map<std::string, int> writes;
   std::unordered_map<std::string, int> reads;
+  std::unordered_map<std::string, int> preds;
   int if_n = 0;
   int ret_n = 0;
   int early_ret = 0;
@@ -495,6 +497,19 @@ void record_lhs_write(TSNode left, const std::string& source, const std::string&
   std::string path = normalize_write_path(extract_write_lhs_path(left, source), rel_path);
   if (!path.empty() && !is_noise_write_path(path)) {
     ++scan->writes[path];
+  }
+}
+
+void record_preds(TSNode cond, const std::string& source, BodyScan* scan) {
+  if (scan == nullptr || ts_node_is_null(cond)) {
+    return;
+  }
+  std::unordered_set<std::string> ids;
+  collect_idents(cond, source, &ids);
+  for (const auto& id : ids) {
+    if (!is_noise_call_name(id)) {
+      ++scan->preds[id];
+    }
   }
 }
 
@@ -540,10 +555,16 @@ void scan_body(TSNode body, const std::string& source, const std::string& rel_pa
       }
     } else if (std::strcmp(t, "if_statement") == 0) {
       ++scan->if_n;
-    } else if (std::strcmp(t, "for_statement") == 0 || std::strcmp(t, "for_range_loop") == 0) {
-      ++scan->for_n;
+      record_preds(ts_node_child_by_field_name(n, "condition", 9), source, scan);
     } else if (std::strcmp(t, "while_statement") == 0 || std::strcmp(t, "do_statement") == 0) {
       ++scan->while_n;
+      record_preds(ts_node_child_by_field_name(n, "condition", 9), source, scan);
+    } else if (std::strcmp(t, "switch_statement") == 0) {
+      record_preds(ts_node_child_by_field_name(n, "condition", 9), source, scan);
+    } else if (std::strcmp(t, "case_statement") == 0) {
+      record_preds(ts_node_child_by_field_name(n, "value", 5), source, scan);
+    } else if (std::strcmp(t, "for_statement") == 0 || std::strcmp(t, "for_range_loop") == 0) {
+      ++scan->for_n;
     } else if (std::strcmp(t, "try_statement") == 0) {
       ++scan->try_n;
     } else if (std::strcmp(t, "throw_statement") == 0) {
@@ -1596,6 +1617,266 @@ A0TrancheShown a_build_a0_tranche_shown(const std::string& workspace_root, const
       out.items.pop_back();
       break;
     }
+  }
+  return out;
+}
+
+namespace {
+
+std::string catalog_fn_name_from_decl(const std::string& decl) {
+  const auto paren = decl.find('(');
+  std::string head = paren == std::string::npos ? decl : decl.substr(0, paren);
+  while (!head.empty() && (head.back() == ' ' || head.back() == '\t' || head.back() == '*' ||
+                           head.back() == '&')) {
+    head.pop_back();
+  }
+  const auto cc = head.rfind("::");
+  if (cc != std::string::npos) {
+    return head.substr(cc + 2);
+  }
+  const auto sp = head.find_last_of(" \t");
+  if (sp != std::string::npos) {
+    return head.substr(sp + 1);
+  }
+  return head;
+}
+
+void catalog_cap_list(std::vector<std::string>* v, int n) {
+  if (v != nullptr && static_cast<int>(v->size()) > n) {
+    v->resize(static_cast<std::size_t>(n));
+  }
+}
+
+bool catalog_call_noise(const std::string& name) {
+  if (name.empty() || name.find('<') != std::string::npos) {
+    return true;
+  }
+  if (name.rfind("static_cast", 0) == 0 || name.rfind("dynamic_cast", 0) == 0 ||
+      name.rfind("reinterpret_cast", 0) == 0 || name.rfind("const_cast", 0) == 0 ||
+      name.rfind("duration_cast", 0) == 0) {
+    return true;
+  }
+  static const char* k[] = {"isspace", "isalpha", "isdigit", "isalnum", "toupper", "tolower",
+                            "strlen",  "strcmp",  "memcpy",  "memset",  "memmove", "max",
+                            "min",     "getline", "printf",  "sprintf", "snprintf"};
+  for (const char* s : k) {
+    if (name == s) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int catalog_call_weight(const std::string& name) {
+  int w = 0;
+  if (name.find('_') != std::string::npos) {
+    w += 4;
+  }
+  if (name.size() >= 8) {
+    w += 2;
+  }
+  if (name.rfind("ai_trace", 0) == 0 || name == "append" || name == "lower" || name == "substr") {
+    w -= 6;
+  }
+  return w;
+}
+
+bool catalog_ident_proper(const std::string& s) {
+  return !s.empty() && std::isupper(static_cast<unsigned char>(s[0])) != 0;
+}
+
+std::vector<std::string> catalog_pick_list(const std::unordered_map<std::string, int>& m,
+                                           bool calls, bool prefer_proper = false) {
+  std::vector<std::pair<int, std::string>> ranked;
+  for (const auto& kv : m) {
+    if (calls && catalog_call_noise(kv.first)) {
+      continue;
+    }
+    const int w = kv.second * 4 + (calls ? catalog_call_weight(kv.first) : 0);
+    ranked.push_back({w, kv.first});
+  }
+  std::sort(ranked.begin(), ranked.end(), [prefer_proper](const auto& a, const auto& b) {
+    if (prefer_proper) {
+      const bool pa = catalog_ident_proper(a.second);
+      const bool pb = catalog_ident_proper(b.second);
+      if (pa != pb) {
+        return pa;
+      }
+    }
+    if (a.first != b.first) {
+      return a.first > b.first;
+    }
+    return a.second < b.second;
+  });
+  std::vector<std::string> out;
+  for (const auto& r : ranked) {
+    if (static_cast<int>(out.size()) >= kCatalogCardList) {
+      break;
+    }
+    out.push_back(r.second);
+  }
+  return out;
+}
+
+std::string catalog_qual_before_colon(const std::string& decl) {
+  const auto paren = decl.find('(');
+  std::string head = paren == std::string::npos ? decl : decl.substr(0, paren);
+  const auto cc = head.rfind("::");
+  if (cc == std::string::npos || cc == 0) {
+    return {};
+  }
+  std::string before = head.substr(0, cc);
+  while (!before.empty() && (before.back() == ' ' || before.back() == '\t' || before.back() == ':' ||
+                             before.back() == '<' || before.back() == '>')) {
+    before.pop_back();
+  }
+  const auto sp = before.find_last_of(" \t*&");
+  return sp == std::string::npos ? before : before.substr(sp + 1);
+}
+
+std::string catalog_card_kind(const std::string& decl, const std::string& sig,
+                              const std::string& symbol, TSNode fn) {
+  const std::string qual = catalog_qual_before_colon(decl);
+  if (!qual.empty() && qual != "std" && qual != "chrono" && qual != "filesystem" &&
+      qual != "string" && qual != "vector") {
+    return "method";
+  }
+  std::string k = detect_symbol_kind(sig, symbol, fn, false);
+  if (k == "method" && (qual.empty() || qual == "std" || qual == "chrono" || qual == "filesystem")) {
+    return "fn";
+  }
+  return k;
+}
+
+int catalog_name_keep(const std::string& symbol) {
+  std::string l = symbol;
+  for (char& c : l) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  int s = 0;
+  static const char* kPref[] = {"handle_", "on_",     "begin_",    "end_",     "cancel_",
+                                "restore_", "revert_", "undo_",    "apply_",   "dispatch_",
+                                "process_", "route_"};
+  for (const char* p : kPref) {
+    const std::size_t n = std::strlen(p);
+    if (l.size() >= n && l.compare(0, n, p) == 0) {
+      s += 16;
+      break;
+    }
+  }
+  if (l.find("escape") != std::string::npos || l.find("revert") != std::string::npos ||
+      l.find("journal") != std::string::npos || l.find("thinking") != std::string::npos) {
+    s += 10;
+  }
+  if (l.rfind("operator", 0) == 0) {
+    s -= 40;
+  }
+  if (l.find("tab_active") != std::string::npos || l.find("press_id") != std::string::npos ||
+      l.find("word_char") != std::string::npos || l.find("now_ms") != std::string::npos) {
+    s -= 10;
+  }
+  return s;
+}
+
+struct CatalogRankedCard {
+  CatalogFnCard card;
+  int keep = 0;
+};
+
+}  // namespace
+
+std::vector<CatalogFnCard> catalog_cards_from_file(const std::string& abs_path,
+                                                   const std::string& rel_path,
+                                                   const std::string& source) {
+  std::vector<CatalogFnCard> out;
+  if (source.empty()) {
+    return out;
+  }
+  TSTree* tree = parse_sync(source, abs_path.empty() ? rel_path : abs_path);
+  if (tree == nullptr) {
+    return out;
+  }
+  const std::string file_hash = std::to_string(source.size());
+  std::unordered_set<std::string> seen;
+  std::vector<CatalogRankedCard> ranked;
+  std::function<void(TSNode)> walk;
+  walk = [&](TSNode n) {
+    if (ts_node_is_null(n)) {
+      return;
+    }
+    const char* t = ts_node_type(n);
+    if (t != nullptr && std::strcmp(t, "function_definition") == 0) {
+      TSNode decl = ts_node_child_by_field_name(n, "declarator", 10);
+      const std::string decl_txt = node_text(decl, source, 240);
+      std::string symbol = catalog_fn_name_from_decl(decl_txt);
+      if (symbol.empty() || symbol[0] == '~' || symbol == "operator") {
+        const uint32_t nc = ts_node_named_child_count(n);
+        for (uint32_t i = 0; i < nc; ++i) {
+          walk(ts_node_named_child(n, i));
+        }
+        return;
+      }
+      if (!seen.insert(symbol).second) {
+        const uint32_t nc = ts_node_named_child_count(n);
+        for (uint32_t i = 0; i < nc; ++i) {
+          walk(ts_node_named_child(n, i));
+        }
+        return;
+      }
+      CatalogFnCard card;
+      card.path = rel_path;
+      card.symbol = symbol;
+      card.id = "fn:" + rel_path + ":" + symbol;
+      card.file_hash = file_hash;
+      const int start_line = static_cast<int>(ts_node_start_point(n).row) + 1;
+      const int end_line = static_cast<int>(ts_node_end_point(n).row) + 1;
+      TSNode body = ts_node_child_by_field_name(n, "body", 4);
+      BodyScan scan;
+      if (!ts_node_is_null(body)) {
+        scan_body(body, source, rel_path, start_line, end_line, &scan);
+      }
+      const std::string sig = function_signature_line(n, source, split_lines(source));
+      card.kind = catalog_card_kind(decl_txt, sig, symbol, n);
+      card.calls = catalog_pick_list(scan.calls, true);
+      card.writes = catalog_pick_list(scan.writes, false);
+      card.reads = catalog_pick_list(scan.reads, false);
+      card.preds = catalog_pick_list(scan.preds, false, true);
+      if (!ts_node_is_null(body)) {
+        detect_hot_from_text(lower_copy(node_text(body, source, 8000)), &card.hot);
+      }
+      if (scan.early_ret >= 2) {
+        card.hot.push_back("early_return");
+      }
+      std::sort(card.hot.begin(), card.hot.end());
+      card.hot.erase(std::unique(card.hot.begin(), card.hot.end()), card.hot.end());
+      catalog_cap_list(&card.hot, kCatalogCardList);
+      card.roles = derive_roles(scan, card.hot);
+      CatalogRankedCard row;
+      row.keep = catalog_name_keep(symbol) + std::max(1, end_line - start_line) +
+                 static_cast<int>(card.calls.size()) * 3 + static_cast<int>(card.writes.size()) * 2 +
+                 static_cast<int>(card.preds.size()) * 2;
+      row.card = std::move(card);
+      ranked.push_back(std::move(row));
+    }
+    const uint32_t nc = ts_node_named_child_count(n);
+    for (uint32_t i = 0; i < nc; ++i) {
+      walk(ts_node_named_child(n, i));
+    }
+  };
+  walk(ts_tree_root_node(tree));
+  ts_tree_delete(tree);
+  std::sort(ranked.begin(), ranked.end(), [](const CatalogRankedCard& a, const CatalogRankedCard& b) {
+    if (a.keep != b.keep) {
+      return a.keep > b.keep;
+    }
+    return a.card.symbol < b.card.symbol;
+  });
+  if (static_cast<int>(ranked.size()) > kCatalogMaxFnPerFile) {
+    ranked.resize(static_cast<std::size_t>(kCatalogMaxFnPerFile));
+  }
+  out.reserve(ranked.size());
+  for (auto& row : ranked) {
+    out.push_back(std::move(row.card));
   }
   return out;
 }

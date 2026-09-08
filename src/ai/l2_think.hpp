@@ -36,9 +36,9 @@ inline L2ThinkProfile think_profile(L2ThinkLevel level) {
     case L2ThinkLevel::Low:
       return {L2ThinkLevel::Low, true, 64};
     case L2ThinkLevel::Medium:
-      return {L2ThinkLevel::Medium, true, 512};
+      return {L2ThinkLevel::Medium, true, 128};
     case L2ThinkLevel::High:
-      return {L2ThinkLevel::High, true, 1536};
+      return {L2ThinkLevel::High, true, 256};
   }
   return {L2ThinkLevel::Low, true, 64};
 }
@@ -50,7 +50,8 @@ inline L2ThinkProfile think_profile_for(std::string_view phase, bool has_pack,
   if (is_pack_review) {
     return think_profile(L2ThinkLevel::Low);
   }
-  if (phase == "edit" || phase == "causal_wave_cover") {
+  // JSON corto: con thinking, Qwen3.6 vuelca CoT al content y no emite `{`.
+  if (phase == "edit" || phase == "causal_wave_cover" || phase == "causal_wave_control") {
     return think_profile(L2ThinkLevel::Off);
   }
   if (phase == "causal_wave_guion") {
@@ -62,8 +63,7 @@ inline L2ThinkProfile think_profile_for(std::string_view phase, bool has_pack,
       phase == "causal_zone_slot_hyp") {
     return think_profile(L2ThinkLevel::Low);
   }
-  if (phase == "causal_pilot_plan" || phase == "causal_wave_pilot" ||
-      phase == "causal_wave_control") {
+  if (phase == "causal_pilot_plan" || phase == "causal_wave_pilot") {
     return think_profile(L2ThinkLevel::Medium);
   }
   if (phase == "causal_zone_hyp" || phase == "causal_zone_anchor" ||
