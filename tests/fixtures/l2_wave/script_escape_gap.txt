@@ -1,0 +1,4 @@
+# Ablación Escape: dos cazas + composición. Sin Escape ni clic en el query.
+dónde se despachan los eventos de teclado en la interfaz
+dónde se aborta la generación en curso del agente
+hay camino entre el despacho de teclado y abortar la generación

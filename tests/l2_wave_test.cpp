@@ -2127,6 +2127,33 @@ int main() {
                misma_nudge.find("otro verbo") != std::string::npos &&
                misma_nudge.find("Rechazado") != std::string::npos,
            "nudge cita la caza ya tirada");
+    const std::string joint =
+        "dónde se captura el evento de Escape o clic fuera para cancelar la generación de IA";
+    const std::string joint2 =
+        "dónde se mapea la tecla Escape a la ruta de cancelación del agente";
+    const std::string teclado = "dónde se despachan los eventos de teclado en la interfaz";
+    const std::string aborto = "dónde se aborta la generación en curso del agente";
+    expect(tuide::wave_control_consulta_claim_conjunto(joint), "escape+cancel es claim conjunto");
+    expect(tuide::wave_control_consulta_claim_conjunto(joint2), "escape+cancelación es conjunto");
+    expect(!tuide::wave_control_consulta_claim_conjunto(teclado), "teclado solo no es conjunto");
+    expect(!tuide::wave_control_consulta_claim_conjunto(aborto), "aborto solo no es conjunto");
+    std::string rerr;
+    expect(tuide::wave_control_consulta_replay_ok(joint, {}, false, &rerr),
+           "primer tiro conjunto vale");
+    expect(!tuide::wave_control_consulta_replay_ok(joint2, {joint}, true, &rerr) &&
+               rerr.find("mapeo") != std::string::npos,
+           "tras fallo, segundo conjunto se rechaza");
+    expect(tuide::wave_control_consulta_replay_ok(teclado, {joint}, true, &rerr),
+           "tras fallo, un polo vale");
+    expect(tuide::wave_control_consulta_replay_ok(
+               "dónde se captura el evento de tecla Escape en la interfaz de usuario", {joint}, true,
+               &rerr),
+           "tras fallo, solo el gesto no es replay");
+    expect(tuide::wave_control_fallo_replay_nudge(joint, joint2).find("refutación") !=
+               std::string::npos,
+           "nudge replay pide refutar o partir");
+    expect(tuide::wave_control_plantilla_nudge().find("Escape a cancelar") == std::string::npos,
+           "plantilla no enseña Escape→cancelar");
     const auto con_evita = tuide::wave_parse_control(
         R"({"action":"control_v1","do":"revisar","consulta":"dónde el panel captura la tecla escape para abortar la generación","evita":["escape de json","rastro de trazas"],"why":"el hijo picó el falso amigo"})");
     expect(con_evita.ok && con_evita.evita.size() == 2 && con_evita.evita[0] == "escape de json",
@@ -2137,6 +2164,10 @@ int main() {
     expect(tuide::wave_control_evita_ok({"escape de json", "rastro de trazas"}, &err),
            "evita conceptos");
     expect(!tuide::wave_control_evita_ok({"src/ai/ai_trace.cpp"}, &err), "evita sin path");
+    expect(!tuide::wave_control_evita_ok({"escape de caracteres JSON"}, &err),
+           "evita no es una frase");
+    expect(tuide::wave_control_evita_nudge().find("omite") != std::string::npos,
+           "nudge evita pide acortar u omitir");
     expect(!tuide::wave_control_consulta_ok("src/ai/ai_controller.cpp", &err), "consulta path");
     expect(!tuide::wave_control_consulta_ok("handle_escape_key", &err), "consulta stem");
     expect(!tuide::wave_control_consulta_ok("qué hace M8", &err), "consulta M*");
@@ -2167,6 +2198,14 @@ int main() {
                "dónde se invoca a la función que limpia el estado de ocupación")
                .find("prompt de investigación") != std::string::npos,
            "nudge plantilla pide investigación");
+    expect(tuide::wave_control_plantilla_nudge(
+               "dónde se invoca a la función que limpia el estado de ocupación", true)
+               .find("reescribirla") != std::string::npos,
+           "nudge plantilla repetida pide otra forma");
+    expect(tuide::wave_control_plantilla_nudge(
+               "dónde se invoca a la función que limpia el estado de ocupación", true)
+               .find("dónde se apaga el spinner") == std::string::npos,
+           "nudge otra forma no pega el few-shot");
     const std::string spinner_ancla =
         "a veces el panel del chat con la IA se queda bloqueado mostrando un spinner infinito "
         "aunque el modelo ya terminó de responder, quiero saber dónde se controla ese estado de "
@@ -2228,15 +2267,21 @@ int main() {
         R"({"action":"control_v1","do":"plan","pasos":["dónde se registra el evento de entrada del usuario","dónde se detiene el trabajo que está en curso","si ese evento llega a detener el trabajo"],"why":"el ancla junta entrada y parada"})");
     expect(!plan_old.ok, "plan con pasos se rechaza");
     const auto plan = tuide::wave_parse_control(
-        R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se registra el evento de entrada del usuario"},{"id":"B","kind":"locator","hacia":["parada trabajo"]},{"id":"P","kind":"puente","need":["A","B"]}],"why":"el mapa no une disparo y parada"})");
+        R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se registra el evento de entrada del usuario"},{"id":"B","kind":"locator","consulta":"dónde se detiene el trabajo que está en curso","hacia":["parada trabajo"]},{"id":"P","kind":"puente","need":["A","B"],"consulta":"hay camino entre el evento de entrada y detener el trabajo"}],"why":"el mapa no une disparo y parada"})");
     expect(plan.ok && plan.do_kind == tuide::WaveControlDo::Plan && plan.plan.fases.size() == 3,
            "parse plan romper");
     expect(plan.plan.modo == tuide::WaveControlPlanModo::Romper, "modo romper");
     expect(plan.plan.fases[2].kind == tuide::WaveControlPhaseKind::Puente, "fase puente");
-    expect(plan.plan.fases[1].consulta.empty() && !plan.plan.fases[1].hacia.empty(),
-           "locator posterior: hacia, no consulta");
+    expect(!plan.plan.fases[1].consulta.empty() && plan.plan.fases[1].consulta.find("detiene") !=
+                                                         std::string::npos,
+           "locator posterior trae consulta");
+    expect(plan.plan.fases[2].consulta.find("camino") != std::string::npos, "puente trae consulta");
+    const auto plan_sin_b = tuide::wave_parse_control(
+        R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se registra el evento de entrada del usuario"},{"id":"B","kind":"locator","hacia":["parada trabajo"]},{"id":"P","kind":"puente","need":["A","B"],"consulta":"hay camino entre el evento de entrada y detener el trabajo"}],"why":"B sin consulta"})");
+    expect(!plan_sin_b.ok && plan_sin_b.error.find("locator sin consulta") != std::string::npos,
+           "locator posterior exige consulta");
     const auto plan_seguir = tuide::wave_parse_control(
-        R"({"action":"control_v1","do":"plan","modo":"seguir","fases":[{"id":"B","kind":"locator","consulta":"dónde se detiene el trabajo que está en curso"},{"id":"S","kind":"seguir","need":["B"],"hacia":["evento","clic"]}],"why":"un ancla y tirar del flujo"})");
+        R"({"action":"control_v1","do":"plan","modo":"seguir","fases":[{"id":"B","kind":"locator","consulta":"dónde se detiene el trabajo que está en curso"},{"id":"S","kind":"seguir","need":["B"],"hacia":["evento","clic"],"consulta":"quién llama al indicador de ocupado cuando acaba el trabajo"}],"why":"un ancla y tirar del flujo"})");
     expect(plan_seguir.ok && plan_seguir.plan.fases.size() == 2, "parse plan seguir");
     const auto plan_corto = tuide::wave_parse_control(
         R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se registra el evento de entrada del usuario"}],"why":"un solo paso no es plan"})");
@@ -2245,18 +2290,18 @@ int main() {
         R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"P","kind":"puente","need":["A"]},{"id":"Q","kind":"puente","need":["P"]}],"why":"puente sin locator no vale"})");
     expect(!plan_sin_loc.ok, "plan sin locator");
     const auto plan_cat = tuide::wave_parse_control(
-        R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se modifican los archivos durante la generación"},{"id":"B","kind":"locator","hacia":["parada trabajo"]},{"id":"P","kind":"puente","need":["A","B"]}],"why":"el mapa no une disparo y efecto"})");
+        R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se modifican los archivos durante la generación"},{"id":"B","kind":"locator","consulta":"dónde se detiene el trabajo que está en curso"},{"id":"P","kind":"puente","need":["A","B"],"consulta":"hay camino entre el evento de entrada y detener el trabajo"}],"why":"el mapa no une disparo y efecto"})");
     expect(!plan_cat.ok && plan_cat.error.find("consulta sin objeto") != std::string::npos,
            "plan no admite locator de categoría");
     const auto plan_post = tuide::wave_parse_control(
-        R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se registra el evento de entrada del usuario"},{"id":"B","kind":"locator","consulta":"dónde se detiene el trabajo que está en curso"},{"id":"P","kind":"puente","need":["A","B"]}],"why":"congelé B"})");
-    expect(!plan_post.ok && plan_post.error.find("locator posterior") != std::string::npos,
-           "locator posterior no congela consulta");
+        R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se registra el evento de entrada del usuario"},{"id":"B","kind":"locator","consulta":"dónde se detiene el trabajo que está en curso"},{"id":"P","kind":"puente","need":["A","B"],"consulta":"hay camino entre el evento de entrada y detener el trabajo"}],"why":"congelé B"})");
+    expect(plan_post.ok && plan_post.plan.fases[1].consulta.find("detiene") != std::string::npos,
+           "locator posterior congela su consulta");
     const auto packed_o = tuide::wave_parse_control(
         R"({"action":"control_v1","do":"explorar","consulta":"dónde se intercepta la tecla escape o el foco perdido","why":"dos disparos en una caza"})");
     expect(packed_o.ok, "explorar con o es NL; no lo caza el runtime");
     const auto plan_o = tuide::wave_parse_control(
-        R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se captura el evento de escape o la pérdida de foco"},{"id":"B","kind":"locator","hacia":["parada trabajo"]},{"id":"P","kind":"puente","need":["A","B"]}],"why":"dos mecanismos distintos y el hijo de A no necesita B"})");
+        R"({"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se captura el evento de escape o la pérdida de foco"},{"id":"B","kind":"locator","consulta":"dónde se detiene el trabajo que está en curso","hacia":["parada trabajo"]},{"id":"P","kind":"puente","need":["A","B"],"consulta":"hay camino entre el evento de entrada y detener el trabajo"}],"why":"dos mecanismos distintos y el hijo de A no necesita B"})");
     expect(plan_o.ok && plan_o.plan.fases.size() == 3, "plan no caza o en el locator");
     const auto pasar = tuide::wave_parse_control(
         R"({"action":"control_v1","do":"pasar","why":"esta fase ya tiene un locus leído"})");
@@ -2418,6 +2463,7 @@ int main() {
     expect(board.fases[2].status == tuide::WaveControlPhaseStatus::EnCurso, "puente en curso");
     const auto spec = tuide::wave_control_launch_spec(board);
     expect(spec.ok && spec.kind == tuide::WaveControlPhaseKind::Puente, "launch puente");
+    expect(spec.consulta.find("camino") != std::string::npos, "puente usa consulta del plan");
     expect(spec.pin_from.find("read_event") != std::string::npos &&
                spec.pin_to.find("stop_job") != std::string::npos,
            "pin from/to del pack");
@@ -2450,6 +2496,7 @@ int main() {
            "pasar semilla");
     const auto spec_s = tuide::wave_control_launch_spec(seguir_board);
     expect(spec_s.ok && spec_s.kind == tuide::WaveControlPhaseKind::Seguir, "launch seguir");
+    expect(spec_s.consulta.find("indicador") != std::string::npos, "seguir usa consulta del plan");
     expect(spec_s.cerca_hops_max == tuide::kWaveControlSeguirHops, "seguir hops altos");
     expect(!spec_s.hacia.empty(), "seguir hacia");
     WaveState pinned;
@@ -2537,8 +2584,8 @@ int main() {
                brief_deny.find("Preguntó:") != std::string::npos,
            "brief: caza fallida si lo leído no es el objeto");
     expect(brief_deny.find("Abierto:") == std::string::npos &&
-               brief_deny.find("la clase puede ser el siguiente encargo") != std::string::npos,
-           "caza fallida: huecos de clase sí pueden ser el siguiente briefing");
+               brief_deny.find("no son el siguiente briefing") != std::string::npos,
+           "caza fallida: huecos no recetan el siguiente tiro");
     WaveState packed_rima = packed_deny;
     packed_rima.cierre =
         "(El why no es evidencia de lo no leído.)\n"
@@ -2552,8 +2599,8 @@ int main() {
     packed_miss.cierre = "no encontré la traducción; lo leído es json escape";
     const auto brief_miss = tuide::wave_control_brief(packed_miss);
     expect(brief_miss.find("No se encontró el objeto de esta caza") != std::string::npos &&
-               brief_miss.find("El siguiente tiro es la clase") != std::string::npos,
-           "brief: no encontré = caza fallida y zoom-out");
+               brief_miss.find("Cierra el ancla citando lo leído") != std::string::npos,
+           "brief: no encontré = caza fallida y refutación o partir");
     WaveState packed3 = packed;
     packed3.huecos_claimed = {"src/ai/ai_controller.cpp:cancel_level1", "cancel"};
     packed3.cierre =
@@ -2772,7 +2819,7 @@ int main() {
                tuide::wave_control_system_prompt().find("indicador de ocupado se apaga") !=
                    std::string::npos,
            "cerrar: veta coletilla; few-shot cita mecanismo");
-    expect(tuide::wave_control_system_prompt().find("plan (un locator más") != std::string::npos,
+    expect(tuide::wave_control_system_prompt().find("cada fase trae consulta tuya") != std::string::npos,
            "al tope cabe un plan tardío");
     expect(tuide::wave_control_system_prompt().find("el hijo no la lee") != std::string::npos,
            "consulta olor; why estrategia");
@@ -2793,7 +2840,7 @@ int main() {
                tuide::wave_control_user_prompt("ancla", "### Trabajo 1\nkeep: M8\n", "", "", {},
                                               {tuide::WaveControlDo::Plan,
                                                tuide::WaveControlDo::Cerrar})
-                   .find("locator más") != std::string::npos,
+                   .find("cada fase trae consulta") != std::string::npos,
            "al tope el user ofrece plan tardío o cerrar");
     const auto exam = tuide::wave_control_slice_exam(
         "cuando pulsa Escape o clic fuera, cancelar sin archivo a medias", {snap_a, snap_b});
@@ -2811,9 +2858,9 @@ int main() {
     const auto exam_deny = tuide::wave_control_slice_exam("ancla", {snap_deny});
     expect(exam_deny.find("No se encontró el objeto de esta caza") != std::string::npos &&
                exam_deny.find("Si rehaces, evita lo leído") != std::string::npos &&
-               exam_deny.find("La última caza no encontró") != std::string::npos &&
-               exam_deny.find("Un hueco que nombra esa clase sí vale") != std::string::npos,
-           "examen: si la última falló, zoom-out a la clase; hueco de clase vale");
+               exam_deny.find("no halló el mapeo") != std::string::npos &&
+               exam_deny.find("Un hueco que nombra esa clase sí vale") == std::string::npos,
+           "examen: si la última falló, refutar o partir; no zoom-out a la clase");
     tuide::WaveControlJobSnap snap_ok = snap_b;
     snap_ok.cerrado = "encontré el aborto del trabajo en el controlador";
     const auto exam_ok = tuide::wave_control_slice_exam("ancla", {snap_deny, snap_ok});
@@ -2859,15 +2906,17 @@ int main() {
     expect(tuide::wave_control_system_prompt().find("PRIMERO") != std::string::npos,
            "ampliar si duda");
     expect(tuide::wave_control_system_prompt().find("prompt de investigación") != std::string::npos &&
-               tuide::wave_control_system_prompt().find("no ve el ancla") != std::string::npos,
+               tuide::wave_control_system_prompt().find("no ve el ancla") != std::string::npos &&
+               tuide::wave_control_system_prompt().find("inspect elige el barrio") !=
+                   std::string::npos,
            "consulta es investigación; el hijo no ve el ancla");
     expect(tuide::wave_control_system_prompt().find("enumera") != std::string::npos &&
                tuide::wave_control_system_prompt().find("copiar el ancla entero") !=
                    std::string::npos,
            "prompt: no recap; no heredar la enumeración");
     expect(tuide::wave_control_system_prompt().find("gesto de puntero") == std::string::npos &&
-               tuide::wave_control_system_prompt().find("se escribe al lanzar") != std::string::npos,
-           "plan: B no congela consulta; no receta de dos disparos");
+               tuide::wave_control_system_prompt().find("no redacta") != std::string::npos,
+           "plan: cada fase trae consulta; runtime no redacta");
     expect(tuide::wave_control_system_prompt().find("rima con el ancla") != std::string::npos,
            "few-shot descarta hole que rima");
     expect(tuide::wave_control_system_prompt().find("no inventes el locator") != std::string::npos,
@@ -2958,15 +3007,19 @@ int main() {
                tuide::wave_control_user_prompt("ancla", "", "pack", "M7 owns: panel")
                    .find("ancla copiado") != std::string::npos &&
                tuide::wave_control_user_prompt("ancla", "", "pack", "M7 owns: panel")
-                   .find("primer locator") != std::string::npos &&
+                   .find("cada locator") != std::string::npos &&
                tuide::wave_control_user_prompt("ancla", "", "pack", "M7 owns: panel")
                    .find("Atomiza") != std::string::npos,
            "tras ampliar: una caza o un plan, no recap");
     const auto after_inspect =
         tuide::wave_control_user_prompt("ancla", "", "pack", "M7 owns: panel");
-    expect(after_inspect.find("Cierras esto (no lo recopies)") != std::string::npos &&
-               after_inspect.find("pack") < after_inspect.find("Cierras esto"),
-           "tras inspect el ancla va al final");
+    expect(after_inspect.find("Consulta del usuario") != std::string::npos &&
+               after_inspect.find("Consulta del usuario") < after_inspect.find("pack") &&
+               after_inspect.find("Cierras esto") == std::string::npos,
+           "tras inspect el ancla sigue arriba");
+    expect(after_inspect.find("inspect elige el") != std::string::npos &&
+               after_inspect.find("caller del writer") != std::string::npos,
+           "tras inspect: fenómeno del usuario, no caller");
     expect(tuide::wave_control_user_prompt("ancla", "", "pack", "M7 owns: panel")
                .find("no otra vez") == std::string::npos,
            "no veta un segundo ampliar");
@@ -2984,12 +3037,12 @@ int main() {
                .find("Tú diriges:") != std::string::npos,
            "user pide dirigir tras un trabajo");
     expect(tuide::wave_control_user_prompt("ancla", "### Trabajo 1\nkeep: M8\nCerrado:\nno es eso\n")
-               .find("caza falló") != std::string::npos &&
+               .find("no halló el mapeo") != std::string::npos &&
                tuide::wave_control_user_prompt("ancla", "### Trabajo 1\nkeep: M8\nCerrado:\nno es eso\n")
-                       .find("el siguiente tiro es la clase") != std::string::npos &&
+                       .find("el siguiente tiro es la clase") == std::string::npos &&
                tuide::wave_control_user_prompt("ancla", "### Trabajo 1\nkeep: M8\nCerrado:\nno es eso\n")
                        .find("sale de Abierto") == std::string::npos,
-           "user: tras fallo, zoom-out a la clase; no receta de Abierto");
+           "user: tras fallo, refutar o partir; no zoom-out a la clase");
     expect(tuide::wave_control_user_prompt(
                "ancla", "### Trabajo 1\nkeep: M8\nCerrado:\nencontré el despachador\n")
                .find("port del pack") != std::string::npos &&
@@ -3006,6 +3059,73 @@ int main() {
            "system: hacia se recorta; overlap no es recap; plan soltable");
     expect(tuide::wave_control_system_prompt().find("mismo objeto") != std::string::npos,
            "system: mismo objeto no es un deber");
+    tuide::WaveControlInduce parsed = tuide::WaveControlInduce::Baseline;
+    expect(tuide::wave_control_induce_parse("refute-shot", &parsed) &&
+               parsed == tuide::WaveControlInduce::RefuteShot,
+           "parse refute-shot");
+    expect(tuide::wave_control_induce_parse("miss-answer", &parsed) &&
+               parsed == tuide::WaveControlInduce::MissAnswer,
+           "parse miss-answer");
+    expect(tuide::wave_control_induce_parse("both", &parsed) &&
+               parsed == tuide::WaveControlInduce::Both,
+           "parse both");
+    expect(!tuide::wave_control_induce_parse("escape", &parsed), "induce desconocido");
+    expect(std::string(tuide::wave_control_induce_name(tuide::WaveControlInduce::Baseline)) ==
+               "baseline",
+           "nombre baseline");
+    const auto sys_base = tuide::wave_control_system_prompt();
+    const auto sys_ref =
+        tuide::wave_control_system_prompt(tuide::WaveControlCue::Default,
+                                          tuide::WaveControlInduce::RefuteShot);
+    const auto sys_miss =
+        tuide::wave_control_system_prompt(tuide::WaveControlCue::Default,
+                                          tuide::WaveControlInduce::MissAnswer);
+    const auto sys_both =
+        tuide::wave_control_system_prompt(tuide::WaveControlCue::Default,
+                                          tuide::WaveControlInduce::Both);
+    expect(sys_base.find("el hijo no halló el objeto de su consulta") == std::string::npos,
+           "baseline sin few-shot de refutar");
+    expect(sys_ref.find("el hijo no halló el objeto de su consulta") != std::string::npos &&
+               sys_ref.find("no hay camino entre ellos") != std::string::npos &&
+               sys_ref.find("Escape") == std::string::npos,
+           "refute-shot: cerrar genérico, no Escape");
+    expect(sys_miss.find("No la relances") != std::string::npos &&
+               sys_base.find("No la relances") == std::string::npos,
+           "miss-answer induce; baseline no");
+    expect(sys_both.find("el hijo no halló el objeto de su consulta") != std::string::npos &&
+               sys_both.find("No la relances") != std::string::npos,
+           "both junta las dos inducciones");
+    WaveState packed_empty;
+    packed_empty.prompt = "dónde se une el disparo al efecto";
+    expect(tuide::wave_control_brief(packed_empty).find("Está contestada") == std::string::npos,
+           "baseline vacío no es inducción");
+    const auto brief_miss_vacio =
+        tuide::wave_control_brief(packed_empty, tuide::WaveControlInduce::MissAnswer);
+    expect(brief_miss_vacio.find("Está contestada") != std::string::npos &&
+               brief_miss_vacio.find("claim conjunto") == std::string::npos,
+           "miss-answer: vacío es respuesta, sin veto de conjunto");
+    const auto jobs_vacio = "### Trabajo 1\nCerrado:\n(vacío)\n";
+    expect(tuide::wave_control_user_prompt("ancla", jobs_vacio).find("ya tiene respuesta") ==
+               std::string::npos,
+           "baseline no lee (vacío) como miss");
+    expect(tuide::wave_control_user_prompt("ancla", jobs_vacio, "", "", {}, {}, "", "",
+                                          tuide::WaveControlCue::Default, "", "", "",
+                                          tuide::WaveControlInduce::MissAnswer)
+               .find("ya tiene respuesta") != std::string::npos,
+           "miss-answer: (vacío) es pregunta contestada");
+    tuide::WaveControlJobSnap snap_vacio;
+    snap_vacio.n = 1;
+    snap_vacio.consulta = "dónde se une el disparo al efecto";
+    const auto exam_vacio = tuide::wave_control_slice_exam(
+        "ancla", {snap_vacio}, tuide::WaveControlInduce::MissAnswer);
+    expect(exam_vacio.find("no hay objeto") != std::string::npos &&
+               exam_vacio.find("claim conjunto") == std::string::npos,
+           "examen miss-answer: vacío contestado");
+    expect(tuide::wave_control_fallo_replay_nudge("q", "q2", tuide::WaveControlInduce::MissAnswer)
+               .find("ya tiene respuesta") != std::string::npos,
+           "nudge miss-answer sin receta de conjunto");
+    expect(tuide::wave_control_legal(tuide::WaveControlPlan{}, 2, false).size() >= 2,
+           "induce no recorta do: explorar sigue legal tras jobs");
     expect(tuide::wave_control_user_prompt("ancla", "### Trabajo 1\nkeep: M8\n")
                .find("el hijo no la lee") != std::string::npos,
            "user separa why de consulta");
@@ -3180,6 +3300,42 @@ int main() {
     expect(stripped.find("tecla") != std::string::npos, "strip deja el gesto");
     expect(tuide::wave_control_user_prompt("ancla", "", barrios, insp).find("M7") != std::string::npos,
            "user lleva inspect");
+  }
+
+  {
+    std::vector<std::string> qs;
+    std::string err;
+    expect(tuide::wave_control_parse_script(
+               "# Ablación Escape: dos cazas + composición. Sin Escape ni clic en el query.\n"
+               "\n"
+               "dónde se despachan los eventos de teclado en la interfaz\n"
+               "dónde se aborta la generación en curso del agente\n"
+               "hay camino entre el despacho de teclado y abortar la generación\n",
+               &qs, &err),
+           "script fixture parse");
+    expect(qs.size() == 3, "script fixture 3 consultas");
+    expect(qs[0] == "dónde se despachan los eventos de teclado en la interfaz", "script t1");
+    expect(qs[1] == "dónde se aborta la generación en curso del agente", "script t2");
+    expect(qs[2] == "hay camino entre el despacho de teclado y abortar la generación", "script t3");
+    expect(err.empty(), "script fixture sin err");
+    qs.clear();
+    err.clear();
+    expect(!tuide::wave_control_parse_script("# solo comentarios\n\n", &qs, &err),
+           "script vacío");
+    expect(err.find("sin consultas") != std::string::npos, "script vacío why");
+    qs.clear();
+    err.clear();
+    expect(!tuide::wave_control_parse_script(
+               "dónde se despachan los eventos de teclado en la interfaz\n"
+               "dónde se aborta la generación en curso del agente\n"
+               "hay camino entre el despacho de teclado y abortar la generación\n"
+               "dónde se pinta el indicador de espera del agente\n",
+               &qs, &err),
+           "script máx 3");
+    expect(err.find("máx 3") != std::string::npos, "script máx 3 why");
+    qs.clear();
+    err.clear();
+    expect(!tuide::wave_control_parse_script("corto\n", &qs, &err), "script consulta corta");
   }
 
   if (failures != 0) {

@@ -273,6 +273,19 @@ enum class WaveControlDo {
 
 enum class WaveControlCue { Default, Neutral };
 
+// Inducciones al piloto (prompt/brief). No recortan do legales.
+// 2×2: few-shot de refutar × miss como respuesta (no vacante).
+enum class WaveControlInduce { Baseline, RefuteShot, MissAnswer, Both };
+
+inline bool wave_control_induce_refute_shot(WaveControlInduce i) {
+  return i == WaveControlInduce::RefuteShot || i == WaveControlInduce::Both;
+}
+inline bool wave_control_induce_miss_answer(WaveControlInduce i) {
+  return i == WaveControlInduce::MissAnswer || i == WaveControlInduce::Both;
+}
+const char* wave_control_induce_name(WaveControlInduce i);
+bool wave_control_induce_parse(const std::string& s, WaveControlInduce* out);
+
 enum class WaveControlPhaseKind { Locator, Puente, Seguir, Invalid };
 
 enum class WaveControlPhaseStatus { Pendiente, EnCurso, Paso, Fallo };
@@ -574,6 +587,8 @@ struct WaveControlBosquejo {
 
 WaveControlOla wave_parse_control(const std::string& raw);
 bool wave_control_consulta_ok(const std::string& consulta, std::string* err);
+bool wave_control_parse_script(const std::string& text, std::vector<std::string>* out,
+                               std::string* err);
 bool wave_control_evita_ok(const std::vector<std::string>& evita, std::string* err);
 bool wave_control_cerrar_why_ok(const std::string& why, std::string* err);
 bool wave_control_bosquejar_ok(const std::vector<std::string>& conceptos, std::string* err);
@@ -588,6 +603,10 @@ bool wave_control_consulta_delta_ok(const std::string& consulta, const std::stri
                                    const std::vector<std::string>& prev, std::string* err);
 std::string wave_control_consulta_misma_caza(const std::string& consulta,
                                             const std::vector<std::string>& prev);
+bool wave_control_consulta_claim_conjunto(const std::string& consulta);
+bool wave_control_consulta_replay_ok(const std::string& consulta, const std::vector<std::string>& prev,
+                                    bool last_failed, std::string* err);
+bool wave_control_jobs_last_failed(const std::string& jobs_md);
 std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int jobs_run,
                                              bool last_visto, int agujas_n = 0, int zoom_n = 0,
                                              int ampliar_n = 0);
@@ -606,7 +625,8 @@ bool wave_control_plan_revisar(WaveControlPlan* plan, const std::string& consult
 WaveControlLaunch wave_control_launch_spec(const WaveControlPlan& plan);
 void wave_control_inherit_visto(WaveControlLaunch* spec, const std::vector<std::string>& visto);
 void wave_control_seed_launch(WaveState* st, const WaveControlLaunch& spec);
-std::string wave_control_brief(const WaveState& st);
+std::string wave_control_brief(const WaveState& st,
+                              WaveControlInduce induce = WaveControlInduce::Baseline);
 
 // Foto causal entre exploradores (mismo dialecto que pilot_opened_v1).
 struct WaveControlJobSnap {
@@ -625,7 +645,8 @@ std::string wave_control_jobs_circuit_pack(const std::vector<WaveControlJobSnap>
                                            const WaveControlPathFn& path_between = {});
 std::string wave_control_fallos_cue(const std::vector<WaveControlJobSnap>& jobs);
 std::string wave_control_slice_exam(const std::string& ancla,
-                                   const std::vector<WaveControlJobSnap>& jobs);
+                                   const std::vector<WaveControlJobSnap>& jobs,
+                                   WaveControlInduce induce = WaveControlInduce::Baseline);
 std::string wave_control_atlas_brief(const std::string& atlas_md);
 std::string wave_control_module_map(const std::string& workspace_root);
 std::string wave_control_barrio_brief(const nlohmann::json& cards, const std::string& consulta,
@@ -638,10 +659,16 @@ std::string wave_control_opened_brief(const std::string& opened_md);
 std::string wave_control_atlas_pack_brief(const std::string& atlas_md, std::size_t cap = 0);
 std::vector<std::string> wave_control_owns_phrases(const nlohmann::json& cards);
 std::string wave_control_strip_owns(std::string consulta, const std::vector<std::string>& owns);
-std::string wave_control_system_prompt(WaveControlCue cue = WaveControlCue::Default);
+std::string wave_control_system_prompt(WaveControlCue cue = WaveControlCue::Default,
+                                       WaveControlInduce induce = WaveControlInduce::Baseline);
 std::string wave_control_rama_nudge(const std::string& consulta = {});
 std::string wave_control_misma_caza_nudge(const std::string& prev, const std::string& proposed);
-std::string wave_control_plantilla_nudge(const std::string& consulta = {});
+std::string wave_control_fallo_replay_nudge(const std::string& prev = {},
+                                           const std::string& proposed = {},
+                                           WaveControlInduce induce = WaveControlInduce::Baseline);
+std::string wave_control_plantilla_nudge(const std::string& consulta = {},
+                                         bool otra_forma = false);
+std::string wave_control_evita_nudge();
 std::string wave_control_cerrar_nudge();
 std::string wave_control_user_prompt(const std::string& user_consulta, const std::string& jobs_md,
                                      const std::string& barrio_brief = {},
@@ -653,7 +680,8 @@ std::string wave_control_user_prompt(const std::string& user_consulta, const std
                                      WaveControlCue cue = WaveControlCue::Default,
                                      const std::string& bosquejo_md = {},
                                      const std::string& plano_md = {},
-                                     const std::string& zoom_md = {});
+                                     const std::string& zoom_md = {},
+                                     WaveControlInduce induce = WaveControlInduce::Baseline);
 nlohmann::json wave_state_to_json(const WaveState& st);
 nlohmann::json wave_ola_to_json(const WaveOla& ola);
 

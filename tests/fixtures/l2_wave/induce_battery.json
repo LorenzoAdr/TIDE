@@ -1,0 +1,31 @@
+{
+  "why": "2×2 de inducciones genéricas al piloto. No recortan do legales ni vetan tecla/cancel. baseline = control actual.",
+  "induces": [
+    {
+      "id": "baseline",
+      "axis": "ninguna"
+    },
+    {
+      "id": "refute-shot",
+      "axis": "few-shot: cerrar cuando el hijo no halló objeto o no hay camino entre polos"
+    },
+    {
+      "id": "miss-answer",
+      "axis": "Cerrado vacío contesta esa pregunta; no se relanza; el piloto juzga el ancla"
+    },
+    {
+      "id": "both",
+      "axis": "refute-shot + miss-answer"
+    }
+  ],
+  "cases": [
+    {
+      "id": "17_ai_spinner_stuck",
+      "kind": "existe"
+    },
+    {
+      "id": "20_cancel_ai_generation",
+      "kind": "vacio"
+    }
+  ]
+}

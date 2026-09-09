@@ -1,4 +1,4 @@
-Atlas del explorador (peek/nucleus/port de todo el mazo. Owns no va en la consulta):
+Atlas del explorador (peek/nucleus/port de todo el mazo. Eligen barrio; la consulta nombra el fenómeno, no el símbolo):
 n=12  (owns=objeto; same=M* clon; peek objeto+verbo; 1–2 ids)
 M1  kind=other  ov=0  stems: search replace
 owns: search replace
