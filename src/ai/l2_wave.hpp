@@ -46,6 +46,8 @@ inline constexpr int kWaveGuionWordsMax = 16;
 inline constexpr int kWaveGuionPapelChars = 120;
 inline constexpr int kWaveIndependienteMaxWaves = 6;
 inline constexpr int kWaveControlMaxJobs = 3;
+inline constexpr int kWaveControlLatePlanJobs = 1;
+inline constexpr int kWaveControlEvitaMax = 3;
 inline constexpr int kWaveControlMaxConsultas = 1;
 inline constexpr int kWaveControlPlanFasesMin = 2;
 inline constexpr int kWaveControlPlanFasesMax = 4;
@@ -283,6 +285,7 @@ struct WaveControlPhase {
   std::string consulta;
   std::vector<std::string> need;
   std::vector<std::string> hacia;
+  std::vector<std::string> evita;
   WaveControlPhaseStatus status = WaveControlPhaseStatus::Pendiente;
   std::vector<std::string> ancla_visto;
 };
@@ -301,6 +304,8 @@ struct WaveControlLaunch {
   std::string pin_to;
   std::vector<std::string> pin_loci;
   std::vector<std::string> hacia;
+  std::vector<std::string> evita;
+  std::string fallos_md;
   int cerca_hops_max = 0;
   int peek_hop_depth = 0;
 };
@@ -313,6 +318,7 @@ struct WaveControlOla {
   std::vector<std::string> consultas;
   std::vector<std::string> ids;
   std::vector<std::string> hacia;
+  std::vector<std::string> evita;
   WaveControlPlan plan;
   std::string why;
 };
@@ -396,6 +402,8 @@ struct WaveState {
   std::string pin_to;
   std::vector<std::string> pin_loci;
   std::vector<std::string> pin_hacia;
+  std::vector<std::string> pin_evita;
+  std::string pin_fallo_md;
   int cerca_hops_max = 0;   // 0 = kWaveCercaHopsMax
   int peek_hop_depth = 0;   // 0 = kWavePeekHopDepth
   std::string atlas_md;  // zone map (causal_atlas_v1 if seeded from cards)
@@ -481,6 +489,8 @@ void wave_merge_hits(WaveState* st, const std::vector<WaveHit>& incoming);
 std::vector<std::string> wave_needle_search_keys(const std::string& needle);
 std::string wave_needle_stem_hint(const std::string& needle);
 bool wave_cerca_concept_ok(const std::string& needle);
+std::string wave_cerca_clip_concept(const std::string& needle);
+void wave_control_sanitize_hacia(std::vector<std::string>* hacia);
 std::string wave_cerca_query(const std::vector<std::string>& needles);
 bool wave_cerca_needles_ok(const std::vector<std::string>& needles, std::string* err);
 bool wave_guion_papel_ok(const std::string& papel);
@@ -564,6 +574,8 @@ struct WaveControlBosquejo {
 
 WaveControlOla wave_parse_control(const std::string& raw);
 bool wave_control_consulta_ok(const std::string& consulta, std::string* err);
+bool wave_control_evita_ok(const std::vector<std::string>& evita, std::string* err);
+bool wave_control_cerrar_why_ok(const std::string& why, std::string* err);
 bool wave_control_bosquejar_ok(const std::vector<std::string>& conceptos, std::string* err);
 bool wave_control_aguja_ok(const std::string& tok);
 bool wave_control_agujas_ok(const std::vector<std::string>& agujas, std::string* err);
@@ -589,7 +601,8 @@ bool wave_control_plan_pasar(WaveControlPlan* plan, const std::vector<std::strin
                             std::string* err);
 bool wave_control_plan_no_pasar(WaveControlPlan* plan, std::string* err);
 bool wave_control_plan_revisar(WaveControlPlan* plan, const std::string& consulta,
-                              const std::vector<std::string>& hacia, std::string* err);
+                              const std::vector<std::string>& hacia, std::string* err,
+                              const std::vector<std::string>& evita = {});
 WaveControlLaunch wave_control_launch_spec(const WaveControlPlan& plan);
 void wave_control_inherit_visto(WaveControlLaunch* spec, const std::vector<std::string>& visto);
 void wave_control_seed_launch(WaveState* st, const WaveControlLaunch& spec);
@@ -610,6 +623,7 @@ using WaveControlPathFn =
 WaveControlJobSnap wave_control_job_snap(int n, const WaveState& st);
 std::string wave_control_jobs_circuit_pack(const std::vector<WaveControlJobSnap>& jobs,
                                            const WaveControlPathFn& path_between = {});
+std::string wave_control_fallos_cue(const std::vector<WaveControlJobSnap>& jobs);
 std::string wave_control_slice_exam(const std::string& ancla,
                                    const std::vector<WaveControlJobSnap>& jobs);
 std::string wave_control_atlas_brief(const std::string& atlas_md);
@@ -627,6 +641,8 @@ std::string wave_control_strip_owns(std::string consulta, const std::vector<std:
 std::string wave_control_system_prompt(WaveControlCue cue = WaveControlCue::Default);
 std::string wave_control_rama_nudge(const std::string& consulta = {});
 std::string wave_control_misma_caza_nudge(const std::string& prev, const std::string& proposed);
+std::string wave_control_plantilla_nudge(const std::string& consulta = {});
+std::string wave_control_cerrar_nudge();
 std::string wave_control_user_prompt(const std::string& user_consulta, const std::string& jobs_md,
                                      const std::string& barrio_brief = {},
                                      const std::string& inspect_brief = {},

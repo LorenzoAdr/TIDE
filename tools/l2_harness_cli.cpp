@@ -8818,9 +8818,10 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     auto run_explorer_job = [&](const std::string& consulta, const tuide::WaveControlLaunch& spec) {
       tuide::WaveControlLaunch launch = spec;
       tuide::wave_control_inherit_visto(&launch, all_visto);
+      launch.fallos_md = tuide::wave_control_fallos_cue(job_snaps);
       tuide::WaveState worker;
       const bool seed = launch.ok || !launch.pin_loci.empty() || !launch.pin_from.empty() ||
-                        !launch.hacia.empty();
+                        !launch.hacia.empty() || !launch.evita.empty() || !launch.fallos_md.empty();
       seed_control_worker(&worker, consulta, seed ? &launch : nullptr);
       const int job = jobs_run + 1;
       const fs::path job_dir = output_root / ("job_" + std::to_string(job));
@@ -8908,7 +8909,11 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
     std::string control_zoom_md;
     std::string control_nudge;
     int control_rama_retries = 0;
-    int control_misma_caza_retries = 0;
+    int control_plantilla_retries = 0;
+    int control_cerrar_retries = 0;
+    int control_cerca_retries = 0;
+    int control_recap_retries = 0;
+    int control_job_cap = tuide::kWaveControlMaxJobs;
     int control_open_retries = 0;
     int control_bosquejos = 0;
     int control_agujas_n = 0;
@@ -8959,7 +8964,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
           << json_dump_safe(tuide::wave_control_plan_to_json(control_plan)) << "\n";
     };
     auto launch_current_phase = [&]() -> bool {
-      if (jobs_run >= tuide::kWaveControlMaxJobs) {
+      if (jobs_run >= control_job_cap) {
         control_why = "presupuesto de trabajos agotado";
         return false;
       }
@@ -8981,7 +8986,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       write_plan_files({});
       return true;
     };
-    const int max_control_turns = tuide::kWaveControlMaxJobs + 6;
+    const int max_control_turns =
+        tuide::kWaveControlMaxJobs + tuide::kWaveControlLatePlanJobs + 6;
     for (int turn = 1; turn <= max_control_turns; ++turn) {
       tuide::L2BrainRequest creq;
       creq.system_prompt = tuide::wave_control_system_prompt();
@@ -9191,12 +9197,6 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
             cola.error = derr.empty() ? "consulta no es un desplazamiento" : derr;
             break;
           }
-          const std::string same = tuide::wave_control_consulta_misma_caza(c, prev_consultas);
-          if (!same.empty()) {
-            cola.ok = false;
-            cola.error = "control: misma caza que un trabajo ya hecho";
-            break;
-          }
           seen.push_back(c);
         }
       }
@@ -9220,21 +9220,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
             cola.error = derr.empty() ? "consulta no es un desplazamiento" : derr;
             break;
           }
-          const std::string same = tuide::wave_control_consulta_misma_caza(ph.consulta, prev_consultas);
-          if (!same.empty()) {
-            cola.ok = false;
-            cola.error = "control: misma caza que un trabajo ya hecho";
-            break;
-          }
           seen.push_back(ph.consulta);
-        }
-      }
-      if (cola.ok && cola.do_kind == tuide::WaveControlDo::Revisar && !cola.consulta.empty()) {
-        const std::string same =
-            tuide::wave_control_consulta_misma_caza(cola.consulta, prev_consultas);
-        if (!same.empty()) {
-          cola.ok = false;
-          cola.error = "control: misma caza que un trabajo ya hecho";
         }
       }
       const char* do_name = tuide::wave_control_do_name(cola.do_kind);
@@ -9244,6 +9230,7 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
                                {"consultas", cola.consultas},
                                {"ids", cola.ids},
                                {"hacia", cola.hacia},
+                               {"evita", cola.evita},
                                {"plan", tuide::wave_control_plan_to_json(cola.plan)},
                                {"why", cola.why},
                                {"error", cola.error}};
@@ -9294,33 +9281,33 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
             cola.error.find("bosquejar") != std::string::npos ||
             cola.error.find("agujas") != std::string::npos ||
             cola.error.find("zoom") != std::string::npos ||
-            cola.error.find("1–3 palabras") != std::string::npos ||
             cola.error.find("hacia es un objeto") != std::string::npos ||
             cola.error.find("consulta sin objeto") != std::string::npos ||
-            cola.error.find("recap del ancla") != std::string::npos ||
-            cola.error.find("desplazamiento") != std::string::npos ||
-            cola.error.find("no pases el ancla") != std::string::npos ||
             cola.error.find("sin objeto JSON") != std::string::npos ||
             cola.error.find("JSON control inválido") != std::string::npos ||
-            ((cola.error.find("misma caza") != std::string::npos ||
-              cola.error.find("consulta repetida") != std::string::npos ||
-              cola.error.find("recap de un trabajo") != std::string::npos) &&
-             control_misma_caza_retries < 2) ||
+            (cola.error.find("1–3 palabras") != std::string::npos &&
+             control_cerca_retries < 2) ||
+            (cola.error.find("recap del ancla") != std::string::npos &&
+             control_recap_retries < 2) ||
+            (cola.error.find("desplazamiento") != std::string::npos &&
+             control_recap_retries < 2) ||
+            (cola.error.find("no pases el ancla") != std::string::npos &&
+             control_recap_retries < 2) ||
+            (cola.error.find("plantilla") != std::string::npos &&
+             control_plantilla_retries < 2) ||
+            (cola.error.find("cierre vacío") != std::string::npos &&
+             control_cerrar_retries < 2) ||
             (cola.error.find("rama") != std::string::npos && control_rama_retries < 2);
         if (retry) {
           if (cola.error.find("rama") != std::string::npos) {
             ++control_rama_retries;
             control_nudge = tuide::wave_control_rama_nudge(cola.consulta);
-          } else if (cola.error.find("misma caza") != std::string::npos ||
-                     cola.error.find("consulta repetida") != std::string::npos ||
-                     cola.error.find("recap de un trabajo") != std::string::npos) {
-            ++control_misma_caza_retries;
-            std::string prev_hit =
-                tuide::wave_control_consulta_misma_caza(cola.consulta, prev_consultas);
-            if (prev_hit.empty() && !prev_consultas.empty()) {
-              prev_hit = prev_consultas.back();
-            }
-            control_nudge = tuide::wave_control_misma_caza_nudge(prev_hit, cola.consulta);
+          } else if (cola.error.find("plantilla") != std::string::npos) {
+            ++control_plantilla_retries;
+            control_nudge = tuide::wave_control_plantilla_nudge(cola.consulta);
+          } else if (cola.error.find("cierre vacío") != std::string::npos) {
+            ++control_cerrar_retries;
+            control_nudge = tuide::wave_control_cerrar_nudge();
           } else if (cola.error.find("ya está abierta") != std::string::npos ||
                      cola.error.find("máx 6") != std::string::npos) {
             ++control_open_retries;
@@ -9330,21 +9317,25 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
             control_nudge =
                 "Esas fichas ya están en inspect. PROHIBIDO volver a ampliarlas. "
                 "explorar (una caza) o plan (cazas independientes).";
-          } else if (cola.error.find("hacia es un objeto") != std::string::npos) {
+          } else if (cola.error.find("hacia es un objeto") != std::string::npos ||
+                     cola.error.find("1–3 palabras") != std::string::npos) {
+            ++control_cerca_retries;
             control_nudge =
-                "hacia es un objeto (entrada o generación), no una lista de zonas del ancla.";
+                "hacia es 1–3 palabras, no el texto de un port. Si es largo se recorta o se omite; "
+                "la consulta sí se lanza. Un objeto (entrada, parada), no una frase.";
           } else if (cola.error.find("consulta sin objeto") != std::string::npos) {
             control_nudge =
-                "consulta = briefing de caza: mecanismo (escritura a medias, reversión), no una "
+                "consulta = prompt de investigación: mecanismo (escritura a medias, reversión), no una "
                 "categoría ('los archivos'). El hijo no ve el ancla. Si el pack no te lo deja, "
                 "amplia M* y vuelve.";
           } else if (cola.error.find("recap del ancla") != std::string::npos ||
                      cola.error.find("desplazamiento") != std::string::npos ||
                      cola.error.find("no pases el ancla") != std::string::npos) {
+            ++control_recap_retries;
             control_nudge =
-                "La consulta es el ataque que sale del inspect, no el ancla con un dónde. "
-                "Si una caza no cierra el ancla, plan (cazas independientes); no empaquetes el ancla. "
-                "El why analiza; el hijo solo caza la consulta.";
+                "Recap es pegar el ancla. Nombrar un disparo de lo visto (un objeto) no es recap, "
+                "aunque el ancla use las mismas palabras. Si el ancla enumera, un hijo un disparo. "
+                "hacia es opcional.";
           } else if (cola.error.find("sin objeto JSON") != std::string::npos ||
                      cola.error.find("JSON control inválido") != std::string::npos) {
             control_nudge = "JSON. Primer carácter `{`. Sin prosa.";
@@ -9354,7 +9345,14 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
                 "PROHIBIDO repetir un zoom ya abierto.";
           } else if (cola.error.find("do no legal") != std::string::npos ||
                      cola.error.find("pasar exige") != std::string::npos) {
-            if ((!tuide::kWaveControlCatalogLive &&
+            if (cola.do_kind == tuide::WaveControlDo::Explorar &&
+                !tuide::wave_control_do_allowed(legal_now, tuide::WaveControlDo::Explorar) &&
+                tuide::wave_control_do_allowed(legal_now, tuide::WaveControlDo::Plan)) {
+              control_nudge =
+                  "explorar agotado. Si falta un eslabón, plan (un locator más sobre lo visto; "
+                  "la consulta se escribe al lanzar) o cierra citando el mecanismo leído. "
+                  "PROHIBIDO 'el ancla queda contestada'.";
+            } else if ((!tuide::kWaveControlCatalogLive &&
                  (cola.do_kind == tuide::WaveControlDo::Agujas ||
                   cola.do_kind == tuide::WaveControlDo::Zoom)) ||
                 (!tuide::kWaveControlBosquejoLive &&
@@ -9406,6 +9404,9 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
         if (!tuide::wave_control_plan_commit(&control_plan, cola, &perr)) {
           control_nudge = perr.empty() ? "El plan no se pudo congelar." : perr;
           continue;
+        }
+        if (jobs_run >= tuide::kWaveControlMaxJobs) {
+          control_job_cap = tuide::kWaveControlMaxJobs + tuide::kWaveControlLatePlanJobs;
         }
         write_plan_files(cola.why);
         if (!control_run_jobs) {
@@ -9460,7 +9461,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
       }
       if (cola.do_kind == tuide::WaveControlDo::Revisar) {
         std::string perr;
-        if (!tuide::wave_control_plan_revisar(&control_plan, cola.consulta, cola.hacia, &perr)) {
+        if (!tuide::wave_control_plan_revisar(&control_plan, cola.consulta, cola.hacia, &perr,
+                                             cola.evita)) {
           control_nudge = perr.empty() ? "revisar no vale." : perr;
           continue;
         }
@@ -9546,6 +9548,10 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
         std::cerr << "\n";
         continue;
       }
+      if (cola.do_kind == tuide::WaveControlDo::Explorar && control_plan.committed) {
+        control_plan = tuide::WaveControlPlan{};
+        write_plan_files(cola.why);
+      }
       if (!control_run_jobs) {
         nlohmann::json plan = {{"consultas", cola.consultas},
                                {"why", cola.why},
@@ -9573,6 +9579,8 @@ int run_wave_explore(const std::string& root, int argc, char** argv) {
         tuide::WaveControlLaunch spec;
         spec.consulta = c;
         spec.hacia = cola.hacia;
+        spec.evita = cola.evita;
+        spec.ok = true;
         run_explorer_job(c, spec);
         launched = true;
       }
