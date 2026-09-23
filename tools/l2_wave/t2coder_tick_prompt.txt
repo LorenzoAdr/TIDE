@@ -1,0 +1,11 @@
+# Tick T2_CODER80B — core5 vs Qwen3-Coder-Next-80B-A3B local
+
+Sentinel: `AGENT_LOOP_WAKE_t2coder`
+
+1. Si `meta/STOP` → para wait/heartbeat y sal.
+2. Estado `.tuide/ai/l2_wave/v2_night/T2_CODER80B/`:
+   - `DONE` → scoreboard; compara vs S0 (0.44), H_CURSOR (0.80/0.60), T2_70B (0), T2_QWEN80B (0.2); tabla por caso; no relances.
+   - cola viva → rearma wait + heartbeat 1500s.
+   - cola muerta sin DONE → anota y sal.
+3. Heartbeat: `./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_t2coder 'Lee tools/l2_wave/t2coder_tick_prompt.txt'`
+4. Wait: `./tools/l2_wave/t270b_wait_done.sh .tuide/ai/l2_wave/v2_night/T2_CODER80B AGENT_LOOP_WAKE_t2coder tools/l2_wave/t2coder_tick_prompt.txt`

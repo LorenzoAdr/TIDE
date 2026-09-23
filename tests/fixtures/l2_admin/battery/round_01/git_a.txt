@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"hay que ver el working tree","spawn":{"tipo":"git","brief":"status","arg":"git status"}}
+{"action":"admin_v1","do":"cerrar","why":"ya tengo respuesta del job","reply":"Revisé el status (ver inbox)."}

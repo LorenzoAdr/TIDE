@@ -1,0 +1,54 @@
+Al despertar META: tú eres el usuario de estos días. El subagente de ronda ya juzgó el bloque.
+
+Sin plazo. El usuario (humano) lo corta. No uses Task/subagente para batería ni wait.
+
+Lee: este archivo, `.cursor/rules/l2-wave-sense12.mdc`, el ledger del sense vivo,
+`.tuide/ai/l2_wave/meta/ledger.jsonl`. Base viva: `meta/CURRENT`.
+Responde en español. Una decisión. Escríbela al ledger meta.
+
+## Criterio (no cambia)
+
+11 y 13 sellan el mecanismo real **y** 20 no sella console keys **y** 18/99 no caen.
+Las cinco cierran bien. No basta 11 sin 13.
+Induce miss-answer, ancla git `d1be1c5`, batería de 5 cazas.
+
+## Decide exactamente una
+
+**parar** si el criterio se cumplió, o el menú está agotado, o existe `meta/STOP`.
+Touch `meta/STOP`. No lances batería. Heartbeat sí (no-op hasta que el humano corte).
+
+**seguir** si en ESTE bloque de 10 hubo ≥1 keep que movió 11 o 13 hacia el sello real
+y 20/18 no cayeron. Lanza id+1 del MISMO sense (siguiente bloque de 10).
+
+**cambiar** si techo: 3+ drops seguidos al cierre del bloque, o 10 rondas sin acercar
+el sello real vs el inicio del sense (como Sense13 r17, Sense14 r13).
+
+## Menú (cerrado; no inventes dimensión)
+
+Ya medido: pack sin bosquejo (12), orientación (13), pack+hijo (14), sello (15).
+En curso: gate de cierre (16) = `last_failed` / `any_miss` / dump no cierra.
+
+Siguiente, en orden, solo si el actual plateau:
+
+1. Si el sense vivo aún es 16 y el gate no platéa → **seguir**, no cambies.
+2. Examen (envoltorio «lo leído no era el disparo») → sense17.
+3. Agotado → **parar**.
+
+Prohibido: reabrir pack/hijo/orientación/bosquejo/censo/sello salvo revertir.
+Prohibido: personalizar a un caso, runtime que redacte `consulta`, recortar `do`.
+
+## Handoff si cambiar
+
+1. Keep del sense que cierra: congela palancas que se quedaron.
+2. `mkdir` `.tuide/ai/l2_wave/senseNN`, ledger r01 change, `ln -sfn senseNN meta/CURRENT`.
+3. Copia `sense16_tick_prompt.txt` → `senseNN_tick_prompt.txt` (base, sentinel, espacio).
+4. Palanca r01 = la dimensión nueva, una sola. Tests. Rebuild.
+5. `./tools/l2_wave_sense_battery.sh 01 $NEWBASE`
+6. `./tools/l2_wave/sense_wait_done.sh 01 $NEWBASE AGENT_LOOP_WAKE_senseNN tools/l2_wave/senseNN_tick_prompt.txt`
+   notify_on_output ese sentinel.
+7. Reescribe `.cursor/rules/l2-wave-sense12.mdc` (alwaysApply) al sense nuevo.
+8. Heartbeat: `./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_senseNN 'Lee y ejecuta tools/l2_wave/senseNN_tick_prompt.txt (supervisión L2-wave).'`
+
+Ledger meta (una línea JSON): `at`, `sense`, `block` (10|20|…), `decision` (seguir|cambiar|parar),
+`why`, `next`.
+Touch `meta/SUPERVISED_<sense>_r<id>` para no repetir el meta de ese bloque.

@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"whitelist","spawn":{"tipo":"shell","brief":"l","arg":"launch"}}
+{"action":"admin_v1","do":"cerrar","why":"ok","reply":"launch ok."}

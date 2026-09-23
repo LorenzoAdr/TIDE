@@ -1,5 +1,8 @@
 # L2 autonomous (Fase E) — local / remote
 
+> **Legacy (chat):** el tab AI usa el [administrador único](l2-admin.md) (`ai.admin_enabled=true`).
+> Este documento describe el camino L2 autónomo antiguo; el código sigue en el repo pero ya no es el hot path NL.
+
 El orquestador (`Level2Session`) + loop (`run_level2_autonomous`) están cableados.
 En esta máquina de desarrollo puede no haber RAM/GPU para el GGUF; el cableado se prueba
 con el test scripted y en el **equipo preparado** con modelo real.

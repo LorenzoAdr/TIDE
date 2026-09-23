@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"ls largo","spawn":{"tipo":"shell","brief":"ls usrbin","arg":"ls /usr/bin"}}
+{"action":"admin_v1","do":"spawn","why":"head scorer","spawn":{"tipo":"shell","brief":"head battery","arg":"head -5 tools/l2_wave/admin_battery.py"}}
+{"action":"admin_v1","do":"cerrar","why":"trunc + battery","reply":"ls /usr/bin vino truncated/recortado en el harness; el head de admin_battery.py confirma que es la battery del admin."}

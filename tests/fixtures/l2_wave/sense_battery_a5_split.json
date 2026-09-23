@@ -1,0 +1,38 @@
+{
+  "train": [
+    "01_settings_about_tab",
+    "03_terminal_output_paint",
+    "04_ai_thinking_status_bar",
+    "06_quit_unsaved_warning",
+    "07_ai_compile_task",
+    "09_console_temp_tab",
+    "10_performance_threads_panel",
+    "11_restore_session_state",
+    "13_lsp_auto_restart",
+    "14_syntax_highlight_repaint",
+    "16_drag_drop_file_open",
+    "17_ai_spinner_stuck",
+    "18_compile_error_gutter_mark",
+    "20_cancel_ai_generation",
+    "99_cursor_ballistics_k8s"
+  ],
+  "held_out": [
+    "02_split_resize_behavior",
+    "05_shortcut_open_settings",
+    "08_toolpacks_install_python",
+    "12_edit_applied_animation",
+    "15_welcome_message_first_launch",
+    "19_editor_font_zoom"
+  ],
+  "n_train": 15,
+  "n_held_out": 6,
+  "n_total": 21,
+  "rule": "supervisor never reads held_out traces; only aggregate scores",
+  "core5_baseline": [
+    "11_restore_session_state",
+    "13_lsp_auto_restart",
+    "20_cancel_ai_generation",
+    "18_compile_error_gutter_mark",
+    "99_cursor_ballistics_k8s"
+  ]
+}

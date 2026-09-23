@@ -20,6 +20,7 @@ inline constexpr int kWaveInBodyChars = 6000;
 inline constexpr int kWaveMaxWaves = 8;
 inline constexpr int kWaveMaxMentions = 16;
 inline constexpr int kWaveMaxOutgoing = 12;
+inline constexpr int kWaveCoverKeepMin = 2;
 inline constexpr int kWaveCoverKeepMax = 3;
 inline constexpr int kWaveMaxFichaPerZone = 12;
 inline constexpr int kWaveWorkChars = 24000;
@@ -46,6 +47,7 @@ inline constexpr int kWaveGuionWordsMax = 16;
 inline constexpr int kWaveGuionPapelChars = 120;
 inline constexpr int kWaveIndependienteMaxWaves = 6;
 inline constexpr int kWaveControlMaxJobs = 3;
+inline constexpr int kWaveControlMaxJobsHard = 5;  // techo absoluto (plan v2 D)
 inline constexpr int kWaveControlLatePlanJobs = 1;
 inline constexpr int kWaveControlEvitaMax = 3;
 inline constexpr int kWaveControlMaxConsultas = 1;
@@ -67,8 +69,54 @@ inline constexpr int kWaveControlAgujasMax = 8;
 // Parse, CLI y tests del censo (agujas/plano/zoom de barrio) siguen vivos.
 // El piloto de control no los ofrece: planifica con fichas M* (ampliar → explorar).
 inline constexpr bool kWaveControlCatalogLive = false;
-// Foto de olores → barrios del grafo. Parse y `wave-bosquejo` siguen; el piloto no la pide.
-inline constexpr bool kWaveControlBosquejoLive = false;
+// Foto de olores → barrios del grafo. El piloto puede bosquejar (orientación). Censo sigue off.
+inline constexpr bool kWaveControlBosquejoLive = true;
+// Sense15/16 sello+gate: retirados tras S0 (minimal ≈ full dentro de 1σ).
+// Quedan en false; --control-diet full solo alarga el prompt, no reactiva gates.
+inline constexpr bool kWaveControlSelloPolosParcial = false;
+// Sense15: un nombre en leído/visto es el pack. No cerrar con «el pack no nombra».
+inline constexpr bool kWaveControlSelloVistoNombra = false;
+// Sense15: un Cerrado `leído:` no afirma ni esta caza. No citarlo como mecanismo.
+inline constexpr bool kWaveControlSelloDumpEstaNoAfirma = false;
+// Sense15: si el hijo niega el enlace, el why del piloto no lo afirma.
+inline constexpr bool kWaveControlSelloHijoNiegaArco = false;
+// Sense15: un leído: no refuta el existe; solo niega ese disparo.
+inline constexpr bool kWaveControlSelloDumpNoRefutaExiste = false;
+// Sense15 r10: no movió el sello (11 perdió session). Revert r11.
+inline constexpr bool kWaveControlSelloPoloNegadoQueda = false;
+// Sense15 r12: no movió el sello (13 siguió pegando eof→restart). Revert r13.
+inline constexpr bool kWaveControlSelloLeerDosNoUne = false;
+// Sense15: un pasar no sella el ancla; cierra el mapa de polos.
+inline constexpr bool kWaveControlSelloPasarNoSellaAncla = false;
+// Sense15 r15: 11 perdió session y over-refutó. Revert r16.
+inline constexpr bool kWaveControlSelloUnoNoRefutaOtro = false;
+// Sense15 r17: 18 sella gutter LSP; 13 pierde eof. Revert r18.
+inline constexpr bool kWaveControlSelloNoCazadoNoRefuta = false;
+// Sense15: un Cerrado de solo nombres no afirma el disparo. No selles ese polo.
+inline constexpr bool kWaveControlSelloSoloNombresNoDisparo = false;
+// Sense15: un reinicio por entorno no es detección de fallo.
+inline constexpr bool kWaveControlSelloReinicioNoEsDetector = false;
+inline constexpr bool kWaveControlGateCerrarAnyMiss = false;
+inline constexpr bool kWaveControlGateDumpNoCierra = false;
+inline constexpr bool kWaveControlGateDumpNoCierraAny = false;
+inline constexpr bool kWaveControlGateTrasFalloNoSeEncontr = false;
+inline constexpr bool kWaveControlGateDumpNoEncontr = false;
+// Plan v2 B: cierre del hijo con veredicto estructurado (no solo prosa / leído:).
+inline constexpr bool kWaveJobVeredictoEstructurado = false;
+// Plan v2 C: cierre del piloto con tabla de polos (además del why).
+// Off tras BCD: el esquema duro tumba cierres válidos (ok_frac 0.20 vs S0 0.44).
+inline constexpr bool kWaveControlCerrarPolos = false;
+
+// S0 (piloto v2): Full = sense16; Minimal = prompt corto, sin Sello*/Gate*.
+enum class WaveControlDiet { Full, Minimal };
+void wave_control_set_diet(WaveControlDiet d);
+WaveControlDiet wave_control_diet();
+inline bool wave_ctrl(bool flag) {
+  return wave_control_diet() != WaveControlDiet::Minimal && flag;
+}
+const char* wave_control_diet_name(WaveControlDiet d);
+bool wave_control_diet_parse(const std::string& s, WaveControlDiet* out);
+
 inline constexpr int kWaveControlMaxOpened = 6;
 inline constexpr int kWaveControlOpenedChars = 8000;
 inline constexpr int kWaveControlRestChars = 1800;
@@ -252,6 +300,11 @@ struct WaveOla {
   int hops = 0;                        // cerca: 0 = default 1; tope 2
   std::string why;
   std::vector<std::string> huecos;  // optional: claimed unread (cerrar)
+  // Plan v2 B: cierre estructurado del hijo (hay|no_hay|no_concluyente).
+  std::string veredicto;
+  std::vector<std::string> simbolos;
+  std::vector<std::string> evidencia;
+  std::vector<std::string> falta;
   std::vector<std::string> papeles;  // guion: preguntas pequeñas de comprensión (no ids)
   int papel = 0;                     // independiente: índice 1-based del guion
   nlohmann::json raw;
@@ -334,6 +387,14 @@ struct WaveControlOla {
   std::vector<std::string> evita;
   WaveControlPlan plan;
   std::string why;
+  // Plan v2 C: tabla de polos del cerrar del piloto.
+  struct Polo {
+    std::string polo;
+    std::string estado;  // hay|no_hay|desconocido
+    std::vector<std::string> evidencia;
+  };
+  std::vector<Polo> polos;
+  std::string union_estado;  // hay|no_hay|no_verificada
 };
 
 inline const char* wave_control_do_name(WaveControlDo d) {
@@ -441,6 +502,12 @@ struct WaveState {
   bool done = false;
   std::string cierre;
   std::vector<std::string> huecos_claimed;  // from cerrar JSON; not a todo
+  // Plan v2 B: veredicto del hijo (si kWaveJobVeredictoEstructurado).
+  std::string job_veredicto;
+  std::vector<std::string> job_simbolos;
+  std::vector<std::string> job_evidencia;
+  std::vector<std::string> job_falta;
+  bool veredicto_retry_used = false;  // un reintento; luego no_concluyente
   std::vector<std::string> circuit_on;
   std::vector<std::string> circuit_off;
   std::vector<std::string> circuit_on_via;
@@ -543,6 +610,16 @@ WaveOla wave_salvage_guion(const std::string& raw);
 bool wave_check_barriers(const WaveOla& ola, const WaveState& st, std::string* err);
 bool wave_apply(WaveState* st, const WaveOla& ola, const WaveOps& ops, std::string* err);
 
+// Plan v2 B: veredicto estructurado del hijo.
+std::string wave_job_veredicto_normalize(const std::string& raw);
+bool wave_job_veredicto_ok(const std::string& v);
+std::string wave_job_veredicto_json(const std::string& veredicto,
+                                    const std::vector<std::string>& simbolos,
+                                    const std::vector<std::string>& evidencia,
+                                    const std::vector<std::string>& falta,
+                                    const std::string& why = {});
+std::string wave_job_veredicto_from_thesis(const std::string& thesis);
+
 std::string wave_notebook_markdown(const WaveState& st);
 std::string wave_work_markdown(const WaveState& st);
 std::string wave_circuit_markdown(const WaveState& st);
@@ -591,6 +668,10 @@ bool wave_control_parse_script(const std::string& text, std::vector<std::string>
                                std::string* err);
 bool wave_control_evita_ok(const std::vector<std::string>& evita, std::string* err);
 bool wave_control_cerrar_why_ok(const std::string& why, std::string* err);
+bool wave_control_cerrar_tras_fallo_ok(const std::string& why, bool last_failed,
+                                      std::string* err = nullptr);
+bool wave_control_cerrar_tras_dump_ok(const std::string& why, bool last_dump,
+                                     std::string* err = nullptr);
 bool wave_control_bosquejar_ok(const std::vector<std::string>& conceptos, std::string* err);
 bool wave_control_aguja_ok(const std::string& tok);
 bool wave_control_agujas_ok(const std::vector<std::string>& agujas, std::string* err);
@@ -603,15 +684,24 @@ bool wave_control_consulta_delta_ok(const std::string& consulta, const std::stri
                                    const std::vector<std::string>& prev, std::string* err);
 std::string wave_control_consulta_misma_caza(const std::string& consulta,
                                             const std::vector<std::string>& prev);
-bool wave_control_consulta_claim_conjunto(const std::string& consulta);
 bool wave_control_consulta_replay_ok(const std::string& consulta, const std::vector<std::string>& prev,
-                                    bool last_failed, std::string* err);
+                                    bool last_failed, std::string* err,
+                                    const std::vector<std::string>& failed = {});
 bool wave_control_jobs_last_failed(const std::string& jobs_md);
+bool wave_control_jobs_last_no_afirma(const std::string& jobs_md);
+bool wave_control_jobs_last_dump_leido(const std::string& jobs_md);
+bool wave_control_jobs_any_dump_leido(const std::string& jobs_md);
+bool wave_control_jobs_any_miss(const std::string& jobs_md);
+bool wave_control_inherit_visto_ok(const std::string& jobs_md);
+bool wave_control_job_marca_failed(const std::string& jobs_md, bool last_visto_empty);
+// Plan v2 D: tope de jobs = max(floor, min(hard, fases del plan committed)).
+int wave_control_job_cap(const WaveControlPlan& plan);
 std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int jobs_run,
                                              bool last_visto, int agujas_n = 0, int zoom_n = 0,
-                                             int ampliar_n = 0);
+                                             int ampliar_n = 0, int bosquejos_n = 0);
 bool wave_control_do_allowed(const std::vector<WaveControlDo>& legal, WaveControlDo d);
-std::string wave_control_legal_markdown(const std::vector<WaveControlDo>& legal);
+std::string wave_control_legal_markdown(const std::vector<WaveControlDo>& legal,
+                                        const std::string& last_reject = {});
 std::string wave_control_plan_markdown(const WaveControlPlan& plan);
 nlohmann::json wave_control_plan_to_json(const WaveControlPlan& plan);
 int wave_control_plan_current(const WaveControlPlan& plan);
@@ -633,6 +723,10 @@ struct WaveControlJobSnap {
   int n = 0;
   std::string consulta;
   std::string cerrado;
+  std::string veredicto;  // hay|no_hay|no_concluyente (vacío = legado)
+  std::vector<std::string> simbolos;
+  std::vector<std::string> evidencia;
+  std::vector<std::string> falta;
   std::vector<std::string> visto;  // path:symbol consultados
   std::vector<WavePeekNeighbors> peek_neighbors;
   std::string circuit_entre;
@@ -641,6 +735,9 @@ using WaveControlPathFn =
     std::function<bool(const std::string& from, const std::string& to, std::string* md,
                        std::vector<WaveHit>* hops, std::string* err)>;
 WaveControlJobSnap wave_control_job_snap(int n, const WaveState& st);
+// Plan v2 C: valida polos/unión contra jobs (esquema; evidencia blanda).
+bool wave_control_cerrar_polos_ok(const WaveControlOla& ola,
+                                 const std::vector<WaveControlJobSnap>& jobs, std::string* err);
 std::string wave_control_jobs_circuit_pack(const std::vector<WaveControlJobSnap>& jobs,
                                            const WaveControlPathFn& path_between = {});
 std::string wave_control_fallos_cue(const std::vector<WaveControlJobSnap>& jobs);
@@ -663,13 +760,17 @@ std::string wave_control_system_prompt(WaveControlCue cue = WaveControlCue::Defa
                                        WaveControlInduce induce = WaveControlInduce::Baseline);
 std::string wave_control_rama_nudge(const std::string& consulta = {});
 std::string wave_control_misma_caza_nudge(const std::string& prev, const std::string& proposed);
+std::string wave_control_miss_empty_cue();
 std::string wave_control_fallo_replay_nudge(const std::string& prev = {},
                                            const std::string& proposed = {},
-                                           WaveControlInduce induce = WaveControlInduce::Baseline);
+                                           WaveControlInduce induce = WaveControlInduce::Baseline,
+                                           bool escalate = false);
 std::string wave_control_plantilla_nudge(const std::string& consulta = {},
                                          bool otra_forma = false);
 std::string wave_control_evita_nudge();
 std::string wave_control_cerrar_nudge();
+std::string wave_control_plan_nudge();
+std::string wave_control_sin_objeto_nudge();
 std::string wave_control_user_prompt(const std::string& user_consulta, const std::string& jobs_md,
                                      const std::string& barrio_brief = {},
                                      const std::string& inspect_brief = {},
@@ -681,7 +782,8 @@ std::string wave_control_user_prompt(const std::string& user_consulta, const std
                                      const std::string& bosquejo_md = {},
                                      const std::string& plano_md = {},
                                      const std::string& zoom_md = {},
-                                     WaveControlInduce induce = WaveControlInduce::Baseline);
+                                     WaveControlInduce induce = WaveControlInduce::Baseline,
+                                     const std::string& last_reject = {});
 nlohmann::json wave_state_to_json(const WaveState& st);
 nlohmann::json wave_ola_to_json(const WaveOla& ola);
 

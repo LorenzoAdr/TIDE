@@ -1,0 +1,23 @@
+Al despertar: batería BCD (post S0+B+C+D). Sense16 en STOP.
+
+Sentinel: `AGENT_LOOP_WAKE_v2bcd`.
+Base: `/home/lorenzo/workspace/TIDE/.tuide/ai/l2_wave/v2_night/BCD`
+Responde en español. Sé breve.
+
+## Tick
+
+0. Si no existe `meta/STOP`, créalo (no reabras sense16).
+1. Estado BCD:
+   - `DONE` ¿sí?
+   - si no: `queue.pid` vivo / cuántos `rep_*/DONE` / última línea de `queue.log`
+2. Si cola muerta y falta DONE: rearma
+   `./tools/l2_wave/run_bcd_baseline.sh 5 .tuide/ai/l2_wave/v2_night/BCD`
+3. Si cola viva: no dupliques.
+4. Si DONE: lee `BCD_summary.json` y `BCD_vs_S0.json`; anota ok_frac vs S0 (1σ).
+   Regla: adoptar B–D si BCD ≳ S0 (dentro de 1σ o mejor).
+5. Heartbeat: rearmar SIEMPRE
+   `./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_v2bcd 'Lee y ejecuta tools/l2_wave/bcd_tick_prompt.txt (batería BCD).'`
+   notify_on_output `AGENT_LOOP_WAKE_v2bcd`.
+6. No edites flags/prompts a medida de un caso.
+
+Manual: no matar la cola BCD.

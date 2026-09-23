@@ -1,0 +1,1 @@
+{"action":"admin_v1","do":"ask_user","why":"referencia vaga","reply":"¿A qué bug te refieres?"}

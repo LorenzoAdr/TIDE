@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"listar round_07","spawn":{"tipo":"shell","brief":"ls r07","arg":"ls tests/fixtures/l2_admin/battery/round_07"}}
+{"action":"admin_v1","do":"spawn","why":"tail del script","spawn":{"tipo":"shell","brief":"tail accum","arg":"tail -5 tests/fixtures/l2_admin/battery/round_07/notebook_accum.txt"}}
+{"action":"admin_v1","do":"cerrar","why":"último do del tail","reply":"En notebook_accum.txt el último do del script es cerrar (tail tras ls de round_07)."}

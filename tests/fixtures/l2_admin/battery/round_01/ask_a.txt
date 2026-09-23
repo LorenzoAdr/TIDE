@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"quizas explorar","spawn":{"tipo":"explore","brief":"arregla eso"}}
+{"action":"admin_v1","do":"ask_user","why":"stub","reply":"¿qué quieres arreglar exactamente?"}

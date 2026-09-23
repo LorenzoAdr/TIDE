@@ -6889,6 +6889,8 @@ int registry_causal_query_hay_overlap(const std::string& query, const std::strin
 
 namespace {
 
+constexpr std::size_t kAtlasClonePeekCap = 2;
+
 std::string atlas_primary_stem(const nlohmann::json& zone) {
   for (const char* key : {"primary_stems", "core_stems"}) {
     for (const auto& stem : zone.value(key, nlohmann::json::array())) {
@@ -6949,7 +6951,7 @@ std::vector<std::string> atlas_diverse_peeks(const nlohmann::json& zone) {
   std::vector<std::string> picked;
   std::unordered_set<std::string> buckets;
   auto try_add = [&](const std::string& s) {
-    if (picked.size() >= 2) {
+    if (picked.size() >= kAtlasClonePeekCap) {
       return;
     }
     if (std::find(picked.begin(), picked.end(), s) != picked.end()) {
@@ -6974,6 +6976,21 @@ std::vector<std::string> atlas_diverse_peeks(const nlohmann::json& zone) {
     picked.push_back(pool.front());
   }
   return picked;
+}
+
+void atlas_emit_peeks(std::ostringstream& out, const nlohmann::json& zone) {
+  const auto peeks = atlas_diverse_peeks(zone);
+  if (peeks.empty()) {
+    return;
+  }
+  out << "    peek:";
+  for (std::size_t i = 0; i < peeks.size(); ++i) {
+    if (i) {
+      out << ",";
+    }
+    out << " " << peeks[i];
+  }
+  out << "\n";
 }
 
 std::string atlas_owns_caption(const nlohmann::json& zone) {
@@ -7215,10 +7232,7 @@ std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
         }
         out << "  stems: " << pstem
             << "\n";
-        const auto peeks = atlas_diverse_peeks(zone);
-        if (!peeks.empty()) {
-          out << "    peek: " << peeks.front() << "\n";
-        }
+        atlas_emit_peeks(out, zone);
         continue;
       }
       stem_first_id.emplace(causal_lower(pstem), id);
@@ -7281,17 +7295,7 @@ std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
     if (!gap.empty()) {
       out << "    gap: " << gap << "\n";
     }
-    const auto peeks = atlas_diverse_peeks(zone);
-    if (!peeks.empty()) {
-      out << "    peek:";
-      for (std::size_t i = 0; i < peeks.size(); ++i) {
-        if (i) {
-          out << ",";
-        }
-        out << " " << peeks[i];
-      }
-      out << "\n";
-    }
+    atlas_emit_peeks(out, zone);
     const auto ports = zone.value("ports", nlohmann::json::array());
     if (!ports.empty()) {
       const auto& edge = ports.front();

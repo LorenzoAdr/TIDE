@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"search primero","spawn":{"tipo":"search","brief":"s","arg":"AdminEvidenceItem"}}
+{"action":"admin_v1","do":"spawn","why":"leer path del notebook","spawn":{"tipo":"read","brief":"r","arg":"src/ai/l2_admin.hpp"}}
+{"action":"admin_v1","do":"cerrar","why":"notebook con 2 evidencias","reply":"AdminEvidenceItem acumula job_id, paths y facts en el notebook de sesión."}

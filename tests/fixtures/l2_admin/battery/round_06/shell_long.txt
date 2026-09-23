@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"listado largo","spawn":{"tipo":"shell","brief":"ls usr bin","arg":"ls /usr/bin"}}
+{"action":"admin_v1","do":"cerrar","why":"miro truncated","reply":"El harness devolvió la salida truncated con head/tail (no completa); raw_bytes alto en el summary."}

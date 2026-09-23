@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"buscar modulo sesion","spawn":{"tipo":"explore","brief":"reset sesion agente"}}
+{"action":"admin_v1","do":"spawn","why":"reintentar","spawn":{"tipo":"explore","brief":"otra vez"}}
+{"action":"admin_v1","do":"cerrar","why":"sigue stub","reply":"No localicé el módulo (explore stub)."}

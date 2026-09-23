@@ -736,6 +736,19 @@ void test_query_constellations() {
     nlohmann::json twins = {{"zones", nlohmann::json::array({twin_a, twin_b})}};
     expect(tuide::registry_causal_atlas_markdown(twins).find("same=M1") != std::string::npos,
            "atlas collapses duplicate stems");
+    nlohmann::json twin_c = {
+        {"id", "M7"},
+        {"primary_stems", nlohmann::json::array({"visual_highlight"})},
+        {"representatives",
+         nlohmann::json::array(
+             {nlohmann::json{{"target", "src/ui/visual_highlight.cpp:start"}},
+              nlohmann::json{{"target", "src/ui/visual_highlight.cpp:on_reader_eof"}},
+              nlohmann::json{{"target", "src/ui/visual_highlight.cpp:stop"}}})}};
+    nlohmann::json twin_clone_peeks = {{"zones", nlohmann::json::array({twin_a, twin_c})}};
+    const std::string clone_md = tuide::registry_causal_atlas_markdown(twin_clone_peeks);
+    expect(clone_md.find("same=M1") != std::string::npos, "clone keeps same=");
+    expect(clone_md.find("on_reader_eof") != std::string::npos,
+           "clone card lists the 2nd peek, not only peeks.front()");
     expect(tuide::registry_causal_pack_markdown(atlas_payload, tuide::GraphViewLevel::Atlas)
                    .find("causal_atlas_v1") != std::string::npos,
            "pack markdown atlas");

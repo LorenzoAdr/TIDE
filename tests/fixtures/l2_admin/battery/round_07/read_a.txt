@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"leer header","spawn":{"tipo":"read","brief":"ui","arg":"src/ai/l2_admin.hpp"}}
+{"action":"admin_v1","do":"cerrar","why":"leído","reply":"AdminSessionUi tiene active_path, cursor_line y selection en el header."}

@@ -1,0 +1,32 @@
+Al despertar: supervisión sense13 → handoff sense14 en /home/lorenzo/workspace/TIDE.
+
+Sin plazo. No pares el bucle. El usuario lo corta.
+
+NUNCA lances la batería ni el wait desde un Task/subagente. Lanza con Shell en ESTA sesión.
+
+Protocolo: lee este archivo y .cursor/rules/l2-wave-sense12.mdc.
+Misma batería `tests/fixtures/l2_wave/sense_battery.json`, induce miss-answer, ancla git d1be1c5.
+Responde siempre en español.
+
+## Mientras r17 no tenga DONE
+
+No toques código. No rebuild. No r18. No sense14.
+Si el proceso vive → wait `sense13_wait_done.sh 17`.
+Si el proceso murió sin DONE → relanza el MISMO id 17.
+
+## Al DONE de r17 (sense13 termina aquí)
+
+NO lanzar r18 de sense13. La orientación bosquejo/censo tocó techo (r01–r16).
+
+1. Juzga las 5 cazas de r17 (jobs/control/why; el scoreboard miente).
+   Hipótesis r17: revert censo; bosquejo live; 13 no pega llama; 99 T0; 20 cierra hueco; 18/11 se quedan.
+2. Ledger + SUPERVISED r17. Base: `.tuide/ai/l2_wave/sense13`
+3. Handoff a sense14 (pack/hijo). Sigue `tools/l2_wave/sense14_tick_prompt.txt`:
+   - Keep orientación congelada: bosquejo live, censo off, tesis dump r03/r05/r08/r09/r12/r14.
+   - Palanca r01: `causal_wave_pilot` think Medium → High en `src/ai/l2_think.hpp`.
+   - Actualiza tests de `l2_think_test` (wave pilot medium → high).
+   - Rebuild `l2_wave_test` `l2_think_test` `l2_harness_cli`. Corre los tests.
+   - Base: `.tuide/ai/l2_wave/sense14`
+   - `./tools/l2_wave_sense_battery.sh 01 /home/lorenzo/workspace/TIDE/.tuide/ai/l2_wave/sense14`
+   - `./tools/l2_wave/sense14_wait_done.sh 01` (sentinel `AGENT_LOOP_WAKE_sense14`)
+4. A partir de ahí el bucle es sense14, no sense13.

@@ -1,0 +1,72 @@
+{
+  "induce": "miss-answer",
+  "why": "Cinco cazas duras: dos mecanismos reales, dos huecos, un ancla inventada. El piloto debe confirmar, refutar o rendirse sin humo. Sin vetos a medida de un caso.",
+  "cases": [
+    {
+      "id": "11_restore_session_state",
+      "kind": "existe",
+      "complexity": "muy_alta",
+      "via": "case",
+      "expect": "persistencia de cursor, tabs y paneles al reabrir un workspace; no recetar el ancla entero a un hijo",
+      "gold": {
+        "symbols_any": ["restore_workspace_session", "save_state"],
+        "polos_afirmados": ["tabs", "sesion"],
+        "polos_negados": ["cursor_persistido_completo"],
+        "forbid_why": ["console keys"]
+      }
+    },
+    {
+      "id": "13_lsp_auto_restart",
+      "kind": "existe",
+      "complexity": "muy_alta",
+      "via": "case",
+      "expect": "detección de muerte/timeout del LSP y relanzado; no confundir con DAP ni con el PTY",
+      "gold": {
+        "symbols_any": ["lsp", "restart", "watch", "timeout"],
+        "polos_afirmados": ["reinicio"],
+        "polos_negados": [],
+        "forbid_why": ["dap", "pty"]
+      }
+    },
+    {
+      "id": "20_cancel_ai_generation",
+      "kind": "hueco",
+      "complexity": "media",
+      "via": "case",
+      "expect": "el aborto y el rollback existen; Escape/clic-fuera no se traducen a esa parada; cerrar el claim, no reabrir la misma caza",
+      "gold": {
+        "symbols_any": ["cancel", "abort", "busy"],
+        "polos_afirmados": [],
+        "polos_negados": ["escape_cancela", "console_keys"],
+        "forbid_why": ["console keys", "escape cancela la generación"]
+      }
+    },
+    {
+      "id": "18_compile_error_gutter_mark",
+      "kind": "hueco",
+      "complexity": "media_alta",
+      "via": "case",
+      "expect": "la consola muestra errores de build; no hay marca de compile en el gutter del editor (el gutter de LSP no cuenta como ese mapeo)",
+      "gold": {
+        "symbols_any": ["diagnostic", "gutter", "compile"],
+        "polos_afirmados": [],
+        "polos_negados": ["compile_gutter"],
+        "forbid_why": []
+      }
+    },
+    {
+      "id": "99_cursor_ballistics_k8s",
+      "kind": "absurdo",
+      "complexity": "inventado",
+      "via": "prompt",
+      "prompt": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+      "expect": "rendirse: no hay física de cursores, ni k8s, ni índice cuántico; no vender un vecino (git, embed, cursor) como si fuera eso",
+      "gold": {
+        "symbols_any": [],
+        "polos_afirmados": [],
+        "polos_negados": ["balistica", "kubernetes", "cuantico"],
+        "forbid_why": ["kubernetes", "balíst", "cuántic"]
+      }
+    }
+  ]
+}

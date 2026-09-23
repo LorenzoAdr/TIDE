@@ -70,6 +70,13 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
   if (doc.contains("enabled") && doc["enabled"].is_boolean()) {
     settings->enabled = doc["enabled"].get<bool>();
   }
+  if (doc.contains("admin_enabled") && doc["admin_enabled"].is_boolean()) {
+    settings->admin_enabled = doc["admin_enabled"].get<bool>();
+  }
+  if (doc.contains("admin") && doc["admin"].is_object() && doc["admin"].contains("enabled") &&
+      doc["admin"]["enabled"].is_boolean()) {
+    settings->admin_enabled = doc["admin"]["enabled"].get<bool>();
+  }
   if (doc.contains("command_whitelist") && doc["command_whitelist"].is_array()) {
     settings->command_whitelist.clear();
     for (const auto& entry : doc["command_whitelist"]) {
@@ -280,6 +287,7 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
   }
   return nlohmann::json{
       {"enabled", settings.enabled},
+      {"admin_enabled", settings.admin_enabled},
       {"command_whitelist", settings.command_whitelist},
       {"tasks", std::move(tasks)},
       {"path_scope", settings.path_scope},

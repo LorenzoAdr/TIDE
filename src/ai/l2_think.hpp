@@ -50,8 +50,10 @@ inline L2ThinkProfile think_profile_for(std::string_view phase, bool has_pack,
   if (is_pack_review) {
     return think_profile(L2ThinkLevel::Low);
   }
-  // JSON corto: con thinking, Qwen3.6 vuelca CoT al content y no emite `{`.
-  if (phase == "edit" || phase == "causal_wave_cover" || phase == "causal_wave_control") {
+  // JSON corto: cover/edit con thinking vuelcan CoT al content y no emiten `{`.
+  // El piloto de control sí piensa (juicio de cierre); el parseo busca el JSON
+  // tras </think> o el último objeto action.
+  if (phase == "edit" || phase == "causal_wave_cover") {
     return think_profile(L2ThinkLevel::Off);
   }
   if (phase == "causal_wave_guion") {
@@ -66,7 +68,8 @@ inline L2ThinkProfile think_profile_for(std::string_view phase, bool has_pack,
   if (phase == "causal_pilot_plan" || phase == "causal_wave_pilot") {
     return think_profile(L2ThinkLevel::Medium);
   }
-  if (phase == "causal_zone_hyp" || phase == "causal_zone_anchor" ||
+  if (phase == "causal_wave_control" || phase == "causal_zone_hyp" ||
+      phase == "causal_zone_anchor" ||
       ((phase == "explore" || phase == "explore_b") && !has_pack)) {
     return think_profile(L2ThinkLevel::High);
   }

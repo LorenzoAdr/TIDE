@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"pide compilar","spawn":{"tipo":"build","brief":"compile","arg":"compile"}}
+{"action":"admin_v1","do":"cerrar","why":"build ok","reply":"Compilación lanzada (ver inbox)."}

@@ -1,0 +1,29 @@
+Al despertar: supervisión sense12 / handoff sense13 en /home/lorenzo/workspace/TIDE.
+
+Lee este archivo y .cursor/rules/l2-wave-sense12.mdc.
+Responde siempre en español.
+NUNCA lances la batería ni el wait desde un Task/subagente. Lanza con Shell en ESTA sesión.
+
+## Mientras r60 no tenga DONE
+
+No toques código. No rebuild. No r61. No sense13.
+Si el proceso vive → wait sense12_wait_done.sh 60.
+Si el proceso murió sin DONE → relanza el MISMO id 60.
+
+## Al DONE de r60 (sense12 termina aquí)
+
+NO lanzar r61 de sense12. El pack/hijo tocó techo (r52–r59).
+
+1. Juzga las 5 cazas de r60 (jobs/control/why; el scoreboard miente).
+   Hipótesis r60: revert expand_hops=2; cover chrome + clon peek 1–2; 13 eof en T1; 11 no niega reopen.
+2. Ledger + SUPERVISED r60.
+3. Handoff a sense13 (orientación bosquejo). Sigue este archivo y tools/l2_wave/sense13_tick_prompt.txt:
+   - Keep pack congelado: atlas hijo de SU consulta, clon peek 1–2, cover chrome,
+     think High piloto, revert hops/audit/hijo High, 99 T0.
+   - Palanca r01: `kWaveControlBosquejoLive = true`. Censo sigue off.
+   - Actualiza tests que afirman bosquejo off → on (legal Bosquejar, few-shot olores).
+   - Rebuild `l2_wave_test` `l2_think_test` `l2_harness_cli`. Corre los tests.
+   - Base: `.tuide/ai/l2_wave/sense13`
+   - `./tools/l2_wave_sense_battery.sh 01 /home/lorenzo/workspace/TIDE/.tuide/ai/l2_wave/sense13`
+   - `./tools/l2_wave/sense13_wait_done.sh 01` (sentinel `AGENT_LOOP_WAKE_sense13`)
+4. A partir de ahí el bucle es sense13, no sense12.

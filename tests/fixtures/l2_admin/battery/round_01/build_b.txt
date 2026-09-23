@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"build para ver si rompe","spawn":{"tipo":"shell","brief":"cmake build","arg":"cmake --build build"}}
+{"action":"admin_v1","do":"ask_user","why":"quizas deny","reply":"¿puedo usar cmake --build o prefieres compile?"}

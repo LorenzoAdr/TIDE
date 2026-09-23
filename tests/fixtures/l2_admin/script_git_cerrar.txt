@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"consultar git","spawn":{"tipo":"git","brief":"status","arg":"status"}}
+{"action":"admin_v1","do":"cerrar","why":"ya tengo el status","reply":"working tree OK"}

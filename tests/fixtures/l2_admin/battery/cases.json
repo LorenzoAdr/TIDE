@@ -1,0 +1,181 @@
+{
+  "version": 2,
+  "notes": "Gold = turno 1. También se puntúa calidad del inbox/harness y shell improvisado.",
+  "cases": [
+    {
+      "id": "git_a",
+      "tool": "git",
+      "prompt": "¿hay cambios sin commitear en el repo?",
+      "gold_do": "spawn",
+      "gold_tipo": "git",
+      "gold_arg_any": ["status"],
+      "expect_inbox": true,
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "git_b",
+      "tool": "git",
+      "prompt": "enséñame los últimos commits",
+      "gold_do": "spawn",
+      "gold_tipo": "git",
+      "gold_arg_any": ["log"],
+      "expect_inbox": true,
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "build_a",
+      "tool": "build",
+      "prompt": "compila el proyecto",
+      "gold_do": "spawn",
+      "gold_tipo": "build",
+      "gold_arg_any": ["compile"],
+      "expect_inbox": true,
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "build_b",
+      "tool": "build",
+      "prompt": "haz un build para ver si rompe",
+      "gold_do": "spawn",
+      "gold_tipo": "build",
+      "gold_arg_any": ["compile", "build"],
+      "expect_inbox": true,
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "shell_a",
+      "tool": "shell",
+      "prompt": "lanza el target launch de la whitelist",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "gold_arg_any": ["launch"],
+      "alt_tipo": ["build"],
+      "expect_inbox": true,
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "shell_b",
+      "tool": "shell",
+      "prompt": "ejecuta la task launch",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "gold_arg_any": ["launch"],
+      "alt_tipo": ["build"],
+      "expect_inbox": true,
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "shell_ls_a",
+      "tool": "shell_free",
+      "prompt": "lista los archivos ocultos en el directorio .tuide (incluido punto)",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "gold_arg_substr": ["ls"],
+      "gold_arg_has_any": ["-a", "-la", "-al", "A"],
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [".", "tuide", "ai", "config", "ocult", "archivo", "list"]
+    },
+    {
+      "id": "shell_ls_b",
+      "tool": "shell_free",
+      "prompt": "enumera qué hay en tests/fixtures/l2_admin (nombres de archivos)",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "gold_arg_substr": ["ls", "find"],
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": ["battery", "script", "fixture", "l2_admin", "archivo", "tests"]
+    },
+    {
+      "id": "shell_long",
+      "tool": "shell_free",
+      "prompt": "haz un listado largo de /usr/bin (muchas entradas) y dime si el harness te devuelve la salida completa o recortada",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "gold_arg_substr": ["ls"],
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "expect_truncated_or_large": true,
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": ["truncat", "head", "tail", "bytes", "recort", "largo", "completo", "parcial"]
+    },
+    {
+      "id": "explore_a",
+      "tool": "explore",
+      "prompt": "¿dónde se pinta el indicador de IA ocupada en la UI?",
+      "gold_do": "spawn",
+      "gold_tipo": "explore",
+      "gold_arg_any": [],
+      "expect_inbox": true,
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "explore_b",
+      "tool": "explore",
+      "prompt": "busca qué módulo reinicia la sesión del agente de chat",
+      "gold_do": "spawn",
+      "gold_tipo": "explore",
+      "gold_arg_any": [],
+      "expect_inbox": true,
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "ask_a",
+      "tool": "ask_user",
+      "prompt": "arregla eso",
+      "gold_do": "ask_user",
+      "gold_tipo": null,
+      "gold_arg_any": [],
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "ask_b",
+      "tool": "ask_user",
+      "prompt": "el bug de antes",
+      "gold_do": "ask_user",
+      "gold_tipo": null,
+      "gold_arg_any": [],
+      "reply_must_not_be_empty": true
+    },
+    {
+      "id": "search_a",
+      "tool": "search",
+      "prompt": "busca dónde se define AdminEvidenceItem",
+      "gold_do": "spawn",
+      "gold_tipo": "search",
+      "gold_arg_substr": ["AdminEvidenceItem", "Evidence"],
+      "expect_inbox": true,
+      "expect_notebook_min": 1,
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": ["AdminEvidenceItem", "l2_admin", "notebook", "evidence", "struct"]
+    },
+    {
+      "id": "read_a",
+      "tool": "read",
+      "prompt": "lee src/ai/l2_admin.hpp y dime qué es AdminSessionUi",
+      "gold_do": "spawn",
+      "gold_tipo": "read",
+      "gold_arg_substr": ["l2_admin.hpp"],
+      "expect_inbox": true,
+      "expect_notebook_min": 1,
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": ["AdminSessionUi", "active_path", "selection", "cursor", "ui"]
+    },
+    {
+      "id": "notebook_accum",
+      "tool": "notebook",
+      "prompt": "localiza AdminEvidenceItem con search, lee el header y resume qué acumula",
+      "gold_do": "spawn",
+      "gold_tipo": "search",
+      "gold_arg_substr": ["AdminEvidenceItem", "Evidence"],
+      "expect_inbox": true,
+      "expect_notebook_min": 2,
+      "expect_close": true,
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": ["AdminEvidenceItem", "path", "fact", "notebook", "evidenc", "job"]
+    }
+  ]
+}

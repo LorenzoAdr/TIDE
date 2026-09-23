@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"ocultos en .tuide","spawn":{"tipo":"shell","brief":"ls hidden","arg":"ls -la .tuide"}}
+{"action":"admin_v1","do":"cerrar","why":"inbox tiene listado","reply":"En .tuide veo entradas (incl. ocultas) según el ls -la del inbox."}

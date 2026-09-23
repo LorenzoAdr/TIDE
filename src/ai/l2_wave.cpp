@@ -3528,6 +3528,10 @@ WaveOla wave_parse_ola(const std::string& raw) {
   }
   out.why = json_str(j, "why");
   out.huecos = json_str_array(j, "huecos");
+  out.veredicto = json_str(j, "veredicto");
+  out.simbolos = json_str_array(j, "simbolos");
+  out.evidencia = json_str_array(j, "evidencia");
+  out.falta = json_str_array(j, "falta");
   if (out.papeles.empty()) {
     out.papeles = json_str_array(j, "papeles");
   }
@@ -4019,6 +4023,51 @@ bool wave_apply(WaveState* st, const WaveOla& ola_in, const WaveOps& ops, std::s
     }
     return false;
   }
+  if (kWaveJobVeredictoEstructurado && st->control_worker) {
+    std::string v = wave_job_veredicto_normalize(ola.veredicto);
+    auto fill_simbolos_from_visto = [&](std::vector<std::string>* dest) {
+      if (dest == nullptr || !dest->empty()) {
+        return;
+      }
+      const auto h = wave_pack_handoff(*st);
+      for (const auto& loc : h.visto) {
+        if (dest->size() >= 8) {
+          break;
+        }
+        if (!loc.empty()) {
+          dest->push_back(loc);
+        }
+      }
+    };
+    if (!wave_job_veredicto_ok(v)) {
+      if (!st->veredicto_retry_used) {
+        st->veredicto_retry_used = true;
+        st->last_error =
+            "cerrar: falta veredicto hay|no_hay|no_concluyente (reintenta una vez)";
+        if (err) {
+          *err = st->last_error;
+        }
+        return false;
+      }
+      v = "no_concluyente";
+    }
+    std::vector<std::string> simbolos = ola.simbolos;
+    std::vector<std::string> evidencia = ola.evidencia;
+    std::vector<std::string> falta = ola.falta;
+    if (v == "no_concluyente") {
+      fill_simbolos_from_visto(&simbolos);
+    }
+    st->job_veredicto = v;
+    st->job_simbolos = simbolos;
+    st->job_evidencia = evidencia;
+    st->job_falta = falta;
+    st->done = true;
+    st->cierre = wave_job_veredicto_json(v, simbolos, evidencia, falta, ola.why);
+    st->huecos_claimed = ola.huecos;
+    wave_attach_cierre_caption(st);
+    push_ola_log(st, "cerrar", ola.why.empty() ? v : ola.why, {});
+    return true;
+  }
   st->done = true;
   st->cierre = ola.why;
   st->huecos_claimed = ola.huecos;
@@ -4029,6 +4078,62 @@ bool wave_apply(WaveState* st, const WaveOla& ola_in, const WaveOps& ops, std::s
 
 bool wave_circuit_complete(const WaveState& st) {
   return !st.circuit_on.empty() && !st.circuit_off.empty();
+}
+
+std::string wave_job_veredicto_normalize(const std::string& raw) {
+  std::string v = ascii_lower(trim_ws_copy(raw));
+  for (char& c : v) {
+    if (c == '-') {
+      c = '_';
+    }
+  }
+  if (v == "hay" || v == "yes" || v == "found" || v == "existe") {
+    return "hay";
+  }
+  if (v == "no_hay" || v == "nohay" || v == "miss" || v == "ausente" ||
+      v == "no_encontrado" || v == "noencontrado") {
+    return "no_hay";
+  }
+  if (v == "no_concluyente" || v == "noconcluyente" || v == "inconclusive" || v == "dump" ||
+      v == "parcial" || v == "unknown" || v == "desconocido") {
+    return "no_concluyente";
+  }
+  return {};
+}
+
+bool wave_job_veredicto_ok(const std::string& v) {
+  return v == "hay" || v == "no_hay" || v == "no_concluyente";
+}
+
+std::string wave_job_veredicto_json(const std::string& veredicto,
+                                    const std::vector<std::string>& simbolos,
+                                    const std::vector<std::string>& evidencia,
+                                    const std::vector<std::string>& falta,
+                                    const std::string& why) {
+  nlohmann::json j = {{"veredicto", veredicto},
+                      {"simbolos", simbolos},
+                      {"evidencia", evidencia},
+                      {"falta", falta}};
+  if (!why.empty()) {
+    j["why"] = why;
+  }
+  return j.dump();
+}
+
+std::string wave_job_veredicto_from_thesis(const std::string& thesis) {
+  const std::string t = trim_ws_copy(thesis);
+  if (t.empty() || t.front() != '{') {
+    return {};
+  }
+  try {
+    const auto j = nlohmann::json::parse(t);
+    if (!j.is_object()) {
+      return {};
+    }
+    return wave_job_veredicto_normalize(j.value("veredicto", ""));
+  } catch (...) {
+    return {};
+  }
 }
 
 bool wave_is_last_propose(const WaveState& st) {
@@ -4843,10 +4948,11 @@ std::string wave_guion_user_prompt(const WaveState& st) {
 }
 
 std::string wave_cover_system_prompt() {
-  return R"(Elige 1–2 ids M* cuyo owns/nucleus sea el sistema de la consulta (el objeto).
-El guion es el examen: no cubras cada pregunta. Keep vacío no vale.
+  return R"(Elige 2–3 ids M* cuyo owns/nucleus sea el sistema de la consulta (el objeto).
+El guion es el examen: no cubras cada pregunta. Keep de uno solo no vale.
 Un gesto sin zona propia no vacía el keep: primero el objeto.
 No elijas una zona solo porque un token de la consulta aparece en el peek.
+kind=chrome es decoración, no el sistema. Si hay object/latch/caller con ov, keep esos.
 Si el cue dice que una caza anterior falló o hay evita, no hagas keep de eso.
 PROHIBIDO inventar ids.
 PROHIBIDO prosa, recap, traducir el atlas o repetir estas reglas.
@@ -4997,7 +5103,7 @@ std::string wave_pilot_user_prompt(const WaveState& st) {
 }
 
 std::string wave_explorer_system_prompt() {
-  return R"(Eres el EXPLORADOR. NO editas código. NO lanzas otros ciclos. NO independiente. NO orquestas.
+  std::string out = R"(Eres el EXPLORADOR. NO editas código. NO lanzas otros ciclos. NO independiente. NO orquestas.
 Cada respuesta es UNA ola. Tras ver el cuaderno eliges el siguiente gesto.
 PROHIBIDO un plan congelado de varias olas. PROHIBIDO inventar ids.
 
@@ -5018,7 +5124,22 @@ do:
 - follow: callers Y callees (cond). Stacks, ramas ON/CXL/OFF. Hops peekables.
 - entre: camino dirigido entre DOS loci ya anclados. `sin camino` también es evidencia.
 - tanda: needles y/o peeks y/o follows y/o entre en UNA ola.
-- cerrar: primera frase: encontraste el objeto de TU consulta, o no. Si lo leído es otra cosa: no encontré lo que preguntaba; lo leído es X. PROHIBIDO asignar la siguiente caza. `huecos` opcional: nombres afirmados y no leídos. No recetes un parche en un símbolo no leído.
+)";
+  if (kWaveJobVeredictoEstructurado) {
+    out += R"(- cerrar: veredicto obligatorio hay|no_hay|no_concluyente. Primera frase del why: encontraste el objeto de TU consulta, o no. Si lo leído es otra cosa: no_hay. Un leído: de solo nombres sin veredicto se rechaza (reintento → no_concluyente). PROHIBIDO asignar la siguiente caza. simbolos/evidencia/falta opcionales. huecos opcional.
+
+JSON:
+{"action":"ola_v1","do":"needles","needles":["start_job"],"why":"cazar el arranque del objeto"}
+{"action":"ola_v1","do":"cerca","needles":["idle timeout"],"in":[],"why":"rank de conceptos en las inmediaciones"}
+{"action":"ola_v1","do":"peek","peeks":["M1","src/pkg/mod.hpp"],"why":"cuerpo del ancla y API del header"}
+{"action":"ola_v1","do":"follow","follows":["M1"],"why":"flujo: quién llama y a quién llama"}
+{"action":"ola_v1","do":"entre","from":"start_job","to":"stop_job","why":"hay camino del arranque a la parada"}
+{"action":"ola_v1","do":"tanda","peeks":["M1"],"follows":["M1"],"why":"cuerpo y flujo en una ola"}
+{"action":"ola_v1","do":"cerrar","veredicto":"no_hay","simbolos":["src/pkg/mod.cpp:format_str"],"evidencia":["src/pkg/mod.cpp:format_str l12 formatea un string"],"why":"no encontré el arranque del trabajo; lo leído formatea un string","huecos":["run_job_async"]}
+{"action":"ola_v1","do":"cerrar","veredicto":"hay","simbolos":["src/pkg/mod.cpp:run_job"],"evidencia":["src/pkg/mod.cpp:run_job l40 arranca el trabajo"],"falta":[],"why":"el control vive en pkg::run_job"}
+)";
+  } else {
+    out += R"(- cerrar: primera frase: encontraste el objeto de TU consulta, o no. Si lo leído es otra cosa: no encontré lo que preguntaba; lo leído es X. PROHIBIDO asignar la siguiente caza. `huecos` opcional: nombres afirmados y no leídos. No recetes un parche en un símbolo no leído.
 
 JSON:
 {"action":"ola_v1","do":"needles","needles":["start_job"],"why":"cazar el arranque del objeto"}
@@ -5029,6 +5150,8 @@ JSON:
 {"action":"ola_v1","do":"tanda","peeks":["M1"],"follows":["M1"],"why":"cuerpo y flujo en una ola"}
 {"action":"ola_v1","do":"cerrar","why":"no encontré el arranque del trabajo; lo leído formatea un string","huecos":["run_job_async"]}
 )";
+  }
+  return out;
 }
 
 bool wave_control_bosquejar_ok(const std::vector<std::string>& conceptos, std::string* err) {
@@ -5087,7 +5210,7 @@ bool wave_control_agujas_ok(const std::vector<std::string>& agujas, std::string*
   std::unordered_set<std::string> seen;
   for (const auto& n : agujas) {
     if (!wave_control_aguja_ok(n)) {
-      return set("control: cada aguja es una clase de sitio (event, mouse, ai), no ident");
+      return set("control: agujas son clases de sitio (event, mouse, ai), no ident");
     }
     const std::string key = ascii_lower(trim_ws_copy(n));
     if (!seen.insert(key).second) {
@@ -5179,7 +5302,7 @@ bool wave_control_consulta_ok(const std::string& consulta, std::string* err) {
   const bool file_obj = has("escritura") || has("escrito") || has("a medias") || has("buffer") ||
                         has("revert") || has("reviert") || has("revers") || has("deshac") ||
                         has("rollback") || has("restaur") || has("insert") || has("pendiente") ||
-                        has("guardad");
+                        has("guard") || has("limpi") || has("serializ") || has("persist");
   if (cat_file && !file_obj) {
     return set("control: consulta sin objeto (no una categoría)");
   }
@@ -5257,6 +5380,167 @@ bool wave_control_cerrar_why_ok(const std::string& why, std::string* err) {
       low.find("lo que preguntamos") != std::string::npos ||
       low.find("con lo que leímos") != std::string::npos) {
     return set("control: cierre vacío, cita el mecanismo leído");
+  }
+  return true;
+}
+
+bool wave_control_cerrar_tras_fallo_ok(const std::string& why, bool last_failed, std::string* err) {
+  auto set = [&](const char* m) {
+    if (err) {
+      *err = m;
+    }
+    return false;
+  };
+  // S0: gates retirados (flags off / dieta minimal).
+  if (!wave_ctrl(kWaveControlGateCerrarAnyMiss) &&
+      !wave_ctrl(kWaveControlGateTrasFalloNoSeEncontr) &&
+      !wave_ctrl(kWaveControlGateDumpNoCierra) &&
+      !wave_ctrl(kWaveControlGateDumpNoCierraAny) &&
+      !wave_ctrl(kWaveControlGateDumpNoEncontr)) {
+    return true;
+  }
+  if (!last_failed) {
+    return true;
+  }
+  const std::string low = ascii_lower(trim_ws_copy(why));
+  std::string ack = low;
+  auto strip = [&](const char* p) {
+    for (;;) {
+      const auto i = ack.find(p);
+      if (i == std::string::npos) {
+        break;
+      }
+      ack.replace(i, std::char_traits<char>::length(p), " ");
+    }
+  };
+  strip("no hay hueco");
+  strip("sin hueco");
+  auto has = [&](const char* k) { return ack.find(k) != std::string::npos; };
+  if (has("no hay") || has("no mape") || has("no encontr") || has("sin camino") ||
+      has("no existe") || has("no dispara") || has("se refut") || has("no se captura") ||
+      has("no llama") || has("no era") || has("no cubre") || has("no une") || has("no conect") ||
+      has("niega") || has("no está") ||
+      (wave_ctrl(kWaveControlGateTrasFalloNoSeEncontr) && has("no se encontr"))) {
+    return true;
+  }
+  return set("control: el último Cerrado negó el mapeo; no selles un polo anterior");
+}
+
+bool wave_control_cerrar_tras_dump_ok(const std::string& why, bool last_dump, std::string* err) {
+  auto set = [&](const char* m) {
+    if (err) {
+      *err = m;
+    }
+    return false;
+  };
+  if (!wave_ctrl(kWaveControlGateDumpNoCierra) && !wave_ctrl(kWaveControlGateDumpNoCierraAny) &&
+      !wave_ctrl(kWaveControlGateDumpNoEncontr)) {
+    return true;
+  }
+  if (!last_dump) {
+    return true;
+  }
+  const std::string low = ascii_lower(trim_ws_copy(why));
+  std::string ack = low;
+  auto strip = [&](const char* p) {
+    for (;;) {
+      const auto i = ack.find(p);
+      if (i == std::string::npos) {
+        break;
+      }
+      ack.replace(i, std::char_traits<char>::length(p), " ");
+    }
+  };
+  strip("no hay hueco");
+  strip("sin hueco");
+  auto has = [&](const char* k) { return ack.find(k) != std::string::npos; };
+  if (has("no hay") || has("no existe") || has("se refut") || has("sin objeto") ||
+      has("sin mecanismo") ||
+      (wave_ctrl(kWaveControlGateDumpNoEncontr) && (has("no se encontr") || has("no encontr")))) {
+    return set("control: un leído no cierra el ancla; no refuta el existe");
+  }
+  return true;
+}
+
+bool wave_control_cerrar_polos_ok(const WaveControlOla& ola,
+                                 const std::vector<WaveControlJobSnap>& jobs, std::string* err) {
+  auto set = [&](const char* m) {
+    if (err) {
+      *err = m;
+    }
+    return false;
+  };
+  if (!kWaveControlCerrarPolos || ola.polos.empty()) {
+    return true;
+  }
+  if (ola.union_estado != "hay" && ola.union_estado != "no_hay" &&
+      ola.union_estado != "no_verificada") {
+    return set("control: union debe ser hay|no_hay|no_verificada");
+  }
+  auto job_veredicto = [&](const WaveControlJobSnap& j) -> std::string {
+    if (!j.veredicto.empty()) {
+      return j.veredicto;
+    }
+    return wave_job_veredicto_from_thesis(j.cerrado);
+  };
+  auto visto_has = [&](const WaveControlJobSnap& j, const std::string& sym) {
+    if (sym.empty()) {
+      return false;
+    }
+    for (const auto& v : j.visto) {
+      if (locus_keys_match(v, sym) || ascii_lower(v).find(ascii_lower(sym)) != std::string::npos) {
+        return true;
+      }
+    }
+    for (const auto& s : j.simbolos) {
+      if (locus_keys_match(s, sym) || ascii_lower(s).find(ascii_lower(sym)) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+  int no_hay_jobs = 0;
+  int no_conc_jobs = 0;
+  int hay_jobs = 0;
+  for (const auto& j : jobs) {
+    const std::string v = job_veredicto(j);
+    if (v == "hay") {
+      ++hay_jobs;
+    } else if (v == "no_hay") {
+      ++no_hay_jobs;
+    } else if (v == "no_concluyente") {
+      ++no_conc_jobs;
+    }
+  }
+  for (const auto& p : ola.polos) {
+    if (p.estado == "hay") {
+      bool ok_ev = false;
+      if (!p.evidencia.empty()) {
+        for (const auto& e : p.evidencia) {
+          for (const auto& j : jobs) {
+            if (job_veredicto(j) == "hay" && visto_has(j, e)) {
+              ok_ev = true;
+              break;
+            }
+          }
+          if (ok_ev) {
+            break;
+          }
+        }
+      } else {
+        ok_ev = hay_jobs > 0 || jobs.empty();
+      }
+      if (!ok_ev) {
+        return set("control: polo hay sin job hay que cite la evidencia");
+      }
+    } else if (p.estado == "no_hay") {
+      if (!jobs.empty() && no_hay_jobs == 0 && no_conc_jobs < 2) {
+        return set("control: polo no_hay sin job no_hay ni ≥2 no_concluyente");
+      }
+    }
+  }
+  if (ola.union_estado == "hay" && !jobs.empty() && hay_jobs == 0) {
+    return set("control: union hay exige un job con veredicto hay");
   }
   return true;
 }
@@ -5362,8 +5646,15 @@ bool control_caza_no_encontro(const std::string& thesis) {
   if (low.empty() || low == "(vacío)") {
     return false;
   }
-  if (low.rfind("leído:", 0) == 0) {
+  const std::string v = wave_job_veredicto_from_thesis(thesis);
+  if (v == "no_hay") {
     return true;
+  }
+  if (v == "hay" || v == "no_concluyente") {
+    return false;
+  }
+  if (low.rfind("leído:", 0) == 0) {
+    return false;
   }
   return low.find("engañoso") != std::string::npos || low.find("no es") != std::string::npos ||
          low.find("no un") != std::string::npos || low.find("no la captura") != std::string::npos ||
@@ -5375,11 +5666,7 @@ bool control_caza_no_encontro(const std::string& thesis) {
          low.find("utilidad") != std::string::npos;
 }
 
-std::string control_jobs_last_cerrado(const std::string& jobs_md) {
-  const auto pos = jobs_md.rfind("Cerrado:");
-  if (pos == std::string::npos) {
-    return {};
-  }
+std::string control_jobs_cerrado_from(const std::string& jobs_md, std::size_t pos) {
   std::string rest = jobs_md.substr(pos + 8);
   const char* stops[] = {"\nAbierto:", "\nHuecos de esta caza", "\n### ", "\n# "};
   std::size_t cut = rest.size();
@@ -5392,8 +5679,96 @@ std::string control_jobs_last_cerrado(const std::string& jobs_md) {
   return trim_ws_copy(rest.substr(0, cut));
 }
 
+std::string control_jobs_last_cerrado(const std::string& jobs_md) {
+  const auto pos = jobs_md.rfind("Cerrado:");
+  if (pos == std::string::npos) {
+    return {};
+  }
+  return control_jobs_cerrado_from(jobs_md, pos);
+}
+
+bool control_caza_es_miss(const std::string& thesis) {
+  const std::string low = ascii_lower(trim_ws_copy(thesis));
+  if (low.empty() || low == "(vacío)") {
+    return true;
+  }
+  const std::string v = wave_job_veredicto_from_thesis(thesis);
+  if (v == "no_hay") {
+    return true;
+  }
+  if (v == "hay" || v == "no_concluyente") {
+    return false;
+  }
+  if (low.rfind("leído:", 0) == 0) {
+    return false;
+  }
+  return control_caza_no_encontro(thesis);
+}
+
+bool control_caza_es_dump_leido(const std::string& thesis) {
+  const std::string low = ascii_lower(trim_ws_copy(thesis));
+  const std::string v = wave_job_veredicto_from_thesis(thesis);
+  if (v == "no_concluyente") {
+    return true;
+  }
+  if (v == "hay" || v == "no_hay") {
+    return false;
+  }
+  return low.rfind("leído:", 0) == 0;
+}
+
+bool control_jobs_any_dump_leido(const std::string& jobs_md) {
+  std::size_t search = 0;
+  for (;;) {
+    const auto pos = jobs_md.find("Cerrado:", search);
+    if (pos == std::string::npos) {
+      return false;
+    }
+    if (control_caza_es_dump_leido(control_jobs_cerrado_from(jobs_md, pos))) {
+      return true;
+    }
+    search = pos + 8;
+  }
+}
+
+bool control_jobs_any_miss(const std::string& jobs_md) {
+  std::size_t search = 0;
+  for (;;) {
+    const auto pos = jobs_md.find("Cerrado:", search);
+    if (pos == std::string::npos) {
+      return false;
+    }
+    if (control_caza_es_miss(control_jobs_cerrado_from(jobs_md, pos))) {
+      return true;
+    }
+    search = pos + 8;
+  }
+}
+
 bool control_jobs_last_failed(const std::string& jobs_md) {
   return control_caza_no_encontro(control_jobs_last_cerrado(jobs_md));
+}
+
+bool control_caza_no_afirma(const std::string& thesis) {
+  const std::string low = ascii_lower(trim_ws_copy(thesis));
+  if (low.empty() || low == "(vacío)") {
+    return true;
+  }
+  const std::string v = wave_job_veredicto_from_thesis(thesis);
+  if (v == "hay") {
+    return false;
+  }
+  if (v == "no_hay" || v == "no_concluyente") {
+    return true;
+  }
+  if (low.rfind("leído:", 0) == 0) {
+    return true;
+  }
+  return control_caza_no_encontro(thesis);
+}
+
+bool control_jobs_last_no_afirma(const std::string& jobs_md) {
+  return control_caza_no_afirma(control_jobs_last_cerrado(jobs_md));
 }
 
 bool control_token_is_id(const std::string& t) {
@@ -5878,41 +6253,61 @@ std::string wave_control_consulta_misma_caza(const std::string& consulta,
   return {};
 }
 
-bool wave_control_consulta_claim_conjunto(const std::string& consulta) {
-  const std::string low = ascii_lower(trim_ws_copy(consulta));
-  if (low.empty()) {
-    return false;
-  }
-  auto has = [&](const char* k) { return low.find(k) != std::string::npos; };
-  const bool gesto = has("escape") || has("clic") || has("click") || has("tecla") ||
-                     has("teclado") || has("foco") || has("raton") || has("mouse") ||
-                     has("fuera");
-  const bool aborto = has("cancel") || has("abort") || has("parada") || has("detener") ||
-                      has("detiene") || has("generacion") || has("generación") || has("stop");
-  return gesto && aborto;
-}
-
 bool wave_control_consulta_replay_ok(const std::string& consulta, const std::vector<std::string>& prev,
-                                    bool last_failed, std::string* err) {
+                                    bool last_failed, std::string* err,
+                                    const std::vector<std::string>& failed) {
+  (void)prev;
+  (void)last_failed;
   auto set = [&](const char* m) {
     if (err) {
       *err = m;
     }
     return false;
   };
-  if (!last_failed || prev.empty()) {
-    return true;
-  }
-  const std::string last = trim_ws_copy(prev.back());
-  if (wave_control_consulta_claim_conjunto(last) &&
-      wave_control_consulta_claim_conjunto(consulta)) {
-    return set("control: esa caza no encontró el mapeo; cierra el ancla o parte");
+  const std::string q = trim_ws_copy(consulta);
+  for (const auto& f : failed) {
+    if (!q.empty() && trim_ws_copy(f) == q) {
+      return set("control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto");
+    }
   }
   return true;
 }
 
 bool wave_control_jobs_last_failed(const std::string& jobs_md) {
   return control_jobs_last_failed(jobs_md);
+}
+
+bool wave_control_jobs_last_no_afirma(const std::string& jobs_md) {
+  return control_jobs_last_no_afirma(jobs_md);
+}
+
+bool wave_control_jobs_last_dump_leido(const std::string& jobs_md) {
+  return control_caza_es_dump_leido(control_jobs_last_cerrado(jobs_md));
+}
+
+bool wave_control_jobs_any_dump_leido(const std::string& jobs_md) {
+  return control_jobs_any_dump_leido(jobs_md);
+}
+
+bool wave_control_jobs_any_miss(const std::string& jobs_md) {
+  return control_jobs_any_miss(jobs_md);
+}
+
+bool wave_control_inherit_visto_ok(const std::string& jobs_md) {
+  if (jobs_md.find("Cerrado:") == std::string::npos) {
+    return true;
+  }
+  if (control_jobs_last_failed(jobs_md) || control_jobs_last_no_afirma(jobs_md)) {
+    return false;
+  }
+  return true;
+}
+
+bool wave_control_job_marca_failed(const std::string& jobs_md, bool last_visto_empty) {
+  if (last_visto_empty) {
+    return true;
+  }
+  return control_jobs_last_failed(jobs_md) || control_jobs_last_no_afirma(jobs_md);
 }
 
 WaveControlOla wave_parse_control(const std::string& raw) {
@@ -5972,6 +6367,48 @@ WaveControlOla wave_parse_control(const std::string& raw) {
     if (!wave_control_cerrar_why_ok(out.why, &cerr)) {
       out.error = cerr.empty() ? "control: cierre vacío, cita el mecanismo leído" : cerr;
       return out;
+    }
+    if (j.contains("polos") && j["polos"].is_array()) {
+      for (const auto& row : j["polos"]) {
+        if (!row.is_object()) {
+          continue;
+        }
+        WaveControlOla::Polo p;
+        p.polo = json_str(row, "polo");
+        p.estado = wave_job_veredicto_normalize(json_str(row, "estado"));
+        if (p.estado == "no_concluyente") {
+          p.estado = "desconocido";
+        }
+        if (p.estado != "hay" && p.estado != "no_hay" && p.estado != "desconocido") {
+          const std::string raw_e = ascii_lower(trim_ws_copy(json_str(row, "estado")));
+          if (raw_e == "desconocido" || raw_e == "unknown" || raw_e.empty()) {
+            p.estado = "desconocido";
+          } else {
+            out.error = "control: polo.estado debe ser hay|no_hay|desconocido";
+            return out;
+          }
+        }
+        p.evidencia = json_str_array(row, "evidencia");
+        if (p.polo.empty()) {
+          out.error = "control: polo sin nombre";
+          return out;
+        }
+        out.polos.push_back(std::move(p));
+      }
+    }
+    out.union_estado = ascii_lower(trim_ws_copy(json_str(j, "union")));
+    if (out.union_estado.empty()) {
+      out.union_estado = ascii_lower(trim_ws_copy(json_str(j, "unión")));
+    }
+    if (out.union_estado == "no_verificado") {
+      out.union_estado = "no_verificada";
+    }
+    if (kWaveControlCerrarPolos && !out.polos.empty()) {
+      if (out.union_estado != "hay" && out.union_estado != "no_hay" &&
+          out.union_estado != "no_verificada") {
+        out.error = "control: union debe ser hay|no_hay|no_verificada";
+        return out;
+      }
     }
   }
   if (out.do_kind == WaveControlDo::Explorar) {
@@ -6323,7 +6760,10 @@ bool control_begin_first_locator(WaveControlPlan* plan, std::string* err) {
 
 std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int jobs_run,
                                              bool last_visto, int agujas_n, int zoom_n,
-                                             int ampliar_n) {
+                                             int ampliar_n, int bosquejos_n) {
+  const int job_cap = wave_control_job_cap(plan);
+  const bool bosquejar_ok =
+      kWaveControlBosquejoLive && bosquejos_n < kWaveControlMaxBosquejar;
   std::vector<WaveControlDo> out;
   if (!plan.committed) {
     if (jobs_run <= 0) {
@@ -6334,7 +6774,7 @@ std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int j
       if (kWaveControlCatalogLive && agujas_n < kWaveControlMaxAgujas) {
         out.push_back(WaveControlDo::Agujas);
       }
-      if (kWaveControlBosquejoLive) {
+      if (bosquejar_ok) {
         out.push_back(WaveControlDo::Bosquejar);
       }
       if (kWaveControlCatalogLive) {
@@ -6345,12 +6785,13 @@ std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int j
         out.push_back(WaveControlDo::Ampliar);
       }
       out.push_back(WaveControlDo::Plan);
+      out.push_back(WaveControlDo::Cerrar);
     } else {
-      if (jobs_run < kWaveControlMaxJobs) {
+      if (jobs_run < job_cap) {
         if (kWaveControlCatalogLive && agujas_n < kWaveControlMaxAgujas) {
           out.push_back(WaveControlDo::Agujas);
         }
-        if (kWaveControlBosquejoLive) {
+        if (bosquejar_ok) {
           out.push_back(WaveControlDo::Bosquejar);
         }
         if (kWaveControlCatalogLive) {
@@ -6358,19 +6799,17 @@ std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int j
         }
         out.push_back(WaveControlDo::Explorar);
         out.push_back(WaveControlDo::Plan);
-      } else {
-        out.push_back(WaveControlDo::Plan);
       }
       out.push_back(WaveControlDo::Cerrar);
     }
     return out;
   }
   const auto add_soltar = [&]() {
-    if (jobs_run > 0 && jobs_run < kWaveControlMaxJobs) {
+    if (jobs_run > 0 && jobs_run < job_cap) {
       out.push_back(WaveControlDo::Explorar);
+      out.push_back(WaveControlDo::Plan);
     }
     if (jobs_run > 0) {
-      out.push_back(WaveControlDo::Plan);
       out.push_back(WaveControlDo::Cerrar);
     }
   };
@@ -6381,11 +6820,13 @@ std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int j
   }
   const auto status = plan.fases[static_cast<std::size_t>(cur)].status;
   if (status == WaveControlPhaseStatus::EnCurso) {
-    if (last_visto) {
+    if (last_visto && jobs_run < job_cap) {
       out.push_back(WaveControlDo::Pasar);
     }
-    out.push_back(WaveControlDo::NoPasar);
-    out.push_back(WaveControlDo::Revisar);
+    if (jobs_run < job_cap) {
+      out.push_back(WaveControlDo::NoPasar);
+      out.push_back(WaveControlDo::Revisar);
+    }
     add_soltar();
   } else if (status == WaveControlPhaseStatus::Fallo) {
     out.push_back(WaveControlDo::Revisar);
@@ -6396,21 +6837,33 @@ std::vector<WaveControlDo> wave_control_legal(const WaveControlPlan& plan, int j
   return out;
 }
 
+int wave_control_job_cap(const WaveControlPlan& plan) {
+  if (!plan.committed || plan.fases.empty()) {
+    return kWaveControlMaxJobs;
+  }
+  const int n = static_cast<int>(plan.fases.size());
+  return std::max(kWaveControlMaxJobs, std::min(kWaveControlMaxJobsHard, n));
+}
+
 bool wave_control_do_allowed(const std::vector<WaveControlDo>& legal, WaveControlDo d) {
   return std::find(legal.begin(), legal.end(), d) != legal.end();
 }
 
-std::string wave_control_legal_markdown(const std::vector<WaveControlDo>& legal) {
+std::string wave_control_legal_markdown(const std::vector<WaveControlDo>& legal,
+                                        const std::string& last_reject) {
   std::ostringstream out;
   out << "Legal ahora:";
   if (legal.empty()) {
     out << " (ninguno)\n";
-    return out.str();
+  } else {
+    for (std::size_t i = 0; i < legal.size(); ++i) {
+      out << (i == 0 ? " " : ", ") << wave_control_do_name(legal[i]);
+    }
+    out << "\n";
   }
-  for (std::size_t i = 0; i < legal.size(); ++i) {
-    out << (i == 0 ? " " : ", ") << wave_control_do_name(legal[i]);
+  if (!last_reject.empty()) {
+    out << "Último rechazo: " << last_reject << "\n";
   }
-  out << "\n";
   return out.str();
 }
 
@@ -6769,16 +7222,26 @@ std::string wave_control_brief(const WaveState& st, WaveControlInduce induce) {
     out << "\n";
   }
   const bool caza_fallo = control_caza_no_encontro(thesis) && !st.prompt.empty();
-  const bool miss_vacio = thesis.empty();
+  const bool miss_vacio = thesis.empty() && leido.empty();
   out << "Cerrado:\n";
-  if (wave_control_induce_miss_answer(induce) && (caza_fallo || miss_vacio) &&
+  if (!st.job_veredicto.empty()) {
+    out << wave_job_veredicto_json(st.job_veredicto, st.job_simbolos, st.job_evidencia,
+                                   st.job_falta, thesis.find('{') == 0 ? std::string() : thesis)
+        << "\n";
+  } else if (wave_control_induce_miss_answer(induce) && (caza_fallo || miss_vacio) && leido.empty() &&
       !st.prompt.empty()) {
     out << "El hijo cerró esta pregunta: no hay objeto. Está contestada. No se relanza.\n";
     if (!st.prompt.empty()) {
       out << "Preguntó: " << st.prompt << "\n";
     }
-    out << "Si el ancla era esa pregunta, cierra el claim citando lo leído. "
-           "Si el ancla era más, otra pregunta distinta.\n";
+    out << "ESA pregunta no se relanza. Cierra ESE mapeo, o un objeto distinto del pack "
+           "(un extra del Abierto); no el mismo claim en otro keep; "
+           "no refutes el claim entero.\n";
+  } else if (wave_control_induce_miss_answer(induce) && caza_fallo && !leido.empty()) {
+    out << "ESA pregunta no se relanza. Lo leído no era el disparo. "
+           "PROHIBIDO el mismo claim. do=cerrar ese mapeo. "
+           "Si el ancla pedía más, un objeto distinto del pack; no el mismo claim en otro keep; "
+           "no refutes el claim entero.\n";
   } else if (caza_fallo) {
     out << "No se encontró el objeto de esta caza.\n";
     out << "Preguntó: " << st.prompt << "\n";
@@ -6787,10 +7250,12 @@ std::string wave_control_brief(const WaveState& st, WaveControlInduce induce) {
            "en dos encargos (un polo cada uno) y luego un puente. PROHIBIDO el mismo claim "
            "conjunto con otro verbo.\n";
   }
-  if (thesis.empty()) {
-    out << "(vacío)\n";
-  } else {
-    out << thesis << "\n";
+  if (st.job_veredicto.empty()) {
+    if (thesis.empty()) {
+      out << "(vacío)\n";
+    } else {
+      out << thesis << "\n";
+    }
   }
   std::vector<std::string> roles;
   for (const auto& a : h.huecos) {
@@ -6833,7 +7298,16 @@ WaveControlJobSnap wave_control_job_snap(int n, const WaveState& st) {
   WaveControlJobSnap s;
   s.n = n;
   s.consulta = st.prompt;
-  s.cerrado = control_cierre_thesis(st.cierre);
+  s.veredicto = st.job_veredicto;
+  s.simbolos = st.job_simbolos;
+  s.evidencia = st.job_evidencia;
+  s.falta = st.job_falta;
+  if (!st.job_veredicto.empty()) {
+    s.cerrado = wave_job_veredicto_json(st.job_veredicto, st.job_simbolos, st.job_evidencia,
+                                        st.job_falta);
+  } else {
+    s.cerrado = control_cierre_thesis(st.cierre);
+  }
   const auto h = wave_pack_handoff(st);
   s.visto = h.visto;
   for (const auto& f : h.seguido) {
@@ -7271,7 +7745,13 @@ std::string wave_control_slice_exam(const std::string& ancla,
     out << "\nT" << n << " preguntó:\n";
     out << (job.consulta.empty() ? "(vacío)" : trim_ws_copy(job.consulta)) << "\n";
     out << "Cerrado de T" << n << ":\n";
-    if (control_caza_no_encontro(job.cerrado)) {
+    if (wave_control_induce_miss_answer(induce) && control_caza_no_afirma(job.cerrado) &&
+        !job.visto.empty()) {
+      out << "ESA pregunta no se relanza. Lo leído no era el disparo. "
+             "PROHIBIDO el mismo claim. do=cerrar ese mapeo. "
+             "Si el ancla pedía más, un objeto distinto del pack; no el mismo claim en otro keep; "
+             "no refutes el claim entero.\n";
+    } else if (control_caza_no_encontro(job.cerrado)) {
       if (wave_control_induce_miss_answer(induce)) {
         out << "El hijo cerró esta pregunta: no hay objeto. No se relanza.\n";
       } else {
@@ -7279,7 +7759,7 @@ std::string wave_control_slice_exam(const std::string& ancla,
       }
     } else if (wave_control_induce_miss_answer(induce)) {
       const std::string c = trim_ws_copy(job.cerrado);
-      if (c.empty() || c == "(vacío)") {
+      if ((c.empty() || c == "(vacío)") && job.visto.empty()) {
         out << "El hijo cerró esta pregunta: no hay objeto. No se relanza.\n";
       }
     }
@@ -7287,21 +7767,39 @@ std::string wave_control_slice_exam(const std::string& ancla,
   }
   const auto& last = jobs.back();
   const auto last_c = trim_ws_copy(last.cerrado);
-  const bool last_vacio = last_c.empty() || last_c == "(vacío)";
-  if (control_caza_no_encontro(last.cerrado) ||
-      (wave_control_induce_miss_answer(induce) && last_vacio)) {
+  const bool last_vacio = (last_c.empty() || last_c == "(vacío)") && last.visto.empty();
+  const bool last_no_af = control_caza_no_afirma(last.cerrado);
+  bool any_dump_leido = false;
+  for (const auto& job : jobs) {
+    if (control_caza_es_dump_leido(job.cerrado)) {
+      any_dump_leido = true;
+      break;
+    }
+  }
+  if (wave_control_induce_miss_answer(induce) && last_no_af && !last.visto.empty()) {
+    out << "\nESA pregunta no se relanza. Lo leído no era el disparo. "
+           "PROHIBIDO el mismo claim. do=cerrar ese mapeo. "
+           "Si el ancla pedía más, un objeto distinto del pack; no el mismo claim en otro keep; "
+           "no refutes el claim entero.\n";
+  } else if (control_caza_no_encontro(last.cerrado) ||
+             (wave_control_induce_miss_answer(induce) && last_vacio)) {
     if (wave_control_induce_miss_answer(induce)) {
-      out << "\nEsta pregunta ya tiene respuesta (no hay objeto). No la relances. "
-             "Cierra el claim si basta lo acumulado, o formula otra pregunta.\n";
+      out << "\n" << wave_control_miss_empty_cue() << "\n";
+      if (any_dump_leido) {
+        out << "Un leído: de otra caza no afirma el ancla; no lo parafrasees como el mecanismo.\n";
+      }
     } else {
       out << "\nLa última caza no halló el mapeo. Cierra el ancla citando lo leído (refutación), "
              "o parte en dos encargos (un polo cada uno) y luego un puente. PROHIBIDO el mismo "
              "claim conjunto con otro verbo. evita lo leído. El pack (entre abiertas / extra) "
              "dice el arco, no el ancla.\n";
     }
-  } else if (!last_c.empty() && last_c != "(vacío)") {
+  } else if (!last_c.empty() && last_c != "(vacío)" && !last_no_af) {
     out << "\nLa última caza cerró. El siguiente tiro es un port del pack (entre abiertas / "
            "extra), no el ancla ni el mismo keep.\n";
+    if (wave_control_induce_miss_answer(induce) && any_dump_leido) {
+      out << "Un leído: de otra caza no afirma el disparo; no selles el ancla con esos nombres.\n";
+    }
   }
   return out.str();
 }
@@ -8241,8 +8739,14 @@ std::string wave_control_misma_caza_nudge(const std::string& prev, const std::st
   return out;
 }
 
+std::string wave_control_miss_empty_cue() {
+  return "Esta pregunta ya tiene respuesta (no hay objeto). No la relances ni en otro keep. "
+         "Cierra ESE mapeo, o un objeto distinto del pack (un extra del Abierto); "
+         "no el mismo claim en otro keep; no refutes el claim entero.";
+}
+
 std::string wave_control_fallo_replay_nudge(const std::string& prev, const std::string& proposed,
-                                           WaveControlInduce induce) {
+                                           WaveControlInduce induce, bool escalate) {
   auto clip = [](std::string q) {
     if (q.size() > 220) {
       utf8_resize(&q, 220);
@@ -8251,8 +8755,12 @@ std::string wave_control_fallo_replay_nudge(const std::string& prev, const std::
   };
   std::string out;
   if (wave_control_induce_miss_answer(induce)) {
-    out = "Esa pregunta ya tiene respuesta (no hay objeto). No la relances. "
-          "Cierra el claim si basta lo acumulado, o formula otra pregunta.";
+    if (escalate) {
+      out = "Esa pregunta ya se contestó. do=cerrar ese mapeo. "
+            "PROHIBIDO plan u otro explorar del mismo objeto.";
+    } else {
+      out = wave_control_miss_empty_cue();
+    }
   } else {
     out =
         "Esa caza no halló el mapeo. Cierra el ancla citando lo leído (refutación), o parte en "
@@ -8274,8 +8782,63 @@ std::string wave_control_evita_nudge() {
 }
 
 std::string wave_control_cerrar_nudge() {
-  return "cerrar.why cita el mecanismo que leíste y el hueco si queda. "
-         "PROHIBIDO una coletilla ('el ancla queda contestada', 'lo que preguntamos y leímos').";
+  std::string out = "cerrar.why cita el mecanismo que leíste y el hueco si queda. "
+                    "PROHIBIDO una coletilla ('el ancla queda contestada', 'lo que preguntamos y leímos').";
+  if (wave_ctrl(kWaveControlSelloDumpEstaNoAfirma)) {
+    out += " Un Cerrado leído: no afirma ni esta caza. No lo cites como el mecanismo.";
+  }
+  if (wave_ctrl(kWaveControlSelloHijoNiegaArco)) {
+    out += " Si el Cerrado niega el enlace o el disparo, tu why no lo afirma.";
+  }
+  if (wave_ctrl(kWaveControlSelloDumpNoRefutaExiste)) {
+    out += " Un leído: no refuta el existe. Solo niega ese disparo.";
+  }
+  if (wave_ctrl(kWaveControlSelloPoloNegadoQueda)) {
+    out += " Si un Cerrado negó un polo, tu why no lo afirma. Un Cerrado posterior no deshace esa negación.";
+  }
+  if (wave_ctrl(kWaveControlSelloLeerDosNoUne)) {
+    out += " Leer dos polos no afirma el arco. Sin Cerrado del enlace, tu why no los une.";
+  }
+  if (wave_ctrl(kWaveControlSelloPasarNoSellaAncla)) {
+    out += " Un pasar no sella el ancla. Cierra qué polo hay y cuál no; no confirmes el claim entero.";
+  }
+  if (wave_ctrl(kWaveControlSelloUnoNoRefutaOtro)) {
+    out += " Un Cerrado no refuta el otro polo. Cierra el leído; no digas que el otro no existe.";
+  }
+  if (wave_ctrl(kWaveControlSelloNoCazadoNoRefuta)) {
+    out += " No refutes un polo que no cazaste. Cierra solo lo leído.";
+  }
+  if (wave_ctrl(kWaveControlSelloSoloNombresNoDisparo)) {
+    out += " Un Cerrado de solo nombres no afirma el disparo. No selles ese polo.";
+  }
+  if (wave_ctrl(kWaveControlSelloReinicioNoEsDetector)) {
+    out += " Un reinicio por entorno no es detección de fallo. Cierra: hay reinicio, no hay detector.";
+  }
+  if (wave_ctrl(kWaveControlGateDumpNoCierra)) {
+    out += " Un leído no cierra el ancla. No afirma el disparo y no refuta el existe.";
+    if (wave_ctrl(kWaveControlGateDumpNoCierraAny)) {
+      out += " Un leído de otra caza tampoco cierra el ancla.";
+    }
+  }
+  if (wave_ctrl(kWaveControlGateTrasFalloNoSeEncontr)) {
+    out += " Tras un miss, no se encontró cita el hueco; puedes afirmar el otro polo.";
+  }
+  if (wave_ctrl(kWaveControlGateDumpNoEncontr)) {
+    out += " Un leído más no se encontró no refuta el existe.";
+  }
+  return out;
+}
+
+std::string wave_control_plan_nudge() {
+  return "El plan son 2–4 fases (locator / puente / seguir), no un locator por cada objeto del "
+         "ancla. Recorta a 2–4 o lanza un explorar del fenómeno. Si este plan fue rechazado, el "
+         "siguiente tiro es explorar, no otro plan. El runtime no redacta la consulta.";
+}
+
+std::string wave_control_sin_objeto_nudge() {
+  return "consulta = mecanismo (escritura a medias, reversión), no una categoría ('los archivos'). "
+         "Si este tiro fue rechazado, el siguiente es explorar, no otro plan. "
+         "El runtime no redacta la consulta.";
 }
 
 std::string wave_control_plantilla_nudge(const std::string& consulta, bool otra_forma) {
@@ -8337,13 +8900,76 @@ bool wave_control_induce_parse(const std::string& s, WaveControlInduce* out) {
   return false;
 }
 
+namespace {
+WaveControlDiet g_wave_control_diet = WaveControlDiet::Minimal;
+}  // namespace
+
+void wave_control_set_diet(WaveControlDiet d) {
+  g_wave_control_diet = d;
+}
+
+WaveControlDiet wave_control_diet() {
+  return g_wave_control_diet;
+}
+
+const char* wave_control_diet_name(WaveControlDiet d) {
+  switch (d) {
+    case WaveControlDiet::Minimal:
+      return "minimal";
+    case WaveControlDiet::Full:
+    default:
+      return "full";
+  }
+}
+
+bool wave_control_diet_parse(const std::string& s, WaveControlDiet* out) {
+  if (out == nullptr) {
+    return false;
+  }
+  if (s.empty() || s == "full" || s == "sense16") {
+    *out = WaveControlDiet::Full;
+    return true;
+  }
+  if (s == "minimal" || s == "s0" || s == "min") {
+    *out = WaveControlDiet::Minimal;
+    return true;
+  }
+  return false;
+}
+
+std::string wave_control_system_prompt_minimal() {
+  // S0: ≤1.5 KB. Rol + movimientos + JSON. Sin Sello/Gate.
+  return R"(Eres el PILOTO DE CONTROL. Diriges la investigación. NO lees código. NO peek.
+El pack (fichas M*) es hipótesis. Los exploradores leen; tú eliges qué cazar.
+Movimientos: ampliar (abrir M*), explorar (consulta tuya a un hijo), plan (2–4 fases),
+pasar / no_pasar (puerta de fase), cerrar (claim confirmado o refutado), bosquejar (olores).
+Máx 3 exploradores. El runtime no redacta la consulta.
+consulta = fenómeno que vería el usuario; why = tu análisis (el hijo no la lee).
+PROHIBIDO copiar M*, paths o stems con _ a la consulta.
+
+JSON tras razonar (un objeto; el parseo busca `{`):
+{"action":"control_v1","do":"ampliar","ids":["M7","M8"],"why":"ov empatado; abro fichas"}
+{"action":"control_v1","do":"explorar","consulta":"dónde se apaga el spinner al acabar","why":"un hijo cierra el OFF"}
+{"action":"control_v1","do":"plan","modo":"romper","fases":[{"id":"A","kind":"locator","consulta":"dónde se apaga el spinner"},{"id":"B","kind":"locator","consulta":"dónde se detiene el trabajo"},{"id":"P","kind":"puente","need":["A","B"],"consulta":"hay camino entre apagar y detener"}],"why":"dos cierres independientes"}
+{"action":"control_v1","do":"pasar","why":"el Cerrado afirma el objeto de esta fase"}
+{"action":"control_v1","do":"no_pasar","why":"el Cerrado niega este pico"}
+{"action":"control_v1","do":"cerrar","why":"el indicador se apaga al terminar el trabajo","polos":[{"polo":"indicador","estado":"hay","evidencia":["src/ui/busy.cpp:set_busy"]}],"union":"hay"}
+{"action":"control_v1","do":"bosquejar","hacia":["evento entrada","parada trabajo"],"why":"quiero ver barrios"}
+)";
+}
+
 std::string wave_control_system_prompt(WaveControlCue cue, WaveControlInduce induce) {
+  if (wave_control_diet() == WaveControlDiet::Minimal) {
+    (void)cue;
+    (void)induce;
+    return wave_control_system_prompt_minimal();
+  }
   const bool neutral = cue == WaveControlCue::Neutral;
   std::ostringstream out;
   out << R"(Eres el PILOTO DE CONTROL. Diriges la investigación. Despiertas al llegar la consulta del usuario.
 NO lees código. NO peek. Los exploradores leen; tú eliges qué cazar y con qué encargo.
 El pack es el atlas de fichas M* (peek/nucleus/port). Hipótesis, no el código.
-Tú decides: el ancla es un claim (se confirma, se refuta o se parte). «Sin camino» entre polos leídos cierra el ancla. Un explorador si una caza basta, o un plan (locator / puente / seguir, 2–4 fases) si hay cazas independientes y luego componerlas. El runtime lanza de uno en uno; tú juzgas puertas. No asumas que un gesto y un efecto están unidos.
+Tú decides: el ancla es un claim (se confirma, se refuta o se parte). «Sin camino» entre polos leídos cierra el ancla. Un explorador si una caza basta, o un plan (locator / puente / seguir, 2–4 fases; cada fase trae consulta tuya) si hay cazas independientes y luego componerlas. El runtime lanza de uno en uno; tú juzgas puertas. No asumas que un gesto y un efecto están unidos.
 El plan sale de ESTA consulta y de lo ya visto, no de una receta. Un plan congelado no es un contrato: tras un Cerrado puedes soltarlo (explorar o un plan nuevo).
 Una fase es una pregunta que un hijo puede cerrar sin el resultado de las otras. Si el mapa no une qué está junto, puedes partir. Tú eliges la rotura.
 En un plan, cada locator, puente y seguir trae consulta tuya. hacia es cerca, no el briefing. El runtime no redacta la consulta.
@@ -8352,12 +8978,12 @@ El hijo es un cazador estrecho. Atomiza el trabajo: cada encargo es un trozo que
 Si se puede copiar el ancla entero, es un recap: no la emitas. PROHIBIDO una categoría ('los archivos') o enumerar el ancla. kind=hole que solo rima con el ancla no es el objeto. Si el pack no nombra el mecanismo: amplia fichas aún cerradas, o plan de cazas; no inventes el locator desde el ancla.
 hacia opcional: 1 concepto de cerca, 1–3 palabras (no ids, no paths). Un objeto; el hijo caza los símbolos. Si pegas un port largo, se recorta; no tumba la consulta.
 evita opcional: 1–3 conceptos que el hijo no debe reabrir (el falso amigo de una caza que falló). El runtime no veta prompts parecidos; tú vetas.
-PROHIBIDO dos exploradores a la vez. Máx 3 exploradores sueltos (los ya hechos cuentan). Si al tope falta un eslabón, plan (cada fase trae consulta tuya) o cierra citando el mecanismo leído o la refutación. PROHIBIDO una coletilla ('el ancla queda contestada').
+PROHIBIDO dos exploradores a la vez. Máx 3 exploradores sueltos (los ya hechos cuentan). Si al tope falta un eslabón, cierra citando el mecanismo leído o la refutación. PROHIBIDO una coletilla ('el ancla queda contestada').
 PROHIBIDO copiar M*, paths y stems con _. Owns/peek no son la consulta; el fenómeno del usuario sí.
 Si varios barrios empatan o el pack no te deja un mecanismo, amplia 1–3 M* PRIMERO (puedes más de una vez). Luego explorar o plan.
 Lo abierto llega como inspect; entre abiertas = ports, no cosine. Chrome no es el disparo.
-Con 2+ trabajos el pack enseña visto, hops extra y entre abiertas (camino o sin camino). sin camino es evidencia, no un deber. No copies loci.
-Si Cerrado dice que no se encontró el objeto, esa caza no halló el mapeo: cierra el ancla citando lo leído (refutación), o parte en dos encargos (un polo cada uno) y luego un puente. PROHIBIDO el mismo claim conjunto con otro verbo. Un hueco no es el siguiente briefing. El pack (entre abiertas / extra) dice el arco, no el ancla. Si la última caza cerró: el siguiente tiro es un port que ya ves, no el ancla ni el mismo keep. 'mismo objeto' en entre abiertas es que la caza no se movió.
+Con 2+ trabajos el pack enseña visto, hops extra y entre abiertas (camino o sin camino). sin camino es evidencia, no un deber. 'extra toca visto' no es el arco del ancla. No copies loci.
+Si Cerrado dice que no se encontró el objeto, esa caza no halló ESE mapeo: no la relances. Lo leído no era el disparo: do=cerrar ese mapeo. Tú cierras el claim cuando lo acumulado basta, o partes en dos encargos y un puente. PROHIBIDO el mismo claim conjunto con otro verbo. Un hueco no es el siguiente briefing. El pack (entre abiertas / extra) dice el arco, no el ancla. Si la última caza cerró: el siguiente tiro es un port que ya ves, no el ancla ni el mismo keep. 'mismo objeto' en entre abiertas es que la caza no se movió.
 Un explorar es una sola rama y un solo locus. Si ves dos loci, atomiza: otro encargo o un plan; no los empaquetes en un hijo. Tú decides el grano.
 )";
   if (kWaveControlBosquejoLive) {
@@ -8374,18 +9000,76 @@ Un explorar es una sola rama y un solo locus. Si ves dos loci, atomiza: otro enc
            "abre el catálogo. No copies ids a la consulta.\n";
   }
   if (!neutral) {
-    out << "El hijo cierra SU consulta. Tú cierras el claim (confirmar o refutar). Un Cerrado limpio del hijo no es el ancla.\n";
+    out << "El hijo cierra SU consulta. Tú cierras el claim (confirmar o refutar). Un Cerrado limpio del hijo no es el ancla. ";
+    if (wave_ctrl(kWaveControlSelloPolosParcial)) {
+      out << "Cierra diciendo qué polo hay y cuál no. No refutes el claim entero porque falte un polo. "
+             "No confirmes el ancla entero con un solo polo.\n";
+    } else {
+      out << "Si el ancla nombra varios polos, confirmar uno no sella el claim.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloVistoNombra)) {
+      out << "Nombres en leído o visto son el pack. PROHIBIDO decir que el pack no nombra si hay un nombre. "
+             "Cierra citando ese nombre y el hueco.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloDumpEstaNoAfirma)) {
+      out << "Un Cerrado leído: no afirma ni esta caza. No lo cites como el mecanismo.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloHijoNiegaArco)) {
+      out << "Si el Cerrado niega el enlace o el disparo, tu why no lo afirma.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloDumpNoRefutaExiste)) {
+      out << "Un leído: no refuta el existe. Solo niega ese disparo.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloPoloNegadoQueda)) {
+      out << "Si un Cerrado negó un polo, tu why no lo afirma. Un Cerrado posterior no deshace esa negación.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloLeerDosNoUne)) {
+      out << "Leer dos polos no afirma el arco. Sin Cerrado del enlace, tu why no los une.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloPasarNoSellaAncla)) {
+      out << "Un pasar no sella el ancla. Cierra qué polo hay y cuál no; no confirmes el claim entero.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloUnoNoRefutaOtro)) {
+      out << "Un Cerrado no refuta el otro polo. Cierra el leído; no digas que el otro no existe.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloNoCazadoNoRefuta)) {
+      out << "No refutes un polo que no cazaste. Cierra solo lo leído.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloSoloNombresNoDisparo)) {
+      out << "Un Cerrado de solo nombres no afirma el disparo. No selles ese polo.\n";
+    }
+    if (wave_ctrl(kWaveControlSelloReinicioNoEsDetector)) {
+      out << "Un reinicio por entorno no es detección de fallo. Cierra: hay reinicio, no hay detector.\n";
+    }
+    if (wave_ctrl(kWaveControlGateDumpNoCierra)) {
+      out << "Un leído no cierra el ancla. No afirma el disparo y no refuta el existe; caza el otro polo o niega ese mapeo.\n";
+      if (wave_ctrl(kWaveControlGateDumpNoCierraAny)) {
+        out << "Un leído de otra caza tampoco cierra el ancla.\n";
+      }
+    }
+    if (wave_ctrl(kWaveControlGateTrasFalloNoSeEncontr)) {
+      out << "Tras un miss, no se encontró cita el hueco; puedes afirmar el otro polo.\n";
+    }
+    if (wave_ctrl(kWaveControlGateDumpNoEncontr)) {
+      out << "Un leído más no se encontró no refuta el existe.\n";
+    }
   }
   if (wave_control_induce_miss_answer(induce)) {
-    out << "Un Cerrado vacío o «no hay objeto» contesta ESA consulta. No la relances. "
+    out << "Un Cerrado vacío o «no hay objeto» contesta ESA consulta si no leíste nombres. No la relances. "
            "sin camino entre polos leídos contesta si el ancla pedía ese arco; no es un hueco "
            "a rellenar con la misma pregunta. Tú cierras el claim cuando lo acumulado basta "
            "para confirmar o refutar.\n";
   }
-  out << R"(No cierres sin haber lanzado al menos un explorador.
+  if (wave_ctrl(kWaveControlSelloVistoNombra)) {
+    out << "Si el pack no nombra el mecanismo (ningún nombre en leído/visto), puedes cerrar sin hijo (no hay objeto). "
+           "Si huele un barrio, un explorador lee.\n";
+  } else {
+    out << "Si el pack no nombra el mecanismo del ancla, puedes cerrar sin hijo (no hay objeto). Si huele un barrio, un explorador lee.\n";
+  }
+  out << R"(
 Con plan: el runtime usa la consulta de la fase en curso; si aún no hay, revisar la pides tú.
 
-JSON. Primer carácter `{`:
+JSON. Tras razonar, un solo objeto (el pensamiento puede ir antes; el parseo busca `{`):
 )";
   if (kWaveControlCatalogLive) {
     out << R"({"action":"control_v1","do":"agujas","agujas":["event","mouse","ai","file"],"why":"el ancla toca entrada, clic, generación y archivo; quiero ver qué barrios cubren esas zonas"}
@@ -8422,7 +9106,7 @@ std::string wave_control_user_prompt(const std::string& user_consulta, const std
                                      const std::string& circuit_md, const std::string& exam_md,
                                      WaveControlCue cue, const std::string& bosquejo_md,
                                      const std::string& plano_md, const std::string& zoom_md,
-                                     WaveControlInduce induce) {
+                                     WaveControlInduce induce, const std::string& last_reject) {
   (void)cue;
   std::ostringstream out;
   out << "Consulta del usuario (ancla, claim; no la copies entera a un hijo):\n"
@@ -8479,7 +9163,7 @@ std::string wave_control_user_prompt(const std::string& user_consulta, const std
                           jobs_md.find("(vacío)") == std::string::npos;
   const auto legal =
       legal_in.empty() ? wave_control_legal(plan, jobs_n, last_visto) : legal_in;
-  out << "\n" << wave_control_legal_markdown(legal);
+  out << "\n" << wave_control_legal_markdown(legal, last_reject);
   if (!plan.committed && jobs_md.empty() && inspect_brief.empty()) {
     if (kWaveControlCatalogLive && !zoom_md.empty()) {
       out << "Ya hay zoom. Tú eliges: un explorar (un cazador; puede cubrir todo el ancla) "
@@ -8518,12 +9202,13 @@ std::string wave_control_user_prompt(const std::string& user_consulta, const std
   } else if (plan.committed) {
     bool last_fail = control_jobs_last_failed(jobs_md);
     const std::string last_c = control_jobs_last_cerrado(jobs_md);
+    const bool last_no_af = control_jobs_last_no_afirma(jobs_md);
     if (wave_control_induce_miss_answer(induce) &&
         (last_c.empty() || last_c == "(vacío)")) {
       last_fail = true;
     }
     const bool last_ok =
-        !last_c.empty() && last_c != "(vacío)" && !last_fail;
+        !last_c.empty() && last_c != "(vacío)" && !last_fail && !last_no_af;
     out << "El plan no es un contrato. Tras un Cerrado puedes soltarlo: explorar un port del "
            "pack, o un plan nuevo.\n";
     const int cur = wave_control_plan_current(plan);
@@ -8533,20 +9218,29 @@ std::string wave_control_user_prompt(const std::string& user_consulta, const std
         out << "Esta fase no tiene consulta. revisar: consulta tuya (un polo o si hay camino), "
                "no el ancla. El runtime no la redacta. O suelta el plan. PROHIBIDO copiar ids.\n";
       } else if (ph.status == WaveControlPhaseStatus::EnCurso) {
-        out << "Puerta de la fase en curso. pasar si el Cerrado afirma el objeto de esta fase; un "
-               "visto que el Cerrado niega no es paso. no_pasar salta a la siguiente caza (no gastes "
-               "otro hijo en el mismo pico). ";
-        if (last_fail) {
-          if (wave_control_induce_miss_answer(induce)) {
-            out << "Esta pregunta ya tiene respuesta (no hay objeto). No la relances. "
-                   "Cierra el claim si basta lo acumulado, o formula otra pregunta. ";
-          } else {
-            out << "Si el particular no halló el mapeo, cierra el ancla (refutación) o parte en dos "
-                   "encargos; no el mismo claim conjunto. evita lo leído. El pack dice el arco. ";
+        if (last_no_af && wave_control_induce_miss_answer(induce)) {
+          out << "Puerta de la fase. Lo leído no era el disparo. No pases como si afirmara. "
+                 "no_pasar o cierra ese mapeo. ";
+        } else {
+          out << "Puerta de la fase en curso. pasar si el Cerrado afirma el objeto de esta fase; un "
+                 "visto que el Cerrado niega no es paso. no_pasar salta a la siguiente caza (no gastes "
+                 "otro hijo en el mismo pico). ";
+          if (last_fail) {
+            if (wave_control_induce_miss_answer(induce)) {
+              out << wave_control_miss_empty_cue() << " ";
+            } else {
+              out << "Si el particular no halló el mapeo, cierra el ancla (refutación) o parte en dos "
+                     "encargos; no el mismo claim conjunto. evita lo leído. El pack dice el arco. ";
+            }
+          } else if (last_ok) {
+            out << "La última caza cerró: el siguiente tiro es un port del pack (entre abiertas / "
+                   "extra), no el ancla ni el mismo keep. ";
+            if (wave_control_induce_miss_answer(induce) &&
+                control_jobs_any_dump_leido(jobs_md)) {
+              out << "Un leído: de otra caza no afirma el disparo; no selles el ancla con esos "
+                     "nombres. ";
+            }
           }
-        } else if (last_ok) {
-          out << "La última caza cerró: el siguiente tiro es un port del pack (entre abiertas / "
-                 "extra), no el ancla ni el mismo keep. ";
         }
         out << "PROHIBIDO copiar ids.\n";
       } else if (ph.status == WaveControlPhaseStatus::Fallo) {
@@ -8560,35 +9254,58 @@ std::string wave_control_user_prompt(const std::string& user_consulta, const std
   } else if (!jobs_md.empty()) {
     const bool can_explore = wave_control_do_allowed(legal, WaveControlDo::Explorar);
     const bool can_plan = wave_control_do_allowed(legal, WaveControlDo::Plan);
-    if (!can_explore && can_plan) {
+    if (!can_explore && !can_plan) {
+      if (wave_control_induce_miss_answer(induce) && control_jobs_last_no_afirma(jobs_md)) {
+        const bool prior_dump = control_jobs_any_dump_leido(jobs_md) &&
+                                !control_caza_es_dump_leido(control_jobs_last_cerrado(jobs_md));
+        if (prior_dump) {
+          out << "exploradores agotados. Lo leído no era el disparo. Cierra ese mapeo; "
+                 "un leído: de otra caza no afirma el ancla; no lo parafrasees como el mecanismo. "
+                 "PROHIBIDO una coletilla ('el ancla queda contestada'). PROHIBIDO copiar ids.\n";
+        } else {
+          out << "exploradores agotados. Lo leído no era el disparo. Cierra ese mapeo; "
+                 "no cites esos nombres como el mecanismo del ancla. "
+                 "PROHIBIDO una coletilla ('el ancla queda contestada'). PROHIBIDO copiar ids.\n";
+        }
+      } else {
+        out << "exploradores agotados. Cierra citando el mecanismo leído o la refutación. "
+               "PROHIBIDO una coletilla ('el ancla queda contestada'). PROHIBIDO copiar ids.\n";
+      }
+    } else if (!can_explore && can_plan) {
       out << "explorar agotado. Si falta un eslabón, plan (cada fase trae consulta tuya) o "
              "cierra citando el mecanismo leído o la refutación. PROHIBIDO una "
              "coletilla ('el ancla queda contestada'). PROHIBIDO copiar ids.\n";
     } else {
       bool last_fail = control_jobs_last_failed(jobs_md);
       const std::string last_c = control_jobs_last_cerrado(jobs_md);
+      const bool last_no_af = control_jobs_last_no_afirma(jobs_md);
       if (wave_control_induce_miss_answer(induce)) {
         if (last_c.empty() || last_c == "(vacío)") {
           last_fail = true;
         }
       }
       const bool last_ok =
-          !last_c.empty() && last_c != "(vacío)" && !last_fail;
+          !last_c.empty() && last_c != "(vacío)" && !last_fail && !last_no_af;
       out << "Este es el estado. Tú diriges: atomiza el trabajo (un hijo, un trozo). "
              "El plan no es un contrato: tras un Cerrado puedes soltarlo (explorar o plan nuevo). ";
       if (last_fail) {
         if (wave_control_induce_miss_answer(induce)) {
-          out << "Esta pregunta ya tiene respuesta (no hay objeto). No la relances. "
-                 "Cierra el claim si basta lo acumulado, o formula otra pregunta. ";
+          out << wave_control_miss_empty_cue() << " ";
         } else {
           out << "Si el Cerrado dice que no se encontró el objeto, esa caza no halló el mapeo: "
                  "cierra el ancla citando lo leído (refutación), o parte en dos encargos (un polo "
                  "cada uno) y luego un puente. PROHIBIDO el mismo claim conjunto con otro verbo. "
                  "evita lo leído. El pack (entre abiertas / extra) dice el arco, no el ancla. ";
         }
+      } else if (last_no_af && wave_control_induce_miss_answer(induce)) {
+        out << "Lo leído no era el disparo. No pases como si afirmara. do=cerrar ese mapeo. ";
       } else if (last_ok) {
         out << "La última caza cerró: el siguiente tiro es un port del pack (entre abiertas / "
                "extra), no el ancla ni el mismo keep. ";
+        if (wave_control_induce_miss_answer(induce) && control_jobs_any_dump_leido(jobs_md)) {
+          out << "Un leído: de otra caza no afirma el disparo; no selles el ancla con esos "
+                 "nombres. ";
+        }
       }
       out << "'mismo objeto' en entre abiertas es que la caza no se movió. Si queda un "
              "tirón, explorar; si el trabajo no cabe en uno, plan. consulta = prompt de investigación "
@@ -8997,6 +9714,11 @@ nlohmann::json wave_state_to_json(const WaveState& st) {
           {"propose_n", st.propose_n},
           {"done", st.done},
           {"cierre", st.cierre},
+          {"job_veredicto", st.job_veredicto},
+          {"job_simbolos", st.job_simbolos},
+          {"job_evidencia", st.job_evidencia},
+          {"job_falta", st.job_falta},
+          {"veredicto_retry_used", st.veredicto_retry_used},
           {"huecos_claimed", st.huecos_claimed},
           {"pack", wave_pack_to_json(st)},
           {"circuit_on", st.circuit_on},

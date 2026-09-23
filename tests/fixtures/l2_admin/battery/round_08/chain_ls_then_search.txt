@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"listar *admin* en src/ai","spawn":{"tipo":"shell","brief":"ls admin","arg":"ls src/ai/l2_admin.hpp src/ai/l2_admin.cpp"}}
+{"action":"admin_v1","do":"spawn","why":"search símbolo","spawn":{"tipo":"search","brief":"AdminSessionUi","arg":"AdminSessionUi"}}
+{"action":"admin_v1","do":"cerrar","why":"path del search","reply":"Tras listar l2_admin.*, search muestra AdminSessionUi en src/ai/l2_admin.hpp."}

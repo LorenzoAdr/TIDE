@@ -67,7 +67,7 @@ class AiController {
   void clear_ai_session(bool clear_transcript = true);
   bool has_continuable_session() const;
 
-  // Entry point for the AI tab input (always L0 first — D14).
+  // Entry point for the AI tab input. Default: single admin LLM (legacy L0/L1/L2 off hot path).
   void handle_user_input(const std::string& line);
 
   // Context-menu insert: stash locus, focus AI tab; next Enter runs Agent with seeded pack.
@@ -116,6 +116,7 @@ class AiController {
   void run_task(const std::string& name);
   void dump_context_pack(const std::vector<std::string>& seeds);
   void run_level1_async(const std::string& message);
+  void run_admin_async(const std::string& message);
   void run_insert_async(const std::string& user_message, AiInsertAnchor anchor);
   void cancel_level1();
   void cancel_all();

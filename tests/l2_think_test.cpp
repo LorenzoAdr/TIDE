@@ -46,10 +46,10 @@ int main() {
          "pilot plan medium");
   expect(think_profile_for("causal_wave_pilot", false, false).level == L2ThinkLevel::Medium,
          "wave pilot medium");
-  expect(think_profile_for("causal_wave_control", false, false).level == L2ThinkLevel::Off,
-         "wave control off");
-  expect(!think_profile_for("causal_wave_control", false, false).enable_thinking,
-         "wave control no thinking");
+  expect(think_profile_for("causal_wave_control", false, false).level == L2ThinkLevel::High,
+         "wave control high");
+  expect(think_profile_for("causal_wave_control", false, false).enable_thinking,
+         "wave control thinking on");
   expect(think_profile_for("causal_pilot_plan_more", false, false).level == L2ThinkLevel::Medium,
          "pilot plan_more medium");
   expect(think_profile_for("causal_pilot_worker", false, false).level == L2ThinkLevel::Low,
@@ -88,6 +88,15 @@ int main() {
     tuide::apply_think_for_request(&p);
     expect(p.reasoning_budget == 128, "apply_think_for_request plan budget");
     expect(p.max_tokens == 512 + 128, "apply_think_for_request plan max_tokens");
+  }
+  {
+    tuide::L2BrainRequest c;
+    c.phase = "causal_wave_control";
+    c.max_tokens = 1024;
+    tuide::apply_think_for_request(&c);
+    expect(c.enable_thinking.has_value() && *c.enable_thinking, "control thinking on");
+    expect(c.reasoning_budget == 256, "control high budget");
+    expect(c.max_tokens == 1024 + 256, "control max_tokens bump");
   }
   {
     tuide::L2BrainRequest w;

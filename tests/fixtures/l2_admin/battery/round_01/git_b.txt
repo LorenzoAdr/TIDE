@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"pide historial","spawn":{"tipo":"explore","brief":"ultimos commits"}}
+{"action":"admin_v1","do":"cerrar","why":"explore no concluyo","reply":"No pude listar commits con explore."}

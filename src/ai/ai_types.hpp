@@ -189,6 +189,8 @@ struct AiLevel2Settings {
 
 struct AiSettings {
   bool enabled = true;
+  // Single-admin chat path (replaces L0→L1→L2 hot path). Legacy code stays compiled.
+  bool admin_enabled = true;
   std::vector<std::string> command_whitelist = {"compile", "launch"};
   // Named tasks: name -> argv string (shell-tokenized).
   std::vector<std::pair<std::string, std::string>> tasks;

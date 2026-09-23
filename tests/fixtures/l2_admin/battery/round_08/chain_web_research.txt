@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"investigar en internet no en rg","spawn":{"tipo":"web","brief":"nlohmann release","arg":"nlohmann json latest stable release github"}}
+{"action":"admin_v1","do":"cerrar","why":"urls en notebook","reply":"Tras spawn web, el notebook trae URL(s) http; la pista apunta a github/nlohmann/json releases (evidencia web:1 url=…)."}
