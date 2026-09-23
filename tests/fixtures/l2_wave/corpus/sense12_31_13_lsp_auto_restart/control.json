@@ -1,0 +1,171 @@
+{
+  "agujas": [
+    "lsp",
+    "app",
+    "util",
+    "backend"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/symbols/lsp_symbol_provider.cpp:ensure_python_lsp_async",
+        "src/symbols/lsp_symbol_provider.cpp:finish_python_lsp_start_locked"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detiene el servidor de lenguaje cuando se para",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje tras un fallo o pérdida de respuesta",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "lsp",
+        "app",
+        "util",
+        "backend"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide detectar caída del LSP y reiniciarlo; necesito ver el barrio del servidor, la gestión de la app y utilidades de procesos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "lsp",
+        "app"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide detectar caída del LSP y reiniciarlo; lsp tiene el protocolo y app la sesión; quiero ver qué stems manejan el ciclo de vida del servidor"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "M5 tiene 'restart lsp for workspace' y 'schedule debounced lsp restart'; necesito ver el trigger de la caída y el flujo de reinicio"
+    },
+    {
+      "consulta": "dónde se detiene el servidor de lenguaje cuando se para",
+      "consultas": [
+        "dónde se detiene el servidor de lenguaje cuando se para"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "stop lsp"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 cerró el reinicio; el pack abre stop lsp. Necesito ver el OFF para completar el ciclo de vida."
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje tras un fallo o pérdida de respuesta",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje tras un fallo o pérdida de respuesta"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 cerró la detección y el disparo del reinicio; ahora necesito ver el mecanismo que ejecuta el reinicio automático para confirmar que se cumple sin intervención del usuario"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el pack y las cazas confirman que no existe un mecanismo de detección automática de caídas o pérdida de respuesta del LSP. solo hay reinicio tras instalación o cambio de entorno. el ancla pide detección automática de fallo, lo cual no está implementado."
+    }
+  ],
+  "why": "el pack y las cazas confirman que no existe un mecanismo de detección automática de caídas o pérdida de respuesta del LSP. solo hay reinicio tras instalación o cambio de entorno. el ancla pide detección automática de fallo, lo cual no está implementado.",
+  "zooms": [
+    "lsp",
+    "app"
+  ]
+}

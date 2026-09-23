@@ -1,0 +1,169 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape cuando la IA está generando código",
+      "keep": [
+        "M2",
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código sin dejar el archivo a medias",
+      "keep": [
+        "M3",
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:stop_completion_server",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/llama_backend.cpp:stop_owned_unlocked"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura el clic fuera o la tecla Escape para detener la generación de la IA",
+      "keep": [
+        "M4",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos polos: el disparo (Escape/clic fuera) y el efecto (cancelar limpio). M2 huele Escape, M8 huele cancelación. Separo para cazar cada uno y luego unir."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape cuando la IA está generando código",
+      "consultas": [
+        "dónde se captura la tecla Escape cuando la IA está generando código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "key event handler"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 falló (escape de caracteres). El pack no tiene un barrio de teclado explícito, pero el ancla pide 'pulsa Escape'. Necesito encontrar el handler de teclado real para ver si existe y si llama a la cancelación."
+    },
+    {
+      "consulta": "dónde se captura el clic fuera o la tecla Escape para detener la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera o la tecla Escape para detener la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "eventos de teclado"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "la caza A falló por confundir escape de caracteres con tecla; busco el handler real de eventos de UI que dispare la cancelación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el mecanismo de cancelación existe (cancel level1, stop completion server), pero no se encontró el disparador de Escape ni clic fuera; el ancla pide ese disparador específico"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el mecanismo de cancelación se lee en T2 (cancel level1, stop completion server); los disparos de Escape y clic fuera no se hallaron en el pack (T1 y T3 negaron el mapeo). el ancla pide ambos polos; sin el disparo, el claim no se confirma."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el mecanismo de cancelación se confirma en cancel level1 y stop completion server; los disparos de Escape o clic fuera no se hallaron en el pack, por lo que el ancla se cierra con el efecto leído y se refuta la captura de eventos en esta búsqueda"
+    }
+  ],
+  "why": "el mecanismo de cancelación se confirma en cancel level1 y stop completion server; los disparos de Escape o clic fuera no se hallaron en el pack, por lo que el ancla se cierra con el efecto leído y se refuta la captura de eventos en esta búsqueda",
+  "zooms": []
+}

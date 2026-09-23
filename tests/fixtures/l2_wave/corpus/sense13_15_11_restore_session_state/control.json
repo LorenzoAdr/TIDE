@@ -1,0 +1,140 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto",
+      "keep": [
+        "M1",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.cpp:load_working_lines_from_disk",
+        "src/ai/level2_session.cpp:save_state",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/app_settings.cpp:save",
+        "src/app/workspace_model.cpp:open_file"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado de visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor dentro del editor al cerrar y abrir el proyecto",
+      "keep": [
+        "M8",
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:set_pos",
+        "src/editor/editor_state.cpp:reset_to_single_cursor",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 huele el estado del editor; necesito ver si persiste el cursor y la lista de archivos"
+    },
+    {
+      "consulta": "dónde se guarda y restaura el estado de visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado de visibilidad de los paneles laterales al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "panel lateral"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 confirmó archivos abiertos pero no cursor ni paneles. Falta investigar la persistencia de los paneles laterales para completar el claim del usuario."
+    },
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor dentro del editor al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor dentro del editor al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 confirmó archivos abiertos pero no cursor. M1 (editor state) tiene 'CursorPos' en peek. Necesito verificar si el estado del editor persiste el cursor, no solo la sesión del workspace."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "los archivos abiertos se restauran, pero la posición del cursor y la visibilidad de los paneles laterales no se persisten"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el ancla pedía tres cosas: cursor, archivos y paneles. T1 y T3 confirman que se restauran los archivos abiertos y la pestaña activa, pero niegan la persistencia del cursor. T2 no halló mecanismo para los paneles laterales. El mapa está completo: se recuerdan los archivos, pero no la posición del cursor ni el estado de los paneles."
+    }
+  ],
+  "why": "el ancla pedía tres cosas: cursor, archivos y paneles. T1 y T3 confirman que se restauran los archivos abiertos y la pestaña activa, pero niegan la persistencia del cursor. T2 no halló mecanismo para los paneles laterales. El mapa está completo: se recuerdan los archivos, pero no la posición del cursor ni el estado de los paneles.",
+  "zooms": []
+}

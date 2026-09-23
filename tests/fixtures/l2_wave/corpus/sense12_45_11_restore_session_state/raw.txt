@@ -1,0 +1,21 @@
+The user wants to restore the cursor position, open files, and panel visibility when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A locator: cursor position (T1, T2 done, T3 failed for files)
+2. [en_curso] B locator: open files (T3 failed)
+3. [pendiente] C locator: panel visibility
+4. [pendiente] P bridge
+
+T3 asked: "dónde se restauran los archivos abiertos al volver a abrir un proyecto"
+T3 closed: "El hijo cerró esta pregunta: no hay objeto. No se relanza."
+
+So, the restoration of open files is not found in the current scope/keep.
+The anchor asks for: cursor position, open files, panel visibility.
+T1/T2 found cursor position restoration (Cursor Pos, editor state hpp, set primary, reset to single cursor).
+T3 found NO object for open files restoration.
+
+The plan phase B is "dónde se restauran los archivos abiertos al volver a abrir un proyecto".
+T3 answered this phase: no object.
+So phase B is closed (refuted/not found).
+
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"T3 cerró la fase B: no hay objeto que restaure los archivos abiertos. Salto a la siguiente caza del plan (paneles laterales)."}

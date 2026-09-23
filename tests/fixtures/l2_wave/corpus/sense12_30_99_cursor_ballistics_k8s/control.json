@@ -1,0 +1,80 @@
+{
+  "agujas": [
+    "cursor",
+    "blink",
+    "kubernetes",
+    "quantum",
+    "vector",
+    "physics",
+    "trajectory"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": false,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [],
+  "jobs_run": 0,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "cursor",
+        "blink",
+        "kubernetes",
+        "quantum",
+        "vector",
+        "physics",
+        "trajectory"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla menciona conceptos muy específicos (trayectoria balística, parpadeo, kubernetes, índice cuántico) que no aparecen en el plano inicial; necesito ver si existen barrios o stems relacionados con estos términos para confirmar o refutar la existencia del módulo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "editor",
+        "ui"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla menciona cursores del editor y parpadeo (UI); zoom a editor y ui para ver stems relacionados con movimiento o estado del cursor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack no nombra ni el cálculo de trayectoria balística, ni la sincronización con kubernetes, ni el índice vectorial cuántico; no hay objeto que cazar"
+    }
+  ],
+  "why": "el pack no nombra ni el cálculo de trayectoria balística, ni la sincronización con kubernetes, ni el índice vectorial cuántico; no hay objeto que cazar",
+  "zooms": [
+    "editor",
+    "ui"
+  ]
+}

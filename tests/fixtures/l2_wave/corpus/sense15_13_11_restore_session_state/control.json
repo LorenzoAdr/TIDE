@@ -1,0 +1,163 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto",
+      "keep": [
+        "M3",
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:close",
+        "src/ui/editor_panel.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor y los archivos abiertos al salir del proyecto",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/recent_projects.cpp:save",
+        "src/app/recent_projects.cpp:config_path",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor y los archivos abiertos al entrar al proyecto",
+      "keep": [
+        "M6",
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.cpp:reload_stale_tabs_from_disk"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor y los archivos abiertos al salir del proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor y los archivos abiertos al entrar al proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar restaurar cursor archivos y guardar restaurar paneles laterales",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar cursor, archivos abiertos y paneles; M1 huele editor state y CursorPos, un buen punto de partida para rastrear la persistencia de la sesión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla tiene tres polos independientes (cursor, archivos, paneles). T1 falló en el editor panel. Parto en tres cazas de estado y un puente para ver si comparten mecanismo o son independientes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega el disparo de guardar cursor y archivos; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "los mapeos leídos (close, save, reload) no son el disparo; el pack no nombra el mecanismo de restauración de cursor ni paneles"
+    }
+  ],
+  "why": "los mapeos leídos (close, save, reload) no son el disparo; el pack no nombra el mecanismo de restauración de cursor ni paneles",
+  "zooms": []
+}

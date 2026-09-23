@@ -1,0 +1,197 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:save_buffer",
+        "src/ai/level2_session.cpp:save_state",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/app_settings.cpp:save"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.cpp:set_primary",
+        "src/editor/editor_state.cpp:set_pos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la lista de archivos abiertos al cargar la sesión del proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado de visibilidad de los paneles laterales al cerrar la sesión",
+      "keep": [
+        "M2"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ui/main_layout.cpp:MainLayoutState",
+        "src/app/application.cpp:save_workspace_session"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda el estado de visibilidad de los paneles laterales al cerrar la sesión",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al cargar la sesión",
+        "evita": [],
+        "hacia": [
+          "layout"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar y restaurar la visibilidad de los paneles laterales",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide restaurar estado (cursor, archivos, paneles); M1/M5/M6 son los únicos que tocan editor/layout/panel, pero sus gaps son vacíos y no nombran persistencia; necesito ver si hay un mecanismo de guardado/carga en esos barrios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide recordar posición; M1 tiene el estado pero no el flujo de persistencia; separo guardar y restaurar para cerrar el ciclo"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restaurar"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el guardado; el pack no une guardar con restaurar, pero el ancla pide el ciclo completo. Atomo la restauración para no mezclar con archivos/paneles."
+    },
+    {
+      "consulta": "dónde se restaura la lista de archivos abiertos al cargar la sesión del proyecto",
+      "consultas": [
+        "dónde se restaura la lista de archivos abiertos al cargar la sesión del proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el cursor está cubierto; el ancla pide también los archivos abiertos. T1/T2 no tocan la lista de pestañas; hay que cazar el restore de los buffers abiertos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el ancla pide recordar paneles laterales; T1-T3 cubren cursor y archivos; falta el estado de los paneles (visible/cerrado). Dos loci independientes (guardar/restaurar) para cerrar el claim completo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 6,
+      "why": "T4 niega la persistencia de visibilidad en save workspace session; salto a la fase B del plan para cazar la restauración"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

@@ -1,0 +1,234 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:load_buffer_from_disk",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los paneles laterales al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar y restaurar la visibilidad de los paneles laterales",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide persistencia de estado (cursor, archivos, paneles); M1/M5/M6 son los únicos que tocan editor/panel, pero sus gaps indican falta de trigger/state; necesito ver si hay serialización o restauración en esos barrios antes de cazar"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor, archivos y paneles. Son 4 estados distintos (cursor, tabs, paneles) con 2 acciones (guardar/cargar). Atomizo en 4 locators para encontrar los puntos de I/O de cada estado, y un puente para ver si hay un 'session manager' unificado o si es parcheado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar estado; el pack tiene M1 (editor state) pero no el ciclo de persistencia. Parto en guardar y restaurar para ver si existe el mecanismo y si están unidos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado no afirma el mecanismo de guardado; salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 confirma la restauración de la posición del cursor, pero el ancla exige también archivos abiertos y paneles laterales. El plan actual solo cubre el cursor; salto para ampliar la caza a los otros dos polos."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "consultas": [
+        "dónde se guarda la posición del cursor al cerrar el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "T1 falló en encontrar el guardado; T2 confirmó la restauración. El claim requiere ambos polos. Reviso el guardado con evitación del efecto ya leído."
+    },
+    {
+      "consulta": "dónde se guarda la lista de archivos abiertos al cerrar el proyecto",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla tiene 3 polos (cursor, archivos, paneles). El cursor está parcialmente cubierto (restauración vía workspace). Faltan los mecanismos de persistencia y restauración para archivos y paneles. Son independientes entre sí."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "el ancla tiene 3 polos (cursor, archivos, paneles). El cursor está parcialmente cubierto (T2 dice que se restaura en workspace, pero no cómo se guarda el estado previo ni si se usa). Archivos y paneles son nuevos. Necesito localizar el guardado y la restauración de cada uno para ver si existe el mecanismo de 'recordar estado exacto'."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 9,
+      "why": "el ancla tiene tres polos: cursor, archivos y paneles. El cursor está parcialmente cubierto (guardado/restaurado). Los paneles laterales son un polo independiente sin cobertura en el pack. Se necesita un plan para cerrar el polo de paneles (guardar y restaurar) y luego verificar la conexión. Los archivos abiertos se pueden abordar después o junto con los paneles si el mecanismo de workspace es común, pero primero cerramos el polo de paneles que es estructuralmente similar al de cursor."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 10,
+      "why": "el Cerrado de T4 niega el objeto (no hay mecanismo de guardado de paneles); salto a la siguiente caza del plan (restauración)"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

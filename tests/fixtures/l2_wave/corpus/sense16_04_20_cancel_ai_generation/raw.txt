@@ -1,0 +1,14 @@
+The user wants to know how to cleanly cancel AI code generation (via Escape or clicking outside) without leaving the file half-written.
+
+I have 3 completed jobs:
+1.  **T1**: Asked what `cancel level1` does to clean the file. Result: It only sets a flag and logs, no file cleaning.
+2.  **T2**: Asked where the file is cleaned when AI writing is cancelled. Result: Read `clear pending insert`, `cancel current`, etc. (No specific mechanism found, just names).
+3.  **T3**: Asked where the file content is truncated/deleted when pending insertion is cancelled. Result: `cancel current` calls `clear pending insert` (resets flags), `truncate utf8` is in-memory. No evidence of disk file truncation.
+
+The "Cerrado" of T3 explicitly states: "no encontré el mecanismo de truncamiento o borrado del archivo al cancelar la inserción pendiente... sin evidencia de escritura o truncamiento de archivos en disco en este flujo".
+
+The instructions say:
+- "Si el Cerrado niega el enlace o el disparo, tu why no lo afirma."
+- "Un leído no cierra el
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo de limpieza del archivo al cancelar la generación; el flujo solo resetea flags y despierta el ciclo, sin truncar ni borrar el contenido en disco"}

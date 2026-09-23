@@ -1,0 +1,124 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia la inserción pendiente cuando se cancela la generación de la IA",
+      "keep": [
+        "M2",
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura el clic fuera del editor para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la pulsación de Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escape"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el pack muestra 'ai trace escape' en M2 y 'skip escape' en M9; necesito confirmar si el disparo de cancelación vive en el trace o en la sesión"
+    },
+    {
+      "consulta": "dónde se limpia la inserción pendiente cuando se cancela la generación de la IA",
+      "consultas": [
+        "dónde se limpia la inserción pendiente cuando se cancela la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró que Escape no se captura; el pack muestra clear pending insert en ai controller. Necesito ver cómo se limpia el archivo a medias al cancelar"
+    },
+    {
+      "consulta": "dónde se captura el clic fuera del editor para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera del editor para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clic fuera"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 refutó Escape; el ancla pide clic fuera. Busco el disparador de ratón en el pack."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide cancelar con Escape o clic fuera; T1 refuta Escape (usa texto), T3 refuta clic fuera (no hay objeto). T2 confirma limpieza de inserción pendiente, pero el disparador no es el pedido. el claim se refuta: no hay mecanismo para los gestos solicitados."
+    }
+  ],
+  "why": "el ancla pide cancelar con Escape o clic fuera; T1 refuta Escape (usa texto), T3 refuta clic fuera (no hay objeto). T2 confirma limpieza de inserción pendiente, pero el disparador no es el pedido. el claim se refuta: no hay mecanismo para los gestos solicitados.",
+  "zooms": []
+}

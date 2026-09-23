@@ -1,0 +1,23 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have three completed works:
+T1: Looked for detection of LSP crash/unresponsiveness to trigger restart. Found nothing for LSP (found health checks for Llama AI backend, and programmatic restarts for config changes).
+T2: Looked for LSP start and lifecycle management. Found `start`, `spawn language server`, `initialize`, `stop`, and `transport reader eof` which detects child process exit.
+T3: Looked for restart when child process terminates. Found nothing (empty).
+
+The user's claim is: "if the LSP server process crashes or stops responding, the application automatically detects it and restarts it without user intervention".
+T2 found `transport reader eof` detects child process exit.
+T3 found no restart mechanism triggered by this detection.
+T1 found no automatic detection mechanism for LSP crash/unresponsiveness (only for Llama AI backend).
+
+So, the current state is:
+- Detection of process exit exists (`transport reader eof` in T2).
+- Restart mechanism triggered by this detection does NOT exist (T3 empty).
+- Detection
+---- content ----
+```json
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de reinicio automático tras caída del LSP no existe; se detecta la salida del proceso hijo en transport reader eof pero no hay código que lo reinicie, y no hay sistema de health-check para el LSP como sí lo hay para el backend de IA"
+}
+```

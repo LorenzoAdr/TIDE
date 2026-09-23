@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have a plan with 3 phases:
+A: locator: where compilation errors from console output are parsed
+B: locator: where error diagnostics are applied to the editor margin
+P: bridge: is there a path between parsing console errors and applying diagnostics to the editor (need A B)
+
+Work 1 (T1) asked: "dónde se marcan los errores de compilación en el margen del editor"
+Closed: "leído: push active file diagnostics from cache, apply lsp diagnostics to panel"
+This seems to be about LSP diagnostics, not necessarily console output parsing.
+
+Work 2 (T2) asked: "dónde se leen los errores de compilación de la salida de la consola"
+Closed: "leído: console panel cpp, main layout cpp, parse pty filter tokens, ascii lower"
+This is about terminal/console rendering, not parsing compiler errors.
+
+Work 3 (T3) asked: "dónde se parsean los errores de compilación de la salida de la consola"
+Closed: "no encontr
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une la consola con el margen del editor; los diagnósticos del margen vienen del LSP, no del parseo de la salida de la terminal. sin camino entre polos leídos cierra el ancla"}

@@ -1,0 +1,14 @@
+The user wants to know if the system remembers the cursor position, open files, and panel layout when reopening a project.
+I have three completed jobs:
+1.  **T1**: Asked where cursor position is saved on close. Result: No mechanism found. `save` persists env/themes, `remember` saves workspace path. Cursor history is in-memory only.
+2.  **T2**: Asked where cursor position is restored on open. Result: Read `restore workspace session`, `open file`. (Implies restoration happens, but T1 says saving doesn't happen for cursor).
+3.  **T3**: Asked where editor state is saved on close. Result: No object found.
+
+The anchor has three poles: cursor position, open files, panel layout.
+T1 refutes cursor position saving.
+T3 refutes editor state saving (which likely covers open files/panels if they are part of the editor state, or at least implies a lack of general state saving).
+T2 mentions `restore workspace session`, which might handle open files, but T1/T3 suggest the specific details (cursor, editor state) aren't saved.
+
+The prompt says "exploradores agotados. Cierra citando
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"T1 y T3 refutan la persistencia: no hay mecanismo que guarde la posición del cursor ni el estado del editor al cerrar. T2 confirma que se restaura la sesión del workspace, pero sin el estado detallado del editor, el sistema no puede recordar la posición exacta del cursor ni la configuración de paneles."}

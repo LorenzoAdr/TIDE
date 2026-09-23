@@ -5,60 +5,52 @@
 namespace tuide {
 namespace {
 
-uint32_t byte_at_point(const std::string& source, uint32_t row, uint32_t column) {
-  uint32_t pos = 0;
-  uint32_t at_row = 0;
-  while (pos < source.size() && at_row < row) {
-    if (source[pos] == '\n') {
-      ++at_row;
+// Line-start table for one buffer. Every lookup below used to rescan from byte 0, and the
+// unmapping does several per highlight span, which made it quadratic in the file size.
+struct LineIndex {
+  explicit LineIndex(const std::string& source) : size(static_cast<uint32_t>(source.size())) {
+    starts.push_back(0);
+    for (uint32_t i = 0; i < size; ++i) {
+      if (source[i] == '\n') {
+        starts.push_back(i + 1);
+      }
     }
-    ++pos;
   }
-  if (at_row != row) {
-    return static_cast<uint32_t>(source.size());
-  }
-  const uint32_t line_begin = pos;
-  while (pos < source.size() && source[pos] != '\n') {
-    ++pos;
-  }
-  const uint32_t line_len = pos - line_begin;
-  return line_begin + std::min(column, line_len);
-}
 
-void point_at_byte(const std::string& source, uint32_t byte, uint32_t* row, uint32_t* column) {
-  uint32_t r = 0;
-  uint32_t line_begin = 0;
-  for (uint32_t i = 0; i < byte && i < source.size(); ++i) {
-    if (source[i] == '\n') {
-      ++r;
-      line_begin = i + 1;
+  // Byte offset of (row, column), with column clamped to the line; buffer end when the row
+  // does not exist.
+  uint32_t byte_at_point(uint32_t row, uint32_t column) const {
+    if (row >= starts.size()) {
+      return size;
     }
+    const uint32_t begin = starts[row];
+    return begin + std::min(column, row_length(row));
   }
-  *row = r;
-  *column = byte >= line_begin ? byte - line_begin : 0;
-}
 
-uint32_t line_byte_length(const std::string& source, int line_0) {
-  if (line_0 < 0 || source.empty()) {
-    return 0;
+  void point_at_byte(uint32_t byte, uint32_t* row, uint32_t* column) const {
+    // starts[0] == 0 <= byte, so the iterator is never begin().
+    const auto it = std::upper_bound(starts.begin(), starts.end(), byte);
+    const uint32_t r = static_cast<uint32_t>(it - starts.begin()) - 1;
+    *row = r;
+    *column = byte - starts[r];
   }
-  uint32_t pos = 0;
-  int row = 0;
-  while (pos < source.size() && row < line_0) {
-    if (source[pos] == '\n') {
-      ++row;
+
+  uint32_t line_byte_length(int line_0) const {
+    if (line_0 < 0 || size == 0 || static_cast<std::size_t>(line_0) >= starts.size()) {
+      return 0;
     }
-    ++pos;
+    return row_length(static_cast<uint32_t>(line_0));
   }
-  if (row != line_0) {
-    return 0;
+
+ private:
+  uint32_t row_length(uint32_t row) const {
+    const uint32_t end = row + 1 < starts.size() ? starts[row + 1] - 1 : size;
+    return end - starts[row];
   }
-  const uint32_t begin = pos;
-  while (pos < source.size() && source[pos] != '\n') {
-    ++pos;
-  }
-  return pos - begin;
-}
+
+  std::vector<uint32_t> starts;
+  uint32_t size = 0;
+};
 
 }  // namespace
 
@@ -133,21 +125,21 @@ uint32_t xml_original_byte_to_wrapped(const XmlFragmentWrap& wrap, uint32_t orig
   return original_byte + wrap.open_len;
 }
 
-void xml_unmap_line_highlights_from_wrap(LineHighlights* highlights, int line_0,
-                                         const XmlFragmentWrap& wrap, const std::string& source) {
+namespace {
+
+void unmap_line_highlights(LineHighlights* highlights, int line_0, const XmlFragmentWrap& wrap,
+                           const LineIndex& wrapped_index, const LineIndex& source_index) {
   if (highlights == nullptr || !wrap.active()) {
     return;
   }
-  const uint32_t line_len = line_byte_length(source, line_0);
+  const uint32_t line_len = source_index.line_byte_length(line_0);
   LineHighlights out;
   out.spans.reserve(highlights->spans.size());
   for (const HighlightSpan& span : highlights->spans) {
-    const uint32_t start_b =
-        byte_at_point(wrap.wrapped, static_cast<uint32_t>(line_0),
-                      static_cast<uint32_t>(std::max(0, span.start_col)));
-    const uint32_t end_b =
-        byte_at_point(wrap.wrapped, static_cast<uint32_t>(line_0),
-                      static_cast<uint32_t>(std::max(0, span.end_col)));
+    const uint32_t start_b = wrapped_index.byte_at_point(
+        static_cast<uint32_t>(line_0), static_cast<uint32_t>(std::max(0, span.start_col)));
+    const uint32_t end_b = wrapped_index.byte_at_point(
+        static_cast<uint32_t>(line_0), static_cast<uint32_t>(std::max(0, span.end_col)));
     const std::size_t orig_start = xml_wrapped_byte_to_original(wrap, start_b);
     const std::size_t orig_end = xml_wrapped_byte_to_original(wrap, end_b);
     if (orig_start == std::string::npos && orig_end == std::string::npos) {
@@ -157,12 +149,12 @@ void xml_unmap_line_highlights_from_wrap(LineHighlights* highlights, int line_0,
     uint32_t mapped_end = 0;
     if (orig_start == std::string::npos) {
       // Span started in the synthetic open tag; clamp to first original byte on this line.
-      mapped_start = byte_at_point(source, static_cast<uint32_t>(line_0), 0);
+      mapped_start = source_index.byte_at_point(static_cast<uint32_t>(line_0), 0);
       if (line_0 == 0 && wrap.inject_point > 0) {
         // Prefer content after the preserved prefix on line 0.
         uint32_t r = 0;
         uint32_t c = 0;
-        point_at_byte(source, wrap.inject_point, &r, &c);
+        source_index.point_at_byte(wrap.inject_point, &r, &c);
         if (static_cast<int>(r) == line_0) {
           mapped_start = wrap.inject_point;
         }
@@ -171,7 +163,7 @@ void xml_unmap_line_highlights_from_wrap(LineHighlights* highlights, int line_0,
       mapped_start = static_cast<uint32_t>(orig_start);
     }
     if (orig_end == std::string::npos) {
-      mapped_end = byte_at_point(source, static_cast<uint32_t>(line_0), line_len);
+      mapped_end = source_index.byte_at_point(static_cast<uint32_t>(line_0), line_len);
     } else {
       mapped_end = static_cast<uint32_t>(orig_end);
     }
@@ -182,8 +174,8 @@ void xml_unmap_line_highlights_from_wrap(LineHighlights* highlights, int line_0,
     uint32_t start_col = 0;
     uint32_t end_row = 0;
     uint32_t end_col = 0;
-    point_at_byte(source, mapped_start, &start_row, &start_col);
-    point_at_byte(source, mapped_end, &end_row, &end_col);
+    source_index.point_at_byte(mapped_start, &start_row, &start_col);
+    source_index.point_at_byte(mapped_end, &end_row, &end_col);
     if (static_cast<int>(start_row) != line_0) {
       start_col = 0;
     }
@@ -201,14 +193,27 @@ void xml_unmap_line_highlights_from_wrap(LineHighlights* highlights, int line_0,
   *highlights = std::move(out);
 }
 
-void xml_unmap_highlights_from_wrap(std::vector<LineHighlights>* highlights,
-                                    const XmlFragmentWrap& wrap, const std::string& source) {
+}  // namespace
+
+void xml_unmap_line_highlights_from_wrap(LineHighlights* highlights, int line_0,
+                                         const XmlFragmentWrap& wrap, const std::string& source) {
   if (highlights == nullptr || !wrap.active()) {
     return;
   }
-  for (int line = 0; line < static_cast<int>(highlights->size()); ++line) {
-    xml_unmap_line_highlights_from_wrap(&(*highlights)[static_cast<std::size_t>(line)], line, wrap,
-                                        source);
+  unmap_line_highlights(highlights, line_0, wrap, LineIndex(wrap.wrapped), LineIndex(source));
+}
+
+void xml_unmap_highlights_from_wrap(std::vector<LineHighlights>* highlights,
+                                    const XmlFragmentWrap& wrap, const std::string& source,
+                                    int first_line_0) {
+  if (highlights == nullptr || !wrap.active()) {
+    return;
+  }
+  const LineIndex wrapped_index(wrap.wrapped);
+  const LineIndex source_index(source);
+  for (int i = 0; i < static_cast<int>(highlights->size()); ++i) {
+    unmap_line_highlights(&(*highlights)[static_cast<std::size_t>(i)], first_line_0 + i, wrap,
+                          wrapped_index, source_index);
   }
 }
 

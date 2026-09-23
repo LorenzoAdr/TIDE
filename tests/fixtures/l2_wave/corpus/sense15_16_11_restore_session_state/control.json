@@ -1,0 +1,160 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto",
+      "keep": [
+        "M3",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ui/editor_panel.cpp:reset_helix_overlay_state",
+        "src/ui/editor_panel.cpp:clear_hover_state"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al iniciar la sesión",
+      "keep": [
+        "M8",
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/terminal/app_session.cpp:rebuild_display",
+        "src/terminal/app_session.cpp:rebuild_display_locked"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir un archivo",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los archivos abiertos al iniciar la sesión",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al iniciar la sesión",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay un mecanismo común que orquesta la restauración de cursor, archivos y paneles al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles; M1 huele editor state y CursorPos, un buen punto de partida para rastrear la persistencia"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla tiene tres polos distintos (cursor, archivos, paneles). T1 falló en encontrar el disparo global; rompo en tres cazas independientes para localizar cada polo por separado y luego componer el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "la restauración de archivos no vive en rebuild display; la posición del cursor no tiene objeto de restauración; el pack no une un mecanismo común para paneles. el ancla pide tres restauraciones; dos caen y la tercera no tiene barrio en el pack. cierro el claim: no hay orquestación de sesión que recuerde cursor, archivos y paneles al abrir el proyecto"
+    }
+  ],
+  "why": "la restauración de archivos no vive en rebuild display; la posición del cursor no tiene objeto de restauración; el pack no une un mecanismo común para paneles. el ancla pide tres restauraciones; dos caen y la tercera no tiene barrio en el pack. cierro el claim: no hay orquestación de sesión que recuerde cursor, archivos y paneles al abrir el proyecto",
+  "zooms": []
+}

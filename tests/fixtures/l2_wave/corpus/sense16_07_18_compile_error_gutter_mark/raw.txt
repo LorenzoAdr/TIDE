@@ -1,0 +1,20 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact error line.
+
+I have three completed jobs:
+1.  **T1**: Asked where the red line is painted in the left margin.
+    *   Read: `line gutter marker`, `gutter buffer line at row`.
+    *   Result: Found the visual object (marker/gutter), but not the trigger/dispatch.
+2.  **T2**: Asked where compilation errors are detected in the console output.
+    *   Read: `count workspace diagnostics`, `apply fix for row`.
+    *   Result: Found diagnostic counting/fixing, but not the specific parsing of console output to create diagnostics.
+3.  **T3**: Asked where the error decoration is created in the margin upon receiving a compilation diagnostic.
+    *   Read: `sync diagnostic cache`, `cached file diagnostics`, `apply lsp diagnostics to panel`, `push active file diagnostics from cache`, `invalidate editor view`.
+    *   Result: Found the cache sync and invalidation, but explicitly *did not* find the code that instantiates or draws the visual decoration in the gutter.
+
+The user
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mapeo de creación de la decoración de error en el margen al recibir un diagnóstico no se encontró; el pack muestra la sincronización del cache y la invalidación de la vista, pero no el código que instancia la decoración visual en el gutter. el ancla pide marcar errores de la consola con una línea roja en el margen; se leyó el objeto visual (T1) y la gestión de datos (T2, T3), pero no el disparo que une la detección de errores de consola con la creación de la decoración en el margen. el hueco es la creación de la decoración visual a partir de los datos de diagnóstico."
+}

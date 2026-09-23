@@ -1,0 +1,173 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M8",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la salida de la consola",
+      "keep": [
+        "M3",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp",
+        "src/ui/main_layout.cpp",
+        "src/ui/console_panel.cpp:parse_pty_filter_tokens",
+        "src/ui/console_panel.cpp:ascii_lower"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la salida de la consola",
+      "keep": [
+        "M8",
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:parse_pty_filter_tokens",
+        "src/ai/l2_problem_frame.cpp:problem_frame_wants_anchor_hypotheses"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación de la salida de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se aplican los diagnósticos de errores al margen del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino parsear errores de consola y aplicar diagnósticos al editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "visual highlight",
+        "binary symbols panel",
+        "editor decoration"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide pintar una línea roja en el margen; M3/M10 (visual highlight) y M11 (binary symbols panel) huelen a decoración y escaneo de errores; quiero ver si el pack une el escaneo de la consola con la pintura del editor"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack huele visual highlight y binary symbols panel; busco el mecanismo de marcado"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la salida de la consola",
+      "consultas": [
+        "dónde se leen los errores de compilación de la salida de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "binary symbols panel"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide errores de la consola; M11 huele escaneo de salida shell para errores"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 ya cerraron esos mapeos pero sin camino. El plan reutiliza los resultados para confirmar la falta de conexión y definir dónde insertar el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack no une la consola con el margen del editor; los diagnósticos del margen vienen del LSP, no del parseo de la salida de la terminal. sin camino entre polos leídos cierra el ancla"
+    }
+  ],
+  "why": "el pack no une la consola con el margen del editor; los diagnósticos del margen vienen del LSP, no del parseo de la salida de la terminal. sin camino entre polos leídos cierra el ancla",
+  "zooms": []
+}

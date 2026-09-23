@@ -1,0 +1,19 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin (gutter) of the editor at the exact line of the error.
+
+T1 found that errors are currently marked as text decorations (underline, color) in the text body, not in the gutter. The gutter is used for folds and git, but not diagnostics.
+T2 found that line decorations only apply text styles (color, background, bold, underline) and there is no support for gutter icons/glyphs in the line decoration system. The gutter is managed separately in `helix dispatch` without integration of glyphs from line decorations.
+T3 found the rendering of the left gutter (`Make Editor Panel`, `Render Editor Line`, `line gutter marker`, `fold gutter marker`, `helix gutter width`).
+
+The user's request is to add a red line in the gutter for errors.
+The investigation shows:
+1. Errors are currently handled via text decorations.
+2. The gutter rendering exists but is separate from the decoration system.
+3. There is no existing mechanism to put icons/glyphs in the gutter based on line decorations.
+
+The user wants a *new feature* or a modification to existing behavior. The prompt asks
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el sistema actual no soporta marcas en el margen para errores; las decoraciones solo afectan el texto y el gutter es independiente"
+}

@@ -1,0 +1,202 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se revierte la escritura cuando se cancela la generación de código",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at",
+        "src/ai/ai_controller.cpp:tasks_",
+        "src/ai/ai_controller.cpp:agent_cancel_"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detiene la escritura en el buffer del editor cuando se pulsa Escape durante la generación",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M2",
+        "M8"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape pero no el efecto; M8 tiene cancel pero no el trigger. Necesito ver si el escape llega al controlador y qué hace cancel."
+    },
+    {
+      "consulta": "dónde se limpia el archivo o se aborta la inserción al cancelar la IA",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla une gesto (Escape) y efecto (limpieza). M2 huele el Escape, M8 huele la cancelación/limpieza. Necesito confirmar que el gesto dispara la limpieza y no otro efecto."
+    },
+    {
+      "consulta": "dónde se limpia el archivo o se revierte la escritura cuando se cancela la generación de código",
+      "consultas": [
+        "dónde se limpia el archivo o se revierte la escritura cuando se cancela la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide limpieza sin dejar archivo a medias; M8 tiene cancel current pero no muestra el efecto en el disco; busco el mecanismo de rollback o truncado"
+    },
+    {
+      "consulta": "dónde se detiene la escritura en el buffer del editor cuando se pulsa Escape durante la generación",
+      "consultas": [
+        "dónde se detiene la escritura en el buffer del editor cuando se pulsa Escape durante la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 refutó la reversión post-mortem; el ancla pide 'sin dejar a medias', lo que implica detener el flujo de escritura en caliente. Busco el interruptor que corta el stream al editor, no la limpieza posterior."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "handle user input"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 y T2 fallaron en el efecto (limpieza/detención). El pack señala 'handle user input' como extra de T1. Necesito localizar el trigger que conecta la acción del usuario con el controlador AI para entender si la cancelación se dispara correctamente antes de juzgar el efecto."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "handle user input"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 y T2 cerraron que no hay limpieza ni parada en buffer. Falta el disparador UI. El pack une M2 (ai trace escape) y M8 (handle route). Cazamos el origen del evento."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 y T2 fallaron en el efecto (limpieza/detención). El pack muestra M2=>M8 handle route como entrada. Necesito confirmar si el trigger (Escape/clic) llega a este punto para decidir si el fallo es en la captura o en la lógica posterior."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "T1 y T2 cerraron que no hay limpieza ni parada en buffer. Falta el disparador UI. M2=>M8 une escape a handle route; busco el origen del evento."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "handle user input"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 9,
+      "why": "T1 y T2 cerraron que no hay limpieza ni parada en buffer. Falta el disparador UI. El pack une M2 (ai trace escape) y M8 (handle route). Cazamos el origen del evento."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 10,
+      "why": "T1 y T2 cerraron que no hay limpieza ni parada en buffer. Falta el disparador UI. M2=>M8 une escape a handle route; busco el origen del evento."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

@@ -1,0 +1,126 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/lsp/lsp_client.cpp:process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "quién llama a la función de reinicio del LSP cuando se detecta que el proceso no está vivo",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/lsp/lsp_client.cpp:process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia el proceso de reinicio del LSP tras detectar que el servidor no responde",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/lsp/lsp_client.cpp:process_alive"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 (application) tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el punto de anclaje para la lógica de detección y recuperación. Un hijo cierra el mecanismo de detección y el disparo del reinicio."
+    },
+    {
+      "consulta": "quién llama a la función de reinicio del LSP cuando se detecta que el proceso no está vivo",
+      "consultas": [
+        "quién llama a la función de reinicio del LSP cuando se detecta que el proceso no está vivo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mecanismo de reinicio (restart lsp for workspace). El pack muestra un port hacia 'on lsp missing install', que es el candidato lógico para el disparador automático ante la caída. Necesito confirmar si este evento es quien inicia el ciclo de reinicio sin intervención del usuario."
+    },
+    {
+      "consulta": "dónde se inicia el proceso de reinicio del LSP tras detectar que el servidor no responde",
+      "consultas": [
+        "dónde se inicia el proceso de reinicio del LSP tras detectar que el servidor no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "on workspace opened"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 confirmaron la detección (process alive) y la función de reinicio (schedule debounced lsp restart), pero falta el disparador automático. El pack sugiere 'on workspace opened' como vecino de la detección; hay que ver si ese evento o un watcher similar lanza el reinicio sin intervención del usuario."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección y reinicio automático está confirmado: se monitorea la vida del proceso (clangd process alive) y, al detectar caída, se dispara un reinicio diferido (schedule debounced lsp restart) que ejecuta la restauración del servicio (restart lsp for workspace) sin intervención del usuario"
+    }
+  ],
+  "why": "el mecanismo de detección y reinicio automático está confirmado: se monitorea la vida del proceso (clangd process alive) y, al detectar caída, se dispara un reinicio diferido (schedule debounced lsp restart) que ejecuta la restauración del servicio (restart lsp for workspace) sin intervención del usuario",
+  "zooms": []
+}

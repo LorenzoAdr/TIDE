@@ -1,0 +1,135 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se procesan los errores de compilación que aparecen en la consola inferior",
+      "keep": [
+        "M12"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crea el marcador de error en el margen del editor",
+      "keep": [
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico compilación",
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con una línea roja en el margen; busco barrios de decoración y diagnóstico"
+    },
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores con una línea roja; busco el mecanismo de dibujo del margen"
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación que aparecen en la consola inferior",
+      "consultas": [
+        "dónde se procesan los errores de compilación que aparecen en la consola inferior"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escaneo salida"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el dibujo del margen; ahora busco el origen del error para unir ambos polos"
+    },
+    {
+      "consulta": "dónde se crea el marcador de error en el margen del editor",
+      "consultas": [
+        "dónde se crea el marcador de error en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "line gutter marker"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 encontró el objeto visual (gutter/marker) pero no el disparo; busco la creación del marcador para enlazarlo con los errores"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de marcar errores en el margen ya existe y depende de diagnostics for editor line; la consola no procesa esos errores para el margen, por lo que no hay objeto que vincular"
+    }
+  ],
+  "why": "el mecanismo de marcar errores en el margen ya existe y depende de diagnostics for editor line; la consola no procesa esos errores para el margen, por lo que no hay objeto que vincular",
+  "zooms": []
+}

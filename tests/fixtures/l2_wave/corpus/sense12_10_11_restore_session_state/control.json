@@ -1,0 +1,152 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/ui/context_menu.cpp:context_menu_open_editor_background",
+        "src/ui/context_menu.cpp:context_menu_open_editor_symbol",
+        "src/app/workspace_model.cpp:open_file_at_impl"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se serializa el estado de la sesión al cerrar el proyecto para restaurar archivos y paneles",
+      "keep": [
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide persistencia de estado (cursor, archivos, paneles); M1 (editor state), M5 (editor panel) y M6 (panel) son los barrios candidatos para guardar/cargar esa sesión; necesito ver si tienen lógica de serialización o restauración"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor, archivos y paneles. El pack muestra M1 (cursor) y M5/M6 (paneles) pero sin triggers de persistencia. Hay que localizar los 4 polos (guardar/restaurar x2) y luego ver si hay un núcleo de sesión que los una."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar posición; el pack tiene M1 (editor state) pero no el ciclo de persistencia; separo guardar y restaurar para cerrar el mecanismo de estado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado niega la persistencia del cursor en ese barrio; salto a la siguiente caza del plan (restauración)"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 no encontró el mecanismo de restauración; el pack sugiere 'ensure cursors' como hop extra. Cambio de caza para buscar la lógica de aseguramiento de cursores al abrir."
+    },
+    {
+      "consulta": "dónde se serializa el estado de la sesión al cerrar el proyecto para restaurar archivos y paneles",
+      "consultas": [
+        "dónde se serializa el estado de la sesión al cerrar el proyecto para restaurar archivos y paneles"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "save state"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "T1 refutó la persistencia en el editor; el ancla pide sesión completa (archivos/paneles). Busco el mecanismo de nivel superior que guarda el estado global, no el cursor aislado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "T3 niega la serialización del estado de la sesión (archivos y paneles). T1 niega la persistencia de la posición del cursor al cerrar. Sin mecanismo de guardado, no hay restauración posible al abrir el proyecto. El claim se refuta: la funcionalidad no existe."
+    }
+  ],
+  "why": "T3 niega la serialización del estado de la sesión (archivos y paneles). T1 niega la persistencia de la posición del cursor al cerrar. Sin mecanismo de guardado, no hay restauración posible al abrir el proyecto. El claim se refuta: la funcionalidad no existe.",
+  "zooms": []
+}

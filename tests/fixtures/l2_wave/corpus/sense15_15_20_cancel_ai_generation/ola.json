@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no nombra un handler de Escape ni clic fuera para cancelar la IA; lo leído son escapes de string y cancelaciones por texto o movimiento de cursor. el polo de captura de input no existe en el código actual, por lo que el claim de cancelar limpiamente con esos gestos se refuta."
+}

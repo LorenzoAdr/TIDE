@@ -1,0 +1,16 @@
+The user wants to know if the application automatically detects when the LSP (Language Server Protocol) process crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Asked where the crash/non-response is detected and the restart is triggered.
+    *   **Result**: Found `health ok` probe (HTTP health) and restart trigger in `start completion server` when `health ok` fails or stamp changes, invoking `stop listener on port`.
+    *   **Analysis**: This looks like a mechanism for the *completion server* (likely Llama/LLM based on "completion server" and "llama backend" in M3/M6), not necessarily the *LSP* (Language Server Protocol) for code editing (like clangd, typescript, etc.). The user asked about "servidor de lenguaje LSP". T1 found a mechanism for "completion server".
+2.  **T2**: Asked where the deferred restart is programmed.
+    *   **Result**: Read `ensure completion server`, `ensure ready`, `start completion server`.
+    *   **Analysis**: Again, "completion server".
+3.  **T3**: Asked
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide reinicio automático del LSP (servidor de lenguaje). T1 encontró un mecanismo de detección y reinicio automático (health ok probe, restart en start completion server), pero es para el 'completion server' (backend de IA/LLM), no para el LSP de edición de código. T2 y T3 confirmaron que el flujo de reinicio automático está acoplado a este completion server. No hay evidencia en el pack de un mecanismo similar para el LSP de edición (clangd, etc.). El mecanismo de reinicio automático existe para el servidor de completado, pero no se ha encontrado para el LSP de lenguaje."
+}

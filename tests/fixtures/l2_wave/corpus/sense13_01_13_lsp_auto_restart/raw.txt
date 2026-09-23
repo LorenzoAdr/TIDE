@@ -1,0 +1,15 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have three completed jobs:
+1.  **T1**: Asked where the crash detection and auto-restart trigger happens. Result: No object found.
+2.  **T2**: Asked where the debounced restart is scheduled. Result: Found `schedule debounced lsp restart`, `restart lsp for workspace`.
+3.  **T3**: Asked where the lifecycle is managed to add crash detection. Result: Found `start completion server` (launches process, checks `health ok`), `health ok` (HTTP request to health endpoint). The child says crash detection exists via `health ok` invoked after fork to confirm readiness, and this is the mechanism to extend/connect for continuous detection.
+
+The user's goal is "detect automatically and restart without user action".
+T3 found the mechanism for starting and checking health (`health ok`).
+T2 found the mechanism for scheduling a restart (`schedule debounced lsp restart`).
+
+The gap is connecting the *continuous* detection of a crash (not just the initial health check) to the restart mechanism.
+T3 says `health ok` is the mechanism to extend.
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la detección de caída se basa en health ok y el reinicio en schedule debounced lsp restart; el pack une ambos mecanismos"}

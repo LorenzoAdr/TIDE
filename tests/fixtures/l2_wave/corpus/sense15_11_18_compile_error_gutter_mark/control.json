@@ -1,0 +1,225 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 2,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se aplica la decoración de error en el margen del editor",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/editor/editor_render.cpp:apply_decoration",
+        "src/editor/editor_render.cpp:RenderEditorLine",
+        "src/editor/editor_render.cpp:render_rich_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se renderiza la columna del margen izquierdo del editor y cómo se añaden marcadores o decoraciones a esa zona",
+      "keep": [
+        "M1",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:git_line_changed",
+        "src/editor/editor_render.cpp:RenderEditorLine"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor a partir de un mapa de errores",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:line_gutter_marker"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "margen editor",
+        "decoración línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con marcas en el editor; busco barrios de diagnóstico y decoración"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error compilación",
+        "margen editor",
+        "decoración línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide unir errores de consola con marcas en el margen; busco barrios que manejen errores y decoración de líneas"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "margen editor",
+        "decoración línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "dónde se aplica la decoración de error en el margen del editor",
+      "consultas": [
+        "dónde se aplica la decoración de error en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide marcar errores con línea roja; busco el mecanismo que pinta el margen"
+    },
+    {
+      "consulta": "dónde se renderiza la columna del margen izquierdo del editor y cómo se añaden marcadores o decoraciones a esa zona",
+      "consultas": [
+        "dónde se renderiza la columna del margen izquierdo del editor y cómo se añaden marcadores o decoraciones a esa zona"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "gutter renderer"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 cerró que las decoraciones actuales van al cuerpo del texto, no al margen. Necesito localizar el renderizado del gutter para ver si existe un mecanismo de marcadores en esa zona o cómo se inyectan elementos allí."
+    },
+    {
+      "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor a partir de un mapa de errores",
+      "consultas": [
+        "dónde se crea el marcador de diagnóstico en el margen del editor a partir de un mapa de errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "marker from map"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "T2 leyó line diagnostic marker from map; ese es el puente entre el mapa de errores y el marcador del margen. Un hijo cierra cómo se construye ese marcador y qué datos espera del mapa."
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación de la consola y se insertan en el mapa de diagnósticos del editor",
+      "consultas": [
+        "dónde se extraen los errores de compilación de la consola y se insertan en el mapa de diagnósticos del editor"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "consola"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "T3 cerró el marcador en el margen, pero falta el origen: cómo pasan los errores de la consola al mapa que alimenta el margen"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "el marcador en el margen se crea en line gutter marker, que delega en line diagnostic marker from map para obtener el carácter o W a partir del mapa de errores panel diagnostics by line"
+    },
+    {
+      "consulta": "dónde se llena el mapa de errores por línea que alimenta el marcador del margen",
+      "consultas": [
+        "dónde se llena el mapa de errores por línea que alimenta el marcador del margen"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnostics by line"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "T3 cerró el mecanismo de renderizado del margen (line gutter marker usa panel diagnostics by line). Falta ver qué llena ese mapa para saber si ya incluye los errores de consola o si hay que inyectarlos ahí."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 10,
+      "why": "el marcador en el margen se crea en line gutter marker a partir del mapa panel diagnostics by line; los errores de la consola no llegan a ese mapa, por lo que no se marcan en el margen"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

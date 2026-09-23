@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de marca existe (line gutter marker delega a line diagnostic marker from map que consulta diagnostics for editor line y retorna E para errores); el color rojo se asocia al carácter renderizado en el gutter. no hay camino entre la consola y el editor en el pack leído; el ancla pide marcar errores de la consola, pero el pack solo muestra el mecanismo de marca del editor, no la extracción de la consola. cierra el claim: hay mecanismo de marca, no hay extracción de consola."
+}

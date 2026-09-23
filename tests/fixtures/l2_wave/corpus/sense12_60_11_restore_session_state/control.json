@@ -1,0 +1,119 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto para restaurarlo al abrirlo",
+      "keep": [
+        "M5",
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/app_settings.cpp:save"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor y los archivos abiertos al cargar la sesión del workspace",
+      "keep": [
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/app/workspace_session.cpp:load",
+        "src/app/application.cpp:restore_workspace_session"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al cargar la sesión del workspace",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto para restaurarlo al abrirlo",
+      "consultas": [
+        "dónde se guarda el estado del editor al cerrar el proyecto para restaurarlo al abrirlo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "sesión"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 tiene editor state y CursorPos; hay que ver si persiste la sesión completa (archivos, paneles, cursor)"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor y los archivos abiertos al cargar la sesión del workspace",
+      "consultas": [
+        "dónde se restaura la posición del cursor y los archivos abiertos al cargar la sesión del workspace"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restore"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el guardado (save workspace session). Ahora necesito confirmar si el mecanismo de restauración (restore) recupera los detalles específicos del usuario (cursor, archivos, paneles) o si falta lógica para ello."
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al cargar la sesión del workspace",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al cargar la sesión del workspace"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar paneles laterales; T2 cerró archivos y cursor, pero no tocó paneles. busco el mecanismo de restauración de visibilidad de paneles al abrir el proyecto."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 confirma la restauración de archivos abiertos y pestaña activa en restore workspace session, pero refuta la posición del cursor (no se lee línea/columna). T3 refuta la restauración de paneles laterales (no hay objeto). El claim se cierra con confirmación parcial y refutación de los otros dos polos."
+    }
+  ],
+  "why": "T2 confirma la restauración de archivos abiertos y pestaña activa en restore workspace session, pero refuta la posición del cursor (no se lee línea/columna). T3 refuta la restauración de paneles laterales (no hay objeto). El claim se cierra con confirmación parcial y refutación de los otros dos polos.",
+  "zooms": []
+}

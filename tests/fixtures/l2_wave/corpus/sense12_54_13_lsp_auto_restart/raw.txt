@@ -1,0 +1,13 @@
+The user wants to implement an automatic restart mechanism for the LSP server if it crashes or becomes unresponsive.
+I have investigated three aspects:
+1.  **T1**: Detection of LSP crash/no response to trigger restart. Found `restart lsp for workspace`, `on lsp missing install`, `notify lsp status`.
+2.  **T2**: How the automatic restart happens. Found `schedule debounced lsp restart`, but the explorer concluded there is no automatic watchdog/ping/timeout handler currently triggering it; it seems manual or reactive to config changes.
+3.  **T3**: Handling unexpected exit/error of the LSP process. Found nothing (no object).
+
+The explorer in T2 explicitly stated: "no encontré el mecanismo de detección automática de caída no-respuesta del LSP... no hay un watchdog, ping timeout o handler de error en el cliente LSP que dispare schedule debounced lsp restart".
+T3 confirmed no object for handling unexpected exit/error.
+
+The claim is "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie".
+The investigation shows that the mechanism *does not exist* currently.
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de detección automática y reinicio ante caída o no-respuesta del LSP no existe; el reinicio actual es manual o reactivo a cambios de entorno, sin watchdog ni handler de error"}

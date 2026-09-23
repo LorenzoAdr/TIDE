@@ -1,0 +1,161 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al volver a abrir un proyecto",
+      "keep": [
+        "M11",
+        "M6"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:save"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la lista de archivos abiertos al volver a abrir un proyecto",
+      "keep": [
+        "M6",
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run",
+        "src/app/workspace_model.cpp:load_working_lines_from_disk",
+        "src/app/workspace_model.cpp:remove_tab_mru",
+        "src/app/workspace_model.cpp:reload_stale_tabs_from_disk",
+        "src/app/workspace_model.cpp:open_tabs_mru"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al volver a abrir un proyecto",
+      "keep": [
+        "M4",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/app/application.cpp:reopen_workspace_documents",
+          "src/app/application.cpp:run",
+          "src/app/workspace_model.cpp:load_working_lines_from_disk",
+          "src/app/workspace_model.cpp:remove_tab_mru",
+          "src/app/workspace_model.cpp:reload_stale_tabs_from_disk",
+          "src/app/workspace_model.cpp:open_tabs_mru"
+        ],
+        "consulta": "dónde se restaura la lista de archivos abiertos al volver a abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al volver a abrir un proyecto",
+        "evita": [],
+        "hacia": [
+          "layout"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino restaurar archivos abiertos y restaurar visibilidad de paneles",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al volver a abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al volver a abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 nombra 'editor state' y 'CursorPos'; es el barrio más directo para rastrear la persistencia de la posición del cursor entre sesiones."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide tres cosas; la posición del cursor ya falló. resto: archivos abiertos y paneles laterales. son mecanismos distintos que puedo cazar por separado y luego unir."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 lista los mecanismos de restauración de archivos (reopen workspace documents, reload stale tabs), confirmando el polo de archivos abiertos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar cursor, archivos y paneles. T2 confirma que se restauran los archivos abiertos (reopen workspace documents, open tabs mru). T1 refuta el cursor (solo guarda rutas recientes). T3 refuta los paneles (no hay objeto). El claim conjunto se refuta: falta el cursor y los paneles."
+    }
+  ],
+  "why": "el ancla pide recordar cursor, archivos y paneles. T2 confirma que se restauran los archivos abiertos (reopen workspace documents, open tabs mru). T1 refuta el cursor (solo guarda rutas recientes). T3 refuta los paneles (no hay objeto). El claim conjunto se refuta: falta el cursor y los paneles.",
+  "zooms": []
+}

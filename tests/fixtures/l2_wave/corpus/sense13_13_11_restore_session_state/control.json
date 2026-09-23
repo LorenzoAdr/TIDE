@@ -1,0 +1,149 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_text.hpp",
+        "src/ui/text_input_style.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al reabrir un proyecto",
+      "keep": [
+        "M6",
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:save",
+        "src/app/application.cpp:reopen_workspace_documents"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado de los paneles laterales al reabrir un proyecto",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "estado sesión",
+        "restaurar layout",
+        "persistencia editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición cursor, archivos abiertos y paneles laterales al reabrir; busco barrios de persistencia de sesión y layout"
+    },
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M1 huele el estado del editor y la posición del cursor; es el primer polo del ancla"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla pide tres cosas distintas: cursor, archivos abiertos y paneles laterales. el pack no une un solo mecanismo; hay que cazar cada uno por su barrio (editor state, editor panel, main layout) y luego ver si hay un puente o si son independientes."
+    },
+    {
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al reabrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la lista de archivos abiertos al reabrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "sesión"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el cursor falló; pruebo con los archivos abiertos, que suelen compartir el mecanismo de persistencia de sesión"
+    },
+    {
+      "consulta": "dónde se guarda y restaura el estado de los paneles laterales al reabrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado de los paneles laterales al reabrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "layout"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "el ancla tiene tres polos; dos fallaron. el tercero (paneles) no se ha cazado. M2 y M6 huelen a layout y paneles; un hijo cierra ese polo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "las tres búsquedas (cursor, archivos, paneles) no hallaron el mecanismo de persistencia al reabrir; el mapa no une los polos leídos y no hay camino entre ellos"
+    }
+  ],
+  "why": "las tres búsquedas (cursor, archivos, paneles) no hallaron el mecanismo de persistencia al reabrir; el mapa no une los polos leídos y no hay camino entre ellos",
+  "zooms": []
+}

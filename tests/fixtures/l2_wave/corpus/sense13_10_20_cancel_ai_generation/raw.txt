@@ -1,0 +1,18 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Looked for Escape/click capture to cancel AI. Result: Found editor Escape logic (modals, completion, selection) but *no invocation* of `cancel level1`.
+2.  **T2**: Looked for cleaning the half-written file on cancel. Result: Found `clear pending insert`, `cancel level1`, `cancel current`, `cancel all`.
+3.  **T3**: Looked for click outside capture. Result: No object found.
+
+Analysis:
+- T1 says the Escape key handling in the editor does *not* call `cancel level1`. It handles modals, completion, selection.
+- T2 says the mechanism to clean up (`clear pending insert`) exists and is associated with `cancel level1`.
+- T3 says clicking outside is not captured for this purpose.
+
+The user's claim is: "when the AI is generating code and the user presses Escape or clicks outside, I want the generation to be cancelled cleanly without leaving the file half-written".
+
+Current state:
+- The "clean
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de limpieza existe (clear pending insert) pero no está unido a la captura de Escape ni al clic fuera; el ancla pide unirlos y el pack no ofrece el puente"}

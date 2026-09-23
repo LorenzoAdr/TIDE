@@ -1,0 +1,15 @@
+The user wants to mark compilation errors from the console with a red line in the editor margin.
+I have investigated:
+1.  **Parsing errors from console**: T1 found "no object" (no parsing mechanism found in the specific scope or it doesn't exist as a distinct parser for this purpose).
+2.  **Painting the red line**: T2 found `line gutter marker` decides to paint based on `line diagnostic marker from map` returning a diagnostic with `severity k Error`.
+3.  **Creating the diagnostic**: T3 found `line diagnostic marker from map` creates the marker when `k Error` is assigned in `diagnostic severity color`.
+
+The user's request implies a missing link: "errors appearing in the console" -> "red line in margin".
+Currently, the red line depends on `diagnostic` objects.
+T1 failed to find where console text is parsed into these diagnostics.
+T2 and T3 explain how diagnostics become red lines.
+The gap is: how do console errors become diagnostics?
+T1 said "no object" for parsing console errors. This suggests the mechanism might not exist or is not in the inspected scope.
+However, the user's claim is "I
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une la consola con el margen: T1 no halló el parser de errores de consola y T2/T3 anclan la línea roja a diagnostics existentes; sin puente entre consola y diagnostic, el claim se refuta"}

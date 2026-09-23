@@ -1,0 +1,141 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "keep": [
+        "M3",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M8",
+        "M10"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/visual_highlight.cpp:visual_highlight_service",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:handle_editor_mouse",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extrae la línea de error del texto de la consola para marcarla en el editor",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:make_terminal_panel"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "visual highlight",
+        "binary symbols panel",
+        "editor margin"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con línea roja en margen; M11 huele escaneo de errores y M3/M10 visual highlight; busco si ya existe el puente o si hay que construirlo"
+    },
+    {
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "consultas": [
+        "dónde se detectan los errores de compilación en la salida de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escaneo"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M11 huele escaneo de errores de linker en shell; necesito ver si ese mecanismo existe y cómo se activa para luego conectarlo al editor"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack nombra visual highlight y binary symbols panel scan shell output for linker errors; busco el mecanismo de marcado visual"
+    },
+    {
+      "consulta": "dónde se extrae la línea de error del texto de la consola para marcarla en el editor",
+      "consultas": [
+        "dónde se extrae la línea de error del texto de la consola para marcarla en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parseo"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 no halló el detector; T2 halló el marcador. Falta el puente: cómo se pasa de texto a línea. Busco el parser que convierte la salida de la consola en coordenadas de línea."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el margen del editor se marca con visual highlight service y line gutter marker; no hay camino desde la detección de errores en la consola"
+    }
+  ],
+  "why": "el margen del editor se marca con visual highlight service y line gutter marker; no hay camino desde la detección de errores en la consola",
+  "zooms": []
+}

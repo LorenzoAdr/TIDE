@@ -1,0 +1,7 @@
+The user wants to restore the exact state of a project when reopening it: cursor position, open files, and visible/closed side panels.
+
+I have three completed works (T1, T2, T3) that all point to `restore workspace session` and `open file impl` as the mechanisms for restoring files, cursor, and panels.
+T1: "dónde se restauran los archivos abiertos y la posición del cursor al volver a abrir un proyecto" -> `restore workspace session`, `open file`, `open file impl`, `open new tab from disk`.
+T2: "dónde se
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de restauración de archivos, cursor y paneles al reabrir un proyecto es restore workspace session, que delega en open file impl para la lógica de apertura y estado"}

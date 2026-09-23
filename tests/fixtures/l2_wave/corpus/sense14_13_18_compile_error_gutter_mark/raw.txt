@@ -1,0 +1,14 @@
+The user wants to mark compilation errors from the console with a red line in the editor's left margin.
+I have a plan with 3 phases:
+1. A: locator: where the line marker is created in the editor margin for a diagnostic error.
+2. B: locator: where a compilation diagnostic is associated with an editor line.
+3. P: bridge: is there a path between compilation diagnostic and line marker in the margin.
+
+Current status:
+- T1 (related to A/B?): Asked "where compilation errors are detected in console output". Read: `parse pty filter tokens`, `diagnostics for translation unit`, `diagnostics on line`. Closed: "ESA pregunta no se relanza...".
+- T2 (related to A?): Asked "where the red line is painted in the left margin". Read: `line gutter marker`. Closed: "no encontré la pintura... selector de carácter ASCII...".
+- T3 (related to A?): Asked "where the line marker is created in the editor margin for a diagnostic error". Read: `line diagnostic marker`, `line gutter marker`, `Make Editor Panel`. Closed: "ESA pregunta no se relanza...".
+
+The system says "explor
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"los marcadores de diagnóstico ya existen en el margen (line diagnostic marker), pero no se pinta la línea roja porque el gutter usa selectores de carácter ASCII, no lógica de color; el mecanismo de pintura no está en el pack"}

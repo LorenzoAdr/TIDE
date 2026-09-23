@@ -1,0 +1,161 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp",
+        "src/ai/ai_trace.cpp",
+        "src/ai/ai_controller.cpp:clear",
+        "src/ui/console_panel.cpp:handle_ai_console_keys"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo al cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "cómo se decide si limpiar el archivo pendiente al cancelar la generación",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: el disparo (Escape) y el efecto (limpieza). M2 huele el Escape, M8/M6 la cancelación. Atomizo para asegurar que el trigger llega al efecto."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "control: lo leído no afirma; no pases ese polo",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado es un dump de nombres, no afirma el objeto de la fase A"
+    },
+    {
+      "consulta": "cómo se decide si limpiar el archivo pendiente al cancelar la generación",
+      "consultas": [
+        "cómo se decide si limpiar el archivo pendiente al cancelar la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "has pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 cerraron. El pack une 'clear' con 'has pending insert'. Necesito ver la condición que activa la limpieza para asegurar que no deja el archivo a medias."
+    },
+    {
+      "consulta": "qué hace cancel all con el archivo cuando busy es true",
+      "consultas": [
+        "qué hace cancel all con el archivo cuando busy es true"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "T3 dice que si busy es true se llama a cancel all en vez de limpiar el pendiente; necesito ver si cancel all deja el archivo a medias o lo limpia"
+    },
+    {
+      "consulta": "dónde se marca busy como true al arrancar la generación de la IA",
+      "consultas": [
+        "dónde se marca busy como true al arrancar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "arranque"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T3 revela que si busy es true, se ignora el pendiente y se llama a cancel all. Necesito confirmar si busy se activa al iniciar la generación para entender por qué no se limpia el archivo a medias."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el mecanismo de cancelación ya está leído: cancel current limpia el archivo pendiente si no está busy; si está busy, llama a cancel all. el flujo de Escape a cancelación está trazado."
+    }
+  ],
+  "why": "el mecanismo de cancelación ya está leído: cancel current limpia el archivo pendiente si no está busy; si está busy, llama a cancel all. el flujo de Escape a cancelación está trazado.",
+  "zooms": []
+}

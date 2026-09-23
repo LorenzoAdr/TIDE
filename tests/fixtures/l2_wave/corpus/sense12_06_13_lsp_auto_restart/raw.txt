@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de detección automática de caída o timeout del LSP no existe en el código; lo leído confirma reinicios por cambio de entorno o falta de instalación, pero no hay monitor de salud (heartbeat/timeout) que dispare el reinicio ante un fallo silencioso"}

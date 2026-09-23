@@ -1,0 +1,100 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:apply_workspace_settings",
+        "src/app/application.cpp:setup_build_environment_watching"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia el backend del servidor LSP tras detectar que falta o ha caído",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:ensure_backend_started"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el punto de anclaje para la detección y acción automática. Un hijo cierra el mecanismo de detección y disparo."
+    },
+    {
+      "consulta": "dónde se inicia el backend del servidor LSP tras detectar que falta o ha caído",
+      "consultas": [
+        "dónde se inicia el backend del servidor LSP tras detectar que falta o ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ensure backend started"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección y el disparo del reinicio; el port T1->ensure backend started indica el siguiente eslabón: la ejecución efectiva del arranque del proceso"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el mecanismo de detección y reinicio automático del LSP está confirmado: el bucle principal (run) y la instalación disparan restart lsp for workspace, que inicia el backend. El usuario no necesita intervenir."
+    }
+  ],
+  "why": "el mecanismo de detección y reinicio automático del LSP está confirmado: el bucle principal (run) y la instalación disparan restart lsp for workspace, que inicia el backend. El usuario no necesita intervenir.",
+  "zooms": []
+}

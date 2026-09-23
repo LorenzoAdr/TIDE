@@ -1,0 +1,10 @@
+The user wants to restore the cursor position, open files, and sidebar visibility when reopening a project.
+I have a plan with 3 phases:
+1. Cursor position (T1) - Failed. `save workspace session` only persists tab paths and launch args. `Cursor Pos` has no serialization logic.
+2. Open files (T2) - Failed/Incomplete. `save workspace session` persists tab paths. `clear tabs`, `open tabs mru` seen.
+3. Sidebar visibility (T3) - Failed/Incomplete. `main layout hpp` seen.
+
+Current state:
+T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto. T1 confirma que no hay mecanismo para guardar/restaurar la posición del cursor (solo rutas de tabs). T2 y T3 no encontraron el mecanismo completo para archivos y paneles. El pack no une estos polos con un mecanismo de sesión persistente que cubra los tres requisitos. Cierro el claim como no implementado."}

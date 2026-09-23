@@ -1,0 +1,20 @@
+The user wants to find two things:
+1. The module calculating ballistic cursor trajectory for real-time sync with Kubernetes on user blink.
+2. Where this physics is persisted in the quantum vector index of the workspace.
+
+Work 1 (T1) already investigated the first part ("dónde se calcula la trayectoria balística...").
+Result of T1: "no hay objeto" (no object found). The code is a local text editor, not a Kubernetes-syncing ballistic cursor system.
+
+The anchor has two parts. Part 1 is refuted (no object).
+Part 2 is "dónde se persiste esa física en el índice vectorial cuántico del workspace".
+Since Part 1 (the physics) doesn't exist, Part 2 (persisting that physics) likely doesn't exist either.
+However, I should check if there is *any* persistence of cursor state or similar "physics" in a vector index, just to be thorough, or simply close the claim based on the refutation of the source object.
+
+The instructions say: "Si el pack no nombra el mecanismo (ningún nombre en leído/visto), puedes cerrar sin hijo (no hay objeto)."
+T1 closed the first part
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el cálculo de trayectoria balística no existe; sin objeto fuente, no hay persistencia de esa física en el índice vectorial"
+}

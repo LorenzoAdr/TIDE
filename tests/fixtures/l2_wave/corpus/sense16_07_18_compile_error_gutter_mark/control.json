@@ -1,0 +1,156 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M6",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "keep": [
+        "M3",
+        "M9"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/diagnostics.cpp:count_workspace_diagnostics",
+        "src/ui/diagnostics_panel.cpp:apply_fix_for_row"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crea la decoración de error en el margen al recibir un diagnóstico de compilación",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:sync_diagnostic_cache",
+        "src/ui/editor_panel.cpp:cached_file_diagnostics",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/editor_panel.cpp:invalidate_editor_view"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico compilación",
+        "línea error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con marcas visuales en el editor; busco barrios de decoración y diagnóstico"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el usuario quiere marcar errores con una línea roja; necesito encontrar el mecanismo que pinta esa decoración para luego conectarlo con la consola"
+    },
+    {
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "consultas": [
+        "dónde se detectan los errores de compilación en la salida de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escaneo salida"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el mecanismo de la línea roja (gutter marker). Falta el polo de la detección de errores en la consola para ver si hay camino o si hay que construirlo. M11 huele a escaneo de errores."
+    },
+    {
+      "consulta": "dónde se crea la decoración de error en el margen al recibir un diagnóstico de compilación",
+      "consultas": [
+        "dónde se crea la decoración de error en el margen al recibir un diagnóstico de compilación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnóstico"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 no se unen; busco el puente que convierte un diagnóstico en una decoración de margen"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo de decoración en el margen existe (line gutter marker) y el sistema gestiona diagnósticos (sync diagnostic cache, apply lsp diagnostics to panel), pero no se ha encontrado el código que vincula los errores de la consola inferior con la creación de la línea roja en el margen; el pack no nombra ese enlace"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mapeo de creación de la decoración de error en el margen al recibir un diagnóstico no se encontró; el pack muestra la sincronización del cache y la invalidación de la vista, pero no el código que instancia la decoración visual en el gutter. el ancla pide marcar errores de la consola con una línea roja en el margen; se leyó el objeto visual (T1) y la gestión de datos (T2, T3), pero no el disparo que une la detección de errores de consola con la creación de la decoración en el margen. el hueco es la creación de la decoración visual a partir de los datos de diagnóstico."
+    }
+  ],
+  "why": "el mapeo de creación de la decoración de error en el margen al recibir un diagnóstico no se encontró; el pack muestra la sincronización del cache y la invalidación de la vista, pero no el código que instancia la decoración visual en el gutter. el ancla pide marcar errores de la consola con una línea roja en el margen; se leyó el objeto visual (T1) y la gestión de datos (T2, T3), pero no el disparo que une la detección de errores de consola con la creación de la decoración en el margen. el hueco es la creación de la decoración visual a partir de los datos de diagnóstico.",
+  "zooms": []
+}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo ya existe: los errores de la consola se analizan en diagnostics panel, se empujan al mapa panel diagnostics by line vía apply lsp diagnostics to panel, y el margen del editor los lee en line gutter marker para pintar la línea roja"
+}

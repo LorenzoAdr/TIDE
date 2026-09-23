@@ -1,0 +1,124 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/symbols/lsp_symbol_provider.cpp",
+        "src/symbols/symbol_provider.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia el reinicio del servidor LSP tras detectar que falta o ha caído",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha dejado de responder timeout o crash y se dispara el reinicio automático",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el punto de anclaje para la lógica de detección y reinicio automático. Necesito ver si la detección es automática (heartbeat, error de socket) o manual."
+    },
+    {
+      "consulta": "dónde se inicia el reinicio del servidor LSP tras detectar que falta o ha caído",
+      "consultas": [
+        "dónde se inicia el reinicio del servidor LSP tras detectar que falta o ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección y el disparador (schedule). El pack une T1 con 'on lsp missing install'. Necesito leer la ejecución del reinicio para confirmar que se reinicia automáticamente sin intervención."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha dejado de responder timeout o crash y se dispara el reinicio automático",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha dejado de responder timeout o crash y se dispara el reinicio automático"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró el caso de 'falta' (instalación). El ancla pide también 'deja de responder'. T1 vio 'schedule debounced lsp restart' pero no el trigger de fallo en tiempo de ejecución. Busco el detector de salud/crash que llama a ese schedule."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de reinicio automático está implementado: on lsp missing install detecta la ausencia/caída y llama a restart lsp for workspace, que ejecuta el reinicio sin intervención del usuario"
+    }
+  ],
+  "why": "el mecanismo de reinicio automático está implementado: on lsp missing install detecta la ausencia/caída y llama a restart lsp for workspace, que ejecuta el reinicio sin intervención del usuario",
+  "zooms": []
+}

@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el sistema no crea diagnósticos de compilación a partir del texto de la consola (T4 vacío, T2/T3 solo linker); sin fuente de datos, no hay camino para marcar el margen"}

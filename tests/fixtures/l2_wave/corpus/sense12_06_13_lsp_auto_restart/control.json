@@ -1,0 +1,133 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:process_build_environment_updates"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:clangd_index_healthy",
+        "src/lsp/lsp_client.hpp",
+        "src/lsp/lsp_client.cpp:process_alive",
+        "src/lsp/lsp_client.cpp:transport_running"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se lee el estado del proceso para detectar que ha muerto o se ha congelado y se dispara la acción de reinicio",
+      "keep": [
+        "M5",
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/lsp/lsp_client.cpp:transport_running",
+        "src/lsp/lsp_client.cpp:process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:async_worker_main",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el punto de anclaje para la detección y acción de reinicio. Necesito ver si la lógica de detección (heartbeat, error de socket, etc.) está ahí o en otro lugar."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el proceso LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clangd process monitor"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 refutó el mecanismo de reinicio por entorno; el Abierto nombra 'clangd process monitor' como hop del pack. Un hijo lee ese barrio específico para confirmar si existe la detección de crash/timeout."
+    },
+    {
+      "consulta": "dónde se lee el estado del proceso para detectar que ha muerto o se ha congelado y se dispara la acción de reinicio",
+      "consultas": [
+        "dónde se lee el estado del proceso para detectar que ha muerto o se ha congelado y se dispara la acción de reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "transport running"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 leyó los sensores (process alive, transport running) pero no el disparador. El pack sugiere que el estado del transporte es la clave; busco el puente entre la lectura del estado y la acción de reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección automática de caída o timeout del LSP no existe en el código; lo leído confirma reinicios por cambio de entorno o falta de instalación, pero no hay monitor de salud (heartbeat/timeout) que dispare el reinicio ante un fallo silencioso"
+    }
+  ],
+  "why": "el mecanismo de detección automática de caída o timeout del LSP no existe en el código; lo leído confirma reinicios por cambio de entorno o falta de instalación, pero no hay monitor de salud (heartbeat/timeout) que dispare el reinicio ante un fallo silencioso",
+  "zooms": []
+}

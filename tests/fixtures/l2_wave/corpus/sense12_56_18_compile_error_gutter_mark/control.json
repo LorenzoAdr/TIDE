@@ -1,0 +1,143 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la salida de la consola",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ai/l2_problem_frame.cpp:std",
+        "src/ui/console_panel.cpp:parse_pty_filter_tokens"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibujan las marcas visuales en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/editor/editor_folds.cpp:fold_gutter_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen y procesan los errores de compilación de la salida del terminal",
+      "keep": [
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/util/compiler_location.cpp",
+        "src/ui/diagnostics_panel.cpp"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M10",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 y M10 manejan resaltado visual; M11 escanea errores de compilación. Necesito ver si ya existe un mecanismo de decoración de márgenes o si debo buscar cómo se pintan las líneas rojas."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos polos distintos: lectura de errores en consola y pintura de marcas en editor. se localizan por separado para luego verificar si existe el arco o hay que construirlo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado de T2 afirma el objeto de la fase B (line gutter marker)"
+    },
+    {
+      "consulta": "dónde se leen y procesan los errores de compilación de la salida del terminal",
+      "consultas": [
+        "dónde se leen y procesan los errores de compilación de la salida del terminal"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnóstico"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 falló en M8 (pty filter); M11 huele a escaneo de salida de shell para errores de linker/compilación. Necesito el polo de origen antes de intentar el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T3 leyó compiler location cpp y diagnostics panel cpp, que procesan los errores; T2 leyó line gutter marker, que dibuja en el margen. El pack no une ambos polos (sin camino entre T2 y T3), por lo que no hay mecanismo que conecte el procesamiento de errores con el dibujo de marcas en el margen."
+    }
+  ],
+  "why": "T3 leyó compiler location cpp y diagnostics panel cpp, que procesan los errores; T2 leyó line gutter marker, que dibuja en el margen. El pack no une ambos polos (sin camino entre T2 y T3), por lo que no hay mecanismo que conecte el procesamiento de errores con el dibujo de marcas en el margen.",
+  "zooms": []
+}

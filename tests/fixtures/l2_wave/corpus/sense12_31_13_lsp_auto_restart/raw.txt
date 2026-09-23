@@ -1,0 +1,12 @@
+The user wants to implement a feature where the application automatically detects if the LSP (Language Server Protocol) process crashes or becomes unresponsive and restarts it without user intervention.
+
+Current state:
+- T1 found `notify lsp status`, `set lsp status callback`, `restart lsp for workspace`, `schedule debounced lsp restart`, `ensure python lsp async`, `finish python lsp start locked`.
+- T2 found `notify lsp status`, `set lsp status callback`.
+- T3 explicitly stated: "no encontré el mecanismo de reinicio tras fallo o pérdida de respuesta; lo leído cubre reinicio tras
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack y las cazas confirman que no existe un mecanismo de detección automática de caídas o pérdida de respuesta del LSP. solo hay reinicio tras instalación o cambio de entorno. el ancla pide detección automática de fallo, lo cual no está implementado."
+}

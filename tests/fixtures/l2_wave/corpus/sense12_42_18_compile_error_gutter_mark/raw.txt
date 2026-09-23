@@ -1,0 +1,26 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 (detect errors in console output): Failed. Found `scan shell output for linker errors` which only parses linker errors, not compilation errors.
+- T2 (draw red line in editor margin): Found `diagnostic severity color`, `diagnostics for editor line`, `Make Editor Panel`, `line gutter marker`, `handle gutter marker click`.
+- T3 (parse compilation errors from compiler output): Failed. No object found.
+
+The pack shows:
+- T1 => T2: sin camino
+- T1 => T3: sin camino
+- T2 => T3: sin camino
+
+We have two poles:
+1. Console output (where errors appear)
+2. Editor margin (where red lines are drawn)
+
+T2 found the mechanism for drawing red lines (`diagnostics for editor line`, `line gutter marker`).
+T1 and T3 failed to find the mechanism for parsing/detecting compilation errors from the console.
+
+The user's request implies a feature that doesn't currently exist or is not implemented in the codebase as
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no contiene mecanismo para parsear errores de compilación de la consola; T1 y T3 confirmaron que no existe. T2 localizó el dibujo de líneas rojas (diagnostics), pero sin fuente de datos no se puede unir. el claim se refuta: no hay código que conecte la consola con el margen del editor para errores de compilación."
+}

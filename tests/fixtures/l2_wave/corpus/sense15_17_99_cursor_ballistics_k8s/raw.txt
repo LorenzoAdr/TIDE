@@ -1,0 +1,17 @@
+The user wants to find two things:
+1. The module calculating ballistic cursor trajectory for real-time sync with Kubernetes on blink.
+2. Where that physics is persisted in the quantum vector index of the workspace.
+
+Work 1 (T1) asked about the ballistic trajectory/Kubernetes sync.
+Result: "no encontré el cálculo de trayectoria balística ni sincronización con Kubernetes; lo leído es un editor de texto local editor panel con lógica de scroll y breadcrumbs, sin infraestructura de cluster ni detección de parpadeo".
+Conclusion: T1 found no object. The claim about ballistic trajectory/Kubernetes sync is refuted by the evidence (it's a local text editor).
+
+Work 2 (T2) asked about persisting physics in the quantum vector index.
+Result: "leído: symbol workspace indexer cpp, sync symbol workspace indexer".
+Conclusion: T2 found a "symbol workspace indexer", but the prompt says "Lo leído no era el disparo" (The read was not the trigger). The user asked for "quantum vector index" and "physics persistence". The read found a standard symbol indexer. This suggests the specific "quantum vector index" for "physics" doesn't exist or isn't the
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide dos objetos: cálculo de trayectoria balística con sync a Kubernetes y persistencia en índice vectorial cuántico. T1 refuta el primero (no hay objeto, es un editor local). T2 lee un índice de símbolos estándar, no el índice cuántico de física pedido. Ambos polos del claim se refutan: no existe el módulo de trayectoria ni el índice cuántico en este código."
+}

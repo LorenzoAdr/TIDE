@@ -1,0 +1,21 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found the mechanism for marking errors in the gutter: `line gutter marker` delegates to `line diagnostic marker from map` to check for `k Error` severity.
+T2 tried to find where console errors are parsed to generate markers but failed (read string formatting).
+T3 tried to find where console errors are read to create markers and found no object.
+
+The pack shows:
+T1 => T2: same object `push active file diagnostics from cache`
+T1 => T3: no path
+T2 => T3: no path
+
+T1 found the UI mechanism for marking errors in the gutter.
+T2 and T3 failed to find the parsing/reading of console errors.
+
+The user's request implies a feature that might not exist yet or is handled differently. The user wants errors *from the console* to be marked.
+T1 found how errors are marked in the gutter generally (via diagnostics).
+T2/T3 failed to find the link between console output and these markers.
+
+The prompt says: "exploradores agotados. Ci
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de marcar errores en el margen existe (line gutter marker con severidad k Error), pero no se encontró el puente que lea los errores de la consola para generar esos marcadores; la funcionalidad solicitada no está implementada"}

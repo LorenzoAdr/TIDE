@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have three completed works:
+T1: Found Escape capture in `handle ai console keys` -> `ai clear pending insert` / `wake console` (pending insert) or `cancel current` (busy generation). No click outside evidence.
+T2: `clear pending insert` resets flag/anchor, does NOT clean file buffer.
+T3: `cancel current` calls `clear pending insert`, resets flag/anchor.
+
+The anchor claims: "cancel cleanly without leaving the file half-written".
+The investigation shows:
+- Escape triggers `cancel current` (for active generation) or `clear pending insert` (for pending).
+- `cancel current` -> `clear pending insert` -> resets internal state (`pending insert = false`, `insert anchor` cleared).
+- Crucially, T2 and T3 explicitly state that `clear pending insert` does *not* clean the file buffer. It only resets internal state.
+- The user's claim assumes a file buffer cleanup that doesn't exist in the read code. The mechanism only resets internal flags/anchors.
+
+Wait, does `cancel current` do
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de cancelación (cancel current → clear pending insert) solo resetea estado interno (flags y anchors); no limpia el buffer del archivo, refutando el claim de limpieza de archivo a medias"}

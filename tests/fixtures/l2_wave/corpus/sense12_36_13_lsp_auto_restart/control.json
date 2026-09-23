@@ -1,0 +1,263 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso del servidor LSP ha salido o muerto para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se llama a restart lsp for workspace cuando el proceso LSP muere",
+      "keep": [
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se llama a restart lsp for workspace cuando el proceso LSP muere",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se llama a schedule debounced lsp restart cuando el proceso LSP muere",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino la detección de muerte del proceso y la llamada al reinicio",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'pending lsp restart' y 'schedule debounced lsp restart', lo que sugiere que la lógica de reinicio ya existe. Necesito encontrar el disparador (detection) que activa este reinicio."
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección; el pack une a la reiniciación (restart lsp for workspace). El hijo busca el mecanismo de reinicio automático."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso del servidor LSP ha salido o muerto para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el proceso del servidor LSP ha salido o muerto para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "on process exit"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 no encontró el disparador; el pack sugiere 'on process exit' como candidato para la detección de muerte del proceso que falta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T2 y T3 fallaron en unir detección y reinicio; rompo en dos localizadores independientes y un puente para verificar el arco."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 no encontró el disparador. Hay dos funciones candidatas de reinicio (restart lsp for workspace, schedule debounced lsp restart). Necesito encontrar qué código llama a cada una de ellas específicamente en el contexto de muerte del proceso (on process exit, waitpid handler, etc. mencionados en T2 Abierto)."
+    },
+    {
+      "consulta": "dónde se llama a restart lsp for workspace cuando el proceso LSP muere",
+      "consultas": [
+        "dónde se llama a restart lsp for workspace cuando el proceso LSP muere"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "on process exit"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 6,
+      "why": "T4 cerró con clangd process alive; el pack une a on process exit (extra de T2). El hijo busca el disparo de reinicio tras la muerte."
+    },
+    {
+      "consulta": "dónde se llama a restart lsp for workspace cuando el proceso LSP muere",
+      "consultas": [
+        "dónde se llama a restart lsp for workspace cuando el proceso LSP muere"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "on process exit"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 7,
+      "why": "T2 y T4 no hallaron el disparo; el pack extra apunta a on process exit como posible puente entre la muerte y el reinicio"
+    },
+    {
+      "consulta": "dónde se detecta que el proceso del servidor LSP ha salido o muerto para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el proceso del servidor LSP ha salido o muerto para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "on process exit"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T2 y T4 fallaron en encontrar el disparador de reinicio. El pack sugiere 'on process exit' como concepto cercano. Necesito encontrar el código que escucha la muerte del proceso para llamar a restart lsp for workspace."
+    },
+    {
+      "consulta": "dónde se llama a restart lsp for workspace cuando el proceso LSP muere",
+      "consultas": [
+        "dónde se llama a restart lsp for workspace cuando el proceso LSP muere"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "on process exit"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "T2 y T4 no hallaron el disparo; el pack extra apunta a on process exit como el barrio del detector de muerte"
+    },
+    {
+      "consulta": "dónde se llama a restart lsp for workspace cuando el proceso LSP muere",
+      "consultas": [
+        "dónde se llama a restart lsp for workspace cuando el proceso LSP muere"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "on process exit"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 10,
+      "why": "T2 cerró que no encontró el disparo; T3 y T4 leyeron clangd process alive pero no el cuerpo. El pack muestra on process exit como extra en T2; es el candidato para el detector de muerte que dispara el reinicio."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

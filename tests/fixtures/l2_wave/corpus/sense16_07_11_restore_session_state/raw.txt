@@ -1,0 +1,10 @@
+The user wants to restore the editor state (cursor position, open files, visible side panels) when reopening a project.
+I have a plan with 3 locators (A, B, C) and a bridge (P).
+- A (cursor): T1 read "reset to single cursor". This is a "leído" (read), not a "no hay objeto" (no object). It found a mechanism related to cursor, but the closed says "Lo leído no era el disparo" (The read was not the trigger). It implies the mechanism exists but might not be the one restoring state on open, or it's a reset mechanism. The prompt says "T1 preguntó: dónde se guarda y restaura la posición del cursor... Cerrado: ... leído: reset to single cursor". The instruction says "Un leído: no refuta el existe. Solo niega ese disparo." and "Un leído más no se encontró no refuta el existe."
+Wait, T1 closed with "leído: reset to single cursor". The instruction says "Un leído: no afirma ni esta caza. No lo cites como el mecanismo." and "Un leído: no refuta el existe. Solo niega ese disparo
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el pack no nombra mecanismo de restauración de sesión al abrir proyecto; T2 y T3 cierran sin objeto, T1 lee reset de cursor (no restauración). el claim se refuta: no hay mecanismo que recuerde posición, archivos ni paneles al reabrir"
+}

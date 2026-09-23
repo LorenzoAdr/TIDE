@@ -1,0 +1,190 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M10"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:load_buffer_from_disk",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al cargar un proyecto",
+      "keep": [
+        "M5",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:load_buffer_from_disk"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al cargar un proyecto",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/app/application.cpp:reopen_workspace_documents",
+          "src/app/workspace_model.cpp:open_file_at_impl",
+          "src/app/workspace_model.cpp:load_buffer_from_disk"
+        ],
+        "consulta": "dónde se restauran los archivos abiertos al cargar un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al cargar un proyecto",
+        "evita": [],
+        "hacia": [
+          "layout"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino restaurar archivos y restaurar paneles",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 tiene el estado del editor y la posición del cursor; es el primer polo del ancla"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla tiene dos polos restantes (archivos y paneles) que no están unidos en el pack; los cazo por separado y luego verifico si comparten flujo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 afirma el objeto de la fase A (restauración de archivos abiertos); paso a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "la posición del cursor y los archivos abiertos se restauran al cargar el proyecto; la visibilidad de los paneles laterales no tiene objeto de restauración en el pack"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "la posición del cursor y los archivos abiertos se restauran al cargar el proyecto; la visibilidad de los paneles laterales no se restaura"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el ancla tiene tres polos: cursor, archivos y paneles. T1 y T2 confirmaron los mecanismos de restauración para cursor y archivos. T3 refutó la existencia de un mecanismo para la visibilidad de paneles. El claim queda parcialmente confirmado (cursor y archivos) y parcialmente refutado (paneles)."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el pack confirma la restauración de archivos y cursor al cargar el proyecto, pero niega la restauración de paneles laterales (no hay objeto). el ancla pide recordar exactamente la posición del cursor, los archivos abiertos y la visibilidad de paneles; al no existir mecanismo para paneles, el claim se refuta parcialmente y se cierra."
+    }
+  ],
+  "why": "el pack confirma la restauración de archivos y cursor al cargar el proyecto, pero niega la restauración de paneles laterales (no hay objeto). el ancla pide recordar exactamente la posición del cursor, los archivos abiertos y la visibilidad de paneles; al no existir mecanismo para paneles, el claim se refuta parcialmente y se cierra.",
+  "zooms": []
+}

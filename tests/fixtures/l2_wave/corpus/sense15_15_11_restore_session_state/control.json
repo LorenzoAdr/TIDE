@@ -1,0 +1,116 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado de la sesión al abrir un proyecto",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 7,
+      "visto": [
+        "src/ai/level2_session.cpp:save_state",
+        "src/ai/level2_session.cpp:load_state",
+        "src/ai/level2_session.cpp:state_path",
+        "src/ai/level2_session.cpp:write_file",
+        "src/ai/level2_session.cpp:read_file",
+        "src/ai/level2_session.cpp:dir_for"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "qué datos del editor y los paneles se incluyen en el estado que se guarda y restaura",
+      "keep": [
+        "M1",
+        "M2",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/ai/level2_session.cpp:save_state",
+        "src/ai/level2_session.cpp:load_state"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "restaurar sesión",
+        "guardar estado editor",
+        "panel lateral visible"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide persistencia de cursor, archivos abiertos y paneles; busco barrios de sesión o estado del editor"
+    },
+    {
+      "consulta": "dónde se guarda y restaura el estado de la sesión al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado de la sesión al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "sesión"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el bosquejo huele un barrio de sesión y estado; M1 y M3 tocan estado y sesión. Un hijo busca el mecanismo de persistencia y recuperación."
+    },
+    {
+      "consulta": "qué datos del editor y los paneles se incluyen en el estado que se guarda y restaura",
+      "consultas": [
+        "qué datos del editor y los paneles se incluyen en el estado que se guarda y restaura"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 confirmó el mecanismo de guardado/restauración, pero no qué contiene. Necesito verificar si cursor, archivos y paneles están en el payload."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de restauración de sesión (save state / load state) no guarda ni restaura el estado de la UI: no incluye posición del cursor, archivos abiertos ni visibilidad de paneles. el estado serializado es exclusivamente de la sesión de IA. el claim se refuta: no hay camino para recordar la posición del cursor, los archivos abiertos o los paneles laterales al abrir un proyecto."
+    }
+  ],
+  "why": "el mecanismo de restauración de sesión (save state / load state) no guarda ni restaura el estado de la UI: no incluye posición del cursor, archivos abiertos ni visibilidad de paneles. el estado serializado es exclusivamente de la sesión de IA. el claim se refuta: no hay camino para recordar la posición del cursor, los archivos abiertos o los paneles laterales al abrir un proyecto.",
+  "zooms": []
+}

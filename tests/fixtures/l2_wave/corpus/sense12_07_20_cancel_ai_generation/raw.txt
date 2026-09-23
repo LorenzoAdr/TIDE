@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se captura la tecla Escape para cancelar la generación de la IA","evita":["clic fuera","comando de texto"],"why":"el Cerrado de T1 niega la captura de Escape; Abierto nombra 'handle key event'. Cazo solo el teclado para ver si existe el listener o si falta por implementar. El clic fuera se deja para después si este falla."}

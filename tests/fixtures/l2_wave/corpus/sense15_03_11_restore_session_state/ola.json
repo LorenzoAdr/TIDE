@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T3 encontró el mecanismo de restauración (restore workspace session), pero T1 y T2 no hallaron dónde se guarda la posición del cursor ni la lista de archivos al cerrar. Sin el guardado, no hay restauración de esos detalles específicos. El pack no nombra otro mecanismo de persistencia para el cursor o los paneles laterales."
+}

@@ -1,0 +1,18 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Asked where the crash/unresponsiveness is detected and the restart is triggered.
+    *   Read: `start completion server`, `status text`, `ensure completion server`, `health ok`.
+    *   Result: "ESA pregunta no se relanza. Lo leído no era el disparo." (This question is not relaunched. What was read was not the trigger.)
+    *   This implies T1 did *not* find the specific mechanism for detecting a crash and triggering a restart in the context of the question asked. It found related things (starting, health ok), but not the crash detection trigger.
+
+2.  **T2**: Asked where the debounced restart is scheduled when the environment changes.
+    *   Read: `schedule debounced lsp restart`, `setup build environment watching`.
+    *   Result: Found that `setup build environment watching` registers callbacks that invoke `schedule debounced lsp restart`.
+    *   This confirms a restart mechanism exists for *environment changes*, but not necessarily for *cr
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el ancla pide detección automática de caída/no respuesta y reinicio. T1 buscó el disparo de caída y no lo halló (lo leído no era el disparo). T2 y T3 hallaron reinicio por cambio de entorno, no por caída. sin camino entre polos leídos cierra el ancla: no hay detección automática de caída implementada."
+}

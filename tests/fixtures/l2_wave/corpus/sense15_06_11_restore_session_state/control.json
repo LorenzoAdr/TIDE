@@ -1,0 +1,153 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+      "keep": [
+        "M1",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/level2_session.cpp:save_state"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura el estado del editor al abrir un proyecto existente",
+      "keep": [
+        "M1",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ui/editor_panel.cpp:open_completion",
+        "open"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+        "evita": [],
+        "hacia": [
+          "sesión"
+        ],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura el estado del editor al abrir un proyecto existente",
+        "evita": [],
+        "hacia": [
+          "sesión"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar el estado y restaurarlo al abrir",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "sesión",
+        "restauración",
+        "estado editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición, archivos y paneles al reabrir; busco el mecanismo de persistencia de sesión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide recordar posición, archivos y paneles al reabrir; necesito ver si hay persistencia de sesión y si se usa al abrir"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega el mapeo de guardar estado del editor; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "el estado del editor no se guarda ni se restaura al abrir un proyecto existente; se crea nuevo al abrir"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "las dos localizaciones fallaron: no hay mecanismo de persistencia ni restauración del estado del editor (cursor, archivos, paneles) al cerrar o abrir el proyecto; el sistema crea estado nuevo cada vez"
+    }
+  ],
+  "why": "las dos localizaciones fallaron: no hay mecanismo de persistencia ni restauración del estado del editor (cursor, archivos, paneles) al cerrar o abrir el proyecto; el sistema crea estado nuevo cada vez",
+  "zooms": []
+}

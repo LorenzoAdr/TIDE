@@ -1,0 +1,5 @@
+The user wants to restore the cursor position, open files, and panel visibility when reopening a project.
+I have three completed tasks:
+T1: Cursor position restoration. Result: "leído: Cursor Pos". This implies the mechanism was found or at least the object `Cursor Pos` was read. The closed status says "leído: Cursor Pos", which is a bit ambiguous. It might mean it found the object but not necessarily the restoration logic, or it found the restoration logic involving `Cursor Pos`. Let's look at the "Abierto" section of T1: "(nada; no copiar ids del
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"T2 confirma la restauración de archivos abiertos; T3 confirma la restauración de paneles laterales; T1 confirma la restauración de la posición del cursor. El claim se confirma."}

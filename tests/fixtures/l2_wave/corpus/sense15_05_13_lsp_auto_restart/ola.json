@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de reinicio diferido está presente (schedule debounced lsp restart con deadline y latch), pero el disparo automático ante caída o falta de respuesta no se encuentra en los lectores visibles (los callers son cambios de configuración o apertura de workspace). el pack no une la detección de fallo con el reinicio; el ancla pide detección automática y reinicio sin intervención, y ese arco no se confirma."
+}

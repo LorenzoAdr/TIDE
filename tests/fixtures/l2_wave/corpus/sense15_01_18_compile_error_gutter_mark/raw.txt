@@ -1,0 +1,14 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor.
+I have tried three times to find where compilation errors are read/parsed/extracted from the console text (T1, T2, T3), and all returned "no object".
+The pack shows M11 (binary symbols panel) scanning shell output for linker errors, but that's specific to linker errors, not general compilation errors.
+The pack also shows M3 (visual highlight) building git marks snapshot.
+The pack shows M1 (editor panel) clearing editor line paint caches.
+The pack shows M4 (editor buffer source) rebuilding joined.
+The pack shows M7 (console panel) applying console line drag.
+The pack shows M8 (dap backend) pushing errors.
+The pack shows M9 (app session) rebuilding shell session.
+
+The user's request implies that currently, compilation errors appear in the console but *not* in the editor margin. The user wants to *add* this feature or enable it.
+Since T1, T2, T3 failed to find an existing mechanism for parsing compilation errors from the console, it's likely that this feature doesn't exist yet, or
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"las tres cazas de extracción de errores de compilación cerraron sin objeto: no existe mecanismo que lea, parsee o extraiga errores de compilación del texto de la consola inferior. el pack muestra escaneo de errores de linker en M11 y marcas de git en M3, pero no el flujo de compilación general. sin extractor, no hay camino para dibujar la línea roja en el margen. el ancla se refuta: el sistema no extrae esos errores para marcarlos."}

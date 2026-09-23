@@ -1,0 +1,219 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:load_buffer_from_disk",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar y restaurar la posición del cursor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide persistencia de estado (cursor, archivos, paneles); M1 (editor state), M5 (editor panel) y M6 (panel) son los barrios candidatos para guardar/cargar esa sesión, pero sus gaps indican falta de trigger/effect; necesito ver si hay mecanismos de serialización o restauración en sus owns"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor, archivos y paneles. El pack muestra M1 (cursor) y M5/M6 (paneles) pero sin flujo de persistencia. Hay que localizar los puntos de guardado y carga por separado para luego ver si hay un orquestador común o si es ad-hoc."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar posición; el pack tiene M1 (editor state CursorPos) pero no el ciclo de persistencia; separo guardar y restaurar para cerrar el mecanismo de estado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado no afirma el mecanismo de persistencia; el pack sugiere hops hacia la selección y la gestión de cursores, no el guardado de estado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 confirma la restauración al abrir un archivo, pero el ancla exige recordar el estado al reabrir un proyecto (archivos abiertos y paneles). El mecanismo leído (reset to single cursor) no cubre la persistencia del layout ni la lista de archivos. Salto a la siguiente caza para cubrir el resto del claim."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor para restaurarla al reabrir",
+      "consultas": [
+        "dónde se guarda la posición del cursor al cerrar el editor para restaurarla al reabrir"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 confirma que la restauración usa un reset fijo, ignorando el estado previo. El ancla requiere recordar la posición exacta. T1 falló en encontrar el guardado; debo buscar si existe un mecanismo de persistencia de la posición (save/restore) que no haya sido leído, o confirmar que no existe y el claim se refuta. La consulta se enfoca en el 'guardado' que falta para que el 'recordar' funcione."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor para restaurarla al reabrir",
+      "consultas": [
+        "dónde se guarda la posición del cursor al cerrar el editor para restaurarla al reabrir"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T2 confirmó que la restauración usa un reset fijo, ignorando el estado previo. T1 solo leyó la estructura, no el guardado. Hay que probar si existe persistencia del estado (save/restore) o si el claim se refuta por diseño (siempre reset)."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor para restaurarla al reabrir",
+      "consultas": [
+        "dónde se guarda la posición del cursor al cerrar el editor para restaurarla al reabrir"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "T2 confirmó que la restauración usa un reset fijo, ignorando el estado previo. El claim de 'recordar posición' se refuta si no hay persistencia. T1 falló en leer el guardado; necesito confirmar que no existe mecanismo de save para cerrar el claim."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor para restaurarla al reabrir",
+      "consultas": [
+        "dónde se guarda la posición del cursor al cerrar el editor para restaurarla al reabrir"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 9,
+      "why": "T2 confirma que la restauración usa un reset fijo, ignorando el estado previo. El claim de 'recordar posición' se refuta si no hay persistencia. T1 solo leyó la estructura, no el flujo de guardado. Busco el mecanismo de persistencia (o su ausencia) para cerrar el claim del cursor."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor para restaurarla después",
+      "consultas": [
+        "dónde se guarda la posición del cursor al cerrar el editor para restaurarla después"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 10,
+      "why": "T1 no encontró persistencia; T2 usa reset (sin memoria). El ancla pide recordar. Hay que cazar el guardado real, no el reseteo."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

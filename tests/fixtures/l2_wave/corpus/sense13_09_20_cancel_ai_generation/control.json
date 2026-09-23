@@ -1,0 +1,157 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo cuando se cancela la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para invocar la cancelación de la IA",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.hpp",
+        "src/ui/console_panel.cpp",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: cancelar (Escape) y limpiar (archivo a medias). M2 huele Escape, M8/M7 huelen cancelación/limpieza. Necesito ver si están unidos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 lista símbolos leídos (clear pending insert, cancel current, cancel all, cancel level1) pero no afirma que haya encontrado el mecanismo de limpieza del archivo al cancelar; además, la instrucción 'Lo leído no era el disparo' indica que no se cerró la caza con éxito. No puedo pasar a la siguiente fase sin confirmar el mecanismo de limpieza."
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "input loop"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 falló en el barrio de trace; el pack apunta a input loop como el barrio de captura de teclado"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para invocar la cancelación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para invocar la cancelación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle user input"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "el locator A falló buscando 'escape' literal; el pack conecta la limpieza (T2) con 'handle user input'. busco el disparador de teclado/ratón en ese barrio para cerrar el ancla"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el pack une el clic fuera con la cancelación y la limpieza: handle console panel mouse → cancel current → clear pending insert. el mecanismo existe y conecta el gesto con la limpieza del archivo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "no hay camino entre el clic fuera y la cancelación; el lector de ratón no invoca la limpieza"
+    }
+  ],
+  "why": "no hay camino entre el clic fuera y la cancelación; el lector de ratón no invoca la limpieza",
+  "zooms": []
+}

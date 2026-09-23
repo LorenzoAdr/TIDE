@@ -1,0 +1,120 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "quién llama a schedule debounced lsp restart cuando el servidor LSP deja de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:apply_workspace_settings",
+        "src/app/application.cpp:setup_build_environment_watching"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o no responde y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el punto de anclaje para la lógica de detección y recuperación automática. Un hijo cierra el mecanismo de trigger y acción."
+    },
+    {
+      "consulta": "quién llama a schedule debounced lsp restart cuando el servidor LSP deja de responder",
+      "consultas": [
+        "quién llama a schedule debounced lsp restart cuando el servidor LSP deja de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el mecanismo de reinicio. El pack une T1 con 'on lsp missing install'. Necesito confirmar que este evento es el detector de la caída para cerrar el claim de detección automática."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el proceso LSP ha muerto o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "heartbeat"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 falló en el trigger de timeout; el pack sugiere 'lsp server heartbeat' como hipotesis alternativa para la detccion de fallo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "las tres cazas confirman que no existe un mecanismo de detección automática de caída o falta de respuesta del LSP que dispare el reinicio. T2 encontró triggers por cambio de entorno, no por fallo del proceso; T3 no halló objeto. El claim se refuta: la aplicación no reinicia el LSP automáticamente ante fallos."
+    }
+  ],
+  "why": "las tres cazas confirman que no existe un mecanismo de detección automática de caída o falta de respuesta del LSP que dispare el reinicio. T2 encontró triggers por cambio de entorno, no por fallo del proceso; T3 no halló objeto. El claim se refuta: la aplicación no reinicia el LSP automáticamente ante fallos.",
+  "zooms": []
+}

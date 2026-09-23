@@ -1,0 +1,11 @@
+# Tick H_LITE_T2 — Grep+Read lite vs LLM local
+
+Sentinel: `AGENT_LOOP_WAKE_hlite_t2`
+
+1. Si `meta/STOP` → mata `queue.pid` y sal.
+2. Estado `.tuide/ai/l2_wave/v2_night/H_LITE_T2/`:
+   - `DONE` → lee `H_LITE_T2_SUMMARY.json`; compara H_LITE/S0/T2_CODER80B; no relances.
+   - cola viva (`queue.pid`) → rearma wait.
+   - cola muerta sin DONE → mira `queue.log` / `FAILED`.
+3. Heartbeat opcional: `./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_hlite_t2 'Lee tools/l2_wave/hlite_t2_tick_prompt.txt'`
+4. Wait: `./tools/l2_wave/t270b_wait_done.sh .tuide/ai/l2_wave/v2_night/H_LITE_T2 AGENT_LOOP_WAKE_hlite_t2 tools/l2_wave/hlite_t2_tick_prompt.txt`

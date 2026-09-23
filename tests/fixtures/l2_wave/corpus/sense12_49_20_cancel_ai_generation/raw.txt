@@ -1,0 +1,17 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current state:
+- T1 (Escape key capture): Closed. No object found (ai trace escape is JSON escaping, not keyboard).
+- T2 (Click outside to cancel): Closed. Read `cancel current`, `cancel level1`.
+- T3 (User input handling to cancel): Closed. Read `handle ai console keys`, `cancel level1`, `cancel current`, `clear pending insert`, `handle user input`.
+
+The last hunt (T3) closed. The next shot must be a port from the pack (between open / extra), not the anchor or the same keep.
+The plan has a bridge phase P: "hay camino manejar la entrada del usuario y cancelar la generación de IA (need A B)".
+T3 corresponds to phase A (locator: dónde se maneja la entrada del usuario para cancelar la generación de IA).
+T2 corresponds to phase B (locator: dónde se maneja la ruta para cancelar la generación de IA). Wait, T2 was "dónde se cancela la generación de la IA al hacer clic fuera del editor". The plan says B is "dónde se
+---- content ----
+{
+  "action": "control_v1",
+  "do": "pasar",
+  "why": "el Cerrado afirma el objeto de esta fase"
+}

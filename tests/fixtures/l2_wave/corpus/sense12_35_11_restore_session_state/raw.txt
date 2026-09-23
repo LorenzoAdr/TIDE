@@ -1,0 +1,10 @@
+The user wants to know if the application remembers the cursor position, open files, and visible/closed side panels when reopening a previously opened project.
+
+I have a plan with two phases:
+1. [en_curso] A locator: dónde se restauran los paneles laterales al abrir un proyecto
+2. [pendiente] B locator: dónde se restaura la posición del cursor al abrir un proyecto
+
+Wait, looking at the history:
+T1 asked about cursor position. Closed: "leído: Cursor Pos, open file at impl". This seems to have found something related to cursor position restoration, but
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"T4 no encontró el mecanismo de restauración de paneles en main layout; salto a la siguiente caza del plan"}

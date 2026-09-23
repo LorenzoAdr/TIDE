@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 y T2 confirman la restauración de cursor y archivos. T3 no halló mecanismo para paneles laterales, refutando esa parte del claim. El claim se cierra parcialmente: cursor y archivos se restauran, paneles no."
+}

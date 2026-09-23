@@ -1,0 +1,159 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/ui/editor_panel.cpp:Event"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la consola para obtener la línea del error",
+      "keep": [
+        "M12"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/ai/l2_effect_slice.cpp:parse_file",
+        "src/ai/l2_effect_summary.cpp:parse_sync"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/editor_panel.cpp:line_gutter_marker",
+          "src/lsp/diagnostics.cpp:diagnostics_on_line",
+          "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+          "src/ui/editor_panel.cpp:MakeEditorPanel",
+          "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+          "src/ui/editor_panel.cpp:Event"
+        ],
+        "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación de la consola para obtener la línea del error",
+        "evita": [],
+        "hacia": [
+          "parseo"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino parsear el error de la consola y dibujar la línea roja en el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M11",
+        "M3"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M11 huele a parseo de errores de compilación; M3 a marcas visuales en el editor. Necesito ver si M11 emite eventos de error y si M3 los consume para pintar el margen."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "dos mecanismos distintos: el dibujo en el editor y el parseo de la consola. hay que ver si ya están unidos o si falta el puente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 no encontró el mecanismo de parsing de errores de consola; salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "el editor ya soporta marcar líneas rojas (T1: line gutter marker, diagnostics on line), pero no existe un mecanismo que parsee los errores de compilación de la consola para extraer la línea del error (T2: no se encontró el parser de output de compilador). la funcionalidad solicitada no está implementada."
+    }
+  ],
+  "why": "el editor ya soporta marcar líneas rojas (T1: line gutter marker, diagnostics on line), pero no existe un mecanismo que parsee los errores de compilación de la consola para extraer la línea del error (T2: no se encontró el parser de output de compilador). la funcionalidad solicitada no está implementada.",
+  "zooms": []
+}

@@ -1,0 +1,169 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto para restaurarlo al abrirlo",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_config.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_config.cpp",
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la selección del cursor al abrir el proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir el proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_config.cpp",
+        "src/editor/editor_state.cpp"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/app/workspace_config.cpp",
+          "src/editor/editor_state.cpp"
+        ],
+        "consulta": "dónde se restauran los archivos abiertos al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los paneles laterales visibles al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto para restaurarlo al abrirlo",
+      "consultas": [
+        "dónde se guarda el estado del editor al cerrar el proyecto para restaurarlo al abrirlo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "sesión"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 (editor state) y M5 (editor panel) sugieren que el estado se gestiona en el editor; busco el mecanismo de persistencia/restauración de la sesión."
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir el proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "workspace config"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el guardado; ahora busco la restauración del cursor"
+    },
+    {
+      "consulta": "dónde se restaura la selección del cursor al abrir el proyecto",
+      "consultas": [
+        "dónde se restaura la selección del cursor al abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "span on line"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró la posición; el pack apunta a la selección como siguiente paso para completar el estado del cursor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar archivos abiertos y paneles laterales; el pack no los une al cursor; rompo en dos cazas independientes"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 5,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

@@ -1,0 +1,13 @@
+The user wants to cancel AI code generation by pressing Escape or clicking outside, cleanly, without leaving the file half-written.
+The previous two jobs (T1 and T2) failed to find the mechanism for Escape or click outside.
+T1 found that cancellation is triggered only by textual input "cancel" in `handle user input`.
+T2 found that `handle ai console keys` captures Escape only for closing menus/clearing selections, not calling `cancel current`. `handle console panel mouse` doesn't invoke cancellation on clicks outside.
+The "Abierto" section from T2 mentions: `handle route`, `handle user input`.
+The "hacia el resto" mentions: `Ai Controller`, `run insert async`, `ai tab active`, `event is ctrl c`.
+
+The claim is: "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias".
+The previous jobs refuted the existence of the mechanism for Escape/click outside in the places they looked.
+However, the user's request implies this feature might be missing or implemented elsewhere, or maybe it's not implemented at all.
+Wait, the prompt says
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"las dos cazas confirman que no existe el mecanismo de cancelación por Escape o clic fuera; la cancelación solo responde a input textual. el ancla pide un comportamiento que no está implementado en el código actual"}

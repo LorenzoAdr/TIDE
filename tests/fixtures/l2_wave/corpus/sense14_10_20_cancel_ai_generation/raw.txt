@@ -1,0 +1,26 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Looked for Escape key capture. Found `ai trace escape` (string formatter) and `ai controller` (logical cancellation), but no keyboard event handler.
+T2: Looked for file cleanup on cancellation. Found `clear pending insert`, `cancel all` (logical state cancellation), but no editor buffer mutation.
+T3: Looked for cancellation on Escape/click outside. Found nothing.
+
+The pack shows:
+M2 (ai trace) -> M3 (level2 session)
+M3 -> M8 (ai controller)
+M4 (file picker) -> M6 (level1 agent)
+M5 (console panel) -> M6
+M6 -> M8
+M7 (editor panel) -> M6
+M8 (ai controller) -> M6
+
+T1 and T2 found logical cancellation (`ai controller`, `clear pending insert`) but not the UI trigger (Escape key) or the file cleanup (buffer mutation).
+T3 found nothing.
+
+The user's claim has two parts:
+1. Trigger: Escape key
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack y los trabajos leídos muestran cancelación lógica (ai controller, clear pending insert) pero no el handler de teclado ni la mutación del buffer del editor; sin camino entre el disparo y el efecto, el ancla se refuta"
+}

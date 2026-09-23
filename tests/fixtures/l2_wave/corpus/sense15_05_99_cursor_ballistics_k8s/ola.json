@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no nombra cálculo de trayectoria balística ni persistencia en índice vectorial; T1 cerró sin objeto. refuto el claim: no hay módulo de física de cursores ni sincronización con kubernetes al parpadear."
+}

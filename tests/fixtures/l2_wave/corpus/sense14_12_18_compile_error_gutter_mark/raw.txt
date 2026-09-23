@@ -1,0 +1,14 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Plan status:
+1. [fallo] A locator: dónde se parsean los errores de compilación de la consola para extraer la línea y el mensaje -> Closed: "no hay objeto".
+2. [en_curso] B locator: dónde se dibuja una línea roja en el margen izquierdo del editor -> Closed: "leído: line gutter marker, gutter buffer line at row".
+3. [pendiente] P puente: hay camino el parseo de errores de consola y el dibujo de la línea roja en el margen (need A B)
+
+T1 (A) failed: "no hay objeto". This means there is no existing mechanism parsing console compilation errors to extract line and message.
+T2 (B) found: "line gutter marker, gutter buffer line at row". This is the mechanism for drawing lines in the margin.
+
+The anchor claims: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error".
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no tiene mecanismo que parsee errores de compilación de la consola para marcar el margen; T1 cerró sin objeto y T2 solo localizó el dibujo del gutter. sin camino entre polos leídos cierra el ancla"}

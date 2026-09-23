@@ -1,0 +1,145 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo cuando se cancela la inserción de código",
+      "keep": [
+        "M6",
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:run_insert_async"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: el disparo (Escape) y el efecto (limpieza del archivo). M2 huele el Escape, M8 huele la inserción pendiente. Separo para cazar el trigger y la limpieza por separado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "editor panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide el disparo de teclado; el pack une editor panel al agente; busco el handler de eventos en el barrio del editor"
+    },
+    {
+      "consulta": "dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 y T2 fallaron en sus loci específicos (teclado y buffer). El pack muestra que M8 (ai controller) es el latch central con cancel level1 y begin insert at. Necesito ver si la cancelación lógica en M8 se conecta a la limpieza del buffer o si falta ese eslabón."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el pack y los trabajos leídos muestran cancelación lógica (ai controller, clear pending insert) pero no el handler de teclado ni la mutación del buffer del editor; sin camino entre el disparo y el efecto, el ancla se refuta"
+    }
+  ],
+  "why": "el pack y los trabajos leídos muestran cancelación lógica (ai controller, clear pending insert) pero no el handler de teclado ni la mutación del buffer del editor; sin camino entre el disparo y el efecto, el ancla se refuta",
+  "zooms": []
+}

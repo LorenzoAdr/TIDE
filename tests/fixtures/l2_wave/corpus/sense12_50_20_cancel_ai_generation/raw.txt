@@ -1,0 +1,17 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have completed 3 works:
+T1: Looked for Escape/click outside capture. Result: No object found (found JSON string escape, not key handler).
+T2: Looked for Escape capture in console panel. Result: Found `handle ai console keys`, `clear pending insert`, `has pending insert`, `cancel current`.
+T3: Looked for Escape detection in console key handling. Result: Found `handle ai console keys` in `console panel cpp` detecting Escape and calling `ai- clear pending insert` when input is active.
+
+The last work (T3) confirmed the mechanism for capturing Escape in the console panel and calling `clear pending insert`.
+The user's request has two parts:
+1. Cancel generation (triggered by Escape/click outside).
+2. Cleanly without leaving the file half-written.
+
+T3 found the trigger (Escape in console) and the call to `clear pending insert`.
+The pack shows `M8` (ai controller) has `cancel level1` and `clear pending insert` (implied by T2/T3 reading).
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de captura de Escape en la consola llama a clear pending insert en el controlador de IA, cancelando la generación"}

@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack no contiene ningún mecanismo de trayectoria balística, sincronización con Kubernetes ni persistencia en índice vectorial cuántico; el claim se refuta por ausencia de objeto"}

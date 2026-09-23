@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "no_pasar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el Cerrado de T4 no afirma el objeto de la fase A (detección de caída); solo lista símbolos leídos sin confirmar el mecanismo de detección. Salto a la siguiente caza (fase B) para avanzar."
+}

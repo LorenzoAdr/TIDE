@@ -1,0 +1,10 @@
+The user wants to restore the editor state (cursor position, open files, visible panels) when reopening a project.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se restaura la posición del cursor al abrir un archivo
+2. [en_curso] B locator: dónde se restauran los archivos abiertos al abrir un proyecto
+3. [pendiente] C locator: dónde se restauran los paneles laterales al abrir un proyecto
+
+T1 (A) failed: no persistence mechanism found for cursor position on close.
+T2 (A retry?): found
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"el Cerrado niega este pico; salto a la siguiente caza"}

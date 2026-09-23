@@ -1,0 +1,179 @@
+{
+  "agujas": [
+    "app",
+    "editor",
+    "ui"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al cerrar y abrir el proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/application.cpp:save_workspace_session"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.cpp:clear_tabs",
+        "src/app/workspace_model.cpp:open_tabs_mru",
+        "src/app/application.cpp:save_workspace_session"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/main_layout.hpp"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la posición del cursor al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "app",
+        "editor",
+        "ui"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto; app, editor y ui cubren sesión, pestañas y UI"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "editor",
+        "app"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor, archivos y paneles al reabrir; editor y app son los barrios calientes para estado y sesión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide tres estados distintos (cursor, archivos, paneles) que suelen persistirse en mecanismos separados; atomizar permite cerrar cada uno sin depender de los demás"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "el Cerrado de T2 no afirma el mecanismo de restauración de archivos; el pack (extra) apunta a set welcome buffer y normalize path, que son el siguiente tiro para ver si la restauración de tabs se completa o se corta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto. T1 confirma que no hay mecanismo para guardar/restaurar la posición del cursor (solo rutas de tabs). T2 y T3 no encontraron el mecanismo completo para archivos y paneles. El pack no une estos polos con un mecanismo de sesión persistente que cubra los tres requisitos. Cierro el claim como no implementado."
+    }
+  ],
+  "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto. T1 confirma que no hay mecanismo para guardar/restaurar la posición del cursor (solo rutas de tabs). T2 y T3 no encontraron el mecanismo completo para archivos y paneles. El pack no une estos polos con un mecanismo de sesión persistente que cubra los tres requisitos. Cierro el claim como no implementado.",
+  "zooms": [
+    "editor",
+    "app"
+  ]
+}

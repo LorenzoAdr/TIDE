@@ -1,0 +1,19 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have three completed jobs:
+1.  **T1**: Looked for detection of crash/no response to trigger restart. Found `health ok`, `wait until healthy`, `ensure completion server`. Conclusion: These are startup/reuse checks, not runtime monitoring loops. No restart trigger found here.
+2.  **T2**: Looked for where the debounced restart is scheduled/triggered after a failure. Found `schedule debounced lsp restart`.
+3.  **T3**: Looked for where `schedule debounced lsp restart` is called after a failure. Found `schedule debounced lsp restart` (likely the definition or a call, but the closed text just repeats the name).
+
+The "entre abiertas" shows:
+- T1 => T2: sin camino (no path)
+- T1 => T3: sin camino (no path)
+- T2 => T3: mismo objeto (same object)
+
+The user's claim is: "detect automatically and restart without user intervention".
+T1 says there is no runtime monitoring loop found in the checked area (M7/ensure completion
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "T1 refuta la existencia de un mecanismo de detección automática de caídas en tiempo de ejecución (no hay loop de monitorización). T2 y T3 confirman la existencia de la función de reinicio diferido, pero sin el disparador de detección, el requisito de 'detectar automáticamente' no se cumple en el código actual."
+}

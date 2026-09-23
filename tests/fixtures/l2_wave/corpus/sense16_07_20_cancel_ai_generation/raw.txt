@@ -1,0 +1,20 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current state:
+- T1 (Escape/click capture): Closed. Found that cancellation is via text command "cancel" in `handle user input`, and `ai trace escape` is just a string formatter, not an event handler. No Escape/click capture found for cancellation.
+- T2 (Clean up partial file): Closed. Found `cancel current`, `clear pending insert`, `cancel all`, `cancel level1`, `begin insert at`. But the prompt says "ESA pregunta no se relanza... do=cerrar ese mapeo." It seems T2 didn't find the specific trigger for cleanup on Escape/click, or rather, the cleanup mechanism exists but isn't tied to the Escape/click trigger we want.
+
+The anchor claim has two poles:
+1. Trigger: Escape or click outside cancels generation.
+2. Effect: Clean cancellation without leaving file half-written.
+
+T1 refuted the trigger (Escape/click doesn't cancel; text command "cancel" does).
+T2 found cleanup mechanisms (`clear pending insert`, etc.) but didn't link them to the trigger.
+
+Since T
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el polo de disparo (Escape o clic fuera) no existe en el código; la cancelación solo responde al comando de texto 'cancel'. sin disparo, el efecto de limpieza no se activa por esos gestos. el claim se refuta."
+}

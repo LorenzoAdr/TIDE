@@ -1,0 +1,11 @@
+The user wants to link compilation errors from the bottom console to red lines in the editor's left margin.
+I have two completed jobs:
+T1: "dónde se pinta la línea roja en el margen izquierdo del editor" -> Read: `visual highlight cpp`, `clear editor line paint caches`.
+T2: "dónde se leen los errores de compilación de la consola inferior" -> Read: `refresh terminal view`, `terminal viewport lines`, `consume output pending`, `drain output bytes`.
+
+The "entre abiertas" says T1=>T2 "sin camino".
+The "Cerrado" of T1 and T2 says "ESA pregunta no se relanza. Lo leído no era el disparo." This implies the specific mechanism for *painting* the red line and *reading* the errors wasn't found in those specific loci, or at least the direct link isn't there.
+However, the user's request is a feature request ("quiero que..."). The user wants to *implement* this or *enable* this.
+Wait, let's look at the "ancla": "quiero que los errores de compilación que aparecen en la consola inferior también se mar
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une la consola con el margen; no hay camino entre leer errores y pintar línea roja"}

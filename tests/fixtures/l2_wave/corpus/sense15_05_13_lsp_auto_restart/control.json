@@ -1,0 +1,175 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M2",
+        "M6"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/lsp/lsp_client.cpp:set_background_paused",
+        "src/lsp/lsp_client.cpp:spawn_language_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se programa el reinicio diferido del servidor LSP tras una caída",
+      "keep": [
+        "M5",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M2",
+        "M3",
+        "M4"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_transport.cpp:reader_loop",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace, schedule debounced lsp restart). Necesito encontrar el disparador de detección de fallo que invoque este reinicio."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "lsp for workspace"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el Cerrado anterior listó funciones pero no confirmó el disparo automático ante fallo; busco el mecanismo de detección y reinicio"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 encontró el reinicio pero no el disparo automático; el Abierto sugiere 'on lsp missing install' como el barrio del detector"
+    },
+    {
+      "consulta": "dónde se programa el reinicio diferido del servidor LSP tras una caída",
+      "consultas": [
+        "dónde se programa el reinicio diferido del servidor LSP tras una caída"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio diferido"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado de T1 nombró 'restart lsp for workspace' pero no el disparo automático. M5 tiene 'schedule debounced lsp restart'. Busco el mecanismo que detecta la caída y programa ese reinicio."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "detect lsp crash"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 cerró que el disparo tras caída no está en el código leído; el pack abre detect lsp crash y on lsp missing install como barrios de detección. Un hijo caza el mecanismo de detección de caída."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el mecanismo de reinicio automático tras caída se confirma: on transport reader eof detecta la caída y dispara schedule debounced lsp restart, que reinicia el servidor tras un delay de 2 segundos sin intervención del usuario"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el mecanismo de reinicio diferido está presente (schedule debounced lsp restart con deadline y latch), pero el disparo automático ante caída o falta de respuesta no se encuentra en los lectores visibles (los callers son cambios de configuración o apertura de workspace). el pack no une la detección de fallo con el reinicio; el ancla pide detección automática y reinicio sin intervención, y ese arco no se confirma."
+    }
+  ],
+  "why": "el mecanismo de reinicio diferido está presente (schedule debounced lsp restart con deadline y latch), pero el disparo automático ante caída o falta de respuesta no se encuentra en los lectores visibles (los callers son cambios de configuración o apertura de workspace). el pack no une la detección de fallo con el reinicio; el ancla pide detección automática y reinicio sin intervención, y ese arco no se confirma.",
+  "zooms": []
+}

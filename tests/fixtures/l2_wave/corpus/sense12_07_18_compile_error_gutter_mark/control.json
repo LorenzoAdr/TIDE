@@ -1,0 +1,165 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se extrae la línea de error del texto de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/ui/console_panel.cpp:parse_pty_filter_tokens"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/ui/console_panel.cpp:parse_pty_filter_tokens"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+          "src/ui/console_panel.cpp:parse_pty_filter_tokens"
+        ],
+        "consulta": "dónde se extrae la línea de error del texto de la consola inferior",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja la línea roja en el margen del editor",
+        "evita": [],
+        "hacia": [
+          "visual highlight"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el error de la consola y el dibujo del margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) tiene un ejemplo de escaneo de errores de compilación. Necesito ver si M3 gestiona los 'error decorations' y cómo M11 obtiene las líneas de error para unirlas."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no une la consola con el editor; M11 huele parsing de errores pero no es el objeto; M3 es el dibujo pero no el trigger. Necesito ver si existe el arco o si hay que crearlo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 leyó el parser de la consola, no el dibujo del margen; el objeto de la fase B no se afirmó"
+    },
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen del editor",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T2 leyó el extractor en lugar del dibujante; el pack tiene M3 (visual highlight) como barrio para el efecto visual, no el parser de la consola"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "las dos cazas leen el mismo objeto (scan shell output for linker errors) y no hallan un mecanismo que una la consola con el margen del editor; el pack no muestra camino entre extraer el error y dibujar la línea roja, por lo que la funcionalidad no existe"
+    }
+  ],
+  "why": "las dos cazas leen el mismo objeto (scan shell output for linker errors) y no hallan un mecanismo que una la consola con el margen del editor; el pack no muestra camino entre extraer el error y dibujar la línea roja, por lo que la funcionalidad no existe",
+  "zooms": []
+}

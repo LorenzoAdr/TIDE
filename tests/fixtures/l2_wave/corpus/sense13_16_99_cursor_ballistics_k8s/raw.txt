@@ -1,0 +1,19 @@
+The user wants to find two things:
+1. The module calculating ballistic trajectory of editor cursors to sync with a Kubernetes cluster on user blink.
+2. Where this physics is persisted in the quantum vector index of the workspace.
+
+Work 1 (T1) asked about the ballistic trajectory calculation.
+T1 Closed: "no encontré el cálculo de trayectoria balística; lo leído es un historial de saltos de edición cursor history y un toggle de visibilidad de parpadeo cursor blink, sin lógica de interpolación ni sincronización con cluster".
+T1 Opened: "ballistic trajectory", "cursor sync cluster".
+
+The anchor claims these things exist. T1 refuted the first part (ballistic trajectory calculation).
+The second part (persistence in quantum vector index) hasn't been hunted yet.
+However, the anchor is likely a hallucination or a joke ("trayectoria balística", "cluster de Kubernetes", "parpadea", "índice vectorial cuántico").
+The pack shows standard editor/IDE components: `cursor_history`, `cursor blink`, `workspace_indexer`, `coding_stem_embed_index`.
+There is no "ballistic trajectory" or "quantum vector index
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla describe mecanismos inexistentes en el plano: no hay cálculo de trayectoria balística ni índice vectorial cuántico; el pack solo muestra historial de cursores e índices de código estándar"
+}

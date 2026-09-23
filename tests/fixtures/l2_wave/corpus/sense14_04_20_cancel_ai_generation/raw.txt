@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Found where Escape/click is captured (`handle ai console keys`, `handle console panel mouse`) and leads to `clear pending insert`, `cancel current`.
+T2: Found where pending insertion is cleaned (`clear pending insert` resets state `pending insert false`, `insert anchor`). No evidence of file cleanup on disk, only memory state.
+T3: Tried to find where file writing stops. Failed to find the mechanism that stops the active writing stream/token insertion. Only found `cancel level1` and `clear pending insert`.
+
+The anchor claims: "cancel cleanly without leaving the file half-written".
+Current findings:
+- Trigger: Escape/click captured.
+- Action: `cancel current` -> `clear pending insert`.
+- Effect: Resets logical state (`pending insert false`).
+- Missing: Mechanism that actually stops the active writing stream or cleans up the file on disk if it's being written to. T3 explicitly says "no encontré dónde se detiene la escritura en el archivo... no el mecanismo que detiene el flujo de escritura activa".
+
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack confirma la captura del gesto y el reseteo del estado lógico, pero no halla el mecanismo que detiene el flujo de escritura activa en el editor ni la limpieza del archivo en disco; el ancla pide cancelar sin dejar el archivo a medias, y ese efecto no está en el mapa"}

@@ -1,0 +1,122 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:status_text",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/llama_backend.cpp:ensure_completion_server",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se gestiona el ciclo de vida del servidor de lenguaje para detectar si se cae o no responde",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se llama a schedule debounced lsp restart cuando el servidor deja de responder",
+      "keep": [
+        "M1",
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_transport.cpp:wait_response"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene estado de reinicio y fingerprint; necesito ver qué dispara el reinicio automático"
+    },
+    {
+      "consulta": "dónde se gestiona el ciclo de vida del servidor de lenguaje para detectar si se cae o no responde",
+      "consultas": [
+        "dónde se gestiona el ciclo de vida del servidor de lenguaje para detectar si se cae o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "pid"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 no encontró el watchdog; busco el gestor del proceso (M6/M3) para ver si hay un loop de supervisión o dónde inyectarlo"
+    },
+    {
+      "consulta": "dónde se llama a schedule debounced lsp restart cuando el servidor deja de responder",
+      "consultas": [
+        "dónde se llama a schedule debounced lsp restart cuando el servidor deja de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "health check"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 vio el método de reinicio pero no el disparador automático; busco el puente entre el chequeo de salud y el reinicio"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección automática de caída y reinicio del servidor LSP no existe en el código actual; las búsquedas confirmaron que solo hay arranque inicial y reinicio manual, sin watchdog ni loop de salud"
+    }
+  ],
+  "why": "el mecanismo de detección automática de caída y reinicio del servidor LSP no existe en el código actual; las búsquedas confirmaron que solo hay arranque inicial y reinicio manual, sin watchdog ni loop de salud",
+  "zooms": []
+}

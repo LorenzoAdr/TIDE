@@ -1,0 +1,19 @@
+The user wants to restore the cursor position, open files, and sidebar visibility when reopening a project.
+I have a plan with 3 locators and a bridge.
+T1 (cursor position) failed to find a mechanism (read: reopen workspace documents, flush active tab, open workspace wizard).
+T2 (open files) found a mechanism: `restore workspace session` in `application` loads `load` and iterates `session open tabs` calling `workspace open file`. Triggered in `Application` constructor and `set workspace`.
+T3 (sidebar visibility) failed to find a mechanism (read: restore workspace session, open workspace wizard).
+
+The pack shows connections:
+T1 => T2: `restore workspace session` -> `open file` -> `flush active tab`
+T1 => T3: `restore workspace session` -> `open file` -> `flush active tab`
+T2 => T3: `mismo objeto: restore workspace session`
+
+T2 found `restore workspace session`. T1 and T3 read `restore workspace session` but didn't find the specific mechanism for cursor or sidebars.
+The pack says T2 => T3 is `mismo objeto: restore workspace session`. This
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo restore workspace session restaura los archivos abiertos, pero no la posición del cursor ni la visibilidad de los paneles laterales"
+}

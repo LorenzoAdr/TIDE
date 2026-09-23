@@ -1,0 +1,125 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ui/console_panel.cpp:handle_ai_console_keys"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "cómo se limpia el archivo cuando se cancela la inserción pendiente",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "qué hace cancel current con el buffer de texto del archivo cuando se cancela la generación activa",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 menciona 'ai trace escape'; necesito ver cómo se inicia la cancelación desde la UI"
+    },
+    {
+      "consulta": "cómo se limpia el archivo cuando se cancela la inserción pendiente",
+      "consultas": [
+        "cómo se limpia el archivo cuando se cancela la inserción pendiente"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancelación"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el trigger de Escape y la llamada a cancelación, pero no el efecto sobre el archivo. El usuario exige 'sin dejar el archivo a medias'. Hay que cazar el mecanismo de limpieza (rollback/clear) que asegura esa limpieza."
+    },
+    {
+      "consulta": "qué hace cancel current con el buffer de texto del archivo cuando se cancela la generación activa",
+      "consultas": [
+        "qué hace cancel current con el buffer de texto del archivo cuando se cancela la generación activa"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancel current"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 refutó la limpieza en pending insert; T1 menciona cancel current para busy. Verifico si este verbo limpia el archivo o solo el estado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de cancelación (cancel current → clear pending insert) solo resetea estado interno (flags y anchors); no limpia el buffer del archivo, refutando el claim de limpieza de archivo a medias"
+    }
+  ],
+  "why": "el mecanismo de cancelación (cancel current → clear pending insert) solo resetea estado interno (flags y anchors); no limpia el buffer del archivo, refutando el claim de limpieza de archivo a medias",
+  "zooms": []
+}

@@ -1,0 +1,18 @@
+{
+  "consulta": "dónde se cancela la generación de código de la IA para limpiar el archivo",
+  "consultas": [
+    "dónde se cancela la generación de código de la IA para limpiar el archivo"
+  ],
+  "do": "explorar",
+  "error": "control: consulta sin objeto (no una categoría)",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "la captura de UI falló; el pack muestra M8 (ai controller) con cancel level1 y clear ai session; busco el mecanismo de limpieza en el controlador"
+}

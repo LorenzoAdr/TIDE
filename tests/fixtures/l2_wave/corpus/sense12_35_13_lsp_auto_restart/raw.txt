@@ -1,0 +1,11 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have 3 completed works (T1, T2, T3).
+T1 looked for detection of crash/no response to trigger restart. Found `clangd process alive` is a stub, and `run lsp missing install` handles startup/install, not monitoring.
+T2 looked for detection of crash/no response. Found `on transport reader eof`, `start`.
+T3 looked for restart when transport connection closes. Found `on transport reader eof` only cleans pid and marks ready false, does not
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de detección automática de caída o no respuesta del servidor LSP y su reinicio no existe en el código actual; on transport reader eof solo limpia estado sin reiniciar, y los disparadores de restart lsp for workspace son arranque inicial e instalación, no monitorización de fallos"
+}

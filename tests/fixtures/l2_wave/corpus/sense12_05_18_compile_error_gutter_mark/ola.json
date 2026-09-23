@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se suscribe el editor a los errores de compilación para pintar la línea roja en el margen",
+  "consultas": [
+    "dónde se suscribe el editor a los errores de compilación para pintar la línea roja en el margen"
+  ],
+  "do": "explorar",
+  "error": "control: do no legal ahora (explorar)",
+  "evita": [
+    "diagnostics on line"
+  ],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T2 y T3 leyeron el pintor, pero falta el suscriptor que conecta la consola con el editor. T1/T4 refutaron el parser en la consola; busco el puente de suscripción o el emisor de diagnósticos."
+}

@@ -1,0 +1,230 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se programa su reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se programa su reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se comprueba si el servidor de lenguaje está vivo o responde antes de enviarle una petición",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:process_alive",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/lsp/lsp_transport.cpp:send_request"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se llama al reinicio del LSP cuando el proceso no está vivo",
+      "keep": [
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:process_alive",
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se llama al reinicio del LSP cuando el proceso no está vivo",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el LSP no responde y se dispara el reinicio",
+        "evita": [
+          "process alive"
+        ],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino la detección de caída y el reinicio automático",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se programa su reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se programa su reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp restart"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'schedule debounced lsp restart' y 'pending lsp restart'; ahí debe estar la lógica de detección y reinicio"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se programa su reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se programa su reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp heartbeat"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mapeo en M5 (application) sin encontrar la detección. El pack tiene M1 (lsp missing prompt) y M2 (lsp symbol provider) que no se han leído. La detección podría estar en el proveedor de símbolos o en la lógica de prompts. Exploro M1/M2 para ver si hay lógica de heartbeat/ping/timeout que dispare el reinicio."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se programa su reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se programa su reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "build environment watching"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 no encontró la detección en el bucle principal ni en los callers leídos, pero el pack sugiere un camino hacia 'setup build environment watching'. Exploro ese barrio para ver si la detección de caída/no-respuesta está ahí."
+    },
+    {
+      "consulta": "dónde se comprueba si el servidor de lenguaje está vivo o responde antes de enviarle una petición",
+      "consultas": [
+        "dónde se comprueba si el servidor de lenguaje está vivo o responde antes de enviarle una petición"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "heartbeat"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el reinicio existe pero no el disparo de caída; busco el chequeo de vida (ping/heartbeat) que falta"
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje si el proceso no está vivo",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje si el proceso no está vivo"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "process alive"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "T3 leyó process alive y send request; hay que ver si la falta de vida dispara el reinicio"
+    },
+    {
+      "consulta": "qué ocurre si la comprobación de que el proceso está vivo falla antes de enviar la petición",
+      "consultas": [
+        "qué ocurre si la comprobación de que el proceso está vivo falla antes de enviar la petición"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T3 leyó process alive y send request; falta ver si el fallo dispara el reinicio o solo aborta la petición"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "T3 encontró la comprobación de vida (process alive) y T1 el reinicio. Necesito ver si se unen o si falta el disparador de 'no responde'."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 8,
+      "why": "el pack y los cierres muestran que la aplicación ya detecta si el proceso está vivo (process alive) y programa el reinicio (schedule debounced lsp restart), pero no hay lógica de ping/timeout para detectar no-respuesta; el mecanismo de reinicio automático existe para caídas, pero falta la detección de congelación"
+    }
+  ],
+  "why": "el pack y los cierres muestran que la aplicación ya detecta si el proceso está vivo (process alive) y programa el reinicio (schedule debounced lsp restart), pero no hay lógica de ping/timeout para detectar no-respuesta; el mecanismo de reinicio automático existe para caídas, pero falta la detección de congelación",
+  "zooms": []
+}

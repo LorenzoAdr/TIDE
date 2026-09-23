@@ -1,0 +1,48 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ui/console_panel.cpp:3020-3165",
+        "src/ui/console_panel.cpp:3020-3139"
+      ],
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de código",
+      "evita": [],
+      "hacia": [
+        "key handler"
+      ],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación",
+      "evita": [],
+      "hacia": [
+        "clear pending insert"
+      ],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino capturar Escape y limpiar el archivo a medias",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

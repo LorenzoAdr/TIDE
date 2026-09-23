@@ -1,0 +1,14 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current state:
+- T1 (locator for Escape/click outside capture): Failed. No object found. `ai trace escape` is JSON string escaping, not UI event handling.
+- T2 (locator for cleaning partial insertion): Found `clear pending insert` called by `cancel current` or `handle user input`. It resets `pending insert` and `insert anchor`. However, it notes that cancellation via Escape/click outside is not in this code, only textual cancellation.
+- Plan: Break
+---- content ----
+{
+  "action": "control_v1",
+  "do": "explorar",
+  "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+  "keep": "M7",
+  "why": "T1 falló en M2 (ai trace). M7 (editor panel) es el barrio de la UI del editor donde ocurre la generación y donde se capturan eventos de teclado/ratón. Necesito encontrar el handler de Escape/clic fuera en el panel del editor para conectarlo con la cancelación."
+}

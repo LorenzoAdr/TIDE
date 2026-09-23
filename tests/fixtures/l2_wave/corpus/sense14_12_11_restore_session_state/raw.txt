@@ -1,0 +1,17 @@
+The user wants to know how the application remembers the cursor position, open files, and sidebar visibility when reopening a previously opened project.
+
+I have three completed jobs (T1, T2, T3) that investigated different aspects of this:
+1.  **T1**: "dónde se guarda y restaura la posición del cursor y los archivos abiertos al volver a abrir un proyecto".
+    *   Read: `save workspace session`, `restore workspace session`, `save`, `flush active tab`, `app settings hpp`, `workspace model hpp`.
+    *   Result: "ESA pregunta no se relanza. Lo leído no era el disparo." (This question is not relaunched. What was read was not the trigger.)
+2.  **T2**: "dónde se restaura la posición del cursor al abrir un archivo que ya estaba abierto".
+    *   Read: `navigate editor to line`, `Make Editor Panel`.
+    *   Result: "ESA pregunta no se relanza. Lo leído no era el disparo."
+3.  **T3**: "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto".
+    *   Read:
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "los tres trabajos cerraron sin hallar el disparo; el pack no une un mecanismo que una la posición del cursor, los archivos abiertos y la visibilidad de paneles al reabrir un proyecto"
+}

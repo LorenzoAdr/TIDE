@@ -1,0 +1,19 @@
+The user wants compilation errors from the console to be marked with a red line in the editor's left margin.
+I have three completed jobs:
+T1: Found where the red line is painted (`line gutter marker` -> `line diagnostic marker from map` -> `diagnostics for editor line`).
+T2: Asked where compilation errors are extracted from the console text to create diagnostics. Result: "no hay objeto" (no object found). This implies the system doesn't currently extract errors from the console text to create diagnostics in the way expected, or at least not in the searched areas.
+T3: Asked where error diagnostics are created that reach the editor. Result: They come from LSP (`symbols diagnostics for file`), cached in `sync diagnostic cache`, indexed by line, and painted via `line gutter marker`.
+
+The user's request is to *make* console errors appear as red lines.
+The investigation shows:
+1. The UI mechanism for red lines exists and relies on diagnostics (`line diagnostic marker from map`).
+2. The current source of diagnostics is LSP (`symbols diagnostics for file`).
+3. There is no existing mechanism found (T2) that extracts console text errors into diagnostics.
+
+The user's claim
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de pintura existe (line gutter marker) pero depende de diagnósticos LSP; no hay extractor de consola a diagnósticos (T2 vacío). el ancla requiere crear ese puente, no solo leerlo."
+}

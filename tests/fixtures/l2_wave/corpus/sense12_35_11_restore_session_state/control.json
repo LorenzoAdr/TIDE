@@ -1,0 +1,187 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:open_file_at_impl"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la selección del cursor al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ui/main_layout.cpp"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los paneles laterales al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 1,
+      "why": "el ancla pide recordar posición, archivos y paneles; el pack tiene pistas de estado (M1, M5, M6) pero no el mecanismo de persistencia; rompo en guardar/restaurar para cada aspecto"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M1 tiene 'editor state CursorPos', el polo clave para recordar la posición del cursor al reabrir."
+    },
+    {
+      "consulta": "dónde se restaura la selección del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la selección del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "span"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró la posición; el pack une a la selección (span) para completar el estado del cursor"
+    },
+    {
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "consultas": [
+        "dónde se restauran los archivos abiertos al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar qué archivos tenía abiertos; el pack huele editor state y open file at impl"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "El ancla tiene tres polos: cursor, archivos y paneles. T1 y T2 ya investigaron el cursor (posición y selección), pero T3 no encontró archivos. Falta investigar los paneles laterales. Necesito un plan para cubrir los tres aspectos de forma independiente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T3 cerró archivos abiertos (no hay objeto). T2 refutó selección. Falta paneles laterales (M5/M6) y confirmar posición (T1 leyó símbolos pero no cerró el claim de restauración). Parto en dos: paneles y posición."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 7,
+      "why": "T4 no encontró el mecanismo de restauración de paneles en main layout; salto a la siguiente caza del plan"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

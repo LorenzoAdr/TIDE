@@ -1,0 +1,11 @@
+The user wants compilation errors from the console to be marked with a red line in the editor's left margin.
+I have already investigated:
+1.  **T1**: How the red line is drawn (`line gutter marker` -> `line diagnostic marker from map` -> `diagnostics for editor line`).
+2.  **T2**: How errors are processed to mark them in the editor (`apply lsp diagnostics to panel` -> `sync diagnostic cache` -> `push active file diagnostics from cache` -> `rebuild diagnostics by line`).
+3.  **T3**: Where console compilation errors are parsed to insert
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack y los trabajos leídos confirman que el sistema ya mapea los errores de compilación (diagnósticos) a líneas rojas en el margen izquierdo del editor. el mecanismo de renderizado (line gutter marker) y el de procesamiento (apply lsp diagnostics to panel) están presentes y conectados. no hay hueco en el flujo descrito."
+}

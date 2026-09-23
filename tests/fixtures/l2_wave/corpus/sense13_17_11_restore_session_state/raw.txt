@@ -1,0 +1,20 @@
+The user wants to restore the editor state (cursor position, open files, panel visibility) when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A: cursor position on close (T1 failed: "on closed" not the trigger)
+2. [paso] B: open files on close (T2 success: `WorkspaceModel` has `tabs` and `tab_mru`)
+3. [en_curso] C: panel state on close (T3 failed: "workspace model hpp, clear tabs" not the trigger for panels)
+4. [pendiente] P: bridge save/restore
+
+Current status:
+- T1 (cursor) failed.
+- T2 (files) succeeded.
+- T3 (panels) failed.
+- The system says "exploradores agotados" (explorers exhausted).
+- I need to close the investigation citing the mechanism read or refutation.
+
+The anchor asks for three things: cursor, files, panels.
+T2 found where files are stored (`WorkspaceModel`).
+T1 and T3 failed to find where cursor and panels are stored *on close*.
+However, T3 read
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la lista de archivos se guarda en WorkspaceModel; no hay mecanismo leído para cursor ni paneles"}

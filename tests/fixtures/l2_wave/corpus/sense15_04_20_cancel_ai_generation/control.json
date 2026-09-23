@@ -1,0 +1,137 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código cuando se pulsa Escape o se hace clic fuera",
+      "keep": [
+        "M2",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ui/search_panel.cpp:clear_search_input_focus"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "keep": [
+        "M7",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:has_pending_insert",
+        "src/ui/console_panel.cpp:Event",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca la cancelación al pulsar Escape o hacer clic fuera durante la generación",
+      "keep": [
+        "M4",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se cancela la generación de código cuando se pulsa Escape o se hace clic fuera",
+      "consultas": [
+        "dónde se cancela la generación de código cuando se pulsa Escape o se hace clic fuera"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancelación"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el pack muestra ai controller cancel level1 y ai trace escape; necesito ver cómo se orquesta la cancelación y la limpieza del archivo"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle key event"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró que no se cancela por Escape/clic en M2/M7; el Abierto apunta a handle key event y handle mouse click. Un hijo caza el disparo de esos gestos en el barrio de eventos."
+    },
+    {
+      "consulta": "dónde se invoca la cancelación al pulsar Escape o hacer clic fuera durante la generación",
+      "consultas": [
+        "dónde se invoca la cancelación al pulsar Escape o hacer clic fuera durante la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai console keys"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 leyeron los manejadores de eventos y cancelación por separado; necesito ver si hay un camino que una Escape/clic con cancel current"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide cancelar la generación al pulsar Escape o hacer clic fuera; las tres cazas confirman que no existe ese mecanismo: Escape solo limpia selecciones de terminal y clics activan inputs o abren resultados, sin invocar cancel current ni detener la generación en curso"
+    }
+  ],
+  "why": "el ancla pide cancelar la generación al pulsar Escape o hacer clic fuera; las tres cazas confirman que no existe ese mecanismo: Escape solo limpia selecciones de terminal y clics activan inputs o abren resultados, sin invocar cancel current ni detener la generación en curso",
+  "zooms": []
+}

@@ -1,0 +1,21 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se captura la tecla Escape o el clic fuera para interrumpir la IA
+2. [paso] B locator: dónde se cancela la generación de código para evitar dejar el archivo a medias
+3. [pendiente] P puente: hay camino capturar la interrupción y cancelar la generación (need A B)
+
+Work 1 (A) failed: "no encontré la interrupción de la IA; lo leído handle editor escape solo cierra UI completado, find, modales y no toca el estado de la IA". It found `handle editor escape` but it's not the trigger for AI.
+Work 2 (B) passed: "leído: cancel level1, cancel all, tasks cancel, clear pending insert". It found the cancellation mechanism.
+
+The plan says P needs A and B. But A failed. The user's claim is about the *whole* flow: trigger -> cancel.
+Since A failed to find the trigger in the expected place (`handle editor escape`), I need
+---- content ----
+{
+  "action": "control_v1",
+  "do": "explorar",
+  "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA",
+  "hacia": [
+    "handle editor keys"
+  ],
+  "why": "el mapeo anterior falló; el pack apunta a handle editor keys como el barrio correcto para la captura de la interrupción"
+}

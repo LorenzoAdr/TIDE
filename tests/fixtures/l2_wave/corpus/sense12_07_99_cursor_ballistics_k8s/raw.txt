@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo del ancla; no hay objeto"}

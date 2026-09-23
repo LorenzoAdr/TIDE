@@ -1,0 +1,107 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la física de los cursores en el índice vectorial del workspace",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "trayectoria cursor",
+        "sincronización cluster",
+        "parpadeo usuario",
+        "física persistencia",
+        "índice vectorial"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla describe fenómenos muy específicos (balística, kubernetes, parpadeo, cuántico) que no aparecen en el pack actual; necesito ver si existe algún barrio que maneje movimiento de cursores, sincronización remota o eventos de hardware antes de descartar o buscar en profundidad"
+    },
+    {
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea",
+      "consultas": [
+        "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "trayectoria cursor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide localizar el módulo que calcula la trayectoria balística de los cursores; el bosquejo huele 'trayectoria cursor' cerca de terminal (c=0.46), pero no hay arista clara; un explorador busca el fenómeno de cálculo de trayectoria en el barrio del cursor/terminal"
+    },
+    {
+      "consulta": "dónde se guarda la física de los cursores en el índice vectorial del workspace",
+      "consultas": [
+        "dónde se guarda la física de los cursores en el índice vectorial del workspace"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "workspace model"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el polo 1 (trayectoria/K8s) ya cerró sin objeto; el polo 2 (persistencia en índice) queda abierto. M3/M4 huelen a workspace y store; un hijo busca el guardado de la física."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack describe un editor de texto local estándar (paneles, indexadores de símbolos, servidores de lenguaje); no hay rastro de Kubernetes, índices vectoriales cuánticos, física de cursores ni eventos de parpadeo. las dos cazas cerraron sin objeto; el claim se refuta."
+    }
+  ],
+  "why": "el pack describe un editor de texto local estándar (paneles, indexadores de símbolos, servidores de lenguaje); no hay rastro de Kubernetes, índices vectoriales cuánticos, física de cursores ni eventos de parpadeo. las dos cazas cerraron sin objeto; el claim se refuta.",
+  "zooms": []
+}

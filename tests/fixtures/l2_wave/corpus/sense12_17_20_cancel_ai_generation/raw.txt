@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se intercepta la tecla Escape para cancelar la generación de la IA","evita":["comandos de texto"],"why":"T1 cerró que no hay cancelación por texto; el ancla pide Escape. Busco el handler de teclado que detecte Escape y dispare la cancelación."}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no nombra el mecanismo de detección de caída ni su enlace al reinicio; los leídos (on lsp notification, restart lsp for workspace) no son el disparo de la caída"
+}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pedía tres cosas: cursor, archivos y paneles. T1 y T3 confirman que se restauran los archivos abiertos y la pestaña activa, pero niegan la persistencia del cursor. T2 no halló mecanismo para los paneles laterales. El mapa está completo: se recuerdan los archivos, pero no la posición del cursor ni el estado de los paneles."
+}

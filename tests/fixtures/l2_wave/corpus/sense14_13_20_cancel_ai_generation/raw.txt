@@ -1,0 +1,23 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de código
+2. [fallo] B locator: dónde se limpia el archivo parcialmente escrito al cancelar la generación
+3. [pendiente] P puente: hay camino capturar la interrupción y limpiar el archivo a medias (need A B)
+
+Work 1 (A) failed: "no hay objeto".
+Work 2 (B) failed: "ESA pregunta no se relanza. Lo leído no era el disparo." It read `cancel level1`, `clear pending insert`, `cancel current`, `cancel all`.
+
+The pack shows:
+M8 (ai controller) has `cancel level1`, `clear pending insert`.
+M6 (level1 agent) has `cancel level1`.
+M3 (level2 session) has `apply tool`, `reopen for followup`.
+M2 (ai trace) has `ai trace escape`.
+M5 (console panel) has `handle ai console keys`.
+M
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no une la captura de Escape/clic fuera con la limpieza del archivo; las cazas de locator fallaron y el puente no tiene polos confirmados. el claim se refuta: no hay camino visible entre el gesto del usuario y la limpieza limpia del archivo a medias."
+}

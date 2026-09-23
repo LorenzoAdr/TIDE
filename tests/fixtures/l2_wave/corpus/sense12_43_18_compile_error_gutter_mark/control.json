@@ -1,0 +1,255 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se procesa la salida de texto de la consola inferior para extraer mensajes",
+      "keep": [
+        "M7",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/terminal/shell_session.cpp:rebuild_display",
+        "src/terminal/raw_pty_screen.cpp:styled_rows",
+        "src/terminal/raw_pty_screen.cpp:rebuild_cache",
+        "src/terminal/shell_session.cpp:rebuild_display_locked",
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/terminal/app_session.cpp:drain_output_bytes"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibujan las marcas de colores en el margen izquierdo del editor",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/visual_highlight.cpp:build_git_marks_snapshot"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se actualiza el estado de las marcas visuales en el margen del editor para reflejar errores",
+      "keep": [
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la salida de la consola para extraer la línea y el mensaje",
+      "keep": [
+        "M11"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación de la salida de la consola para extraer la línea y el mensaje",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crean las marcas de diagnóstico en el margen del editor a partir de los errores extraídos",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parseo de errores de la consola y la creación de marcas de diagnóstico en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M11",
+        "M3",
+        "M10"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M11 parsea errores de shell; M3 y M10 manejan highlights visuales. Necesito ver si M11 conecta con el editor o si M3/M10 son el mecanismo de la línea roja."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide unir dos fenómenos distintos: leer la consola y pintar el margen. necesito localizar ambos puntos de anclaje antes de diseñar el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "control: lo leído no afirma; no pases ese polo",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado es un dump de nombres, no afirma el objeto de la fase A; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se actualiza el estado de las marcas visuales en el margen del editor para reflejar errores",
+      "consultas": [
+        "dónde se actualiza el estado de las marcas visuales en el margen del editor para reflejar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "Visual Highlight Service"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 cerró con build git marks snapshot. El pack indica un hop extra hacia Visual Highlight Service, que es el mecanismo probable para gestionar marcas de estado (errores) en el margen. Necesito ver cómo se inyectan o actualizan estas marcas."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T1 encontró el parseo de errores (scan shell output for linker errors) y T3 encontró la actualización de marcas (rebuild diagnostics by line). Falta conectar cómo los errores parseados se convierten en diagnósticos que actualizan el margen."
+    },
+    {
+      "consulta": "hay camino el parseo de errores de la consola y la creación de marcas de diagnóstico en el margen",
+      "consultas": [
+        "hay camino el parseo de errores de la consola y la creación de marcas de diagnóstico en el margen"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnostics"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 7,
+      "why": "T4 cerró el parseo (A), T3 cerró las marcas (B). Falta el puente P: si el flujo une ambos polos o si son independientes."
+    },
+    {
+      "consulta": "hay camino el parseo de errores de la consola y la creación de marcas de diagnóstico en el margen",
+      "consultas": [
+        "hay camino el parseo de errores de la consola y la creación de marcas de diagnóstico en el margen"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnostics"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T4 cerró el parseo; T3 cerró las marcas. Falta el puente que une ambos polos para confirmar el claim del usuario"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "T4 cerró A. T3 cerró B. Falta el puente P para ver si se unen o si hay que crear el camino."
+    },
+    {
+      "consulta": "dónde se crean las marcas de diagnóstico en el margen del editor a partir de los errores extraídos",
+      "consultas": [
+        "dónde se crean las marcas de diagnóstico en el margen del editor a partir de los errores extraídos"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnostics"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 10,
+      "why": "fase B del plan; T4 cerró el parseo, ahora busco la creación de marcas en el margen"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

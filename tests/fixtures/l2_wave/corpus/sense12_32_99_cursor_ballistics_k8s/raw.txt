@@ -1,0 +1,13 @@
+The user wants to find two things:
+1. The module calculating ballistic cursor trajectory for real-time sync with Kubernetes on blink.
+2. Where that physics is persisted in the quantum vector index of the workspace.
+
+The previous work (Trabajo 1) investigated the first part ("dónde se calcula la trayectoria balística...") and concluded "no hay objeto" (no object found). The explorer read `editor panel` and found it's a local text editor with scroll/breadcrumbs, no ballistic physics or K8s sync.
+
+The anchor (claim) has two parts. The first part is refuted by
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide dos objetos: cálculo de trayectoria y persistencia en índice. Trabajo 1 refutó el primero (no hay cálculo ni sync). El pack no muestra mecanismo para el segundo (índice vectorial cuántico); sin camino entre polos leídos y sin barrio que huela el objeto, cierro el claim."
+}

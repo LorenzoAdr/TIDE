@@ -1,0 +1,20 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 found where compilation errors are detected in the console (`build rows`, `count errors`, `Make Diagnostics Panel`).
+- T2 found where visual marks are drawn in the editor margin (`collect diagnostic decorations`, `apply decoration`, `line gutter marker`).
+- T3 found where diagnostics are sent from the console to the editor (`parse diagnostic`, `parse publish diagnostics`, `on lsp notification`, `set diagnostics notify callback`).
+
+The plan was:
+1. A: locator: where diagnostics are sent from console to editor (T3)
+2. B: locator: where editor subscribes to diagnostics changes to draw marks (T2)
+3. P: bridge: path between sending and subscribing (need A, B)
+
+T3 closed with "no object found" (or rather, the read wasn't the trigger, but it found `parse diagnostic`, `parse publish diagnostics`, `on lsp notification`, `set diagnostics notify callback`). The prompt says "ESA pregunta no se relanza... do=cerrar ese mapeo."
+T2 closed with
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack une la detección en consola (T1) con el dibujo en margen (T2) y el envío de diagnósticos (T3); sin camino entre T1 y T2/T3 indica que la integración no existe aún, confirmando que falta el puente para marcar errores de consola en el editor"
+}

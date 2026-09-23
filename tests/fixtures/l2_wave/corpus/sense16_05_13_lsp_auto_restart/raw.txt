@@ -1,0 +1,14 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3).
+T1 asked: "where is it detected that the LSP server has crashed or does not respond and the restart is triggered".
+T1 Closed: "read: completion wait timeout ms, parse wait timeout ms, schedule debounced lsp restart, reader loop, wait response, restart lsp for workspace, start, on lsp notification".
+T1 Closed says: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo."
+
+T2 asked: "where is the LSP server restarted after a failure or timeout".
+T2 Closed: "found the object of the query: the restart is triggered in lsp missing install after installation failure and is programmed with debounce in schedule debounced lsp restart after environment changes; the effect is restart lsp for workspace which restarts the symbol provider and reopens documents".
+
+T3 asked: "where is it detected that the LSP server process has crashed or does not respond and the restart is triggered".
+T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra un detector de caída automática del proceso LSP; los cierres leídos niegan ese disparo y solo confirman reinicios tras cambios de entorno o fallos de instalación"}

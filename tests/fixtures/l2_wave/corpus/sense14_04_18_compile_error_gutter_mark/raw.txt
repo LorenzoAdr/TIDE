@@ -1,0 +1,19 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se pinta la línea roja en el margen del editor para marcar un error
+2. [en_curso] B locator: dónde se leen los errores de compilación de la consola inferior
+3. [pendiente] P puente: hay camino leer los errores de la consola y pintar la línea roja en el margen (need A B)
+
+Work 1 (Phase A) failed: "no hay objeto". The child closed it saying there is no object.
+Work 2 (Phase B) succeeded: found the mechanism for reading errors (Make Diagnostics Panel, diagnostics for translation unit, build rows).
+
+Current state:
+- Phase A (painting red line) is closed with "no object".
+- Phase B (reading errors) is closed with success.
+- Phase P (bridge) is pending.
+
+The plan requires A and B to build P.
+However, A failed ("no hay objeto").
+If A failed, it means there is no existing mechanism to paint the red line in the
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de pintar la línea roja no existe (T1: no hay objeto); el claim se refuta"}

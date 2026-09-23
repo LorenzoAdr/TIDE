@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "las tres búsquedas (cursor, archivos, paneles) no hallaron el mecanismo de persistencia al reabrir; el mapa no une los polos leídos y no hay camino entre ellos"
+}

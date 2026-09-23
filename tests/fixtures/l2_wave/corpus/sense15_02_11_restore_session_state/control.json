@@ -1,0 +1,164 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto",
+      "keep": [
+        "M1",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/level2_session.cpp:save_state"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se persiste y recupera la posición del cursor y la lista de archivos abiertos al salir y entrar al proyecto",
+      "keep": [
+        "M10",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:reset_to_single_cursor",
+        "src/editor/helix/helix_state.cpp:reset_helix_editor_state",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/app_settings.cpp:save"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:close",
+        "src/app/workspace_session.cpp:save"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "D",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 owns 'editor state' y el ancla pide recordar cursor y archivos; es el primer polo del claim"
+    },
+    {
+      "consulta": "dónde se persiste y recupera la posición del cursor y la lista de archivos abiertos al salir y entrar al proyecto",
+      "consultas": [
+        "dónde se persiste y recupera la posición del cursor y la lista de archivos abiertos al salir y entrar al proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 descartó save state para IA; busco el mecanismo real de persistencia del estado visual del editor y layout"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla tiene tres polos distintos (cursor, archivos, paneles). T1 y T2 fallaron buscando un mecanismo único de 'save state' o 'workspace session'. Atomizo en cuatro cazas independientes para encontrar los mecanismos específicos de cada polo. El hijo de A no necesita B, C ni D."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto. T1, T2 y T3 no encontraron el mecanismo de guardado/restauración del estado visual del editor (cursor, archivos, paneles). T1 encontró save state pero solo para sesión IA. T2 encontró reset helix editor state y save workspace session pero no el mecanismo de persistencia visual. T3 encontró close y save pero no el guardado de posición. El pack no nombra el mecanismo del ancla. Cierro sin hijo."
+    }
+  ],
+  "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto. T1, T2 y T3 no encontraron el mecanismo de guardado/restauración del estado visual del editor (cursor, archivos, paneles). T1 encontró save state pero solo para sesión IA. T2 encontró reset helix editor state y save workspace session pero no el mecanismo de persistencia visual. T3 encontró close y save pero no el guardado de posición. El pack no nombra el mecanismo del ancla. Cierro sin hijo.",
+  "zooms": []
+}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el polo de captura de Escape está confirmado (handle ai console keys -> cancel current). el polo de limpieza del archivo no tiene objeto en el pack (T2 vacío), pero el circuito de T1 ya lee clear pending insert y cancel current, que cubren la intención de cancelar sin dejar inserciones pendientes. el claim se confirma con el mecanismo de cancelación y limpieza de inserción pendiente ya visto; no hay otro barrio que añadir."
+}

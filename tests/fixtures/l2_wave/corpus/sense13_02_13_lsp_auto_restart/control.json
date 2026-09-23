@@ -1,0 +1,125 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:wait_until_healthy",
+        "src/ai/llama_backend.cpp:status_text",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se maneja la desconexión o el error del servidor de lenguaje para intentar reconectar",
+      "keep": [
+        "M9"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia el servidor de lenguaje y se establece la conexión inicial",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/lsp_client.cpp:spawn_language_server",
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_client.cpp:initialize"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace), pero falta ver qué dispara ese reinicio automáticamente"
+    },
+    {
+      "consulta": "dónde se maneja la desconexión o el error del servidor de lenguaje para intentar reconectar",
+      "consultas": [
+        "dónde se maneja la desconexión o el error del servidor de lenguaje para intentar reconectar"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "on connection lost"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el watchdog no existe; busco el punto de fallo (desconexión/error) para inyectar el reinicio automático"
+    },
+    {
+      "consulta": "dónde se inicia el servidor de lenguaje y se establece la conexión inicial",
+      "consultas": [
+        "dónde se inicia el servidor de lenguaje y se establece la conexión inicial"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "start server"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 convergen en reinicio manual; para detectar caída automática necesito ver dónde nace el proceso y si hay un listener de eventos de cierre/error en ese punto de arranque"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "no existe un mecanismo de detección automática de caída o no-respuesta del LSP que dispare el reinicio; solo hay reinicio manual debounced tras cambios de configuración y lógica de salud para el backend L2, no para el LSP"
+    }
+  ],
+  "why": "no existe un mecanismo de detección automática de caída o no-respuesta del LSP que dispare el reinicio; solo hay reinicio manual debounced tras cambios de configuración y lógica de salud para el backend L2, no para el LSP",
+  "zooms": []
+}

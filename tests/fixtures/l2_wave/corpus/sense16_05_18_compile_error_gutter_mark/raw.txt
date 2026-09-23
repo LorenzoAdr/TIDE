@@ -1,0 +1,15 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 (detect errors in console): Read `diagnostics panel cpp`, `console panel tab active`, `console panel cpp`, `diagnostics panel hpp`. Closed: "ESA pregunta no se relanza. Lo leído no era el disparo." (The read wasn't the trigger).
+- T2 (paint red line in margin): Read `line gutter marker`, `gutter buffer line at row`. Closed: "ESA pregunta no se relanza. Lo leído no era el disparo."
+- T3 (extract error line from console text): Closed: "no hay objeto" (no object).
+
+The plan was:
+1. A locator: extract error line from console text (T3 - closed: no object)
+2. B locator: create line marker in editor margin (T2 - closed: read wasn't trigger)
+3. P bridge: path between extract and create (need A B)
+
+T3 says "no object" for extracting the error line from console text. This implies there is no code currently doing this extraction, or
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay código que extraiga la línea del error del texto de la consola; sin extracción, no hay camino para pintar la línea roja en el margen"}

@@ -1,0 +1,20 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "bosquejar",
+  "error": "control: bosquejar máx 2",
+  "evita": [],
+  "hacia": [
+    "error de compilación",
+    "margen izquierdo",
+    "línea roja"
+  ],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "quiero ver si el ancla vive en un barrio o en varios"
+}

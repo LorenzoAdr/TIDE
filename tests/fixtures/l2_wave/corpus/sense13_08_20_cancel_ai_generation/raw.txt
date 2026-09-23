@@ -1,0 +1,14 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have two completed jobs:
+1.  **T1**: Where Escape is captured to cancel generation.
+    *   Read: `ai trace escape`, `cancel all`, `cancel level1`.
+    *   Closed: "Lo leído no era el disparo." (The read wasn't the trigger).
+    *   This implies the specific mechanism for *capturing* Escape to trigger the cancellation wasn't found or wasn't the right one in the context of "cleanly canceling without half-written files". Or perhaps the "trigger" part is missing.
+2.  **T2**: Where the partially written file is cleaned up upon cancellation.
+    *   Read: `clear pending insert`, `cancel level1`, `cancel current`, `cancel all`, `begin insert at`.
+    *   Closed: "Lo leído no era el disparo." (The read wasn't the trigger).
+    *   This implies the cleanup mechanism (`clear pending insert` etc.) might not be the one responsible for the "clean" cancellation the user wants, or it's not connected to the trigger properly.
+
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une el disparo (Escape/clic) con la limpieza del archivo; los mapeos leídos no son el mecanismo buscado"}

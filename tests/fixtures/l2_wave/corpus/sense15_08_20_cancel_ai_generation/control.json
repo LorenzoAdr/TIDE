@@ -1,0 +1,134 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ui/clickable_interaction.cpp:clear_hover"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_console_panel_mouse",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: el disparo (Escape/clic) y el efecto (limpieza del archivo). Son dos polos distintos que pueden estar en barrios diferentes."
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "console panel"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "la caza anterior falló en ai trace; el pack apunta a console panel como barrio de captura de eventos (handle ai console keys) que llama a ai controller clear"
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "console panel mouse"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "la caza anterior cerró el mapeo de Escape y clic en M1/M2; el pack abre handle console panel mouse como extra, que huele al clic fuera"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle user input"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 fallaron en la captura; el Abierto sugiere handle user input como barrio para el trigger de Escape"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "no hay captura de Escape ni clic fuera que cancele la generación; lo leído son utilidades de escape de strings y manejo de hover/selección en el panel de consola, sin invocación a cancel level1 ni lógica de clic fuera. el mecanismo de cancelación no existe en el flujo de entrada del usuario."
+    }
+  ],
+  "why": "no hay captura de Escape ni clic fuera que cancele la generación; lo leído son utilidades de escape de strings y manejo de hover/selección en el panel de consola, sin invocación a cancel level1 ni lógica de clic fuera. el mecanismo de cancelación no existe en el flujo de entrada del usuario.",
+  "zooms": []
+}

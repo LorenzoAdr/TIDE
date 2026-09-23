@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo actual captura los errores del stderr del proceso (parse gfortran stderr) y no lee el texto de la consola UI; por tanto, no hay un flujo que tome los errores de la consola inferior para marcar el margen."
+}

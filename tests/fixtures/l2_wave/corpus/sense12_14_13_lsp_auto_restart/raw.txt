@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se conecta el evento de fin de transporte al reinicio del servidor LSP","hacia":["async worker"],"why":"T4 leyó 'on transport reader eof' y abrió 'start async worker'. Hay que ver si ese listener dispara el reinicio o si falta el puente."}

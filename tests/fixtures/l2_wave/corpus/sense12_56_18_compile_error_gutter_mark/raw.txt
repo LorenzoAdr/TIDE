@@ -1,0 +1,24 @@
+The user wants to mark compilation errors from the console with a red line in the left margin of the editor at the exact line of the error.
+
+I have three completed tasks:
+1.  **T1**: Asked where compilation errors are parsed from the console output. Result: Not found (read text utilities, not compiler diagnostics).
+2.  **T2**: Asked where visual marks are drawn in the left margin. Result: Read `line gutter marker`, `gutter buffer line at row`, `fold gutter marker`.
+3.  **T3**: Asked where compilation errors are read and processed from terminal output. Result: Read `compiler location cpp`, `diagnostics panel cpp`.
+
+The user's request involves connecting the parsing of errors (T1/T3) to the drawing of marks (T2).
+T1 failed to find the parsing mechanism.
+T3 found `compiler location cpp` and `diagnostics panel cpp`. This looks like the mechanism for reading/processing errors.
+T2 found the drawing mechanism (`line gutter marker`).
+
+The "between open" section says:
+T1 => T2 sin camino
+T1 => T3 sin camino
+T2 => T3 sin camino
+
+However, T3
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "T3 leyó compiler location cpp y diagnostics panel cpp, que procesan los errores; T2 leyó line gutter marker, que dibuja en el margen. El pack no une ambos polos (sin camino entre T2 y T3), por lo que no hay mecanismo que conecte el procesamiento de errores con el dibujo de marcas en el margen."
+}

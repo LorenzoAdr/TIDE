@@ -1,0 +1,13 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have two completed tasks:
+T1: Found where Escape is captured (`handle ai console keys` -> `cancel current` / `clear pending insert`).
+T2: Looked for file cleanup on cancel. Result: No file cleanup found (only memory flags like `agent cancel`, `pending insert`, `tasks cancel`). No `unlink`, `remove`, `truncate`.
+
+The anchor claim is: "cancel cleanly without leaving the file half-written".
+T1 confirms the trigger (Escape) and
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide cancelar sin dejar el archivo a medias; T1 confirma la captura de Escape y T2 refuta la limpieza de archivos (no hay unlink, remove, truncate en la rama de cancelación). El mecanismo de limpieza no existe."
+}

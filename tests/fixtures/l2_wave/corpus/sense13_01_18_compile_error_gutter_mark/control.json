@@ -1,0 +1,150 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen del editor",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:git_line_changed",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crea el diagnostic con severity k Error que pinta la línea roja",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:diagnostic_severity_color"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico error",
+        "escaneo consola"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con marcas visuales en el editor; busco barrios de decoración y diagnóstico"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M11",
+        "M3"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M11 huele a escaneo de errores de compilación; M3 huele a decoración de margen. Necesito ver si M11 ya tiene el mecanismo de dibujo o si M3 es el barrio de la línea roja."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla une dos polos distintos (consola y margen); necesito localizar cada uno y luego verificar si ya están conectados o si falta el puente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el hijo no encontró objeto para esta fase; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se crea el diagnostic con severity k Error que pinta la línea roja",
+      "consultas": [
+        "dónde se crea el diagnostic con severity k Error que pinta la línea roja"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnostic"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 cerró el pintado; el pack une a Make Editor Panel. T1 falló en consola; busco el origen del diagnostic en el barrio del editor para ver si hay un disparo de compilación."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el pack no une la consola con el margen: T1 no halló el parser de errores de consola y T2/T3 anclan la línea roja a diagnostics existentes; sin puente entre consola y diagnostic, el claim se refuta"
+    }
+  ],
+  "why": "el pack no une la consola con el margen: T1 no halló el parser de errores de consola y T2/T3 anclan la línea roja a diagnostics existentes; sin puente entre consola y diagnostic, el claim se refuta",
+  "zooms": []
+}

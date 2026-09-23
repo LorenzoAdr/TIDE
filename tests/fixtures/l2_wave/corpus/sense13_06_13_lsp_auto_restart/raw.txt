@@ -1,0 +1,17 @@
+The user wants to know if the application automatically detects when the LSP server process crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Asked where the crash/non-response is detected and the restart is triggered.
+    *   Read: `status text`, `start completion server`, `ensure completion server`, `health ok`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+    *   Result: Found mechanisms related to restarting (`restart lsp for workspace`, `schedule debounced lsp restart`) and health checks (`health ok`).
+2.  **T2**: Asked where the process state is read to know if it's alive or dead.
+    *   Read: `process alive`.
+    *   Result: Found the mechanism: `process alive` reads state via `waitpid child pid`, `status`, `WNOHANG` and updates `child pid` if the process has terminated.
+3.  **T3**: Asked where the process state is used to decide whether to restart the server.
+    *   Read: `ensure completion server`, `restart lsp for workspace`, `ensure ready`, `start server`, `stop owned
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "la aplicación detecta la caída del servidor LSP mediante process alive (waitpid) y decide reiniciar en ensure ready y start server si el pid es 0 o health ok falla, disparando restart lsp for workspace"
+}

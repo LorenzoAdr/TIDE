@@ -1,0 +1,161 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se insertan los diagnósticos de error en el mapa que consulta el marcador del margen",
+      "keep": [
+        "M9"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se aplican los diagnósticos de LSP al panel del editor para que aparezcan en el margen",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "errores compilación",
+        "margen editor",
+        "decoración línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir dos fenómenos: errores en consola y línea roja en margen. necesito ver si el pack tiene barrios para el parseo de errores y para las decoraciones del editor."
+    },
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores con una línea roja en el margen; busco el mecanismo de dibujo de decoraciones en el editor"
+    },
+    {
+      "consulta": "dónde se insertan los diagnósticos de error en el mapa que consulta el marcador del margen",
+      "consultas": [
+        "dónde se insertan los diagnósticos de error en el mapa que consulta el marcador del margen"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "aplicar lsp"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el dibujo; el pack apunta a cómo se llena el mapa de diagnósticos. Necesito ver si la consola alimenta este mapa o si hay un hueco"
+    },
+    {
+      "consulta": "dónde se aplican los diagnósticos de LSP al panel del editor para que aparezcan en el margen",
+      "consultas": [
+        "dónde se aplican los diagnósticos de LSP al panel del editor para que aparezcan en el margen"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "aplicar lsp"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack sugiere apply lsp diagnostics to panel como el origen de los datos que alimentan el mapa de diagnósticos; necesito ver si ahí es donde se filtran o procesan los errores antes de llegar al margen"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la consola para generar diagnósticos",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la consola para generar diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "consola"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el pack muestra el mecanismo de dibujo (LSP -> margen), pero falta el origen: cómo la consola alimenta ese mapa de diagnósticos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de la línea roja en el margen depende exclusivamente de los diagnósticos de LSP aplicados al panel; no hay camino desde los errores de la consola inferior hacia este mapa de diagnósticos"
+    }
+  ],
+  "why": "el mecanismo de la línea roja en el margen depende exclusivamente de los diagnósticos de LSP aplicados al panel; no hay camino desde los errores de la consola inferior hacia este mapa de diagnósticos",
+  "zooms": []
+}

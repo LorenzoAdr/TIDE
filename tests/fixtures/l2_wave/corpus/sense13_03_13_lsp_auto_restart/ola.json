@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack y los cerrados confirman que no existe un mecanismo automático de detección de no-respuesta (heartbeat/timeout) ni de reinicio tras caída; solo hay detección de EOF que limpia estado y reinicios manuales/debounced por configuración. el ancla pide algo que no está implementado."
+}

@@ -1,0 +1,57 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/ui/editor_panel.cpp:close",
+        "src/editor/editor_state.cpp:set_pos",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ],
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run"
+      ],
+      "consulta": "dónde se restauran los archivos abiertos al iniciar el proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se controla la visibilidad de los paneles laterales al cargar la sesión",
+      "evita": [],
+      "hacia": [],
+      "id": "C",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay un único mecanismo que orquesta la restauración de cursor, archivos y paneles al reabrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B",
+        "C"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

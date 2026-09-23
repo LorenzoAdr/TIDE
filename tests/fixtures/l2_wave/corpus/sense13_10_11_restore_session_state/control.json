@@ -1,0 +1,114 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al cerrar y abrir el proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:save_workspace_session"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+      "keep": [
+        "M5",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:save",
+        "src/app/recent_projects.cpp:remember"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+      "keep": [
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/panel.hpp"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide tres elementos distintos (cursor, archivos, paneles). Los localizaré por separado para ver si comparten un sistema de persistencia o si son independientes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 fallaron en cursor y archivos; pruebo el tercer polo del ancla (paneles) para ver si hay persistencia de layout"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar cursor, archivos y paneles. T2 niega archivos (solo rutas). T1 y T3 no hallaron el disparo (save session y panel hpp no son el mecanismo). sin camino entre ellos. el pack no une qué está junto. el claim se refuta: no hay mecanismo que recuerde esos tres estados al reabrir"
+    }
+  ],
+  "why": "el ancla pide recordar cursor, archivos y paneles. T2 niega archivos (solo rutas). T1 y T3 no hallaron el disparo (save session y panel hpp no son el mecanismo). sin camino entre ellos. el pack no une qué está junto. el claim se refuta: no hay mecanismo que recuerde esos tres estados al reabrir",
+  "zooms": []
+}

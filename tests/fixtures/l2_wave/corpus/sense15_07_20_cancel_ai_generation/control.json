@@ -1,0 +1,113 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo cuando se cancela la generación de la IA",
+      "keep": [
+        "M2",
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura el clic fuera o la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "dos polos distintos: el disparo (Escape) y el efecto (limpieza del archivo). El pack huele M2 para el disparo y M8/M6 para la cancelación, pero no une explícitamente la limpieza del archivo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el hijo no halló la captura de Escape; salto a la siguiente caza del plan (limpieza del archivo)"
+    },
+    {
+      "consulta": "dónde se captura el clic fuera o la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera o la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "input loop"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el polo del disparo (Escape/clic) no se halló en la caza anterior; el pack abre input loop y ui event handler para reintentar el trigger"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el sistema de cancelación existe (cancel level1, clear pending insert), pero no se encontró el mecanismo que captura Escape o clic fuera para dispararlo; el ancla pide ese disparador y no está en el pack"
+    }
+  ],
+  "why": "el sistema de cancelación existe (cancel level1, clear pending insert), pero no se encontró el mecanismo que captura Escape o clic fuera para dispararlo; el ancla pide ese disparador y no está en el pack",
+  "zooms": []
+}

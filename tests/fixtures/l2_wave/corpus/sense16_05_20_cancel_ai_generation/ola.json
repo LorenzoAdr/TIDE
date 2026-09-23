@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "control: un leído no cierra el ancla; no refuta el existe",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el sistema cancela la generación al pulsar Escape (handle completion keys -> completion close), pero no se encontró el mecanismo que limpia o revierte el archivo para evitar dejarlo a medias; el mapeo de limpieza no existe en el pack"
+}

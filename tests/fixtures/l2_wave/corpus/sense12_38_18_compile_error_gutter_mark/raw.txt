@@ -1,0 +1,13 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 asked: "dónde se pinta la línea roja en el margen izquierdo del editor para marcar errores"
+T1 Closed: "no hay objeto" (Empty). This means there is no existing mechanism to paint a red line in the margin for errors.
+
+T2 asked: "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor"
+T2 Closed: "no encontré el mecanismo que lee errores
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "T1 cerró que no hay objeto que pinte la línea roja en el margen; T2 cerró que no hay mecanismo que lea los errores de la consola para marcarlos. El pack no nombra el mecanismo del ancla y las cazas confirmaron la ausencia. Cierro el claim: no hay objeto."
+}

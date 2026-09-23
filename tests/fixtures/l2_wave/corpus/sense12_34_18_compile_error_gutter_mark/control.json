@@ -1,0 +1,195 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pintan las marcas rojas en el margen izquierdo del editor",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:apply_myers_git_marks_to_panel",
+        "src/ui/editor_panel.cpp:apply_visual_highlight_git_marks",
+        "src/ui/editor_panel.cpp:apply_line_diff_result_to_panel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se construye el snapshot de marcas para el margen del editor",
+      "keep": [
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/editor/visual_highlight.cpp:build_git_marks_snapshot"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para añadirlos al snapshot de marcas",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/editor/visual_highlight.cpp:build_git_marks_snapshot"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para añadirlos al snapshot de marcas",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 4,
+      "proposes": 6,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se leen los errores de compilación de la consola para añadirlos al snapshot de marcas",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se construye el snapshot de marcas para el margen del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino leer los errores de compilación y construir el snapshot de marcas",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M10"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el pack menciona visual highlight y git marks, pero no el mecanismo de errores de compilación ni la línea roja en el margen; necesito ver cómo se aplican los highlights y si hay un sistema de diagnostics o markers"
+    },
+    {
+      "consulta": "dónde se pintan las marcas rojas en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se pintan las marcas rojas en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores con una línea roja en el margen; M3 y M10 manejan visual highlight y snapshots, pero no se ha leído el mecanismo de dibujo del margen ni cómo se aplican las marcas de error"
+    },
+    {
+      "consulta": "dónde se construye el snapshot de marcas para el margen del editor",
+      "consultas": [
+        "dónde se construye el snapshot de marcas para el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "snapshot"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el pintado; ahora busco la fuente de datos (snapshot) para inyectar los errores"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para añadirlos al snapshot de marcas",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para añadirlos al snapshot de marcas"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "snapshot"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 cerró el snapshot; el pack une a worker main y Visual Highlight Service. Necesito ver si se leen los errores de compilación para añadirlos al snapshot."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "T3 no encontró el objeto; necesito localizar dónde se leen los errores de compilación y dónde se construye el snapshot de marcas para ver si hay un camino entre ellos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 6,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

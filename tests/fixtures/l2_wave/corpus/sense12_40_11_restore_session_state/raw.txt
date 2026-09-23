@@ -1,0 +1,12 @@
+The user wants to restore the editor state (cursor position, open files, side panel visibility) when reopening a project.
+I have completed 4 tasks:
+1.  **T1**: Where editor state is saved/restored. Found `editor state cpp/hpp`.
+2.  **T2**: Where cursor position is restored. Found `set primary`, `reset to single cursor` in `editor state`.
+3.  **T3**: Where open files are restored. Found `set primary`, `reset to single cursor` in `editor state`.
+4.  **T4**: Where side panel
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "El estado del editor (cursor, archivos) se restaura en editor state, pero no hay camino hacia la visibilidad de los paneles laterales. El claim se refuta parcialmente: el editor recuerda su estado, pero los paneles laterales no se restauran automáticamente."
+}

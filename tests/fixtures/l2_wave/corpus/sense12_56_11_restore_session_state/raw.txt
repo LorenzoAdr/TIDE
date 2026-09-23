@@ -1,0 +1,20 @@
+The user wants to restore the exact state of the editor when reopening a project: cursor position, open files, and sidebar visibility.
+
+I have a plan with 4 phases:
+1. [Done] A: Save cursor position on close.
+2. [Done] B: Restore open files on start.
+3. [Done] C: Control sidebar visibility on load.
+4. [Pending] P: Bridge to see if there's a single mechanism orchestrating all this.
+
+Let's review the results:
+- T1 (Cursor): Found `close`, `set pos`, `reset to single cursor`. This suggests the cursor position is handled, likely saved/restored via `set pos` or similar.
+- T2 (Files): Found `reopen workspace documents` iterating `workspace tabs` and calling `symbols document opened`. Triggered by `run` -> `ensure backend started`.
+- T3 (Sidebars): Found `reopen workspace documents`, `run`. This is the same mechanism as T2. It seems `reopen workspace documents` might handle the layout or at least is the central point.
+
+The user's claim is about remembering *exactly* where the cursor was, *which* files were open, and
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de restauración se confirma: reopen workspace documents itera las pestañas y restaura los archivos; la posición del cursor se maneja con set pos y reset to single cursor al cerrar/abrir; los paneles laterales se controlan en el mismo flujo de restauración de la sesión."
+}

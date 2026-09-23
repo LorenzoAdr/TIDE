@@ -1,0 +1,144 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje falta o se ha caído para mostrar el aviso",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/util/lsp_missing_prompt.cpp:lsp_missing_prompt_for_status_key",
+        "src/app/application.cpp:maybe_show_lsp_missing_toast",
+        "src/app/application.cpp:Application"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje falta para disparar el reinicio",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 7,
+      "visto": [
+        "src/util/lsp_missing_prompt.cpp:lsp_missing_prompt_for_status_key",
+        "src/app/application.cpp:maybe_show_lsp_missing_toast",
+        "src/util/lsp_missing_prompt.cpp:is_lsp_missing_status_key",
+        "src/util/lsp_missing_prompt.cpp:catalog",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:on_lsp_missing_install"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace), pero falta el disparador de detección de fallo."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje falta o se ha caído para mostrar el aviso",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje falta o se ha caído para mostrar el aviso"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el reinicio; ahora busco la detección del fallo que dispara el aviso o el reinicio"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje falta o se ha caído para mostrar el aviso",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje falta o se ha caído para mostrar el aviso"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "missing status key"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T2 cerró con el aviso; el pack apunta a is lsp missing status key como el detector del estado. necesito ver si ese detector también dispara el reinicio o solo el aviso."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje falta para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje falta para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 encontró el reinicio y T2 la detección para UI. El pack sugiere un camino T1->T2 y extra 'on lsp missing install'. Necesito confirmar si la detección de 'falta' (T2) o un evento similar activa el reinicio (T1) automáticamente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de reinicio automático se activa tras una instalación exitosa (lsp missing install), no al detectar caída o falta de respuesta del servidor en ejecución; la detección actual (maybe show lsp missing toast) muestra un aviso al usuario en lugar de reiniciar automáticamente"
+    }
+  ],
+  "why": "el mecanismo de reinicio automático se activa tras una instalación exitosa (lsp missing install), no al detectar caída o falta de respuesta del servidor en ejecución; la detección actual (maybe show lsp missing toast) muestra un aviso al usuario en lugar de reiniciar automáticamente",
+  "zooms": []
+}

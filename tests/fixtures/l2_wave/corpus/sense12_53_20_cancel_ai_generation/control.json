@@ -1,0 +1,129 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:handle_editor_escape",
+        "src/ui/editor_panel.cpp:handle_editor_keys",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo al cancelar la generación de la IA",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación cuando el usuario hace clic fuera del editor",
+      "keep": [
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ui/editor_panel.cpp:handle_editor_mouse",
+        "src/ui/editor_panel.cpp:end_mouse_selection",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ui/editor_panel.cpp:Event"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escape"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el trigger de escape; necesito ver cómo se inicia la cancelación"
+    },
+    {
+      "consulta": "dónde se limpia el archivo al cancelar la generación de la IA",
+      "consultas": [
+        "dónde se limpia el archivo al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide cancelar limpiamente sin dejar el archivo a medias; Trabajo 1 cerró la captura de Escape y el llamado a cancel level1; ahora busco el efecto de limpieza del archivo tras esa cancelación"
+    },
+    {
+      "consulta": "dónde se cancela la generación cuando el usuario hace clic fuera del editor",
+      "consultas": [
+        "dónde se cancela la generación cuando el usuario hace clic fuera del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clic fuera"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide cancelar con Escape o clic fuera; T1 cerró Escape, falta el otro disparador"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo está completo: los disparadores (Escape y clic fuera) invocan cancel all, que a su vez limpia el archivo mediante clear pending insert"
+    }
+  ],
+  "why": "el mecanismo está completo: los disparadores (Escape y clic fuera) invocan cancel all, que a su vez limpia el archivo mediante clear pending insert",
+  "zooms": []
+}

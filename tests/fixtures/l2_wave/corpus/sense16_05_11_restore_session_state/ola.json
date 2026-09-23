@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de sesión guarda y restaura los archivos abiertos y la pestaña activa, pero no la posición del cursor ni la visibilidad de los paneles laterales"
+}

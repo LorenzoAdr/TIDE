@@ -1,0 +1,127 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 7,
+      "visto": [
+        "src/ui/diagnostics_panel.cpp",
+        "src/backend/dap_backend.cpp",
+        "src/lsp/diagnostics.cpp",
+        "src/symbols/symbol_provider.hpp",
+        "src/lsp/diagnostics.cpp:diagnostics_for_translation_unit",
+        "src/symbols/symbol_provider.hpp:workspace_diagnostics"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se parsea la salida del compilador en la consola inferior",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se extraen las líneas de error de la salida del compilador en la consola inferior",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "parseo error consola",
+        "diagnóstico editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "necesito ver si el barrio une el parseo de errores con la pintura del margen o si son dos islas"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos fenómenos distintos (consola y margen); busco dónde vive cada uno y si ya están unidos"
+    },
+    {
+      "consulta": "dónde se parsea la salida del compilador en la consola inferior",
+      "consultas": [
+        "dónde se parsea la salida del compilador en la consola inferior"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "build output parser"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el lector anterior falló (LSP no es build output); el pack huele 'build output parser' en abierto; busco el mecanismo que lee la consola"
+    },
+    {
+      "consulta": "dónde se extraen las líneas de error de la salida del compilador en la consola inferior",
+      "consultas": [
+        "dónde se extraen las líneas de error de la salida del compilador en la consola inferior"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 cerraron que no hay parser nativo de build output. El pack huele M11 (binary symbols panel scan shell output for linker errors) y M7 (console panel). Cazo el extractor de errores de shell para luego enlazarlo al margen del editor."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "no hay mecanismo que lea ni parsee la salida del compilador de la consola inferior; lo leído es el panel de diagnósticos LSP que consume workspace diagnostics del servidor de lenguaje, no la salida del compilador build output"
+    }
+  ],
+  "why": "no hay mecanismo que lea ni parsee la salida del compilador de la consola inferior; lo leído es el panel de diagnósticos LSP que consume workspace diagnostics del servidor de lenguaje, no la salida del compilador build output",
+  "zooms": []
+}

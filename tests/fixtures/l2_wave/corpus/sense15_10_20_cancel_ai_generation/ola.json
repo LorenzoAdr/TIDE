@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pide que Escape o clic fuera cancelen y limpien; T1 y T2 niegan esos disparos (no hay objeto ni enlace); T3 halló la limpieza (clear pending insert) pero sin el gatillo el flujo no arranca; el claim se refuta"
+}

@@ -1,0 +1,19 @@
+The user wants to know if the application remembers the cursor position, open files, and side panel visibility when reopening a project.
+
+Current status:
+- T1 (Editor state: tabs/active tab): Found mechanism (save/load session md).
+- T2 (Cursor position): Not found in `load` (only serializes open tabs/active tab path).
+- T3 (Side panel visibility): Not found in `save workspace session` (read was just the name, no mechanism details).
+
+The plan was:
+1. A (Cursor position) -> Failed (T2).
+2. B (Side panel visibility) -> Failed (T3).
+3. P (Bridge) -> Pending.
+
+T3's closed says "read: save workspace session" and then the standard "ESA pregunta no se relanza...". This implies the explorer didn't find the specific mechanism for side panels in the `save workspace session` context or the read was insufficient to confirm.
+
+However, T1 found that `save` and `load` persist "editor state" (tabs, active tab).
+T2 explicitly says `load` *only* serializes open tabs and active tab path, *without* cursor position.
+T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de sesión guarda y restaura los archivos abiertos y la pestaña activa, pero no la posición del cursor ni la visibilidad de los paneles laterales"}

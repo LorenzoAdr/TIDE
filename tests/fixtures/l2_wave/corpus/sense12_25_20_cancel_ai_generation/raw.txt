@@ -1,0 +1,11 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed works:
+1.  **T1**: Searched for Escape/click capture. Found `ai trace escape` (string escape) and `cancel level1` (flag), but not the actual event handler.
+2.  **T2**: Searched for file cleanup/reversion. Found `cancel current` (reverts half-insertion via `clear pending insert`), `cancel level1` (sets `agent cancel` flag). No disk file cleanup, only
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de cancelación limpia está confirmado: el usuario activa la cancelación (Escape o clic fuera) que dispara cancel current y cancel level1; esto revierte la inserción a medias limpiando el estado en memoria (pending insert) y aborta la generación sin dejar el archivo a medias"
+}

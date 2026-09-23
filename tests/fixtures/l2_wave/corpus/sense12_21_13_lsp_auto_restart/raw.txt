@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"la caza en M5 (el barrio de reinicio LSP) no encontró objeto: no hay mecanismo de detección automática de caída ni reinicio disparado. El claim se refuta: la aplicación no detecta ni reinicia el LSP automáticamente."}

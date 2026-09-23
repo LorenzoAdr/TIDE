@@ -1,0 +1,131 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código para evitar dejar el archivo a medias",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de código",
+      "keep": [
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:tasks_",
+        "src/ai/ai_controller.cpp:tasks_.cancel()"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla une un gesto (Escape/clic fuera) con un efecto (cancelar generación limpia); busco ambos polos y su conexión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de código",
+      "consultas": [
+        "dónde se limpia el archivo a medias al cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 leyó cancel level1 pero no el efecto de limpieza; el ancla exige no dejar el archivo a medias. El hijo busca el efecto de limpieza en el barrio de cancelación."
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 falló en el trigger; busco el evento de teclado/ratón que dispara la cancelación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack no une el disparo (Escape/clic) con la cancelación; T1 refuta el mecanismo de captura. T2 y T3 leen cancel level1 y clear pending insert, pero sin el disparo el claim no se confirma"
+    }
+  ],
+  "why": "el pack no une el disparo (Escape/clic) con la cancelación; T1 refuta el mecanismo de captura. T2 y T3 leen cancel level1 y clear pending insert, pero sin el disparo el claim no se confirma",
+  "zooms": []
+}

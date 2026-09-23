@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no une el disparo (Escape/clic) con el efecto (cancelación limpia); T1 refuta el handler de Escape y T2/T3 leen cancelación sin el disparo"
+}

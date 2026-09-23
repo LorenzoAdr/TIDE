@@ -1,0 +1,8 @@
+The user wants to implement a feature where the application automatically detects if the LSP (Language Server Protocol) process crashes or becomes unresponsive and restarts it without user intervention.
+
+I have reviewed the previous work:
+- T1 found `restart lsp for workspace`, `schedule debounced lsp restart`, `run`, `on lsp missing install`.
+- T2 clarified that `ensure backend started` is for DAP, not LSP. It confirmed `restart lsp for workspace` is the restart mechanism and `on lsp missing install` handles missing packs.
+- T3 looked for the detection of a crash/unresponsive state
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio existe (restart lsp for workspace) pero la detección automática de caída o no respuesta no se encuentra en el código actual; solo se maneja la falta de instalación (on lsp missing install). el ancla pide detección automática de caída, lo cual no está implementado."}

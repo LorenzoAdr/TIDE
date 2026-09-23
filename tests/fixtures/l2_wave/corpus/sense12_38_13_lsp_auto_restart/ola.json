@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pide detección automática de caída o falta de respuesta. T2 confirmó que no existe mecanismo de detección (no hay objeto). T1 mostró reinicio por entorno, no por fallo. el claim se refuta: no hay detección automática de caídas."
+}

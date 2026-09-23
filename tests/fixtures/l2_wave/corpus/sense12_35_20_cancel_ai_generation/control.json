@@ -1,0 +1,173 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de código",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai trace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 tiene 'ai trace escape' en el peek; es el disparo de la cancelación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla tiene dos disparadores (Escape, clic fuera) y un efecto (cancelar limpiamente). T1 falló en M2 para Escape. Hay que buscar en otros barrios (M3, M4, M5, M6, M7, M8) y separar la captura del evento de la limpieza del archivo."
+    },
+    {
+      "consulta": "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor",
+      "consultas": [
+        "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla tiene dos disparadores; Escape falló, ahora busco el clic fuera para cancelar"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor",
+      "consultas": [
+        "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla tiene dos disparadores; el de Escape falló, busco el de clic fuera para ver si existe el mecanismo de cancelación"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor",
+      "consultas": [
+        "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla tiene dos disparadores; T1 falló en Escape, busco el otro polo: clic fuera"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor",
+      "consultas": [
+        "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 6,
+      "why": "el ancla tiene dos disparadores; T1 falló en Escape, ahora busco el otro polo: clic fuera"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor",
+      "consultas": [
+        "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla tiene dos disparadores; T1 falló en Escape, ahora busco el clic fuera para ver si existe el mecanismo de cancelación"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor",
+      "consultas": [
+        "dónde se cancela la generación de código cuando el usuario hace clic fuera del editor"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 8,
+      "why": "el ancla tiene dos disparadores; el de Escape falló, busco el de clic fuera para ver si existe el mecanismo de cancelación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 9,
+      "why": "el ancla tiene dos disparadores (Escape y clic fuera); M2 falló para Escape, pero el pack tiene otros barrios (M7 editor panel, M6 level1 agent, M8 ai controller) que pueden tener la lógica de cancelación o captura de eventos"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código al hacer clic fuera del área de edición",
+      "consultas": [
+        "dónde se cancela la generación de código al hacer clic fuera del área de edición"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 10,
+      "why": "el ancla tiene dos disparadores; T1 falló en Escape. Busco el otro polo: clic fuera. El hijo busca el gesto de desactivar la IA al perder foco o clic externo."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

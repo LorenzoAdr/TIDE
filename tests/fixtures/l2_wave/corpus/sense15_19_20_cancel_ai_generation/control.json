@@ -1,0 +1,204 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de código de la IA",
+      "keep": [
+        "M2",
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código de la IA",
+      "keep": [
+        "M8",
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:has_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ui/console_panel.cpp:Event"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "qué hace cancel current o clear pending insert al abortar la generación de la IA",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:busy",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de código de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de código de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai trace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape en el rastro de la ia; necesito ver el disparo y a quién llama"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "key handler"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 falló en ai trace escape (era string escape). Ahora busco el handler real de teclado o clic que dispare la cancelación. El pack sugiere editor panel (M7) o console panel (M5) como posibles barrios de UI/key handling."
+    },
+    {
+      "consulta": "qué hace cancel current o clear pending insert al abortar la generación de la IA",
+      "consultas": [
+        "qué hace cancel current o clear pending insert al abortar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "limpieza archivo"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró la captura; ahora tiro del efecto para ver si limpia el archivo a medias o solo corta el flujo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla se confirma: la captura de Escape y clic fuera está en handle ai console keys y handle console panel mouse, que invocan cancel current; este mecanismo bifurca hacia clear pending insert o cancel level1 para abortar la generación y limpiar el estado sin dejar el archivo a medias"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla se confirma: la captura de Escape y clic fuera se gestiona en handle ai console keys y handle console panel mouse, que invocan cancel current. Este mecanismo bifurca según el estado: si hay inserción pendiente, limpia el estado de inserción; si está ocupado, cancela las tareas activas y el agente, evitando dejar el archivo a medias."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el ancla se confirma: la tecla Escape se captura en handle ai console keys y el clic fuera en handle console panel mouse; ambos invocan cancel current o clear pending insert, que bifurcan según el estado para resetear la inserción pendiente o cancelar las tareas activas del agente, limpiando la generación sin dejar el archivo a medias"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla se confirma: la captura de Escape y clic fuera invoca cancel current, que al estar ocupado llama a cancel level1 para abortar la generación y cancelar las tareas activas, evitando dejar el archivo a medias"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "el mecanismo se confirma: la tecla Escape se captura en handle ai console keys y el clic fuera en handle console panel mouse; ambos invocan cancel current o clear pending insert, que a su vez cancelan la generación y limpian el estado sin dejar el archivo a medias"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "el ancla se confirma: la tecla Escape se captura en handle ai console keys y el clic fuera en handle console panel mouse; ambos invocan cancel current que, si la IA está ocupado, llama a cancel all y cancel level1 para abortar la generación y limpiar el estado sin dejar el archivo a medias"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 10,
+      "why": "el ancla se confirma: la captura de Escape y clic fuera está en handle ai console keys y handle console panel mouse, que invocan cancel current; este bifurca a clear pending insert (si hay inserción pendiente) o cancel all -> cancel level1 (si está ocupado), limpiando el estado y cancelando tareas sin dejar el archivo a medias"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

@@ -1,0 +1,179 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al abrir un proyecto",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M8",
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/terminal/app_session.cpp:rebuild_display",
+        "src/app/workspace_model.cpp:open_file"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al volver a abrir un proyecto",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 3,
+      "visto": [
+        "src/app/recent_projects.cpp:load"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los archivos abiertos al volver a abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 nombra editor state y CursorPos; es el barrio más cercano para rastrear la persistencia de posición y archivos abiertos"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "la caza anterior cerró el estado general del editor; ahora busco el polo específico del cursor (M1) para ver si existe un mecanismo de restauración independiente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 encontró 'restore workspace session' pero no cerró el disparo. El ancla tiene tres partes: cursor, archivos, paneles. T1 falló en estado genérico. T2 falló en cursor. Ataco las otras dos partes (archivos y paneles) para ver si el mecanismo de 'workspace session' las cubre. Si cubre archivos y paneles, el cursor podría estar ahí o no. Si no cubre nada, el mecanismo es otro."
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "el plan tiene un locator pendiente para paneles; T1 y T3 cerraron sin disparo, T2 leyó sesión pero no cerró el polo; cazo el polo de paneles para ver si el mecanismo de sesión lo cubre"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo de restauración de sesión (restore workspace session) no restaura la posición del cursor ni los archivos abiertos; solo se restaura la lista de proyectos recientes (load)."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "control: do no legal ahora (no_pasar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el Cerrado niega el mapeo de archivos abiertos; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el pack no nombra el mecanismo de restauración de archivos ni paneles; T1 niega el objeto, T3 refuta el mapeo de archivos abiertos, y T2 solo lee la sesión de trabajo sin confirmar la posición del cursor"
+    }
+  ],
+  "why": "el pack no nombra el mecanismo de restauración de archivos ni paneles; T1 niega el objeto, T3 refuta el mapeo de archivos abiertos, y T2 solo lee la sesión de trabajo sin confirmar la posición del cursor",
+  "zooms": []
+}

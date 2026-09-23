@@ -1,0 +1,121 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_text.hpp",
+        "src/app/workspace_model.cpp:load_working_lines_from_disk",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la lista de archivos abiertos al volver a abrir un proyecto",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/recent_projects.cpp:load"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.cpp:load_working_lines_from_disk",
+        "src/app/recent_projects.cpp:load",
+        "src/app/application.cpp:reopen_workspace_documents"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 tiene 'editor state CursorPos'; es el punto de partida para la persistencia del cursor"
+    },
+    {
+      "consulta": "dónde se restaura la lista de archivos abiertos al volver a abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la lista de archivos abiertos al volver a abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el cursor; el ancla pide también los archivos abiertos. M5 (editor panel) y M1 (editor state) son candidatos para el estado de archivos, pero necesito confirmar el mecanismo de restauración de la lista de pestañas/archivos."
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar paneles visibles/cerrados; M5/M6 son el barrio de paneles; un hijo cierra el estado de visibilidad"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "la posición del cursor se restaura en load working lines from disk y reset to single cursor; los archivos abiertos se restauran en reopen workspace documents iterando workspace tabs; la visibilidad de paneles se restaura en load working lines from disk y reopen workspace documents"
+    }
+  ],
+  "why": "la posición del cursor se restaura en load working lines from disk y reset to single cursor; los archivos abiertos se restauran en reopen workspace documents iterando workspace tabs; la visibilidad de paneles se restaura en load working lines from disk y reopen workspace documents",
+  "zooms": []
+}

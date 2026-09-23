@@ -1,0 +1,14 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with 3 phases:
+1. [Done] A locator: where Escape/click outside is captured to cancel AI generation.
+2. [Done] B locator: where the half-written file is cleaned up when canceling AI generation.
+3. [Current] P bridge: is there a path between canceling generation and cleaning up the half-written file?
+
+Work 3 (T3) was the bridge phase.
+T3 asked: "hay camino cancelar la generación y
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de cancelación limpia el archivo a medias: clear pending insert resetea el flag y el ancla, evitando la inserción del texto pendiente en el buffer del editor"
+}

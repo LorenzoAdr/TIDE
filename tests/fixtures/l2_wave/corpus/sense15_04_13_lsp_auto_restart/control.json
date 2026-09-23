@@ -1,0 +1,130 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder para disparar un reinicio",
+      "keep": [
+        "M2",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:stop",
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_client.cpp:spawn_language_server",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "qué hace schedule debounced lsp restart cuando se llama tras detectar que el servidor se ha caído",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene lógica de reinicio (restart lsp for workspace), pero necesito encontrar el disparador (detection) que inicia este proceso cuando el servidor falla."
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección (eof). Falta el polo de reinicio automático para confirmar el claim del usuario."
+    },
+    {
+      "consulta": "qué hace schedule debounced lsp restart cuando se llama tras detectar que el servidor se ha caído",
+      "consultas": [
+        "qué hace schedule debounced lsp restart cuando se llama tras detectar que el servidor se ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 dice que on transport reader eof llama a schedule debounced lsp restart. T2 dice que no hay reinicio automático inmediato. Necesito ver si schedule debounced lsp restart es el mecanismo de reinicio automático con retraso o si solo marca estado. Esto conecta la detección (T1) con el reinicio (T2)."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "la detección de caída existe (eof en el pipe del servidor), pero no dispara reinicio automático; solo limpia estado. el reinicio es reactivo a acciones externas (instalación, cambios de config, run). no hay mecanismo de auto-reinicio tras caída en el código leído."
+    }
+  ],
+  "why": "la detección de caída existe (eof en el pipe del servidor), pero no dispara reinicio automático; solo limpia estado. el reinicio es reactivo a acciones externas (instalación, cambios de config, run). no hay mecanismo de auto-reinicio tras caída en el código leído.",
+  "zooms": []
+}

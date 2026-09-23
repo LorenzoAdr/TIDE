@@ -1,0 +1,50 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "plan",
+  "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación del texto de la consola para obtener la línea y el mensaje",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor a partir de un error",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parser de errores de la consola y el creador de marcadores del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "why": "el ancla pide unir dos polos: leer errores de compilación de la consola y marcarlos en el margen. T1 falló en encontrar el parser genérico (solo halló linker). T2 halló el dibujo del margen. Necesito localizar el parser de compilación (A) y el creador de marcadores (B) para luego unirlos (P)."
+}

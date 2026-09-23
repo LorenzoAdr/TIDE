@@ -1,0 +1,183 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "quién llama a restart lsp for workspace cuando el servidor se cae o no responde",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP no responde o se cae para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:process_build_environment_updates"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene la lógica de reinicio (restart lsp for workspace), pero falta el disparador de la detección de fallo."
+    },
+    {
+      "consulta": "quién llama a restart lsp for workspace cuando el servidor se cae o no responde",
+      "consultas": [
+        "quién llama a restart lsp for workspace cuando el servidor se cae o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "detection"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el reinicio; ahora busco el disparador automático de la caída"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "fingerprint"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T2 no encontró el llamador directo; busco el mecanismo de detección (fingerprint/estado) que dispara el reinicio en M5"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T2 no encontró el disparador de reinicio ante caída. El pack sugiere 'on lsp missing install' como extra de T1. Exploro ese barrio para ver si hay lógica de detección de fallo o reinicio automático."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "el pack une la detección con on lsp missing install; el hijo busca el disparador"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 falló buscando el llamador directo de restart lsp for workspace. El pack sugiere que la detección puede estar en on lsp missing install o on workspace opened. Exploro esos barrios para encontrar el mecanismo de detección de caída/no respuesta."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP no responde o se cae para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP no responde o se cae para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "debounced lsp restart"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 7,
+      "why": "el hijo anterior no encontró el llamador directo; el pack muestra schedule debounced lsp restart como extra en T1; busco el disparador de ese schedule"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el mecanismo de detección y reinicio automático ya existe: process build environment updates verifica el timeout (lsp restart deadline) y dispara restart lsp for workspace, cubriendo la caída o falta de respuesta del servidor LSP sin intervención del usuario"
+    }
+  ],
+  "why": "el mecanismo de detección y reinicio automático ya existe: process build environment updates verifica el timeout (lsp restart deadline) y dispara restart lsp for workspace, cubriendo la caída o falta de respuesta del servidor LSP sin intervención del usuario",
+  "zooms": []
+}

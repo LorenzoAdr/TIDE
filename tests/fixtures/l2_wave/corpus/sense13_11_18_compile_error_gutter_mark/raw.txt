@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found: `line gutter marker` in `editor panel` reads `panel diagnostics by line` populated by `push active file diagnostics from cache` from LSP.
+T2 found: `diagnostics panel` analyzes errors in the bottom console via `build rows` transforming LSP diagnostics into `Diagnostic Row`.
+T3 found: `panel diagnostics by line` is updated in `rebuild diagnostics by line` invoked by `rebuild diagnostics by line if changed` when console cache changes. Orchestration from console happens in `apply lsp diagnostics to panel`.
+
+The mechanism seems to be already in place:
+1. Console errors are analyzed in `diagnostics panel` (T2).
+2. These diagnostics are pushed to the cache and then to `panel diagnostics by line` via `apply lsp diagnostics to panel` (T3).
+3. The editor margin (`line gutter marker`) reads `panel diagnostics by line` to render the markers (T1).
+
+The user's request implies that currently, errors in the console *are not* marked in the editor margin, or
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo ya existe: los errores de la consola se analizan en diagnostics panel, se empujan al mapa panel diagnostics by line vía apply lsp diagnostics to panel, y el margen del editor los lee en line gutter marker para pintar la línea roja"
+}

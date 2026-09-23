@@ -1,0 +1,174 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen la línea y columna de los errores de compilación del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+        ],
+        "consulta": "dónde se extraen la línea y columna de los errores de compilación del texto de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parser de errores de la consola y el dibujo de la línea roja en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) tiene un ejemplo de escaneo de errores. Necesito ver si M3 expone la API para dibujar líneas rojas y si M11 revela cómo se parsean los errores de compilación."
+    },
+    {
+      "consulta": "dónde se extraen la línea y el archivo de los mensajes de error de compilación de la consola",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el pack no une la consola con el editor; hay que cazar los dos polos (extracción y pintura) y luego ver si se conectan"
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer línea y archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el pack muestra M11 (consola/errores) y M3 (visual highlight) pero sin conexión; necesito leer ambos polos y luego unirlos"
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación del output de la consola para extraer línea y archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el pack muestra M11 (consola/errores) y M3 (visual highlight) pero sin conexión; necesito leer ambos polos y luego unirlos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack muestra M11 (parser de errores) y M3 (visual highlight) como barrios separados sin conexión directa; necesito confirmar si existe el puente que une la detección del error con su visualización en el margen"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 6,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 7,
+      "why": "T1 y T2 convergen en 'diagnostics for editor line'. El pack muestra que la extracción de errores (T1) y el dibujo del marcador (T2) comparten el mismo objeto de estado. No hay camino entre la consola y el margen porque el flujo actual no une la salida de la consola con la creación de diagnostics para el editor; el mecanismo existe pero no está conectado al disparador de la consola. El ancla se refuta: no hay camino automático."
+    }
+  ],
+  "why": "T1 y T2 convergen en 'diagnostics for editor line'. El pack muestra que la extracción de errores (T1) y el dibujo del marcador (T2) comparten el mismo objeto de estado. No hay camino entre la consola y el margen porque el flujo actual no une la salida de la consola con la creación de diagnostics para el editor; el mecanismo existe pero no está conectado al disparador de la consola. El ancla se refuta: no hay camino automático.",
+  "zooms": []
+}

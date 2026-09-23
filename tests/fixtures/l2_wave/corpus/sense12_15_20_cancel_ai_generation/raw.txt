@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de cancelación limpia está confirmado: Escape invoca cancel current, que delega en cancel level1 para abortar el agente y cancelar tareas pendientes, evitando dejar el archivo a medias; el estado se resetea vía clear pending insert"}

@@ -1,0 +1,13 @@
+The user wants to mark compilation errors appearing in the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 (parse errors from console): Closed. Found that diagnostics come from LSP, not parsing console text. The assumption of parsing stdout/stderr is refuted.
+- T2 (draw red line in margin): Closed. Found `line gutter marker`, `gutter buffer line at row`, `line diagnostic marker from map`, `diagnostics for editor line`. This confirms the mechanism for drawing the red line exists and is tied to diagnostics.
+- Plan: A (parse), B (draw), P (bridge). A and B are done. P is pending.
+- Pack: T1 and T2 have no path between them (`sin camino`). T1 points to `Make Console Panel`, `Make Main Layout`. T2 points to `Make Editor Panel`, `Make Main Layout`.
+- The user's claim is about connecting console errors to editor margin markers.
+- T1 refuted the parsing assumption. Diagnostics come from LSP.
+- T2 confirmed the drawing mechanism exists for diagnostics.
+- The bridge P asks: "hay camino
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla se refuta: los errores de compilación no se parsean de la consola inferior (vienen de LSP), y el margen rojo ya se dibuja para diagnósticos LSP; no hay mecanismo que extraiga errores de texto plano de la terminal para marcar el editor"}

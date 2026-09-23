@@ -1,0 +1,8 @@
+The user wants to know if the application remembers the cursor position, open files, and visible/closed side panels when reopening a project.
+
+I have three completed jobs:
+1.  **T1**: "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto" -> Result: "no hay objeto".
+2.  **T2**: "dónde se guarda y restaura la posición del cursor al abrir un proyecto" -> Result: "reset to single cursor, reset helix editor state, open file at impl, load working lines from disk". The "Cerrado" says "Lo leído no era el disparo". This implies that while these functions exist, they might not be the mechanism for *restoring* the state from a previous session, or they reset the state rather than restoring it. Specifically, "reset to single cursor" and "reset helix editor state" sound like initialization, not restoration.
+3.  **T3**: "dónde se restaura la lista de archivos abiertos al volver a abrir un proyecto" -> Result: "reopen workspace documents, run, load, on workspace complete". Again, "Lo leído no era el disparo". "reopen workspace documents" sounds
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide recordar posición, archivos y paneles. T1 niega el objeto de estado. T2 y T3 leen funciones de reinicialización (reset) y apertura, pero el Cerrado indica que no son el disparo de restauración. No hay mecanismo de persistencia de sesión en el pack."}

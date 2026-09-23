@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el claim se refuta: el sistema cancela la generación (banderas y tareas) pero no existe mecanismo de limpieza del buffer de texto parcial; el archivo queda con lo insertado hasta la cancelación"}

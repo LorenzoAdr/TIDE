@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 confirmó el mecanismo de decoración (margen rojo) y su fuente (diagnósticos LSP). T2 refutó la existencia de un escáner de consola que genere esos diagnósticos. El pack no une consola con margen. El claim de que existe un camino o mecanismo para marcar errores de consola en el margen queda refutado: no hay objeto que lo haga."
+}

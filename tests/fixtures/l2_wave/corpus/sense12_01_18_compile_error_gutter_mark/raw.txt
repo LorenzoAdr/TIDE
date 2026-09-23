@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"T1 refuta la existencia del mecanismo de dibujo de línea roja en el margen para errores (no hay objeto). T2 confirma la extracción, pero sin camino hacia el editor y sin mecanismo de pintura, el claim de que 'se marquen' es falso en el estado actual. El pack no une T1 y T2."}

@@ -1,0 +1,16 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+I have three completed jobs (T1, T2, T3) corresponding to these three aspects.
+T1 (cursor position): Read "save workspace session". The closed message says "ESA pregunta no se relanza... leído: save workspace session". This implies the mechanism wasn't found or the read wasn't the trigger.
+T2 (open files): Read "load, save, remember". The closed message says "no encontré el mecanismo... lo leído recent projects solo persiste rutas...". This explicitly refutes the existence of the mechanism for open files.
+T3 (sidebar visibility): Read "panel hpp". The closed message says "ESA pregunta no se relanza... leído: panel hpp".
+
+The "control_opened_v1" section shows:
+T1 -> save workspace session
+T2 -> load, save, remember
+T3 -> panel hpp, layout state
+"entre abiertas": sin camino between T1, T2, T3.
+
+The "examen" section repeats the closed messages.
+T1: "ESA pregunta no se relanza... leído: save workspace
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide recordar cursor, archivos y paneles. T2 niega archivos (solo rutas). T1 y T3 no hallaron el disparo (save session y panel hpp no son el mecanismo). sin camino entre ellos. el pack no une qué está junto. el claim se refuta: no hay mecanismo que recuerde esos tres estados al reabrir"}

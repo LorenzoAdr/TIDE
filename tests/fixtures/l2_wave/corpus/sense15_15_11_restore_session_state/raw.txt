@@ -1,0 +1,17 @@
+The user wants to restore the editor state (cursor position, open files, visible/closed side panels) when reopening a project.
+I have two completed jobs:
+T1: Found the mechanism for saving/loading session state (`save state`, `load state`, `state path`, `state json`).
+T2: Checked what data is included in that state. The result was negative: `load state` only serializes AI session state (turn, phase, workflow, etc.), NOT UI state (scroll, selection, panels).
+
+The anchor claim is: "when I open a project I had open before, I want it to remember exactly where the cursor was, which files were open, and if any side panel was visible or closed".
+T2 refutes the existence of this mechanism in the current `save state` / `load state` flow for the UI. The state saved is purely AI-related.
+
+So, the mechanism to restore UI state (cursor, files, panels) does not exist in the current `save state` / `load state` implementation.
+The user's request is a feature request or a bug report implying it *should* work but doesn't, or asking *how* to make it work.
+However,
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de restauración de sesión (save state / load state) no guarda ni restaura el estado de la UI: no incluye posición del cursor, archivos abiertos ni visibilidad de paneles. el estado serializado es exclusivamente de la sesión de IA. el claim se refuta: no hay camino para recordar la posición del cursor, los archivos abiertos o los paneles laterales al abrir un proyecto."
+}

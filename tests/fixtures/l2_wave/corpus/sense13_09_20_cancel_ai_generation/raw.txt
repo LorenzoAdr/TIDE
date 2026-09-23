@@ -1,0 +1,12 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Looked for Escape key capture. Found `ai trace escape` (string escaping), `json escape`, `cancel all` (logical cancel). No keyboard input connection.
+2.  **T2**: Looked for file cleaning on cancel. Found `clear pending insert`, `cancel current`, `cancel all`, `cancel level1`.
+3.  **T3**: Looked for Escape/click outside capture to invoke cancel. Found `console panel hpp/cpp`, `handle console panel mouse`.
+
+The last Closed (T3) says: "ESA pregunta no se relanza... leído: console panel hpp, console panel cpp, handle console panel mouse".
+The prompt instructions say: "El último Cerrado negó el mapeo. Cierra ESE mapeo (hueco o sin camino), no selles un polo que sí se leyó."
+T3 looked for the capture of Escape/click outside. It found `handle console panel mouse` but the Closed implies this wasn't the trigger or the mechanism wasn't found/
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay camino entre el clic fuera y la cancelación; el lector de ratón no invoca la limpieza"}

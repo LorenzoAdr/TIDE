@@ -1,0 +1,21 @@
+The user wants to restore the cursor position, open files, and panel states when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A: save cursor pos on close
+2. [en_curso] B: restore cursor pos on open
+3. [pendiente] C: save open files on close
+4. [pendiente] D: restore open files on open
+
+Work 1 (save/restore editor state) -> Closed: no object.
+Work 2 (save cursor pos) -> Closed: no object.
+Work 3 (restore cursor pos) -> Closed: read "reset to single cursor", "context menu open editor background", "context menu open editor symbol". The child says "no object" for the specific question "where is cursor position restored on open". The read items are about resetting cursor or context menus, not restoring a specific saved position.
+
+The anchor claims: "remember exactly where the cursor was".
+The pack (M1, M4) has "editor state CursorPos" and "shell session cursor col".
+Work 3 read "reset to single cursor". This suggests the system resets the cursor rather than restoring it.
+The child closed the
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el sistema no restaura la posición del cursor al abrir el proyecto; el leído 'reset to single cursor' indica que se reinicia el cursor en lugar de recordar la posición anterior. el polo de restauración no existe."
+}

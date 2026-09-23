@@ -1,0 +1,23 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1 (Escape key):** Found that cancellation is triggered by text commands ("cancel", "cancelar") in `is cancel input`, not by keyboard events (Escape).
+2.  **T2 (Clean up pending insert):** Found where pending insert is cleared: `clear pending insert` invoked by `cancel current` when `pending insert` is true and no busy activity.
+3.  **T3 (Click outside):** Found no object. Clicking outside does not trigger cancellation.
+
+The anchor claim has two parts:
+1.  Cancel generation on Escape or click outside.
+2.  Cancel cleanly without leaving the file half-written.
+
+Current status:
+-   **Escape:** Refuted. The system uses text commands, not Escape.
+-   **Click outside:** Refuted. No mechanism found.
+-   **Clean cancellation:** Confirmed partially. `clear pending insert` exists and is called by `cancel current`. However, the trigger for `cancel current` is text input, not Escape/click.
+
+The user's specific request ("when
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el ancla pide cancelar con Escape o clic fuera; T1 refuta Escape (usa texto), T3 refuta clic fuera (no hay objeto). T2 confirma limpieza de inserción pendiente, pero el disparador no es el pedido. el claim se refuta: no hay mecanismo para los gestos solicitados."
+}

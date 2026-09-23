@@ -1,0 +1,16 @@
+The user wants to restore the cursor position, open files, and panel visibility when reopening a project.
+I have a plan with 3 phases:
+1. Cursor position (T1) - Closed. Read `editor state cpp`, `helix state cpp`.
+2. Open files list (T2) - Closed. Read `load`, `save`, `remember`. Result: "no encontré el mecanismo... recent projects gestiona... no los archivos abiertos".
+3. Panel visibility (T3) - Closed. Result: "no hay objeto".
+
+The plan is effectively finished or failed to find the mechanism for files and panels.
+T1 found `editor state cpp` and `helix state cpp`. This might be relevant for the cursor, but the user wants *all* three things (cursor, files, panels).
+T2 failed to find the mechanism for open files. It found `recent projects` but not the specific open files list persistence.
+T3 failed to find the mechanism for panel visibility.
+
+The "control_opened_v1" section shows:
+T1: `editor state cpp`, `helix state cpp`
+T2: `load`, `save`, `remember`, `ensure wake
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo de persistencia de archivos abiertos ni paneles; el cursor se lee en editor state pero no hay camino a la restauración completa del workspace"}

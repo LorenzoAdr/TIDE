@@ -1,0 +1,175 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar un error",
+      "keep": [
+        "M1",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se analizan los errores de compilación en la salida de la consola para extraer la línea y el mensaje",
+      "keep": [
+        "M4",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para crear marcadores en el editor",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "línea margen",
+        "error consola",
+        "decoración editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir dos fenómenos: el error en la consola y la marca visual en el editor. necesito ver si el pack ya tiene el barrio de la decoración del margen y el de la lectura de errores"
+    },
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar un error",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen del editor para marcar un error"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "necesito encontrar el mecanismo que pinta la línea roja en el margen para luego conectarlo con los errores de la consola"
+    },
+    {
+      "consulta": "dónde se analizan los errores de compilación en la salida de la consola para extraer la línea y el mensaje",
+      "consultas": [
+        "dónde se analizan los errores de compilación en la salida de la consola para extraer la línea y el mensaje"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escaneo salida"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "necesito encontrar el origen de los errores de consola para ver si se convierten en diagnósticos"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para crear marcadores en el editor",
+      "consultas": [
+        "dónde se extraen los errores de compilación del texto de la consola para crear marcadores en el editor"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T2 falló en encontrar el análisis de la consola; busco el parser de errores de compilación que alimenta los marcadores, evitando el camino de LSP que ya se descartó"
+    },
+    {
+      "consulta": "dónde se analizan los errores de compilación en la salida de la consola para extraer la línea y el mensaje",
+      "consultas": [
+        "dónde se analizan los errores de compilación en la salida de la consola para extraer la línea y el mensaje"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "binary symbols panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T2 no encontró el origen de los errores (consola), sino el destino (editor). M11 huele a análisis de errores de shell/linker. Necesito confirmar si ahí se parsea la consola para extraer líneas de error."
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para crear marcadores en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para crear marcadores en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "consola"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "T2 falló porque el sistema usa LSP (rebuild diagnostics by line if changed). Necesito encontrar si existe un mecanismo que lea la consola y genere marcadores, o si hay que crearlo. El pack tiene M11 (binary symbols panel scan shell output for linker errors) que huele a análisis de consola, pero no sé si conecta con el editor."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el mecanismo de marcar errores en el margen existe (T1), pero el disparo no proviene de la consola inferior (T2, T3 refutan el origen). el pack no une la consola con el margen; el camino está roto."
+    }
+  ],
+  "why": "el mecanismo de marcar errores en el margen existe (T1), pero el disparo no proviene de la consola inferior (T2, T3 refutan el origen). el pack no une la consola con el margen; el camino está roto.",
+  "zooms": []
+}

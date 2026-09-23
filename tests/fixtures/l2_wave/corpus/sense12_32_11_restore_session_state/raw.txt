@@ -1,0 +1,14 @@
+The user wants to restore the cursor position, open files, and panel visibility when reopening a project.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se restaura la posición del cursor al abrir el proyecto
+2. [en_curso] B locator: dónde se restauran los archivos abiertos al abrir el proyecto
+3. [pendiente] C locator: dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto
+
+Wait, the plan says:
+1. [fallo] A locator: dónde se restaura la posición del cursor
+---- content ----
+{
+  "action": "control_v1",
+  "do": "pasar",
+  "why": "el Cerrado de T3 afirma el objeto de la fase B (archivos abiertos); avanzo a la siguiente caza del plan"
+}

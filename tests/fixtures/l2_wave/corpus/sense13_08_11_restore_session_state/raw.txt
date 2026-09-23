@@ -1,0 +1,19 @@
+The user wants to restore the cursor position, open files, and sidebar visibility when reopening a project.
+I have three completed jobs:
+1.  **Cursor position**: Read "reset to single cursor". This implies the cursor is reset, not restored to a specific position.
+2.  **Open files**: "No object found".
+3.  **Sidebar visibility**: "No object found".
+
+The "sin camino" (no path) between these poles in the pack suggests they are not connected in the current map.
+The user's claim is that the system *should* remember these things.
+The evidence so far:
+- Cursor: "reset to single cursor" suggests it goes to a default state (likely start or single cursor mode), not a saved position.
+- Files/Sidebars: No mechanism found to restore them.
+
+The prompt instructions say: "exploradores agotados. Cierra citando el mecanismo leído o la refutación."
+I have exhausted the explorers (3 jobs done).
+The evidence refutes the claim: the system resets the cursor and doesn't seem to have mechanisms to restore files or sidebars (based on "no object found" for those specific restoration queries).
+
+I need
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el cursor se reinicia a un solo cursor y no se restaura la posición; no hay mecanismo para restaurar archivos ni paneles laterales"}

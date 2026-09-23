@@ -1,0 +1,9 @@
+The user wants to find a module that calculates ballistic trajectory of editor cursors to sync them with a Kubernetes cluster when the user blinks, and where this physics is persisted in a quantum vector index of the workspace.
+The previous work (Trabajo 1) asked: "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea"
+The result was: "no encontré el cálculo de trayectoria balística de cursores ni sincronización con Kubernetes; lo leído es un editor de texto local editor panel con scroll
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el hijo confirmó que no hay cálculo de trayectoria balística ni sincronización con Kubernetes; el editor es local sin física ni clusters. el claim se refuta."
+}

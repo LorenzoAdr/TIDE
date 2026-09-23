@@ -1,0 +1,17 @@
+The user wants to detect when the LSP server process crashes or becomes unresponsive and automatically restart it.
+I have a plan with 3 phases:
+A: locator: where is it detected that the LSP server process has unexpectedly terminated or died
+B: locator: where is it detected that the LSP server is not responding to requests timeout or heartbeat
+P: bridge: connect the detection of crash or unresponsiveness with the automatic restart of the LSP (need A B)
+
+Current status:
+Phase A is [en_curso].
+T1 found the restart mechanism (restart lsp for workspace) triggered by environment changes or missing installation.
+T2 looked for detection in the symbol provider, found status notification and startup logic.
+T3 looked for detection in the application, found startup/notification/restart logic but explicitly stated "no encontré el mecanismo de detección de caída o no-respuesta del proceso LSP".
+T4 looked for detection of unexpected termination/death, found startup logic.
+
+The last hunt (T4) closed. It didn't find the crash detection mechanism.
+The pack shows "entre abiertas": T1=>T4 sin camino. T2=>T4 mismo objeto. T3=>T
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"T4 no halló el detector de caída; el pack no une a otro barrio con ese fenómeno. Salto a la siguiente caza del plan (B: timeout/no-respuesta)."}

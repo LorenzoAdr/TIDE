@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 refuta la persistencia del cursor (no hay serialización). T2 confirma que la apertura del editor es un evento de UI (context menu) desconectado de la sesión previa. El pack no une estos polos ni sugiere un mecanismo de restauración de estado global (sesión/archivos/paneles). El claim se refuta: no existe el mecanismo para recordar la posición, archivos y paneles al reabrir."
+}

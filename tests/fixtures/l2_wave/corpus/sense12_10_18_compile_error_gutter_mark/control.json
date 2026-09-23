@@ -1,0 +1,249 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/ui/binary_symbols_panel.cpp:parse_linker_undefined_reference"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer la línea y el mensaje",
+      "keep": [
+        "M11"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:ai_result_at_line",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer la línea y el mensaje",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se publican los diagnostics al editor para que aparezcan en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parser de errores de la consola y la publicación de diagnostics en el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los adornos visuales; M11 (binary symbols panel) procesa errores de compilación. Necesito ver si M3 tiene el mecanismo de 'línea roja' y si M11 expone los errores para que M3 los consuma."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no une la consola con el margen; M11 huele parsing de errores pero no el efecto visual; M3 es git, no compilación. Necesito confirmar si existe el mecanismo de marcado y si está conectado a la consola."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 no encontró el mecanismo de lectura de errores; el pack indica 'sin camino' entre T1 y T2, por lo que salto a la siguiente caza para buscar el origen de los diagnostics"
+    },
+    {
+      "consulta": "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola",
+      "consultas": [
+        "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parseo"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 leyó el panel pero no el mecanismo de extracción; necesito saber si se parsea la salida para obtener la línea exacta y poder unirla a T1"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T3 falló en el parser genérico; T1 encontró el renderizado pero no la fuente. Necesito localizar el extractor real (A) y el puente de datos (B) para unirlos en P."
+    },
+    {
+      "consulta": "dónde se extraen la línea y el archivo de los errores de compilación del texto de la consola para crear diagnostics",
+      "consultas": [
+        "dónde se extraen la línea y el archivo de los errores de compilación del texto de la consola para crear diagnostics"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 7,
+      "why": "T3 falló en linker; T4 vio diagnostics pero no el origen. Necesito el parser genérico que convierte texto de consola en objetos diagnostic para el editor"
+    },
+    {
+      "consulta": "dónde se convierte el texto de la consola en diagnostics para el editor",
+      "consultas": [
+        "dónde se convierte el texto de la consola en diagnostics para el editor"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "console panel mouse"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T4 vio 'handle console panel mouse' como extra; es el puente probable entre la consola (T2) y los diagnostics (T1/T4). T3 falló buscando un parser genérico, pero el sistema puede usar un handler específico o un servicio de diagnóstico que escuche la consola."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer la línea y el mensaje",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer la línea y el mensaje"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "console output"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "T3 falló en el parser de linker; T4 leyó ai result (falso amigo). Necesito el parser genérico de errores de compilación (gcc/clang/msvc) que extraiga línea y mensaje, no el de símbolos ni el de IA. El pack no tiene este objeto aún, amplio la búsqueda en el barrio de la consola."
+    },
+    {
+      "consulta": "dónde se convierte el texto de la consola en diagnostics para el editor",
+      "consultas": [
+        "dónde se convierte el texto de la consola en diagnostics para el editor"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnostics"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 10,
+      "why": "T4 leyó diagnostics for editor line pero no el origen; T3 falló en M11; necesito el puente que transforma la salida de la consola en el objeto que T1 consume"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

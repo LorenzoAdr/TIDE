@@ -1,0 +1,21 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 found the mechanism for painting the red line: `line gutter marker` checks `line diagnostic marker from map` for `k Error`.
+- T2 looked for extracting compilation errors from the console to add to the diagnostics map. It found LSP integration (`apply lsp diagnostics to panel`) but NOT console text extraction.
+- T3 looked for analyzing console text to detect compilation errors. It found nothing ("no hay objeto").
+
+The pack shows:
+- M1 (editor panel), M3 (visual highlight), M10 (embedding backend), M11 (binary symbols panel).
+- T2 and T3 failed to find the bridge between console text and diagnostics.
+- T3 explicitly says "no hay objeto" for analyzing console text.
+- T2 says it found LSP diagnostics, not console text extraction.
+
+The user's request implies a feature that might not exist yet, or exists in a different way (e.g., via LSP, not raw console parsing).
+The prompt says: "Si Cerrado dice que no se
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de pintar la línea roja existe (line gutter marker lee line diagnostic marker from map), pero no hay código que extraiga errores de compilación del texto de la consola inferior para inyectarlos en ese mapa; T2 y T3 refutan la existencia de ese puente"
+}

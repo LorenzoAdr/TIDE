@@ -1,0 +1,206 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 7,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar un error",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp",
+        "src/ui/editor_panel.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar un error",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.hpp",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:line_gutter_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación para extraer la línea y el mensaje del texto de la consola",
+      "keep": [
+        "M1"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:viewport_line_hash_diagnostics"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación para extraer la línea y el mensaje del texto de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crea o actualiza el marcador de diagnóstico en el margen del editor para un error dado",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parseo de errores de la consola y la creación del marcador en el margen del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los adornos visuales; M11 (binary symbols panel) tiene un ejemplo de escaneo de errores. Necesito ver si M3 gestiona los 'marks' de error y cómo M11 los detecta para unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no une la consola con el margen; M11 huele la extracción pero no el dibujo; M3 huele el dibujo pero no la fuente; necesito ambos polos para ver si hay arco"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar un error",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen del editor para marcar un error"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "paint"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 leyó los archivos pero no cerró el mecanismo de dibujo; el hijo debe encontrar la función que pinta el margen"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 falló en el parseo (encontró linker, no compilación). T2/T3 encontraron el dibujo (line diagnostic marker). Falta el extractor de errores de compilación y el puente que una el texto de la consola con el marcador del editor. Atomizo: 1) encontrar el parser de errores de compilación, 2) confirmar cómo se crea el marcador, 3) unir ambos."
+    },
+    {
+      "consulta": "dónde se crean los marcadores de diagnóstico en el margen del editor a partir de los datos de error",
+      "consultas": [
+        "dónde se crean los marcadores de diagnóstico en el margen del editor a partir de los datos de error"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "for editor line"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 6,
+      "why": "T3 y T4 encontraron el objeto visual (line diagnostic marker) y su fuente de datos (diagnostics for editor line). Falta el mecanismo que transforma los datos en el marcador visual. T1 falló en el parseo de consola, pero el ancla pide la marca en el editor; si el mecanismo de marca existe, podemos inyectar datos o buscar otro origen. El pack une T3 y T4 vía 'line diagnostic marker from map → diagnostics for editor line'."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 7,
+      "why": "el pack no contiene mecanismo de parseo de errores de compilación (T1 refuta: solo linker); T3/T4 muestran marcadores genéricos sin vínculo a consola; sin camino entre polos; claim refutado por ausencia de objeto"
+    }
+  ],
+  "why": "el pack no contiene mecanismo de parseo de errores de compilación (T1 refuta: solo linker); T3/T4 muestran marcadores genéricos sin vínculo a consola; sin camino entre polos; claim refutado por ausencia de objeto",
+  "zooms": []
+}

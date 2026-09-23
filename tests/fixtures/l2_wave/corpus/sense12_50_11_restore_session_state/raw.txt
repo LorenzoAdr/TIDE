@@ -1,0 +1,13 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+
+I have three completed investigations (T1, T2, T3):
+1.  **T1 (Cursor Position):** Read `Cursor Pos`, `open file at impl`, `load file`, `open file at confirmed`, `open file impl`. The closed status just lists these symbols. It doesn't explicitly say "found the mechanism" or "not found", but listing symbols usually implies reading the code. However, looking at the "Cerrado" text, it's just a list of symbols. Wait, T2 explicitly says "encontré el mecanismo". T1 and T3 just list symbols.
+    *   T1: `Cursor Pos`, `open file at impl`, `load file`, `open file at confirmed`, `open file impl`.
+    *   T3: `restore workspace session`.
+
+Let's look at the "entre abiertas" and "hacia el resto" in the pack.
+T1 -> `cursor selection span on line`, `ensure cursors`.
+T2 -> `Application`, `set workspace`.
+T3 -> `Application`, `set workspace`.
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la sesión de trabajo restaura los archivos abiertos y la visibilidad de los paneles laterales al cargar el espacio de trabajo; la posición del cursor se lee al abrir el archivo pero no se confirma su restauración automática"}

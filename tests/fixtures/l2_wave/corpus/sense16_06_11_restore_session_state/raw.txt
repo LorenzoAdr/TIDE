@@ -1,0 +1,6 @@
+The user wants to know if the editor remembers the cursor position, open files, and panel visibility when reopening a project.
+I have a plan with 3 locators (A, B, C) and a bridge (P).
+- T1 (A): Asked about saving editor state on close. Result: Found `Level2Session` saving AI state, but explicitly *not* UI state (scroll, cursors, panels). The Cerrado says "no encontré el guardado del estado del editor... lo leído es el guardado del estado de la sesión de IA". This effectively refutes the existence of a mechanism for saving the *editor* state (UI) at the point of closing, or at least the specific mechanism found was for AI, not UI.
+- T2 (B): Asked about restoring cursor position. Result: `restore workspace session`, `open file`. The Cerrado just lists these. It doesn't explicitly say "found it" or "didn't find it" in the text provided in the prompt's `Cerrado` section for T2, but the `leído` section lists `restore workspace session`. Wait, looking at the `Cerrado` text for T2 in the prompt
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el guardado del estado del editor al cerrar el proyecto no se encontró; lo leído es el guardado del estado de la sesión de IA, que no persiste el estado UI del editor"}

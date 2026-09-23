@@ -1,0 +1,10 @@
+The user wants to automatically detect if the LSP server crashes or becomes unresponsive and restart it without user intervention.
+I have a plan with 3 phases:
+1. A: locator: where is the health check invoked to detect if it has crashed.
+2. B: locator: where is the decision to restart the LSP server made after detecting it has crashed.
+3. P: bridge: is there a path between invoking the health check and deciding to restart the server.
+
+Current status:
+- T1 (Restart mechanism): Found `restart lsp for workspace` triggered by missing install, settings change,
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"T4 no encontró la invocación de la comprobación de salud; el mecanismo de detección automática no existe en el código actual"}

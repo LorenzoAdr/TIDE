@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "control: un leído no cierra el ancla; no refuta el existe",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "no hay mecanismo de limpieza del archivo al cancelar la generación; el flujo solo resetea flags y despierta el ciclo, sin truncar ni borrar el contenido en disco"
+}

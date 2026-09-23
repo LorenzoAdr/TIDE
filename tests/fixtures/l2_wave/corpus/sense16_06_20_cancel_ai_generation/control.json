@@ -1,0 +1,104 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "cómo se cancela la generación de código cuando se pulsa Escape o se hace clic fuera",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:handle_editor_keys",
+        "src/symbols/symbol_provider.hpp:cancel_completion_fetch",
+        "src/ui/editor_panel.cpp:cancel_live_lsp_on_cursor_move",
+        "src/ui/editor_panel.cpp:handle_editor_mouse",
+        "src/ui/editor_panel.cpp:completion_lsp_tick",
+        "src/ui/editor_panel.cpp:close",
+        "src/ui/editor_panel.cpp:end_mouse_selection"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código de la IA cuando se pulsa Escape o se hace clic fuera",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "cómo se cancela la generación de código cuando se pulsa Escape o se hace clic fuera",
+      "consultas": [
+        "cómo se cancela la generación de código cuando se pulsa Escape o se hace clic fuera"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "controller cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M8 tiene el latch de inserción pendiente y el método de cancelación; M2 menciona escape en el trace. Necesito ver cómo se orquesta la cancelación limpia."
+    },
+    {
+      "consulta": "dónde se cancela la generación de código de la IA cuando se pulsa Escape o se hace clic fuera",
+      "consultas": [
+        "dónde se cancela la generación de código de la IA cuando se pulsa Escape o se hace clic fuera"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 leyó cancelación de LSP/completado, no de la IA. El pack nombra ai controller cancel level1 y level1 agent run; busco el disparo de cancelación del agente IA."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 niega el disparo: no hay detección de Escape ni clic fuera para cancelar la generación; la cancelación solo ocurre por comandos de texto. el ancla pide un mecanismo que no existe en el código actual."
+    }
+  ],
+  "why": "el Cerrado de T2 niega el disparo: no hay detección de Escape ni clic fuera para cancelar la generación; la cancelación solo ocurre por comandos de texto. el ancla pide un mecanismo que no existe en el código actual.",
+  "zooms": []
+}

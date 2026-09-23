@@ -1,0 +1,11 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have three completed jobs (T1, T2, T3).
+T1 looked for crash detection triggering restart. Found `on transport reader eof` cleans state but doesn't call `restart lsp for workspace`. `restart lsp for workspace` is called by `run` (start) and `lsp missing install`. No caller from LSP client after EOF.
+T2 looked for timeout detection triggering restart. Found `completion wait timeout ms`, `wait response`, `wait fd readable`, `on transport reader eof`, `start`. No explicit restart trigger found in the closed text provided (it just lists read items).
+T3 looked for `schedule debounced lsp restart` invocation after connection failure. Found `schedule debounced lsp restart` but the closed text implies it didn't find the specific trigger or context needed, or just listed the read item.
+
+The "Cerrado" sections for T1, T2, T3 all say "ESA pregunta no se relanza... no encontré el mecanismo...".
+T1 explicitly says: "no hay un caller desde el cliente LSP tras un EOF".
+T2
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo de detección automática de caída o timeout que dispare el reinicio; el lector eof solo limpia estado y el reinicio se invoca solo al inicio o por ausencia de instalación"}

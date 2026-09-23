@@ -1,0 +1,18 @@
+The user wants to automatically detect when the LSP server crashes or becomes unresponsive and restart it without user intervention.
+
+Current state:
+- T1 (detect crash/no response -> restart): Closed with "no object". The child found no mechanism for detecting a crash or unresponsiveness and triggering a restart.
+- T2 (restart LSP after failure/app restart): Closed. Found `restart lsp for workspace` triggered by `lsp missing install` and `schedule debounced lsp restart` (settings/build env changes).
+
+The anchor claim is: "if the LSP server process crashes or stops responding, the application automatically detects it and restarts it without user action."
+
+T1 explicitly looked for "detect crash/no response -> restart" and found nothing.
+T2 found restart mechanisms, but they are triggered by *installation* or *settings/env changes*, not by a crash or unresponsiveness.
+
+The pack shows M5 (application) has `pending lsp restart`, `last lsp environment fingerprint`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+T2 confirmed `restart lsp for workspace` and `schedule debounced lsp restart`.
+T1 found no object for crash detection.
+
+Is there any other mechanism?
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack y las cazas confirman que el reinicio del LSP se dispara por instalación de toolpacks o cambios en settings/entorno, pero no existe mecanismo que detecte caída o falta de respuesta del proceso para reiniciarlo automáticamente. el claim se refuta."}

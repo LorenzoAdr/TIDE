@@ -1,0 +1,14 @@
+The user wants to ensure that if the LSP server crashes or becomes unresponsive, the application automatically detects it and restarts it without user intervention.
+
+I have already completed two tasks:
+1.  **T1**: Found where the LSP crash/unresponsiveness is detected (`notify lsp status`, `join thread if joinable`, etc.).
+2.  **T2**: Found where the LSP is restarted after detection (`restart lsp for workspace`, `schedule debounced lsp restart`, etc.).
+
+The `control_opened_v1` shows:
+-   T1 saw: `notify lsp status`, `
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "T1 y T2 confirman que la aplicación detecta la caída del LSP (notify lsp status) y lo reinicia automáticamente (restart lsp for workspace, schedule debounced lsp restart) sin intervención del usuario."
+}

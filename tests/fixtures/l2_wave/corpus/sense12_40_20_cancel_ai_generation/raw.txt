@@ -1,0 +1,14 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have two completed tasks:
+1.  **Task 1 (Locator A):** "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA".
+    *   **Result:** No object found. `ai trace escape` is JSON string escaping, not UI event handling.
+    *   **Conclusion:** The trigger (Escape/click outside) is not currently implemented or found in the inspected areas.
+
+2.  **Task 2 (Locator B
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de limpieza y detención existe (cancel current, clear pending insert, cancel level1), pero el disparador por Escape o clic fuera no se encuentra en el código; el claim de cancelar limpiamente con esos gestos se refuta porque falta el trigger"
+}

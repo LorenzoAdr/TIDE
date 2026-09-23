@@ -1,0 +1,18 @@
+The user wants to find two things:
+1. The module calculating ballistic trajectory of editor cursors for real-time sync with a Kubernetes cluster when the user blinks.
+2. Where this physics is persisted in the quantum vectorial index of the workspace.
+
+The previous work (T1) asked: "dónde se calcula la trayectoria balística de los cursores del editor".
+The result was: "no hay objeto" (no object found). The code read shows instant state operations (set pos, reset to single cursor, clamping), no interpolation or physics.
+
+The anchor claim is highly specific and likely hallucinated or metaphorical ("balistic trajectory", "Kubernetes cluster", "user blinks", "quantum vectorial index").
+The pack (M*) shows standard editor components: editor panel, watches panel, workspace model, model store, application, llama backend, diagnostics, language server, ui perf monitor, file picker, key bindings.
+The "Abierto" from T1 lists: cursor animation, cursor lerp, cursor physics. These are likely the "extra" or "hops" that didn't match the specific "balistic trajectory" query.
+
+Since T1 closed with "no object" for the
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el ancla pide un módulo de trayectoria balística y persistencia en índice cuántico; T1 cerró que no hay cálculo de trayectoria (solo estado instantáneo). el pack no nombra ni kubernetes ni índice vectorial cuántico. el claim se refuta: no hay objeto."
+}

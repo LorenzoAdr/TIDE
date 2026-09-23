@@ -1,0 +1,23 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed works:
+1.  **T1 (Escape key):** Found `handle editor escape`, `handle editor keys`, `cancel all`, `cancel level1`.
+2.  **T2 (Clean file):** Found `clear pending insert`, `cancel all`, `cancel current`, `cancel level1`.
+3.  **T3 (Click outside):** Found `cancel level1`, `handle editor mouse`, `end mouse selection`, `cancel all`, `Event`.
+
+The "entre abiertas" section shows strong connections:
+-   T1, T2, T3 all share `cancel all` and `cancel level1`.
+-   T1 connects to T3 via `handle editor escape` -> `end mouse selection`.
+
+The mechanism seems to be:
+-   Triggers: `handle editor escape` (T1), `handle editor mouse` (T3).
+-   Action: `cancel all` / `cancel level1`.
+-   Effect: `clear pending insert` (T2).
+
+The user's claim is "cancel cleanly without leaving the file half
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el mecanismo está completo: los disparadores (Escape y clic fuera) invocan cancel all, que a su vez limpia el archivo mediante clear pending insert"
+}

@@ -1,0 +1,21 @@
+The user wants to know if the application remembers the cursor position, open files, and visible/closed side panels when reopening a previously opened project.
+
+I have three completed jobs:
+1.  **T1**: Asked about saving/restoring cursor position and open files. Result: `save state` only persists AI session state (turns, actions, pending), not the visual editor state.
+2.  **T2**: Asked about saving/restoring editor cursor position. Result: No object found.
+3.  **T3**: Asked about saving/restoring editor state. Result: No object found.
+
+The "control_opened_v1" section shows:
+-   T1 saw `save state`, `state path`, `write file`.
+-   T2 and T3 saw nothing.
+-   There is no path between T1, T2, and T3.
+
+The user's claim involves three distinct aspects:
+1.  Cursor position.
+2.  Open files.
+3.  Side panels visibility.
+
+T1 explicitly checked for cursor position and open files and found that `save state` does *not* handle the visual editor state (only AI session).
+T2 and T3 confirmed
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de persistencia (save state) solo guarda la sesión de IA; no existe objeto que guarde ni restaure la posición del cursor, los archivos abiertos ni los paneles laterales"}

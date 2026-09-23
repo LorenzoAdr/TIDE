@@ -1,0 +1,20 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have 3 completed jobs:
+T1: Looked for Escape key capture during generation. Found `ai trace escape` (log escaping), not key capture.
+T2: Looked for canceling generation without leaving file half-written. Found `stop completion server`, `cancel level1`, `stop owned unlocked`.
+T3: Looked for click outside or Escape key capture to stop generation. Found `handle user input` (text console commands like "cancel"), not key/mouse events.
+
+The anchor has two poles:
+1. Trigger: User presses Escape or clicks outside.
+2. Effect: Cancel generation cleanly without leaving file half-written.
+
+T2 found the cancellation mechanism (`cancel level1`, `stop completion server`).
+T1 and T3 failed to find the trigger (Escape/click outside). They found unrelated things (log escaping, text console commands).
+
+The pack shows:
+T2 => `cancel level1` -> `ai trace escape` (T1)
+T2 => `cancel level1` -> `handle user input` (T3)
+But T1 and T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de cancelación se confirma en cancel level1 y stop completion server; los disparos de Escape o clic fuera no se hallaron en el pack, por lo que el ancla se cierra con el efecto leído y se refuta la captura de eventos en esta búsqueda"}

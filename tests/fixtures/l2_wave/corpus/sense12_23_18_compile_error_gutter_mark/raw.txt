@@ -1,0 +1,12 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+The previous investigations (T1, T2, T3) found that the current mechanism for marking errors in the editor comes from the LSP (Language Server Protocol) via `ISymbol Provider`, not from parsing the console output.
+T2 explicitly states: "los errores no se leen de la consola, sino que provienen del LSP".
+T3 confirms: "no encontré la lectura de errores de compilación de la consola".
+
+The
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el sistema no lee errores de la consola para marcarlos en el margen; usa el LSP vía ISymbol Provider. no hay mecanismo de lectura de consola para este efecto."
+}

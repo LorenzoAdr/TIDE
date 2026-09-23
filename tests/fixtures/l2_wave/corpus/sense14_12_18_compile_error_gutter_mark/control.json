@@ -1,0 +1,166 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 2,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la consola para extraer la línea y el mensaje",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación de la consola para extraer la línea y el mensaje",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parseo de errores de consola y el dibujo de la línea roja en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "parseo errores consola",
+        "diagnóstico editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla une dos polos: errores en consola y línea roja en margen. busco barrios que manejen decoraciones de línea y análisis de salida de compilador"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "parseo errores consola",
+        "decoración margen",
+        "diagnóstico editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos polos: leer errores de la consola y pintar el margen del editor; busco barrios que conecten diagnóstico con decoración"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M7",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "M3 (visual highlight) y M7 (console panel) son los polos del ancla; M11 huele a parseo de errores. Necesito ver si M3 ya gestiona decoraciones de margen y si M7/M11 emiten eventos de error."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla une dos fenómenos distintos (parseo de consola y decoración de editor); necesito localizar ambos polos y verificar si ya existe un camino o si hay que construirlo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 5,
+      "why": "la fase A cerró sin objeto: no hay parseo de errores de consola para extraer línea y mensaje. salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el pack no tiene mecanismo que parsee errores de compilación de la consola para marcar el margen; T1 cerró sin objeto y T2 solo localizó el dibujo del gutter. sin camino entre polos leídos cierra el ancla"
+    }
+  ],
+  "why": "el pack no tiene mecanismo que parsee errores de compilación de la consola para marcar el margen; T1 cerró sin objeto y T2 solo localizó el dibujo del gutter. sin camino entre polos leídos cierra el ancla",
+  "zooms": []
+}

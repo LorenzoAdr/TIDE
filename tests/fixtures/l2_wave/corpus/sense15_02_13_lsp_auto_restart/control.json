@@ -1,0 +1,136 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M7",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:wait_until_healthy",
+        "src/ai/llama_backend.cpp:status_text",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/ai/llama_backend.cpp:ready",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje automáticamente tras detectar que se ha caído o no responde",
+      "keep": [
+        "M2",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/ai/llama_backend.cpp:complete",
+        "src/ai/llama_backend.cpp:ready",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/llama_backend.cpp:stop_owned_unlocked",
+        "src/ai/llama_backend.cpp:ensure_completion_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M2",
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene la lógica de reinicio (restart lsp for workspace), pero necesito ver qué dispara ese reinicio automáticamente (detección de fallo)."
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje automáticamente tras detectar que se ha caído o no responde",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje automáticamente tras detectar que se ha caído o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mapeo de detección; ahora busco el mecanismo de reinicio automático que cierra el claim del usuario"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "salida"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "los trabajos anteriores no encontraron el disparo; busco en la salida o error del proceso"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide detección automática de caída/no respuesta y reinicio sin intervención. T1, T2 y T3 leyeron `restart lsp for workspace`, `schedule debounced lsp restart`, `wait until healthy`, `on transport reader eof`, pero los Cerrados indican que lo leído no era el disparo (no era el mecanismo de detección automática de caída/no respuesta que dispara el reinicio sin intervención). No hay más exploradores disponibles y el pack no nombra un mecanismo distinto. Cierra el claim: no se encontró el mecanismo de detección automática de caída/no respuesta y reinicio sin intervención."
+    }
+  ],
+  "why": "el ancla pide detección automática de caída/no respuesta y reinicio sin intervención. T1, T2 y T3 leyeron `restart lsp for workspace`, `schedule debounced lsp restart`, `wait until healthy`, `on transport reader eof`, pero los Cerrados indican que lo leído no era el disparo (no era el mecanismo de detección automática de caída/no respuesta que dispara el reinicio sin intervención). No hay más exploradores disponibles y el pack no nombra un mecanismo distinto. Cierra el claim: no se encontró el mecanismo de detección automática de caída/no respuesta y reinicio sin intervención.",
+  "zooms": []
+}

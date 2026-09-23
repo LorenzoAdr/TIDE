@@ -1,0 +1,199 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback",
+        "src/symbols/lsp_symbol_provider.cpp:ensure_python_lsp_async",
+        "src/symbols/lsp_symbol_provider.cpp:finish_python_lsp_start_locked"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar su caída",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback",
+        "src/app/application.cpp:Application",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se llama a reiniciar el servidor de lenguaje tras detectar su caída",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback",
+        "src/app/application.cpp:Application"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback",
+        "src/symbols/lsp_symbol_provider.cpp:ensure_python_lsp_async",
+        "src/symbols/lsp_symbol_provider.cpp:finish_python_lsp_start_locked",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/symbols/lsp_symbol_provider.cpp:stop_lsp"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar su caída",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino detectar la caída y reiniciar el servidor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace), pero falta el disparador (detection). El hijo debe encontrar el código que decide llamar a ese reinicio."
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar su caída",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP tras detectar su caída"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart lsp"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección; ahora busco el mecanismo de reinicio automático en el pack (M5) para confirmar si existe y cómo se invoca."
+    },
+    {
+      "consulta": "dónde se llama a reiniciar el servidor de lenguaje tras detectar su caída",
+      "consultas": [
+        "dónde se llama a reiniciar el servidor de lenguaje tras detectar su caída"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "callback"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 leen el mismo objeto (notify lsp status). El siguiente tiro es un port del pack: T1 → on document opened. Necesito ver si el callback de estado llama a restart lsp for workspace."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 leyeron los polos (detección y reinicio) pero no confirmaron el arco entre ellos. T3 intentó unirlos pero dejó el callback sin leer. Rompo en dos localizadores para confirmar los mecanismos y luego un puente para asegurar que la detección dispara el reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 5,
+      "why": "T4 no confirmó la detección de caída; solo leyó el callback y stop lsp. Falta el disparo real de reinicio tras crash."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

@@ -1,0 +1,17 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs (T1, T2, T3).
+T1: Looked for cancellation on Escape/click outside. Found `cancel current` triggered by text "cancel" in `handle user input`, and `clear search input focus` manages focus but doesn't cancel.
+T2: Looked for capturing Escape/click outside to cancel. Found `handle ai console keys`, `handle console panel mouse`, `clear pending insert`, `has pending insert`, `Event`, `cancel current`, `handle user input`.
+T3: Looked for invoking cancellation on Escape/click outside during generation. Found `handle ai console keys` handles Escape only for clearing terminal selection, `handle console panel mouse` handles clicks for activating inputs/opening results, neither invokes `cancel current` or cancels generation.
+
+The pack shows:
+`handle ai console keys` -> `handle user input` -> `handle route` -> `cancel current` -> `cancel all` -> `cancel level1`
+`handle route` -> `cancel current` -> `clear pending insert`
+`ai controller` has `
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide cancelar la generación al pulsar Escape o hacer clic fuera; las tres cazas confirman que no existe ese mecanismo: Escape solo limpia selecciones de terminal y clics activan inputs o abren resultados, sin invocar cancel current ni detener la generación en curso"
+}
+```

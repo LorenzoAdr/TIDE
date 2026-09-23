@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código",
+  "consultas": [
+    "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código"
+  ],
+  "do": "explorar",
+  "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+  "evita": [
+    "comandos de texto"
+  ],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 cerró que no hay captura en el flujo de texto; el pack muestra M7 (editor panel) y M5 (console panel) con handlers de eventos. Busco el listener de UI que dispara la cancelación, no el procesador de input."
+}

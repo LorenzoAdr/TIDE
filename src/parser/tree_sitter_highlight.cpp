@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <set>
 
@@ -452,6 +453,20 @@ std::size_t line_end_offset(const std::string& source, int line_0) {
   return next == std::string::npos ? source.size() : next;
 }
 
+// Byte offset where each line starts (one entry per line, so size() == line count).
+// line_begin_offset()/line_end_offset() rescan from byte 0 on every call; anything that
+// needs them once per capture over a whole document must use this table instead.
+std::vector<std::size_t> line_start_offsets(const std::string& source) {
+  std::vector<std::size_t> starts;
+  starts.push_back(0);
+  for (std::size_t i = 0; i < source.size(); ++i) {
+    if (source[i] == '\n') {
+      starts.push_back(i + 1);
+    }
+  }
+  return starts;
+}
+
 void emit_segment(Elements* out, const std::string& segment, Decorator style, int global_offset,
                   int cursor_col, Decorator cursor_style, bool keyword_token = false) {
   if (segment.empty()) {
@@ -560,8 +575,20 @@ std::vector<LineHighlights> highlights_after_incremental_parse(
 
 std::vector<LineHighlights> highlights_for_document(TSNode root, const std::string& source,
                                                     TreeSitterLangKind lang) {
-  const int line_count = count_source_lines(source);
-  std::vector<LineHighlights> per_line(static_cast<std::size_t>(line_count));
+  return highlights_for_document_rows(root, source, 0, std::numeric_limits<int>::max(), lang);
+}
+
+std::vector<LineHighlights> highlights_for_document_rows(TSNode root, const std::string& source,
+                                                         int first_row, int last_row,
+                                                         TreeSitterLangKind lang) {
+  const std::vector<std::size_t> line_starts = line_start_offsets(source);
+  const int line_count = static_cast<int>(line_starts.size());
+  first_row = std::max(0, first_row);
+  last_row = std::min(last_row, line_count - 1);
+  if (last_row < first_row) {
+    return {};
+  }
+  std::vector<LineHighlights> per_line(static_cast<std::size_t>(last_row - first_row + 1));
 
   TSQuery* query = highlight_query_for_lang(lang);
   if (query == nullptr || ts_node_is_null(root)) {
@@ -569,6 +596,12 @@ std::vector<LineHighlights> highlights_for_document(TSNode root, const std::stri
   }
 
   TSQueryCursor* cursor = ts_query_cursor_new();
+  if (first_row > 0 || last_row < line_count - 1) {
+    // Only visit matches that intersect the requested rows; a match may still carry
+    // captures outside them, which the row clamp below drops.
+    ts_query_cursor_set_point_range(cursor, TSPoint{static_cast<uint32_t>(first_row), 0},
+                                    TSPoint{static_cast<uint32_t>(last_row) + 1, 0});
+  }
   ts_query_cursor_exec(cursor, query, root);
 
   TSQueryMatch match;
@@ -582,20 +615,22 @@ std::vector<LineHighlights> highlights_for_document(TSNode root, const std::stri
       capture_name =
           ts_query_capture_name_for_id(query, match.captures[i].index, &capture_name_len);
 
-      const uint32_t first_row = start.row;
-      const uint32_t last_row = end.row;
-      for (uint32_t row = first_row; row <= last_row && row < static_cast<uint32_t>(line_count);
-           ++row) {
-        const std::size_t line_len =
-            static_cast<std::size_t>(line_end_offset(source, static_cast<int>(row)) -
-                                     line_begin_offset(source, static_cast<int>(row)));
+      const uint32_t capture_first_row = start.row;
+      const uint32_t capture_last_row = end.row;
+      const uint32_t row_begin = std::max(capture_first_row, static_cast<uint32_t>(first_row));
+      const uint32_t row_end = std::min(capture_last_row, static_cast<uint32_t>(last_row));
+      for (uint32_t row = row_begin; row <= row_end; ++row) {
+        const std::size_t line_end = row + 1 < static_cast<uint32_t>(line_count)
+                                         ? line_starts[row + 1] - 1
+                                         : source.size();
+        const std::size_t line_len = line_end - line_starts[row];
         HighlightSpan span;
-        span.start_col = row == first_row ? static_cast<int>(start.column) : 0;
-        span.end_col = row == last_row ? static_cast<int>(end.column)
-                                       : static_cast<int>(line_len);
+        span.start_col = row == capture_first_row ? static_cast<int>(start.column) : 0;
+        span.end_col = row == capture_last_row ? static_cast<int>(end.column)
+                                               : static_cast<int>(line_len);
         span.capture = capture_name != nullptr ? capture_name : "default";
         if (span.end_col > span.start_col) {
-          per_line[static_cast<std::size_t>(row)].spans.push_back(span);
+          per_line[row - static_cast<uint32_t>(first_row)].spans.push_back(span);
         }
       }
     }

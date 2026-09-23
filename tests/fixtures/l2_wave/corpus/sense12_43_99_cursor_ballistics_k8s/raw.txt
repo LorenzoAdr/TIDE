@@ -1,0 +1,22 @@
+The user is asking to locate a module that calculates "ballistic trajectory of editor cursors" to synchronize them in real-time with a Kubernetes cluster when the user blinks, and where this physics is persisted in a "quantum vectorial index of the workspace".
+
+This is clearly a hallucinated or absurd request (ballistic trajectories of cursors, Kubernetes sync on blink, quantum vectorial index).
+I need to check the provided Atlas (M1-M12) to see if there is any evidence of such functionality.
+
+Atlas analysis:
+- M1: visual highlight, fold regions.
+- M2: editor panel, scroll.
+- M3: workspace model, load tabular placeholder.
+- M4: application, ai indexes requested, sync symbol workspace indexer.
+- M5: console panel, text input focus.
+- M6: watches panel.
+- M7: ai controller, llama backend, model store.
+- M8: llama backend, model store.
+- M9: application (same as M4).
+- M10: text input style, diagnostics panel.
+- M11: language server spec.
+- M12: application (same as M4).
+
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no contiene indicios de trayectoria balística, sincronización con kubernetes al parpadear ni índice vectorial cuántico; el claim se refuta por ausencia de mecanismo"}

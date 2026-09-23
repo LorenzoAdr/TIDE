@@ -1,0 +1,107 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la IA",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo cuando se cancela la generación de la IA",
+      "keep": [
+        "M2",
+        "M10"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:begin_insert_at"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: capturar el gesto (Escape) y el efecto (limpieza). M2 huele el Escape, M8 huele la cancelación. Necesito ver si el gesto llega a la limpieza."
+    },
+    {
+      "consulta": "dónde se limpia el archivo cuando se cancela la generación de la IA",
+      "consultas": [
+        "dónde se limpia el archivo cuando se cancela la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "la fase A leyó handle ai console keys; el pack une a clear pending insert. busco el polo de limpieza del archivo"
+    },
+    {
+      "consulta": "dónde se escribe el código generado en el archivo antes de que termine la generación",
+      "consultas": [
+        "dónde se escribe el código generado en el archivo antes de que termine la generación"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T2 confirmó que no hay limpieza al cancelar; para cancelar limpio sin dejar el archivo a medias, necesito encontrar dónde se escribe el código parcial y evitar esa escritura o revertirla"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide cancelar sin dejar el archivo a medias; T2 confirma que la rama de cancelación no escribe ni trunca el archivo en disco, solo limpia estado en memoria; el mecanismo de limpieza no existe en el flujo de cancelación"
+    }
+  ],
+  "why": "el ancla pide cancelar sin dejar el archivo a medias; T2 confirma que la rama de cancelación no escribe ni trunca el archivo en disco, solo limpia estado en memoria; el mecanismo de limpieza no existe en el flujo de cancelación",
+  "zooms": []
+}

@@ -1,0 +1,14 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+
+I have three completed jobs:
+1.  **T1**: Asked about saving/restoring cursor position and open files on load.
+    *   Result: Found `save state` but it persists AI session state (turns, actions), not UI editor state.
+    *   Conclusion: No mechanism found for UI state restoration in this path.
+2.  **T2**: Asked about saving/restoring sidebar visibility on load.
+    *   Result: Empty. No object found.
+3.  **T3**: Asked about saving cursor position and open files on *close*.
+    *   Result: Found `save workspace session`, `flush active tab`, `save`.
+    *   Conclusion: The prompt says "ESA pregunta no se relanza... Lo leído no era el disparo". Wait, T3 found `save workspace session` and `flush active tab`. The prompt says "Lo leído no era el disparo" in the context of the *previous* instruction or the system's interpretation of the closed status?
+    *   Let's look at the "Cerrado" text for
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de restaurar la posición del cursor, los archivos abiertos y la visibilidad de paneles al cargar un proyecto no se encuentra en el pack; las búsquedas de restauración (T1, T2) no hallaron el objeto y la búsqueda de guardado (T3) no conecta con la restauración"}

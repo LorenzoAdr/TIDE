@@ -1,0 +1,8 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Asked where the crash is detected. Result: `on transport reader eof`, `reader loop`, `spawn language server`, etc. The closed status says "ESA pregunta no se relanza...". This implies the detection mechanism was found (EOF on transport), but maybe the specific "crash" vs "EOF" distinction wasn't fully fleshed out, or it's just a standard EOF detection.
+2.  **T2**: Asked where the restart happens after detection. Result: Found the mechanism. The client detects crash via `transport reader eof`, but *does not* restart automatically there. It delegates to the main loop `run` which monitors `ready` state. If false, it calls `schedule debounced lsp restart` -> `restart lsp for workspace`.
+3.  **T3**: Asked where the main loop monitors the state and decides to restart. Result: "ESA pregunta no se relanza...". The closed status lists `start`, `on transport reader eof`, `restart lsp for workspace`, `schedule debounced lsp
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el cliente detecta la caída por EOF en el transporte y delega al bucle principal, que monitorea el estado ready y programa un reinicio diferido si el servidor no está listo"}

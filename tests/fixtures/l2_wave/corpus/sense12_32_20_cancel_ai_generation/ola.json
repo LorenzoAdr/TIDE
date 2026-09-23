@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de limpieza existe (cancel level1, clear pending insert), pero no hay captura de Escape ni clic fuera para dispararlo; el ancla pide ambos polos unidos y el pack no une el trigger UI con el efecto"
+}

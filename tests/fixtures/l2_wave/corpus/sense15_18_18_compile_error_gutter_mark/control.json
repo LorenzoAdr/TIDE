@@ -1,0 +1,148 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "keep": [
+        "M3",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:parse_pty_filter_tokens"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_render.cpp:decoration_at",
+        "src/editor/editor_render.cpp:apply_decoration",
+        "src/editor/editor_render.cpp:RenderEditorLine",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se conecta la detección de errores de compilación con la aplicación de decoraciones en el editor",
+      "keep": [
+        "M1",
+        "M12"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/lsp/diagnostics.cpp:cached_file_diagnostics",
+        "src/lsp/diagnostics.cpp:sync_diagnostic_cache",
+        "src/symbols/symbol_provider.hpp:diagnostics_revision",
+        "src/symbols/symbol_provider.hpp:supports_diagnostics",
+        "src/symbols/lsp_symbol_provider.cpp:client_diagnostics_revision"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error consola",
+        "línea margen",
+        "decoración editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir dos fenómenos: el error en la consola y la marca visual en el editor. Necesito ver si el pack tiene barrios para ambos o si hay que ampliar"
+    },
+    {
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "consultas": [
+        "dónde se detectan los errores de compilación en la salida de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escaneo salida"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M11 huele 'scan shell output for linker errors'; necesito ver si ya existe un mecanismo que lea los errores para luego conectarlo al margen"
+    },
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "necesito el mecanismo de dibujo para inyectar el error; el detector de consola falló, busco el efecto visual"
+    },
+    {
+      "consulta": "dónde se conecta la detección de errores de compilación con la aplicación de decoraciones en el editor",
+      "consultas": [
+        "dónde se conecta la detección de errores de compilación con la aplicación de decoraciones en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "puente"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 están leídos pero sin camino; busco el mecanismo que une la detección con el dibujo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el ancla pide conectar errores de consola con decoraciones; T1 y T2 cierran los polos, pero entre abiertas dice sin camino. T3 cierra el puente LSP, no el de consola. el pack no une consola con margen: el mecanismo no existe en el código actual."
+    }
+  ],
+  "why": "el ancla pide conectar errores de consola con decoraciones; T1 y T2 cierran los polos, pero entre abiertas dice sin camino. T3 cierra el puente LSP, no el de consola. el pack no une consola con margen: el mecanismo no existe en el código actual.",
+  "zooms": []
+}

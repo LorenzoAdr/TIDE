@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have two completed jobs:
+T1: How to cancel generation on Escape/click outside. Found: `cancel current`, `handle user input`, `handle route`, `is cancel input`, `cancel all`, `clear pending insert`.
+T2: How to clean the file or undo pending changes when canceling. Found: `cancel current` invokes `clear pending insert` which resets `pending insert` flag and `insert anchor`, then wakes the cycle.
+
+The anchor has two poles:
+1. Cancel generation (triggered by Escape/click outside).
+2. Clean up the file (don't leave it half-written).
+
+T1 found the cancellation mechanism (`cancel current`, `clear pending insert`).
+T2 found the cleanup mechanism (`clear pending insert` resets flags/anchors).
+
+Wait, T2 says: "al cancelar, cancel current invoca clear pending insert que resetea el flag pending insert y el ancla insert anchor y luego despierta el ciclo con wake para que el sistema sepa que ya no hay inserción pendiente."
+This implies the cleanup is handled by resetting the insertion state.
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de cancelación invoca la limpieza de inserción pendiente que resetea el estado y el ancla de inserción, cumpliendo el claim de cancelar limpiamente sin dejar el archivo a medias"}

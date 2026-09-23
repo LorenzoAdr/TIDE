@@ -1,0 +1,11 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed tasks:
+T1: Asked where Escape/click outside is captured to cancel AI generation. Result: No object found. `ai trace escape` is JSON string escaping, not UI event handling.
+T2: Asked where the half-written file is cleaned/reverted when cancelling AI. Result: Read `clear pending insert`, `cancel current`, `cancel all`, `busy`, `cancel level1`, `begin insert at`, `handle user input`.
+T3: Asked the
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide cancelar la generación limpiamente sin dejar el archivo a medias. T1 refuta la captura de Escape/clic para cancelar (no hay objeto). T2 y T3 confirman que la cancelación solo limpia el estado interno (pending insert, agent cancel) pero no hay mecanismo que reverta el contenido del archivo ya escrito. El claim se refuta: no existe el comportamiento solicitado."
+}

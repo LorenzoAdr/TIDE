@@ -1,0 +1,14 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have a plan with 3 phases:
+1. A locator: where is the crash/unresponsiveness detected?
+2. B locator: where is the LSP server restarted after detecting the crash?
+3. P bridge: is there a path between detecting the crash and restarting the server?
+
+Current status:
+- T1 (Phase A): Asked "where is the crash detected?". Closed with `notify lsp status`, `set lsp status callback`, `ensure python lsp async`, `finish python lsp
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "T4 no confirmó la detección de caída; solo leyó el callback y stop lsp. Falta el disparo real de reinicio tras crash."
+}

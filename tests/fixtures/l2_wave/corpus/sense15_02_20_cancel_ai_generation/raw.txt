@@ -1,0 +1,20 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with two phases:
+1. Locator: where Escape triggers AI controller cancellation (keyboard).
+2. Locator: where clicking outside triggers AI controller cancellation (window).
+
+Work done so far:
+T1: Asked where Escape is captured to cancel AI generation. Result: "ai trace escape" found (char escaping), not the input handler. "no_pasar" or close mapping.
+T2: Asked where clicking outside is detected to cancel AI generation. Result: "clickable interaction cpp, quit confirm cpp" found. "no_pasar" or close mapping.
+T3: Asked where AI controller cancellation is invoked on Escape. Result: "cancel all, cancel level1, Ai Controller" found. "no_pasar" or close mapping.
+
+The "Cerrado" for T1, T2, T3 all say "ESA pregunta no se relanza... no encontré...".
+T1 didn't find the Escape handler.
+T2 didn't find the click-outside handler.
+T3 found "cancel all, cancel level1, Ai Controller" but the prompt says
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no une el disparo (Escape/clic) con la cancelación limpia; T1 y T2 no hallaron los handlers de input, y T3 solo mostró el controlador sin el puente de cancelación limpia"
+}

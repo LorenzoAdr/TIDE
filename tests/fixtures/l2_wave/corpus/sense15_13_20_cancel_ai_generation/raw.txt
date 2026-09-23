@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+The plan has 3 phases:
+A: locator: where Escape/click outside is captured to cancel generation. (Done, T1 found `handle ai console keys` -> `cancel current`)
+B: locator: where the file is cleaned or partial insertion undone on cancel. (Done, T2 found "no object")
+P: bridge: is there a path between capturing Escape and cleaning the file on cancel.
+
+T1 found `cancel current` is called from `handle ai console keys`.
+T2 found "no object" for cleaning the file/undoing partial insertion.
+The pack shows `T1 => has pending insert`, `T1 => ai tab active`.
+`clear pending insert` was read in T1.
+The ancla says "sin dejar el archivo a medias" (without leaving the file half-written).
+T2 asked "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la generación" and found nothing.
+But `clear pending insert` was read in T1! Wait, T1's `leído` includes `clear pending insert`.
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el polo de captura de Escape está confirmado (handle ai console keys -> cancel current). el polo de limpieza del archivo no tiene objeto en el pack (T2 vacío), pero el circuito de T1 ya lee clear pending insert y cancel current, que cubren la intención de cancelar sin dejar inserciones pendientes. el claim se confirma con el mecanismo de cancelación y limpieza de inserción pendiente ya visto; no hay otro barrio que añadir."}

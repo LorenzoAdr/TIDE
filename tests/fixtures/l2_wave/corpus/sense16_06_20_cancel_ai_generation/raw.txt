@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation by pressing Escape or clicking outside.
+Current state:
+- T1 looked for "how to cancel... Escape or click outside" in M1/M3. Found `handle editor keys`, `cancel completion fetch`, etc. Closed: "Lo leído no era el disparo".
+- T2 looked for "where to cancel... Escape or click outside" in M1/M7. Found `cancel current`, `cancel level1`, `handle user input`. Closed: "no encontré el mecanismo... cancelación se activa únicamente por comandos de texto... sin detección de eventos de teclado o ratón".
+
+The anchor claims: "when AI is generating code and user presses Escape or clicks outside, I want generation to be cancelled cleanly".
+T2 explicitly says: "no detection of keyboard or mouse events for cancellation".
+This suggests the mechanism for "Escape or click outside" to cancel generation *does not exist* in the current codebase, or at least not in the places checked (M1, M3, M7).
+However, T2 mentions `handle user input` and `cancel level1`.
+The pack shows `M8` (ai controller) has `cancel level1
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el Cerrado de T2 niega el disparo: no hay detección de Escape ni clic fuera para cancelar la generación; la cancelación solo ocurre por comandos de texto. el ancla pide un mecanismo que no existe en el código actual."
+}

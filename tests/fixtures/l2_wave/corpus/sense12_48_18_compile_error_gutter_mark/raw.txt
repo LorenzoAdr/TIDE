@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the console with a red line in the editor's left margin.
+I have three completed works:
+T1: Found where red lines are painted in the margin (`diagnostic severity color`, `line gutter marker`).
+T2: Found where console errors are parsed (`scan shell output for linker errors`, `make diagnostic modal`).
+T3: Asked how diagnostics are sent from console to editor. The result was `diagnostics for editor line`, `rebuild diagnostics by line`, `apply lsp diagnostics to panel`, etc.
+
+The "entre abiertas" section says:
+T1 => T2: `make diagnostic modal` -> `diagnostic severity color` (path exists)
+T1 => T3: same object `diagnostics for editor line`
+T2 => T3: **sin camino** (no path)
+
+The user's claim is that errors appearing in the console *also* get marked in the editor margin.
+T2 found parsing of console errors (`scan shell output for linker errors`).
+T3 looked for the link between console diagnostics and editor painting.
+The result of T3 mentions `apply lsp diagnostics to panel` and `push active file diagnostics from cache`.
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"T2=>T3 sin camino: los diagnósticos de la consola no se envían al editor para pintar el margen; el pack cierra el arco"}

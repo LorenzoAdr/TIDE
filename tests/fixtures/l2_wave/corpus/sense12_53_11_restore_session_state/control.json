@@ -1,0 +1,177 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:close",
+        "src/app/workspace_model.cpp:close_tab",
+        "src/app/workspace_model.cpp:flush_active_tab"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/workspace_model.cpp:open_file",
+        "src/app/workspace_model.cpp:open_file_impl",
+        "src/app/workspace_model.cpp:open_new_tab_from_disk"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se controla la visibilidad de los paneles laterales",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/source_panel.cpp:handle_source_panel_event",
+        "src/ui/focus_manager.cpp:secondary_visible",
+        "src/ui/main_layout.cpp:OnEvent",
+        "src/ui/main_layout.cpp:MainLayoutState"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/editor_panel.cpp:close",
+          "src/app/workspace_model.cpp:close_tab",
+          "src/app/workspace_model.cpp:flush_active_tab"
+        ],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se controla la visibilidad de los paneles laterales",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay un mecanismo común que restaura el estado del editor al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar cursor, archivos y paneles; son tres estados distintos que pueden tener mecanismos de guardado/restauración separados o unificados; rompo en tres localizadores para encontrar cada uno y luego ver si hay un puente común"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 afirma el mecanismo de restauración de archivos abiertos, pero la fase en curso es B (restaurar archivos), que ya cerró. Sigo al siguiente paso del plan: C (paneles laterales)."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "control: do no legal ahora (no_pasar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T3 leyó la lógica de visibilidad (handle source panel event, secondary visible) pero no encontró el mecanismo de restauración al abrir el proyecto; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de restauración de archivos (restore workspace session) se confirma, pero no se halló persistencia para la posición del cursor ni para la visibilidad de paneles; el estado se pierde al cerrar"
+    }
+  ],
+  "why": "el mecanismo de restauración de archivos (restore workspace session) se confirma, pero no se halló persistencia para la posición del cursor ni para la visibilidad de paneles; el estado se pierde al cerrar",
+  "zooms": []
+}

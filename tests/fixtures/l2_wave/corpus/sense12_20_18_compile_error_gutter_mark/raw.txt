@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el claim se refuta: T2 y T3 confirman que no existe mecanismo para extraer o parsear errores de la consola hacia diagnósticos del editor; T1 confirma que la línea roja depende de dichos diagnósticos. Al no haber puente, el fenómeno no ocurre."}

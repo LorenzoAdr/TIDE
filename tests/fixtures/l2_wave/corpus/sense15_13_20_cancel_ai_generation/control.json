@@ -1,0 +1,122 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la generación",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/console_panel.cpp:handle_ai_console_keys",
+          "src/ui/console_panel.cpp:handle_console_panel_mouse",
+          "src/ai/ai_controller.cpp:clear_pending_insert",
+          "src/ai/ai_controller.cpp:cancel_current"
+        ],
+        "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la generación",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino capturar el Escape y limpiar el archivo al cancelar",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: capturar el gesto (Escape/clic) y el efecto (limpiar archivo). M2 huele el escape, M8 huele la cancelación, M7 huele el editor. Parto en capturar el disparo y ejecutar la limpieza para luego unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el polo de captura de Escape está confirmado (handle ai console keys -> cancel current). el polo de limpieza del archivo no tiene objeto en el pack (T2 vacío), pero el circuito de T1 ya lee clear pending insert y cancel current, que cubren la intención de cancelar sin dejar inserciones pendientes. el claim se confirma con el mecanismo de cancelación y limpieza de inserción pendiente ya visto; no hay otro barrio que añadir."
+    }
+  ],
+  "why": "el polo de captura de Escape está confirmado (handle ai console keys -> cancel current). el polo de limpieza del archivo no tiene objeto en el pack (T2 vacío), pero el circuito de T1 ya lee clear pending insert y cancel current, que cubren la intención de cancelar sin dejar inserciones pendientes. el claim se confirma con el mecanismo de cancelación y limpieza de inserción pendiente ya visto; no hay otro barrio que añadir.",
+  "zooms": []
+}

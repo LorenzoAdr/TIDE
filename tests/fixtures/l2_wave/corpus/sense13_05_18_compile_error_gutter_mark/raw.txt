@@ -1,0 +1,20 @@
+The user wants to mark compilation errors from the console with a red line in the editor's left margin.
+I have three completed jobs:
+1.  **T1**: Looked for detection of compilation errors in console output. Result: `console panel` only does text filtering/rendering, no parsing of compiler errors.
+2.  **T2**: Looked for parsing of compilation errors from console text. Result: Empty/No object found.
+3.  **T3**: Looked for marking errors with a red line in the editor margin. Result: `visual highlight` only does code folding, no gutter rendering for errors.
+
+The "control_opened_v1" shows no paths between T1, T2, and T3.
+The "examen" section confirms the negative results.
+T1 says `console panel` doesn't parse errors.
+T2 says there's no object for parsing errors.
+T3 says `visual highlight` doesn't render gutter errors.
+
+The user's request implies a feature that might not exist or is implemented elsewhere (e.g., via a language server protocol, or a specific plugin not in the current pack, or simply not implemented).
+The pack (M1-M12
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no contiene el mecanismo: la consola no parsea errores de compilación y el editor no renderiza líneas rojas en el margen para diagnósticos; la funcionalidad no existe en el código leído"
+}

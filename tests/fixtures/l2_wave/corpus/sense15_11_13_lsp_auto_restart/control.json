@@ -1,0 +1,197 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_lsp_notification",
+        "src/lsp/lsp_client.cpp:spawn_language_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se programa el reinicio del servidor LSP cuando se detecta que falta o no responde",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/lsp/lsp_client.cpp:on_lsp_notification"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/lsp_transport.cpp:wait_response",
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se programa el reinicio automático del servidor LSP tras la detección",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino la detección de caída y el reinicio automático",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp symbol provider"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el reinicio (restart lsp for workspace), pero falta el disparador de la caída. M2/M4 son el proveedor de símbolos LSP, posible cliente que detecta la desconexión."
+    },
+    {
+      "consulta": "dónde se programa el reinicio del servidor LSP cuando se detecta que falta o no responde",
+      "consultas": [
+        "dónde se programa el reinicio del servidor LSP cuando se detecta que falta o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio diferido"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "M5 tiene schedule debounced lsp restart; busco el disparador de ese reinicio"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 leyeron el mismo objeto (on lsp notification) pero no confirmaron el flujo completo de detección a reinicio. Rompo en dos localizadores para asegurar que la detección (A) y el reinicio (B) existen y están conectados (P)."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "control: do no legal ahora (no_pasar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T3 cerró la detección (transport reader eof, wait response), pero no el reinicio automático. Paso a la siguiente caza del plan: B locator (reinicio)."
+    },
+    {
+      "consulta": "dónde se programa el reinicio automático del servidor LSP tras detectar el cierre de transporte o el timeout",
+      "consultas": [
+        "dónde se programa el reinicio automático del servidor LSP tras detectar el cierre de transporte o el timeout"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "restart lsp"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "T3 confirmó la detección (eof/timeout). Ahora necesito ver si esa detección dispara el reinicio automático o si queda a mano del usuario."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "control: do no legal ahora (pasar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T3 confirma la detección de caída (transport reader eof) y falta de respuesta (wait response timeout). T2 confirma el reinicio (restart lsp for workspace). El pack une T1=>T2 y T2=>T3. El siguiente tiro es el puente P."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "la aplicación detecta la caída del LSP mediante el cierre del socket (transport reader eof) y la falta de respuesta mediante un timeout en la espera (wait response); tras la detección, se programa el reinicio automático del servidor (restart lsp for workspace) sin intervención del usuario"
+    }
+  ],
+  "why": "la aplicación detecta la caída del LSP mediante el cierre del socket (transport reader eof) y la falta de respuesta mediante un timeout en la espera (wait response); tras la detección, se programa el reinicio automático del servidor (restart lsp for workspace) sin intervención del usuario",
+  "zooms": []
+}

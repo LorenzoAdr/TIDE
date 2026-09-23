@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de detección y reinicio automático está confirmado: el sistema monitorea la vida del proceso (process alive) y, al detectar su caída, invoca el reinicio diferido (schedule debounced lsp restart) sin intervención del usuario"
+}

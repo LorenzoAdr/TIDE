@@ -1,0 +1,10 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3).
+T1 looked for detection and restart trigger. Read: `restart lsp for workspace`, `set background paused`, `spawn language server`.
+T2 looked for the scheduled restart mechanism. Read: `schedule debounced lsp restart`, `restart lsp for workspace`, `run`. Found the mechanism for scheduling a debounced restart (2s deadline, latch). Noted that the trigger for a crash wasn't in the read code (callers were config changes), but the scheduling mechanism is complete.
+T3 looked for detection and restart trigger again (similar to T1). Read: `on transport reader eof`, `reader loop`, `start`, `schedule debounced lsp restart`, `notify lsp status`.
+
+The "Cerrado" for T3 says: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo. Si el ancla pedía más, un objeto distinto del pack; no el mismo claim en otro keep; no ref
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio diferido está presente (schedule debounced lsp restart con deadline y latch), pero el disparo automático ante caída o falta de respuesta no se encuentra en los lectores visibles (los callers son cambios de configuración o apertura de workspace). el pack no une la detección de fallo con el reinicio; el ancla pide detección automática y reinicio sin intervención, y ese arco no se confirma."}

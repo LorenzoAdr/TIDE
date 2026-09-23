@@ -1,0 +1,14 @@
+The user wants to restore the cursor position, open files, and sidebar panel visibility when reopening a project.
+I have a plan with 3 phases:
+1. Cursor position (T1) - Failed/Closed (read `editor state cpp`, `recent projects cpp`, but "no era el disparo").
+2. Open files list (T2) - Closed (no object found).
+3. Sidebar visibility (T3) - Failed/Closed (read `editor state cpp`, `recent projects cpp`, but "no era el disparo").
+
+The plan is essentially broken or exhausted based on the current "Cerrado" status of the phases.
+T1 and T3 read `editor state cpp` and `recent projects cpp` but didn't find the trigger/mechanism.
+T2 found nothing.
+
+The "Cerrado" messages for T1 and T3 say "Lo leído no era el disparo" (What was read wasn't the trigger). This implies the mechanism exists but wasn't in those files, or the files were the wrong ones for the *trigger* (saving/restoring logic).
+However, the instructions say: "Si el Cerrado niega el enlace o el disparo,
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo de restauración de sesión (archivos, paneles, cursor) al abrir un proyecto; las fichas leídas (editor state, recent projects) no contienen el disparo ni el efecto de restauración"}

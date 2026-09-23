@@ -1,0 +1,7 @@
+The user wants to restore the editor state (cursor position, open files, side panels) when reopening a project.
+I have three completed tasks:
+1.  **Cursor position**: Found mechanism `open file at confirmed` -> `open file at impl` -> `reset to single cursor`.
+2.  **Open files**: Found mechanism `restore workspace session` -> `workspace open file path`.
+3.  **Side panels**: The closed report for T3 says "leído: restore workspace session, open file, Ai Controller". It doesn't explicitly state a mechanism for restoring panels, but it mentions `restore
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"T1 y T2 confirman la restauración de cursor y archivos. T3 no halló mecanismo para paneles laterales, refutando esa parte del claim. El claim se cierra parcialmente: cursor y archivos se restauran, paneles no."}

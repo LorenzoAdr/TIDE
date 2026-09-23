@@ -1,0 +1,15 @@
+The user wants to know if the IDE remembers the cursor position, open files, and sidebar panel visibility when reopening a project.
+I have a plan with 3 phases:
+1. Cursor position (T1) -> Closed: "seek, load working lines from disk". This seems to confirm the mechanism for cursor position (seek/load lines).
+2. Open files (T2) -> Closed: Found mechanism "save workspace session" / "restore workspace session". Confirmed.
+3. Sidebar visibility (T3) -> Closed: "no encontré la persistencia de la visibilidad de los paneles laterales; lo leído Workspace Session solo serializa pestañas abiertas... sin ningún campo para el estado de los paneles visible oculto".
+
+The last Closed (T3) explicitly states that the mechanism for sidebar visibility was *not* found in the inspected object (Workspace Session). It says "ESA pregunta no se relanza... do=cerrar ese mapeo".
+The instructions say: "Si el último Cerrado negó el mapeo. Cierra ESE mapeo (hueco o sin camino), no selles un polo que sí se leyó."
+Also: "Si Cerrado dice que no
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el ancla pedía tres cosas: cursor (T1 leído), archivos (T2 leído) y paneles (T3 no leído). T3 cerró el mapeo de paneles en workspace session; no hay mecanismo de persistencia para la visibilidad de paneles en el pack. el claim se refuta parcialmente: cursor y archivos sí, paneles no."
+}

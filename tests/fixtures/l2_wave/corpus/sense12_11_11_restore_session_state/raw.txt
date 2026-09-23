@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el claim se refuta: T2 confirma que la restauración del cursor es un reset a 0,0 (o posición por defecto) al cargar el buffer, sin mecanismo de persistencia de la posición anterior detectado en el flujo de apertura. El ancla pedía recordar la posición exacta; el código leído la pierde."}

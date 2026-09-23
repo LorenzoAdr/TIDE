@@ -1,0 +1,17 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found where margin markers are drawn: `line gutter marker` delegates to `line diagnostic marker from map` and `git line changed`, rendered in `Make Editor Panel`.
+T2 looked for where compilation errors from the console are read to mark the editor. It found two independent systems: LSP fills diagnostics via cache (not console), and the console parses locations for navigation (click to open) but doesn't write to the editor's diagnostic state.
+T3 looked for where console compilation errors are parsed to extract location. It found no object (empty).
+
+The pack shows T1 and T2 share `line diagnostic marker from map`. T2 explicitly states the console parsing is for navigation, not for writing to the editor's diagnostic state. T3 confirms no parsing object exists for this purpose (or at least, the specific mapping wasn't found).
+
+The claim is: "I want compilation errors appearing in the bottom console to also be marked with a red line in the left margin...".
+The investigation shows:
+1. The margin markers come from `line diagnostic marker from map`
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el sistema actual no une la consola con el margen: la consola parsea solo para navegación y el margen lee de LSP; no hay mecanismo que escriba errores de consola en el estado de diagnósticos del editor"
+}

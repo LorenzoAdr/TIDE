@@ -1,0 +1,16 @@
+The user wants to restore the cursor position, open files, and sidebar state when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A: save cursor pos on close
+2. [en_curso] B: restore cursor pos on open
+3. [pendiente] C: save/restore open files
+4. [pendiente] D: save/restore sidebar state
+
+Work 1 (T1) asked about saving/restoring cursor and files. Result: `save state`, `serialize ai settings`, `serialize ui colors`.
+Work 2 (T2) asked about saving cursor pos on close. Result: `close` cleans UI, `set pos` is in-memory. No persistence found.
+Work 3 (T3) asked about restoring cursor pos on open. Result: `restore workspace session`, `open file`.
+
+The last Closed (T3) says: "leído: restore workspace session, open file".
+The prompt says: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo."
+This implies T3 didn't find the specific mechanism for *cursor
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"T3 no encontró el mecanismo de restauración del cursor; restore workspace session y open file no restauran la posición del cursor"}

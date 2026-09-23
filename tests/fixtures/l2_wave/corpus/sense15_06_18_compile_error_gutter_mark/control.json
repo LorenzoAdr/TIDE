@@ -1,0 +1,154 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pintan las marcas en el margen izquierdo del editor",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:handle_git_gutter_click",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/editor/visual_highlight.cpp:build_git_marks_snapshot"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la consola inferior",
+      "keep": [
+        "M9",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/diagnostics_panel.cpp:MakeDiagnosticsPanel",
+        "src/ui/diagnostics_panel.cpp:build_rows",
+        "src/symbols/symbol_provider.hpp:supports_diagnostics"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se pintan las marcas en el margen izquierdo del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación de la consola inferior",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino parsear el error y pintar la marca en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "línea roja margen",
+        "error compilación",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "necesito ver si el pack tiene fichas sobre el dibujo de errores en el editor y la lectura de la consola"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M11",
+        "M3"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M11 huele a escaneo de errores de compilación; M3 huele a resaltado visual (visual highlight). Necesito ver si M11 tiene el mecanismo de parseo y M3 el de dibujo en el margen."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla une dos fenómenos distintos: la fuente del error (consola) y el efecto visual (margen). necesito localizar ambos polos por separado para luego verificar si existe un arco que los una o si hay que construirlo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "lo leído son marcas de git y clics; no es el mecanismo para pintar errores de compilación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack no nombra el mecanismo de parsing de errores de compilación desde la consola inferior ni el puente hacia el margen del editor; el panel de diagnósticos consume exclusivamente LSP, y las búsquedas de parsing de texto plano retornaron 0 hits. sin camino entre polos leídos cierra el ancla."
+    }
+  ],
+  "why": "el pack no nombra el mecanismo de parsing de errores de compilación desde la consola inferior ni el puente hacia el margen del editor; el panel de diagnósticos consume exclusivamente LSP, y las búsquedas de parsing de texto plano retornaron 0 hits. sin camino entre polos leídos cierra el ancla.",
+  "zooms": []
+}

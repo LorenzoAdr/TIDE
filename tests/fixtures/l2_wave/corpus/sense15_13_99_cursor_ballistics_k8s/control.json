@@ -1,0 +1,68 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 2,
+  "cerró": true,
+  "circuit": false,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [],
+  "jobs_run": 0,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor",
+        "parpadeo",
+        "kubernetes",
+        "índice vectorial"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla describe un mecanismo muy específico (trayectoria balística, parpadeo, kubernetes, índice cuántico) que no aparece explícitamente en los stems del pack; necesito ver si hay barrios que traten con movimiento de cursor, detección de eventos de usuario o sincronización externa antes de lanzar una caza concreta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor",
+        "parpadeo",
+        "kubernetes",
+        "índice vectorial"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla menciona conceptos muy específicos (trayectoria balística, kubernetes, parpadeo, índice cuántico) que no aparecen en el atlas; necesito ver si hay algún barrio que huela a estos conceptos o si es una consulta sobre funcionalidad inexistente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack no nombra ni trayectoria balística, ni sincronización con kubernetes, ni índice vectorial cuántico; el ancla describe un mecanismo que no existe en el código leído"
+    }
+  ],
+  "why": "el pack no nombra ni trayectoria balística, ni sincronización con kubernetes, ni índice vectorial cuántico; el ancla describe un mecanismo que no existe en el código leído",
+  "zooms": []
+}

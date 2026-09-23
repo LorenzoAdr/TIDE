@@ -1,0 +1,133 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ui/settings_modal.cpp:handle_ai_download_confirm_keys"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se detiene la inserción de código al cancelar la generación",
+      "keep": [
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:run_insert_async",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el buffer del editor o se detiene la escritura en el archivo al cancelar la generación",
+      "keep": [
+        "M3",
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide cancelar limpiamente; necesito ver el disparo (Escape/clic) y el efecto (limpieza/detención) para unirlos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 falló en M7; M2 (ai trace) tiene port a M3 (level2 session) y peek 'ai trace escape'; es el barrio del trigger"
+    },
+    {
+      "consulta": "dónde se limpia el buffer del editor o se detiene la escritura en el archivo al cancelar la generación",
+      "consultas": [
+        "dónde se limpia el buffer del editor o se detiene la escritura en el archivo al cancelar la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "on editor buffer"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 no halló el efecto en el nivel de control; el Abierto apunta a que el efecto del cancel del agente sobre el buffer del editor es el siguiente tiro"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "la cancelación se gestiona mediante cancel level1 y flags internos, pero no se limpia el buffer del editor ni se detiene la escritura en el archivo; el mecanismo de limpieza no existe"
+    }
+  ],
+  "why": "la cancelación se gestiona mediante cancel level1 y flags internos, pero no se limpia el buffer del editor ni se detiene la escritura en el archivo; el mecanismo de limpieza no existe",
+  "zooms": []
+}

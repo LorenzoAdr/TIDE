@@ -1,0 +1,123 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia el reinicio del servidor LSP tras detectar que falta o ha caído",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:apply_workspace_settings",
+        "src/app/application.cpp:setup_build_environment_watching"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o no responde y se dispara la acción de reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el punto de anclaje para la detección y acción automática. Necesito ver el trigger de esa detección."
+    },
+    {
+      "consulta": "dónde se inicia el reinicio del servidor LSP tras detectar que falta o ha caído",
+      "consultas": [
+        "dónde se inicia el reinicio del servidor LSP tras detectar que falta o ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "instalación"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "la caza anterior no halló el detector de caída, pero el pack une 'restart' con 'on lsp missing install'; busco el disparador en ese barrio"
+    },
+    {
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o no responde y se dispara la acción de reinicio",
+      "consultas": [
+        "dónde se detecta que el proceso LSP ha muerto o no responde y se dispara la acción de reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "las cazas anteriores fallaron buscando el disparo directo; el pack señala 'on lsp missing install' como el evento que podría contener la lógica de detección de fallo y posterior reinicio. Necesito ver si este handler existe y qué hace."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "las tres cazas confirmaron que no existe un mecanismo de detección automática de caída o no-respuesta del LSP. Se leyeron funciones de reinicio manual o tras instalación, pero ningún watchdog, heartbeat o detector de proceso muerto. El claim se refuta: la aplicación no detecta ni reinicia automáticamente ante una caída."
+    }
+  ],
+  "why": "las tres cazas confirmaron que no existe un mecanismo de detección automática de caída o no-respuesta del LSP. Se leyeron funciones de reinicio manual o tras instalación, pero ningún watchdog, heartbeat o detector de proceso muerto. El claim se refuta: la aplicación no detecta ni reinicia automáticamente ante una caída.",
+  "zooms": []
+}

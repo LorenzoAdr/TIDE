@@ -1,0 +1,137 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "keep": [
+        "M3",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/diagnostics.cpp:count_workspace_diagnostics",
+        "src/ai/l2_problem_frame.cpp:std"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se escanea la salida del compilador para extraer errores",
+      "keep": [
+        "M11",
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/diagnostics_panel.cpp:build_rows",
+        "src/ui/diagnostics_panel.cpp:format_problem_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "keep": [
+        "M8",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico error",
+        "escaneo consola"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con marcas visuales en el editor; busco barrios de decoración y diagnóstico"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "necesito localizar el origen (detección) y el destino (dibujo) para ver si están conectados o si falta el puente"
+    },
+    {
+      "consulta": "dónde se escanea la salida del compilador para extraer errores",
+      "consultas": [
+        "dónde se escanea la salida del compilador para extraer errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "binary symbols panel"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "la fase A falló en el barrio de LSP; M11 huele a escaneo de errores en shell; cambio de barrio para encontrar el parser"
+    },
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 encontró el escaneo (build rows, format problem line). Ahora necesito el efecto visual (la línea roja) para conectar ambos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack muestra sin camino entre el escaneo de salida del compilador y el dibujo de la línea roja en el margen; el mecanismo que une la consola con las decoraciones del editor no está en el atlas ni en los trabajos leídos"
+    }
+  ],
+  "why": "el pack muestra sin camino entre el escaneo de salida del compilador y el dibujo de la línea roja en el margen; el mecanismo que une la consola con las decoraciones del editor no está en el atlas ni en los trabajos leídos",
+  "zooms": []
+}

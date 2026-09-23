@@ -1,0 +1,15 @@
+The user wants to find:
+1. The module calculating ballistic trajectory of editor cursors for real-time sync with a Kubernetes cluster when the user blinks.
+2. Where this physics is persisted in the quantum vector index of the workspace.
+
+The previous work (T1) asked: "dónde se calcula la trayectoria balística de los cursores del editor" (where is the ballistic trajectory of editor cursors calculated).
+The result of T1: "no encontré cálculo de trayectoria balística; lo leído son ajustes de scroll y clamping de coordenadas en folds, sin física ni interpolación" (didn't find ballistic trajectory calculation; read scroll adjustments and coordinate clamping in folds, no physics or interpolation).
+The system says: "Esta pregunta ya tiene respuesta (no hay objeto). No la relances ni en otro keep. Cierra ESE mapeo, o un objeto distinto del pack (un extra del Abierto); no el mismo claim en otro keep; no refutes el claim entero."
+
+The anchor claim is about "trayectoria balística de los cursores" (ballistic trajectory of cursors) and "sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parp
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el pack no nombra cálculo de trayectoria balística ni persistencia en índice vectorial; T1 cerró sin objeto. refuto el claim: no hay módulo de física de cursores ni sincronización con kubernetes al parpadear."
+}

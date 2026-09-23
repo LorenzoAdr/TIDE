@@ -1,0 +1,21 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found how the red line is painted (it's a character in the gutter based on diagnostics).
+T2 found nothing about extracting errors from the console to fill the diagnostics map.
+T3 found `scan shell output for linker errors` but it's not the trigger for the user's request (it's for linker errors in a specific panel, likely not the general compilation errors the user sees in the console).
+
+The user's request implies a feature that doesn't exist or isn't connected: "errors in the console" -> "red line in editor".
+T1 shows the editor *can* show red lines if there are diagnostics.
+T2 shows there is no mechanism extracting console errors to diagnostics.
+T3 shows a specific scanner for linker errors, but not a general one for compilation errors in the console.
+
+The "ancla" (claim) is: "I want compilation errors in the console to also be marked with a red line in the editor".
+This is a feature request or a request to enable a missing link.
+The investigation shows:
+1. The
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el editor pinta la línea roja si hay diagnostics (T1), pero no existe mecanismo que extraiga errores de la consola para generarlos (T2 vacío, T3 específico de linker). el ancla pide una conexión que no existe."
+}

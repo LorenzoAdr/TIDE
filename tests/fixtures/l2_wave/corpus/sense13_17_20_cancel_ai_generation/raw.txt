@@ -1,0 +1,21 @@
+The user wants to know how to cleanly cancel AI code generation when pressing Escape or clicking outside, specifically ensuring the file isn't left half-written.
+
+I have three completed jobs:
+1.  **T1**: Found where Escape/click outside is captured (`handle ai console keys`, `handle console panel mouse`) and how it triggers cancellation (`clear pending insert`, `cancel current`).
+2.  **T2**: Looked for where the file is cleaned up upon cancellation. Found state flags (`agent cancel`, `pending insert`) but *no* file I/O operations on the editor buffer.
+3.  **T3**: Looked for where the editor buffer is cleaned or partial insertion undone. Result: "no object found".
+
+The "between open" section shows:
+- T1 -> T2: `clear pending insert` is the same object.
+- T1 -> T2: `handle ai console keys` -> `handle user input` -> `handle route` -> `cancel current` -> `cancel all`.
+- T1 -> T3: no path.
+- T2 -> T3: no path.
+
+The user's claim has two parts:
+1.  Cancel generation (Escape/click outside
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "la captura de Escape y clic fuera se confirma en handle ai console keys y handle console panel mouse, que invocan clear pending insert y cancel current; sin embargo, no existe mecanismo de limpieza del archivo a medias ni deshacer de inserción parcial en el buffer del editor al cancelar, por lo que el claim de limpieza limpia no se cumple"
+}

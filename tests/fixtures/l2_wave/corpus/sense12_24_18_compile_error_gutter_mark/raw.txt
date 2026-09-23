@@ -1,0 +1,9 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se leen los errores de compilación de la consola inferior
+2. [en_curso] B locator: dónde se dibuja la línea roja en el margen izquierdo del editor
+3. [pendiente] P puente: hay camino leer los errores de la consola y dibujar la línea roja en el margen (need A B)
+
+T1 (Phase A) asked: "dónde se
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo del ancla; no hay objeto"}

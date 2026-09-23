@@ -1,0 +1,13 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have already performed 3 explorations:
+1.  **T1**: Looked for detection of LSP crash/unresponsiveness to trigger restart. Found `restart lsp for workspace`, `schedule debounced lsp restart`, `on lsp missing install`.
+2.  **T2**: Same query, same keep (M5). Confirmed T1 findings, explicitly stated that the *detection* logic for crash/timeout was not found, only the restart effects and missing install trigger.
+3.  **T3**: Looked for monitoring the LSP process state. Result: "no hay objeto" (empty).
+
+Current state:
+-   I know how the restart is triggered (`restart lsp for workspace`, `schedule debounced lsp restart`).
+-   I know there is a trigger for missing installation (`on lsp missing install`).
+-   I *don't* know if there is a mechanism to detect a crash or unresponsiveness (timeout, exit code, etc.) currently in the codebase. T3 explicitly said "no hay objeto" for monitoring state.
+-   The user's request is "
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack y los trabajos leídos confirman que no existe un mecanismo de detección automática de caída o timeout del LSP; solo hay reinicio manual o por instalación faltante. el claim se refuta: la aplicación no detecta ni reinicia automáticamente ante fallos del servidor"}

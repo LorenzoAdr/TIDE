@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed works:
+1.  **T1**: Looked for Escape/click capture. Found `handle ai download confirm keys` (wrong context: package install). Opened `ai generation cancel`, `ai trace escape`.
+2.  **T2**: Looked for file cleaning/stopping insertion. Found `cancel current`, `clear pending insert`, `cancel all`, `cancel level1`. These seem to clear internal flags (`pending insert`, `agent cancel`) and request cancellation to the agent, but no evidence of cleaning the editor buffer or stopping file writing. Opened `handle route`, `agent cancel effect on editor buffer`, `tasks cancel`.
+3.  **T3**: Looked for editor buffer cleaning/stopping file writing. Found `cancel level1`.
+
+Current state:
+-   T1 failed to find the trigger (Escape/click).
+-   T2 found cancellation logic (`cancel level1`, etc.) but claims it doesn't clean the buffer or stop file writing.
+-   T3 found `cancel level1` again.
+
+The pack shows:
+-   M
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la cancelación se gestiona mediante cancel level1 y flags internos, pero no se limpia el buffer del editor ni se detiene la escritura en el archivo; el mecanismo de limpieza no existe"}

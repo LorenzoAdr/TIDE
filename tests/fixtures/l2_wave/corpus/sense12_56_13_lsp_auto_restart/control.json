@@ -1,0 +1,131 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o deja de responder",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:stop",
+        "src/lsp/lsp_client.cpp:start"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se maneja el evento transport reader eof para conectar la caída del cliente LSP al reinicio automático",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_client.cpp:stop",
+        "src/lsp/lsp_client.cpp:spawn_language_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca schedule debounced lsp restart al detectar que el servidor LSP se ha caído o no responde",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:tick_shutdown"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o deja de responder",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP cuando se cae o deja de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 y M7 tienen lógica de reinicio de LSP; necesito ver cómo se detecta la caída y se dispara el reinicio"
+    },
+    {
+      "consulta": "dónde se maneja el evento transport reader eof para conectar la caída del cliente LSP al reinicio automático",
+      "consultas": [
+        "dónde se maneja el evento transport reader eof para conectar la caída del cliente LSP al reinicio automático"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mecanismo de reinicio pero dejó el disparo desconectado; busco el puente entre la detección de caída y schedule debounced lsp restart"
+    },
+    {
+      "consulta": "dónde se invoca schedule debounced lsp restart al detectar que el servidor LSP se ha caído o no responde",
+      "consultas": [
+        "dónde se invoca schedule debounced lsp restart al detectar que el servidor LSP se ha caído o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "transport reader eof"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 encontraron los extremos (detección de caída y mecanismo de reinicio) pero no el puente. Necesito ver qué código conecta el evento de caída (EOF o timeout) con la función que agenda el reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de reinicio automático ya existe en la aplicación (schedule debounced lsp restart y restart lsp for workspace), pero la detección de caída (transport reader eof) no está conectada directamente al reinicio; se activa por cambios de configuración o instalación faltante, no por fallo del servidor. el pack no muestra un camino entre la detección de caída y el reinicio, y las cazas confirmaron que el disparo actual no es el deseado. se requiere implementar la conexión entre la detección de fallo y el reinicio, no solo encontrar código existente."
+    }
+  ],
+  "why": "el mecanismo de reinicio automático ya existe en la aplicación (schedule debounced lsp restart y restart lsp for workspace), pero la detección de caída (transport reader eof) no está conectada directamente al reinicio; se activa por cambios de configuración o instalación faltante, no por fallo del servidor. el pack no muestra un camino entre la detección de caída y el reinicio, y las cazas confirmaron que el disparo actual no es el deseado. se requiere implementar la conexión entre la detección de fallo y el reinicio, no solo encontrar código existente.",
+  "zooms": []
+}

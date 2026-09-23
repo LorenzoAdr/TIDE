@@ -1,0 +1,155 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia la cancelación de la generación de código cuando el usuario interactúa con la interfaz",
+      "keep": [
+        "M5",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ui/console_panel.cpp:Event",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "cómo se limpia el archivo a medias cuando se cancela la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:busy",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 (ai trace) y M8 (ai controller) son los únicos con 'escape' y 'cancel' en su núcleo. M2 es el punto de entrada probable para el gesto del usuario. Necesito ver si el listener existe y qué llama."
+    },
+    {
+      "consulta": "dónde se invoca la cancelación del agente de IA al recibir un evento de teclado o ratón",
+      "consultas": [
+        "dónde se invoca la cancelación del agente de IA al recibir un evento de teclado o ratón"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "nivel 1"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "la captura directa falló; el pack une M6 (agente) y M8 (controlador) con cancelación. Busco el puente UI->Controlador que dispara ese método, no el handler de tecla en sí."
+    },
+    {
+      "consulta": "dónde se invoca la cancelación del agente de IA al recibir un evento de teclado o ratón",
+      "consultas": [
+        "dónde se invoca la cancelación del agente de IA al recibir un evento de teclado o ratón"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "la captura directa falló; busco el efecto (cancelación) desde el controlador para retroceder al trigger"
+    },
+    {
+      "consulta": "dónde se inicia la cancelación de la generación de código cuando el usuario interactúa con la interfaz",
+      "consultas": [
+        "dónde se inicia la cancelación de la generación de código cuando el usuario interactúa con la interfaz"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "la captura directa falló; busco el punto de entrada lógico de la cancelación desde la UI, no el handler de teclado específico"
+    },
+    {
+      "consulta": "cómo se limpia el archivo a medias cuando se cancela la generación de la IA",
+      "consultas": [
+        "cómo se limpia el archivo a medias cuando se cancela la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 leyó el mecanismo de cancelación (cancel level1/clear pending insert). El ancla exige 'limpiamente sin dejar el archivo a medias'. Hay que cazar el efecto de limpieza en el editor, no el trigger."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el claim se refuta: el sistema cancela la generación (banderas y tareas) pero no existe mecanismo de limpieza del buffer de texto parcial; el archivo queda con lo insertado hasta la cancelación"
+    }
+  ],
+  "why": "el claim se refuta: el sistema cancela la generación (banderas y tareas) pero no existe mecanismo de limpieza del buffer de texto parcial; el archivo queda con lo insertado hasta la cancelación",
+  "zooms": []
+}

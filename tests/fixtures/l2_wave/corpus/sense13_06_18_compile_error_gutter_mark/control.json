@@ -1,0 +1,146 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M7",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:diagnostic_severity_tr",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se procesan los errores de compilación que aparecen en la consola inferior para extraer su línea y mensaje",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:handle_problems_button_click",
+        "src/ui/console_panel.cpp:problems_tab_active_console",
+        "src/ui/main_layout.cpp:console_panel_tab_active"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola inferior",
+      "keep": [
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/diagnostics.cpp",
+        "src/symbols/symbol_provider.hpp"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "margen editor",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "necesito ver si el pack conecta la consola con el margen del editor o si son barrios separados"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack huele M3 y M10 para marcas visuales; busco el mecanismo de línea roja"
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación que aparecen en la consola inferior para extraer su línea y mensaje",
+      "consultas": [
+        "dónde se procesan los errores de compilación que aparecen en la consola inferior para extraer su línea y mensaje"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró cómo se pinta el margen, pero falta el origen: cómo se capturan y estructuran los errores de la consola para alimentar ese sistema de diagnósticos."
+    },
+    {
+      "consulta": "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola inferior",
+      "consultas": [
+        "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola inferior"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parseo"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 no encontró el disparo; necesito el mecanismo que lee la consola y crea los diagnostics para que el gutter los pinte"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el margen se marca mediante line diagnostic marker from map que consulta diagnostics for editor line; el mecanismo de extracción de la consola no se halló"
+    }
+  ],
+  "why": "el margen se marca mediante line diagnostic marker from map que consulta diagnostics for editor line; el mecanismo de extracción de la consola no se halló",
+  "zooms": []
+}

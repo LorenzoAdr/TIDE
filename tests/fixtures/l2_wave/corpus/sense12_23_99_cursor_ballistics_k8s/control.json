@@ -1,0 +1,63 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/editor/editor_render.cpp:caret_column_in_body",
+        "src/editor/editor_render.cpp:caret_visual_in_view",
+        "src/ui/editor_panel.cpp:ensure_virtual_caret_visible"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real",
+      "consultas": [
+        "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el usuario pide la física de los cursores; el pack huele editor panel y workspace model"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado de T1 niega el objeto: no hay cálculo de trayectoria balística ni sincronización remota en el editor local; lo leído son funciones de renderizado visual y ajuste de scroll. El pack no sugiere otros barrios para este mecanismo específico."
+    }
+  ],
+  "why": "el Cerrado de T1 niega el objeto: no hay cálculo de trayectoria balística ni sincronización remota en el editor local; lo leído son funciones de renderizado visual y ajuste de scroll. El pack no sugiere otros barrios para este mecanismo específico.",
+  "zooms": []
+}

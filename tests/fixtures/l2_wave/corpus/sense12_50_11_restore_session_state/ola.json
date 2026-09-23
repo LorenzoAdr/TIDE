@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "la sesión de trabajo restaura los archivos abiertos y la visibilidad de los paneles laterales al cargar el espacio de trabajo; la posición del cursor se lee al abrir el archivo pero no se confirma su restauración automática"
+}

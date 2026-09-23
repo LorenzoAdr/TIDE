@@ -1,0 +1,110 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape en el trace; necesito el punto de entrada que decide abortar la generación"
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el hijo anterior falló por ruido (escape de strings); el pack muestra M2 y M8 como barrios de control. Necesito confirmar si existe un listener de UI para Escape/clic que dispare la cancelación, o si el claim se refuta por falta de mecanismo."
+    },
+    {
+      "consulta": "dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "la caza anterior falló por ruido (escape de strings); el pack muestra cancel level1 en ai controller; busco el trigger real de UI"
+    },
+    {
+      "consulta": "dónde se captura el evento de clic fuera del panel de edición para abortar la operación en curso",
+      "consultas": [
+        "dónde se captura el evento de clic fuera del panel de edición para abortar la operación en curso"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide dos disparadores; el teclado falló. el clic fuera es el otro polo. si no hay objeto, el claim se refuta por falta de soporte UI"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 5,
+      "why": "la caza anterior refutó la existencia de la interceptación de Escape o clic fuera para cancelar la IA; el mecanismo leído solo responde a comandos de texto. No hay objeto que conectar, por lo que el claim de que 'pulsa Escape o hace clic fuera... se cancele' se refuta: esa vía no existe en el código actual."
+    }
+  ],
+  "why": "la caza anterior refutó la existencia de la interceptación de Escape o clic fuera para cancelar la IA; el mecanismo leído solo responde a comandos de texto. No hay objeto que conectar, por lo que el claim de que 'pulsa Escape o hace clic fuera... se cancele' se refuta: esa vía no existe en el código actual.",
+  "zooms": []
+}

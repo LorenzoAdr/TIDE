@@ -1,0 +1,23 @@
+The user wants to cancel AI code generation by pressing Escape or clicking outside, and wants the file to be cleaned up (not left half-written).
+
+I have two completed tasks:
+1.  **Task 1 (Locator A):** Looked for Escape/click capture. Result: Not found. Cancellation is currently text-based ("cancel").
+2.  **Task 2 (Locator B):** Looked for file cleanup on cancel. Result: Not found. `clear pending insert` only resets flags, doesn't revert text edits.
+
+The plan was:
+1.  A: Capture Escape/click.
+2.  B: Clean file on cancel.
+3.  P: Bridge A and B.
+
+Both A and B failed to find the specific mechanisms requested (Escape capture, file cleanup).
+The "Cerrado" for T2 explicitly says: "no encontré el mecanismo que limpia el archivo a medias... clear pending insert solo resetea banderas... sin invocar ninguna operación de edición de texto borrado".
+
+The user's claim is: "quiero que se cancele la generación limpiamente sin dejar el archivo a medias".
+The investigation shows:
+1.  There is no Escape/click
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no nombra el mecanismo de captura de Escape ni de limpieza de texto; las cazas confirman que no existe el objeto buscado (solo cancelación por texto y reset de banderas sin revertir buffer)"
+}

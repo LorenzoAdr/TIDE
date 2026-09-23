@@ -1,0 +1,15 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1 (Detection):** Found that the server is considered crashed when the output pipe closes (EOF). This happens in `reader thread` -> `wait fd readable` -> `reader eof handler` -> `transport reader eof`. This function marks `ready false` and cleans the PID.
+2.  **T2 (Restart after crash):** Looked for automatic restart *after* the crash detection (specifically looking at `transport reader eof` calling `start` or `spawn`). Found that `transport reader eof` *only* cleans state (`ready false`, `waitpid`) and does *not* invoke `start` or `spawn language server`. The restart does not happen immediately in the client after EOF detection.
+3.  **T3 (Deferred Restart):** Looked for a deferred restart mechanism. Found `schedule debounced lsp restart` which programs `pending lsp restart`, and `process build environment updates` which evaluates and triggers `restart lsp for workspace`.
+
+Analysis:
+-   **Detection:** Confirmed. The app detects the crash via EOF
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "la aplicación detecta la caída del servidor LSP cuando el pipe de salida cierra (EOF), pero no lo reinicia automáticamente tras ese evento; el mecanismo de reinicio diferido solo se activa por cambios en el entorno de compilación, no por la caída del proceso."
+}

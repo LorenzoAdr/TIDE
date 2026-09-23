@@ -1,0 +1,11 @@
+The user wants to restore the cursor position, open files, and side panel visibility when reopening a project.
+I have three completed jobs:
+1.  **Cursor position**: T1 closed with "load, remember" but the prompt says "ESA pregunta no se relanza. Lo leído no era el disparo." This implies T1 didn't find the specific mechanism or the mechanism found wasn't the trigger. Wait, looking at T1's closed text: "ESA pregunta no se relanza. Lo leído no era el disparo... leído: load, remember". This suggests T1 failed to find the specific mechanism for cursor position restoration, or at least didn't confirm it.
+2.  **Open files**: T2 found the mechanism: `save` serializes open tabs to `.tuide session.json`, `load` reads them back. Triggers: `begin shutdown` (save), `process pending workspace load` (load).
+3.  **Side panels**: T3 closed with "no hay objeto". This means there is no mechanism to save/restore side panel visibility.
+
+The anchor has three parts:
+1.  Cursor position (T1: failed/unclear)
+2.  Open files (T2
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la restauración de archivos abiertos se confirma (save/load en .tuide session.json), pero la posición del cursor no se halló (T1 falló) y la visibilidad de paneles laterales no existe (T3 vacío); el claim se refuta parcialmente"}

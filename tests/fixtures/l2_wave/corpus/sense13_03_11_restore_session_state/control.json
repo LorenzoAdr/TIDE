@@ -1,0 +1,126 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado de la sesión al abrir un proyecto",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:save",
+        "src/app/recent_projects.cpp:config_path"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:open_file_confirmed",
+        "src/app/workspace_model.cpp:open_file_impl",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos y las pestañas al cargar la sesión del workspace",
+      "keep": [
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 3,
+      "visto": [
+        "src/app/workspace_session.cpp:load"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado de la sesión al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado de la sesión al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 owns editor state y tiene CursorPos; es el barrio más probable para la persistencia de archivos, cursor y paneles"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un archivo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restore workspace session"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el mecanismo de sesión pero no el disparo específico; busco el cursor dentro de ese flujo"
+    },
+    {
+      "consulta": "dónde se restauran los archivos abiertos y las pestañas al cargar la sesión del workspace",
+      "consultas": [
+        "dónde se restauran los archivos abiertos y las pestañas al cargar la sesión del workspace"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restore workspace session"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 encontró la sesión; T2 el cursor. Falta confirmar la restauración de los archivos abiertos (polo 2 del ancla). El pack une T1 con flush active tab."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 confirma la posición del cursor (open file at impl -> buffer reset to single cursor). T3 confirma los archivos abiertos (load -> session open tabs). T1 confirma la restauración general de la sesión (restore workspace session) que incluye el estado de los paneles laterales (layout)."
+    }
+  ],
+  "why": "T2 confirma la posición del cursor (open file at impl -> buffer reset to single cursor). T3 confirma los archivos abiertos (load -> session open tabs). T1 confirma la restauración general de la sesión (restore workspace session) que incluye el estado de los paneles laterales (layout).",
+  "zooms": []
+}

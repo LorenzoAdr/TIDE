@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no tiene mecanismo que parsee errores de compilación de la consola para marcar el margen; T1 cerró sin objeto y T2 solo localizó el dibujo del gutter. sin camino entre polos leídos cierra el ancla"
+}

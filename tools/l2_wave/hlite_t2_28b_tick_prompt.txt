@@ -1,0 +1,7 @@
+# Tick R_cerca_v2 — canal fijo + cerca ≤1/job
+
+Sentinel: `AGENT_LOOP_WAKE_cerca_v2`
+
+1. `.tuide/ai/l2_wave/v2_night/TOOL_EVAL/R_cerca_v2/DONE` → lee `R_cerca_v2_SUMMARY.json`.
+2. Compara vs R0 (ok_gold 0.80, wall 980s) y R5_cerca (ok_gold 1.0, wall 1887s).
+3. Keep si og≥0.95 y wall≤1.3× R0 (~1274s), o anota tradeoff.

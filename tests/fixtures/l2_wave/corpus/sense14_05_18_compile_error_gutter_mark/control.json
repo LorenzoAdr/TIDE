@@ -1,0 +1,153 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M2",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/editor/editor_render.cpp:RenderEditorLine",
+        "src/editor/editor_render.cpp:render_rich_line",
+        "src/editor/editor_render.cpp:apply_decoration",
+        "src/editor/editor_render.cpp:decoration_at"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se definen los tipos de decoraciones de línea y si existe soporte para iconos o marcas en el margen gutter",
+      "keep": [
+        "M4",
+        "M10"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/ui/glyphs.cpp:configure_glyphs",
+        "src/editor/editor_render.cpp:apply_decoration",
+        "src/editor/editor_render.cpp:RenderEditorLine",
+        "src/editor/editor_render.cpp:render_rich_line",
+        "src/editor/editor_render.cpp:decoration_at",
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/editor/editor_render.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se renderiza el margen izquierdo gutter del editor y qué elementos dibuja",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/editor/editor_render.cpp:RenderEditorLine",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/editor/editor_folds.cpp:fold_gutter_marker",
+        "src/editor/helix/helix_dispatch.cpp:helix_gutter_width"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico error",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir un efecto visual en el editor con una fuente de datos en la consola; busco barrios que manejen decoraciones y diagnósticos"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el usuario quiere ver la línea roja en el margen; M11 huele errores de compilación y M3 huele highlights, pero necesito ver dónde se pinta el margen"
+    },
+    {
+      "consulta": "dónde se definen los tipos de decoraciones de línea y si existe soporte para iconos o marcas en el margen gutter",
+      "consultas": [
+        "dónde se definen los tipos de decoraciones de línea y si existe soporte para iconos o marcas en el margen gutter"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 confirmó que los errores usan subrayado en el texto. Para añadir una línea roja en el margen, necesito encontrar dónde se definen los tipos de decoración y si el gutter acepta decoraciones de diagnóstico o si hay que extenderlo."
+    },
+    {
+      "consulta": "dónde se renderiza el margen izquierdo gutter del editor y qué elementos dibuja",
+      "consultas": [
+        "dónde se renderiza el margen izquierdo gutter del editor y qué elementos dibuja"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "gutter"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 confirmaron que no hay soporte actual para diagnostics en el gutter. Necesito encontrar el sitio de renderizado del gutter para ver si es posible añadir la línea roja allí o si está cerrado a modificaciones externas."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el sistema actual no soporta marcas en el margen para errores; las decoraciones solo afectan el texto y el gutter es independiente"
+    }
+  ],
+  "why": "el sistema actual no soporta marcas en el margen para errores; las decoraciones solo afectan el texto y el gutter es independiente",
+  "zooms": []
+}

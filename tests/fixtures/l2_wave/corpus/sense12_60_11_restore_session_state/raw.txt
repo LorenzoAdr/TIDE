@@ -1,0 +1,24 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+
+I have three completed works:
+1.  **T1 (Save):** Found `save workspace session`, `flush active tab`, `save`.
+2.  **T2 (Restore Files/Cursor):** Found `restore workspace session` restores open files and active tab path. Explicitly stated: "no encontré la restauración de la posición del cursor línea columna... load solo restaura rutas de archivos y pestañas, sin campos de cursor."
+3.  **T3 (Restore Panels):** Found nothing ("no hay objeto").
+
+The user's claim has three parts:
+1.  Cursor position: T2 refuted this (not found in restore).
+2.  Open files: T2 confirmed this (restored in `restore workspace session`).
+3.  Sidebar visibility: T3 refuted this (no object found).
+
+The pack (M*) and the works suggest I have enough information to close the investigation.
+-   Files: Confirmed.
+-   Cursor: Refuted (based on T2).
+-   Panels: Refuted (based on T3).
+
+I should
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "T2 confirma la restauración de archivos abiertos y pestaña activa en restore workspace session, pero refuta la posición del cursor (no se lee línea/columna). T3 refuta la restauración de paneles laterales (no hay objeto). El claim se cierra con confirmación parcial y refutación de los otros dos polos."
+}

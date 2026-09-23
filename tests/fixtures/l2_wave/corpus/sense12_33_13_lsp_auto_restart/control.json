@@ -1,0 +1,202 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:clangd_index_healthy"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dispara el reinicio del servidor de lenguaje cuando se detecta que falta o no responde",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:run",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:clangd_index_healthy"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:clangd_index_healthy"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se lee el estado de clangd process alive para decidir si reiniciar",
+      "keep": [
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se lee el estado de clangd process alive para decidir si reiniciar",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se lee el estado de clangd index healthy para decidir si reiniciar",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino leer el estado y llamar a schedule debounced lsp restart",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace, schedule debounced lsp restart). Necesito encontrar el disparador (trigger) que detecta la caída o falta de respuesta y llama a este reinicio."
+    },
+    {
+      "consulta": "dónde se dispara el reinicio del servidor de lenguaje cuando se detecta que falta o no responde",
+      "consultas": [
+        "dónde se dispara el reinicio del servidor de lenguaje cuando se detecta que falta o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack une la detección con el disparador de reinicio; necesito ver si el reinicio automático está activo o requiere intervención"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clangd index healthy"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 falló en el disparo de unresponsive; busco el mecanismo de detección de latencia o timeout que llame al reinicio"
+    },
+    {
+      "consulta": "dónde se lee el estado pendiente de reinicio del lsp para ejecutar el reinicio",
+      "consultas": [
+        "dónde se lee el estado pendiente de reinicio del lsp para ejecutar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "run loop"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "el pack une T2 a run loop check pending lsp restart; necesito ver si el bucle principal detecta y ejecuta el reinicio pendiente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 falló en el disparo de unresponsive; T3 leyó los sensores pero no el uso. Rompo en dos locators para los sensores y un puente para el efecto."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 6,
+      "why": "el Cerrado de T4 no afirma el objeto de la fase A; solo leyó el estado sin encontrar la decisión de reinicio. salto a la siguiente caza del plan"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

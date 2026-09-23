@@ -1,0 +1,15 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3).
+T1 looked for detection and restart trigger. Found: `restart lsp for workspace`, `schedule debounced lsp restart`, `completion wait timeout ms`, `set background paused`.
+T2 looked for detection and restart trigger. Found: `restart lsp for workspace`, `on lsp notification`, `on lsp missing install`.
+T3 looked for restart after failure. Found: `restart lsp for workspace`, `schedule debounced lsp restart`, `run`, `on lsp missing install`, `apply workspace settings`, `setup build environment watching`.
+
+The "Abierto" section of T3 mentions `ensure backend started`.
+The "entre abiertas" section shows T1, T2, T3 all point to the same object `restart lsp for workspace`.
+The "hacia el resto" section points to `on workspace opened` and `set workspace clangd options`.
+
+The user's claim is about *automatic detection of crash/non-response* and *automatic restart*.
+The findings so far mention `restart lsp for workspace` and `
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra un mecanismo de detección automática de caída o falta de respuesta del LSP que dispare el reinicio sin intervención del usuario; los nombres leídos (restart lsp for workspace, schedule debounced lsp restart, on lsp missing install) no confirman el polo de detección automática de fallo en tiempo de ejecución"}

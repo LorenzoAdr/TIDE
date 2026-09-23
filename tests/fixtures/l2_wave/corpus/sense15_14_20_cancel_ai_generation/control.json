@@ -1,0 +1,159 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "qué hace el controlador de IA al cancelar el nivel 1 y cómo limpia el archivo",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ui/symbol_picker_match_runner.cpp:cancel",
+        "src/ai/ai_controller.cpp:append"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el texto del editor al cancelar la generación de código",
+      "keep": [
+        "M2",
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:cancel_live_lsp_on_cursor_move"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se revierte el contenido del archivo al cancelar la generación de código",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/level2_session.cpp:rollback_pending",
+        "src/editor/undo_stack.cpp:undo",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "qué hace el controlador de IA al cancelar el nivel 1 y cómo limpia el archivo",
+      "consultas": [
+        "qué hace el controlador de IA al cancelar el nivel 1 y cómo limpia el archivo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancelación"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M8 tiene cancel level1 y pending insert; necesito ver si limpia el archivo a medias o solo detiene el flujo"
+    },
+    {
+      "consulta": "dónde se limpia el texto del editor al cancelar la generación de código",
+      "consultas": [
+        "dónde se limpia el texto del editor al cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor text clear"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró que el controlador no limpia el archivo; el pack une al editor panel con 'editor text clear', que es el candidato para la limpieza visual"
+    },
+    {
+      "consulta": "dónde se limpia el texto del editor al cancelar la generación de código",
+      "consultas": [
+        "dónde se limpia el texto del editor al cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "limpieza"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 no encontró limpieza en el controlador; T2 encontró un disparo distinto (cursor). Busco el mecanismo de limpieza real."
+    },
+    {
+      "consulta": "dónde se limpia el texto del editor al cancelar la generación de código",
+      "consultas": [
+        "dónde se limpia el texto del editor al cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T2 falló en el disparo; el pack une a editor panel (M7)"
+    },
+    {
+      "consulta": "dónde se revierte el contenido del archivo al cancelar la generación de código",
+      "consultas": [
+        "dónde se revierte el contenido del archivo al cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "revertir"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 confirmó la cancelación pero negó la limpieza en ese punto. T2 buscó limpieza en el editor pero encontró otro disparador. Necesito cazar el mecanismo que deshace los cambios en el archivo (revert/restore) al recibir la señal de cancelación, para cerrar el polo de 'no dejar el archivo a medias'."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "la cancelación detiene la generación y limpia flags atómicos, pero no existe mecanismo de reversión ni limpieza del archivo; el contenido queda tal como se insertó hasta el momento de la interrupción"
+    }
+  ],
+  "why": "la cancelación detiene la generación y limpia flags atómicos, pero no existe mecanismo de reversión ni limpieza del archivo; el contenido queda tal como se insertó hasta el momento de la interrupción",
+  "zooms": []
+}

@@ -1,0 +1,151 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ui/editor_panel.cpp:handle_editor_escape",
+        "src/ui/editor_panel.cpp:handle_editor_keys"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la IA",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:busy",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:run_insert_async"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se revierte el contenido del archivo al cancelar la generación de la IA",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos cosas distintas: el disparo (Escape/clic) y el efecto (archivo limpio). El pack muestra M2 con escape y M8 con cancelación/inserción, pero no une el disparo con la limpieza del archivo. Rompo en dos localizadores y un puente para verificar si el flujo conecta ambos polos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se escribe el código en el archivo durante la generación de la IA",
+      "consultas": [
+        "dónde se escribe el código en el archivo durante la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T2 dice que cancel current no toca el sistema de archivos. Para saber si el archivo queda a medias, debo ver dónde se escribe. Si es un buffer en memoria que se confirma al final, el archivo no queda a medias. Si se escribe en streaming, sí. Tiro del port begin insert at para ver el efecto de escritura."
+    },
+    {
+      "consulta": "dónde se escribe el código en el archivo mientras la IA genera",
+      "consultas": [
+        "dónde se escribe el código en el archivo mientras la IA genera"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T2 dice que no se toca el sistema de archivos al cancelar; necesito ver si la escritura es atómica o incremental para saber si 'limpiar' implica revertir o simplemente no escribir"
+    },
+    {
+      "consulta": "dónde se revierte el contenido del archivo al cancelar la generación de la IA",
+      "consultas": [
+        "dónde se revierte el contenido del archivo al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "revertir"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 confirmó que cancel current solo limpia estado en memoria; el ancla exige no dejar el archivo a medias, por lo que falta el mecanismo de reversión de escritura en disco o buffer"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el ancla pide dos cosas: capturar Escape/clic para cancelar, y limpiar el archivo sin dejarlo a medias. T1 confirma que no hay captura de Escape/clic conectada a la cancelación (solo UI de editor). T2 y T3 confirman que la cancelación actual solo limpia estado en memoria y no revierte ni limpia el buffer/archivo. El mecanismo solicitado no existe en el código leído; el flujo actual no une el disparo con el efecto, ni el efecto con la limpieza de disco/buffer. Cierra el claim como refutado."
+    }
+  ],
+  "why": "el ancla pide dos cosas: capturar Escape/clic para cancelar, y limpiar el archivo sin dejarlo a medias. T1 confirma que no hay captura de Escape/clic conectada a la cancelación (solo UI de editor). T2 y T3 confirman que la cancelación actual solo limpia estado en memoria y no revierte ni limpia el buffer/archivo. El mecanismo solicitado no existe en el código leído; el flujo actual no une el disparo con el efecto, ni el efecto con la limpieza de disco/buffer. Cierra el claim como refutado.",
+  "zooms": []
+}

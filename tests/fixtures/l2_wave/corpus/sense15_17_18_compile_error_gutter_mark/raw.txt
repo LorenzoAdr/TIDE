@@ -1,0 +1,15 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found that errors are painted in the line body, not the gutter, via `collect diagnostic decorations` and `apply decoration`.
+T2 asked about configuring decorations for the left margin, but the result was the same as T1 (line body).
+T3 found the definition of the left margin marker: `line gutter marker` decides the character, delegating to `line diagnostic marker from map`, and `diagnostic severity color` defines the color.
+
+The user's request is to *add* a red line in the left margin.
+T3 found the mechanism for the left margin marker (`line gutter marker`, `line diagnostic marker from map`, `diagnostic severity color`).
+T1 found the mechanism for painting errors in the line body (`collect diagnostic decorations`, `apply decoration`).
+
+The user wants to *combine* these or modify the existing behavior to show a red line in the margin.
+The "red line in the margin" is likely the `line gutter marker` or a similar decoration.
+T3 found `line gutter marker` and `diagnostic severity color`.
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el marcador del margen izquierdo se define en line gutter marker y line diagnostic marker from map, con el color dado por diagnostic severity color; la pintura de errores en el cuerpo de la línea usa collect diagnostic decorations y apply decoration"}

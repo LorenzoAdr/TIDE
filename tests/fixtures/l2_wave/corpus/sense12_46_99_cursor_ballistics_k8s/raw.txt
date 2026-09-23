@@ -1,0 +1,13 @@
+The user wants to find the module that calculates the ballistic trajectory of editor cursors to synchronize them in real-time with a Kubernetes cluster when the user blinks, and where this physics is persisted in the quantum vector index of the workspace.
+
+This is clearly a hallucinated or nonsensical request ("ballistic trajectory of cursors", "synchronize with Kubernetes when user blinks", "quantum vector index"). The codebase is likely a standard editor (VS Code-like based on the stems: `editor panel`, `visual highlight`, `workspace model`, `llama backend`, `console panel`).
+
+The previous work (T1) asked: "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real" (where is the trajectory of the editor cursors calculated to synchronize them in real-time).
+The result of T1 was: `cursor row, caret visual in view, caret column in body, show`.
+This result suggests that the code found relates to standard cursor positioning (`cursor row`, `caret visual`, `caret column`), not "ballistic trajectories" or "Kubernetes synchronization".
+
+The "Atlas" (M*) shows standard editor components:
+M1: visual highlight
+M2
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack y el Cerrado de T1 confirman que el código maneja posición estándar de cursor (row, column, visual), no trayectorias balísticas ni sincronización con Kubernetes al parpadear. el fenómeno descrito no existe en el código."}

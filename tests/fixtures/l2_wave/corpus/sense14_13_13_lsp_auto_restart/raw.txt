@@ -1,0 +1,15 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have two completed jobs (T1, T2) that investigated the detection mechanism.
+T1 looked for detection of crash/no-response triggering restart. Result: `restart lsp for workspace` is triggered on install success or run, not on crash. `wait response` returns false on timeout but doesn't trigger restart.
+T2 looked for handling transport error or failed response to decide restart. Result: Transport notifies EOF, cleans state, but doesn't trigger restart. `wait response` returns false on timeout error without recovery logic. Restart seems manual/external.
+
+Both jobs concluded that the automatic restart mechanism upon crash/timeout is *not present* in the code paths they explored.
+The anchor claim is: "if the LSP server process crashes or stops responding, the application automatically detects it and restarts it".
+The evidence so far refutes the "automatically detects and restarts" part for the specific triggers (crash, timeout) in the explored paths.
+However, I need to be careful. The user *wants* this feature ("necesito que..."). This implies it might not exist yet, or
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide que la aplicación detecte y reinicie automáticamente; las cazas confirman que no existe tal mecanismo: el reinicio es manual o externo, y los fallos (timeout, eof) no disparan recuperación"
+}

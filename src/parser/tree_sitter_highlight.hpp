@@ -21,6 +21,13 @@ std::vector<LineHighlights> highlights_for_document(
     TSNode root, const std::string& source,
     TreeSitterLangKind lang = TreeSitterLangKind::kCpp);
 
+// Same as highlights_for_document but only for rows [first_row, last_row] (clamped to the
+// document). The result is indexed by row - first_row. Cost scales with the requested rows,
+// not the document, so callers that paint a viewport should prefer it.
+std::vector<LineHighlights> highlights_for_document_rows(
+    TSNode root, const std::string& source, int first_row, int last_row,
+    TreeSitterLangKind lang = TreeSitterLangKind::kCpp);
+
 // Re-highlight only lines touched by an incremental parse; falls back to full scan.
 // When layout_shift_from_row >= 0, lines at/after that row are always re-highlighted
 // (needed when line count changes and indices shift).

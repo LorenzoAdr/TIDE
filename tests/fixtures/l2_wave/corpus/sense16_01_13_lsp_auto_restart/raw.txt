@@ -1,0 +1,11 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3).
+T1 and T2 asked where the detection and restart happen. They found `restart lsp for workspace`, `schedule debounced lsp restart`, `completion wait timeout ms`, `on transport reader eof`, `set reader eof handler`, `start`.
+T3 asked what event or error triggers the restart. It found that `transport reader eof` only cleans up state (`ready false waitpid`) and does *not* trigger a restart. It also found that `restart lsp for workspace` is invoked manually or by configuration, not by the transport EOF.
+
+The "Cerrado" of T3 explicitly states: "no encontré el mecanismo de reinicio automático tras error de transporte; lo leído muestra que transport reader eof solo limpia estado ready false waitpid sin disparar reinicio, y que restart lsp for workspace es invocado manualmente o por configuración, no por el EOF del transporte".
+
+This directly refutes the user's claim that the application *automatically* detects and restarts the LSP server when it crashes or stops responding (
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el Cerrado de T3 niega el disparo automático: el EOF del transporte solo limpia estado sin reiniciar, y la función de reinicio se invoca manualmente o por configuración, no por detección de fallo"}

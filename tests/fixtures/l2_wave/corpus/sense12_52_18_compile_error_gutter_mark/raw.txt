@@ -1,0 +1,17 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor.
+I have already investigated:
+1.  **T1**: Where the red line is drawn -> `rebuild diagnostics by line`.
+2.  **T2**: Where console errors are converted to diagnostics -> `apply lsp diagnostics to panel` (LSP based).
+3.  **T3**: Where compilation errors are read from the console -> `parse gfortran stderr` (captured from `run shell capture`, not the UI console).
+
+The user's request implies a connection between the *UI console* (where errors appear) and the *editor margin* (red line).
+T3 revealed that the current mechanism for `gfortran` errors bypasses the UI console text and reads directly from the process stderr.
+However, the user specifically mentions "errors that appear in the bottom console". This suggests they might be seeing errors in the console that are *not* being picked up by the specific `gfortran` parser, or they want a generic mechanism that reads the console text.
+But looking at the "holes" and "extra" in the pack:
+- T3 found `parse g
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el mecanismo actual captura los errores del stderr del proceso (parse gfortran stderr) y no lee el texto de la consola UI; por tanto, no hay un flujo que tome los errores de la consola inferior para marcar el margen."
+}

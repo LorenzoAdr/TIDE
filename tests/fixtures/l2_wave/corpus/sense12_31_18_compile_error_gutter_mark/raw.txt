@@ -1,0 +1,10 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 found where the red line is painted: `line gutter marker` reads `diagnostics for editor line` and `diagnostics on line`.
+- T2 found where errors are read from the console to create markers: `line gutter marker editor panel cpp` reads diagnostics from `panel diagnostics by line` via `diagnostics for editor line` and decides the character or 'W' in `line diagnostic marker from map`.
+- T3
+---- content ----
+```json
+{"action":"control_v1","do":"cerrar","why":"el mecanismo está completo: los errores de compilación se leen de la consola, se convierten en diagnostics y se leen en line gutter marker editor panel cpp para pintar la línea roja en el margen izquierdo del editor"}
+```

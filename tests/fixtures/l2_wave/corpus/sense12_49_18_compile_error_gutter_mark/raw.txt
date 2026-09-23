@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have a plan with 3 phases:
+A: locator: where compilation errors from the bottom console text are parsed. (Done: T1 found `scan shell output for linker errors`)
+B: locator: where a red line is drawn in the left margin of the editor. (Done: T2 found `clear editor line paint caches`)
+P: bridge: is there a path between parsing console errors and drawing the red line in the editor? (Need A, B)
+
+T1 closed with `scan shell output for linker errors`.
+T2 closed with `clear editor line paint caches`.
+The pack says `T1=>T2 sin camino` (no path).
+This means there is currently no connection between parsing the errors and drawing the red line.
+The user's claim is "quiero que los errores... también se marquen con una línea roja...". This implies a feature request or a missing connection.
+Since `sin camino` is evidence that the feature doesn't exist or isn't connected, I should close the claim. The investigation shows that parsing errors and
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack confirma sin camino entre parsear errores y dibujar la línea roja; la funcionalidad no existe"
+}

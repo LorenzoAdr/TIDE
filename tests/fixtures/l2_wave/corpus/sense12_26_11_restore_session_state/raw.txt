@@ -1,0 +1,12 @@
+The user wants to restore the editor state (cursor position, open files, visible/closed side panels) when reopening a project.
+I have a plan with 3 phases:
+1. A: locator: where cursor position is saved on close.
+2. B: locator: where cursor position is restored on open.
+3. P: bridge: is there a path between save and restore.
+
+Work 1 (A) closed: "leído: Cursor Pos". It found the object but didn't find the save mechanism.
+Work 2 (B) closed: "leído: Cursor Pos". It
+---- content ----
+```json
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo de serialización del estado del editor; las fichas leídas son getters/setters de coordenadas sin guardar/restaurar. el claim se refuta: no hay camino entre cerrar y abrir que recuerde la posición del cursor"}
+```

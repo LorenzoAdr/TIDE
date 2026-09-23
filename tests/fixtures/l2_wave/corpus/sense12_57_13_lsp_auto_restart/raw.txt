@@ -1,0 +1,16 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+
+Current state:
+- T1 (detection of crash triggering restart): Closed. Found that `transport reader eof` cleans state but doesn't call `restart lsp for workspace`. Callers of `restart lsp for workspace` are `run` (start) and `lsp missing install`. No crash detector found.
+- T2 (scheduling/execution of debounced restart): Closed. Found `schedule debounced lsp restart` (2s deadline) triggered by `setup build environment watching` (env changes). Execution delegates to `restart lsp for workspace`.
+
+The user's claim is: "detect automatically and restart without user intervention if LSP crashes or stops responding".
+T1 refuted the existence of a crash detection mechanism that triggers restart.
+T2 confirmed the restart mechanism exists but is triggered by environment changes, not crashes.
+
+The pack shows:
+M5 (application): `pending lsp restart`, `last lsp environment fingerprint`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+M1 (lsp missing prompt): `lsp missing prompt catalog`, `lsp missing prompt for status key`.
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack y las cazas confirman que no existe un detector de caída ni de falta de respuesta que dispare el reinicio; el reinicio solo se programa ante cambios de entorno o instalación faltante. el mecanismo solicitado no está implementado."}

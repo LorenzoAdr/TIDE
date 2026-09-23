@@ -1,0 +1,141 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "cómo se procesan los errores de compilación del shell para marcarlos en el editor",
+      "keep": [
+        "M5",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/ui/binary_symbols_panel.cpp:parse_linker_undefined_reference",
+        "src/ui/binary_symbols_panel.cpp:request_binary_symbols_panel",
+        "src/ui/binary_symbols_panel.cpp:tick_binary_symbols_panel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "keep": [
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar errores",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error compilación",
+        "margen editor",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla une la consola (fuente) con el margen del editor (destino); necesito ver si el pack ya tiene el barrio de los errores o si debo ampliar"
+    },
+    {
+      "consulta": "cómo se procesan los errores de compilación del shell para marcarlos en el editor",
+      "consultas": [
+        "cómo se procesan los errores de compilación del shell para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "errores linker"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M11 escanea la salida del shell para errores de linker; necesito ver si ya marca el editor o solo la consola"
+    },
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "margen editor"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 encontró el parser de errores de linker, pero no el dibujo en el margen. Necesito localizar el mecanismo de UI que pinta la línea roja en el editor para luego conectarlo con los errores de compilación."
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar errores",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "gutter paint"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 encontró la construcción de datos pero no el renderizado; el pack señala 'gutter paint' como el barrio del dibujo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack no une el mecanismo: T1 lee símbolos binarios, T2 lee datos de diagnóstico pero no el renderizado del gutter, T3 no halló objeto; sin camino entre polos leídos"
+    }
+  ],
+  "why": "el pack no une el mecanismo: T1 lee símbolos binarios, T2 lee datos de diagnóstico pero no el renderizado del gutter, T3 no halló objeto; sin camino entre polos leídos",
+  "zooms": []
+}

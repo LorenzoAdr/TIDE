@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de detección de caída del LSP (on transport reader eof) no dispara el reinicio automáticamente; solo limpia el estado. el reinicio se invoca por otros caminos (run, on lsp missing install), no desde el detector de caída. por lo tanto, la aplicación no detecta y reinicia automáticamente el LSP al caerse como se solicita en el ancla."
+}

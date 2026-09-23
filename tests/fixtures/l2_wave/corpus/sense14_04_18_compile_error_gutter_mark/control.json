@@ -1,0 +1,155 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen del editor para marcar un error",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M12"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/main_layout.cpp:problems_tab_active",
+        "src/ui/diagnostics_panel.cpp:Event",
+        "src/ui/console_panel.hpp",
+        "src/ui/console_panel.cpp:MakeConsolePanel",
+        "src/ui/diagnostics_panel.cpp:MakeDiagnosticsPanel",
+        "src/ui/diagnostics_panel.cpp:build_rows",
+        "src/ui/diagnostics_panel.cpp:diagnostics_display_allowed",
+        "src/ui/diagnostics_panel.cpp:diagnostics_for_translation_unit"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se pinta la línea roja en el margen del editor para marcar un error",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se leen los errores de compilación de la consola inferior",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino leer los errores de la consola y pintar la línea roja en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "margen editor",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir dos polos (consola y margen); necesito ver si el pack tiene barrios para ambos o si hay que ampliar"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos polos: la fuente (consola) y el efecto (margen). necesito localizar ambos y ver si están conectados."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el hijo no halló el objeto; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen del editor para marcar un error",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen del editor para marcar un error"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "margen editor"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 no halló objeto; T2 cerró lectura. El pack une T2 a Make Busy Strip Placeholder y colors revision; exploro el barrio de margen para ver si el mecanismo vive allí."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de pintar la línea roja no existe (T1: no hay objeto); el claim se refuta"
+    }
+  ],
+  "why": "el mecanismo de pintar la línea roja no existe (T1: no hay objeto); el claim se refuta",
+  "zooms": []
+}

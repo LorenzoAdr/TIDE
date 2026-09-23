@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Asked where code generation is cancelled on Escape/click outside.
+    *   Read: `cancel level1`, `cancel current`, `clear pending insert`, `handle user input`, `handle route`.
+    *   Closed: "ESA pregunta no se relanza... leído: cancel level1, cancel current, clear pending insert, handle user input, handle route". This implies the mechanism was found or the question is exhausted. The read names suggest a mechanism exists (`cancel level1`, `clear pending insert`).
+2.  **T2**: Asked where Escape/click outside is captured to interrupt AI.
+    *   Read: `ai trace escape`, `handle editor escape`.
+    *   Closed: "no encontré el mecanismo de interrupción de la IA; lo leído son utilidades de escape de strings...". This refutes the specific capture mechanism in the editor/trace context for *interrupting* AI, or at least says those specific names weren't the trigger.
+3.  **T3**: Asked where the file is cleaned or
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de cancelación se confirma: clear pending insert limpia la inserción pendiente al cancelar la generación, invocado desde handle user input y cancel current; el polo de captura de Escape en el editor se refuta (ai trace escape y handle editor escape no interrumpen la IA)"
+}

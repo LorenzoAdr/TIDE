@@ -1,0 +1,14 @@
+The user wants to find a module that calculates the ballistic trajectory of editor cursors to synchronize them with a Kubernetes cluster when the user blinks, and where this physics is persisted in a quantum vector index of the workspace.
+
+This sounds like a hallucinated or extremely specific/fictional feature request, likely a test of the system's ability to handle non-existent features or "hallucinations" in the prompt.
+
+The previous work (T1) asked: "dónde se calcula la trayectoria balística del cursor para sincronizar con el cluster al parpadear" (where is the ballistic trajectory of the cursor calculated to sync with the cluster on blink).
+The result (Cerrado) was: "no encontré el cálculo de trayectoria balística del cursor; lo leído es un decorador visual estático y un toggle de visibilidad basado en tiempo, sin lógica de movimiento ni sincronización con cluster" (did not find the calculation... read is a static visual decorator... no movement logic nor cluster sync).
+
+The instructions say: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo. Si el ancla pedía más, un objeto distinto
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el Cerrado de T1 niega la existencia del cálculo de trayectoria balística y la sincronización con cluster al parpadear; el pack no nombra ni sugiere estos mecanismos (solo decoradores visuales estáticos). No hay evidencia de persistencia en índice vectorial cuántico. El ancla describe funcionalidades inexistentes en el sistema."
+}

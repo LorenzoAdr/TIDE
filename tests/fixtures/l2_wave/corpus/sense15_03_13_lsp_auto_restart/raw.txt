@@ -1,0 +1,14 @@
+The user wants to automatically detect if the LSP server process crashes or stops responding and restart it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Looked for detection of LSP crash/unresponsiveness to trigger restart. Found `reader loop`, `wait response`, `start`, `schedule debounced lsp restart`, `apply workspace settings`, `restart lsp for workspace`, `run`.
+2.  **T2**: Looked for detection of LSP crash/unresponsiveness to trigger restart. Found `on transport reader eof` handler registered in `start` via `set reader eof handler`. The handler cleans up state (`ready false`, `waitpid`) but does *not* trigger the restart directly. The restart `restart lsp for workspace` is invoked by other paths (`run`, `on lsp missing install`), not from the crash detector.
+3.  **T3**: Looked for the connection between the transport crash handler and the LSP restart. Confirmed that `start` registers `on transport reader eof` via `set reader eof handler`, but the restart is *not* triggered from this handler.
+
+The evidence from T2 and T3 is consistent: the current crash detection mechanism (`
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de detección de caída del LSP (on transport reader eof) no dispara el reinicio automáticamente; solo limpia el estado. el reinicio se invoca por otros caminos (run, on lsp missing install), no desde el detector de caída. por lo tanto, la aplicación no detecta y reinicia automáticamente el LSP al caerse como se solicita en el ancla."
+}

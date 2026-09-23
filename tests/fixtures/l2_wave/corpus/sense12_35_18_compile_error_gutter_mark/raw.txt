@@ -1,0 +1,13 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have a plan:
+1. [en_curso] A locator: dónde se extraen los errores de compilación de la salida de la consola
+2. [pendiente] B locator: dónde se aplican los diagnósticos extraídos al margen del editor
+3. [pendiente] P puente: hay camino extraer los errores y aplicarlos al margen (need A B)
+
+Work 1 asked: dónde se pinta la línea roja en
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "el Cerrado niega este pico; salto a la siguiente caza"
+}

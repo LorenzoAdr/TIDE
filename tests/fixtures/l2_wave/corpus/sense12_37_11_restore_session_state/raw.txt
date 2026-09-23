@@ -1,0 +1,11 @@
+The user wants to restore the editor state (cursor position, open files, panel visibility) when reopening a project.
+I have a plan with 3 phases:
+1. [fallo] A: cursor position (failed, found AI session state instead of editor state)
+2. [en_curso] B: open files list (failed, "no object")
+3. [pendiente] C: panel visibility
+
+Current status:
+- T1 (Editor state): Failed. Found `Level2Session` state, not editor state.
+- T2 (Cursor pos): Found `Cursor Pos` (
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"T2 encontró 'Cursor Pos' pero no el mecanismo de persistencia; T3 no encontró objeto. El plan actual se agota sin confirmar el claim."}

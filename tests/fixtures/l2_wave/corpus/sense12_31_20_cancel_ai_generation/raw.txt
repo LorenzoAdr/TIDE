@@ -1,0 +1,10 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have already investigated:
+1.  **T1**: Found that Escape is captured in `handle user input` -> `is cancel input` -> `cancel current` -> `cancel all`. No evidence of "click outside" capture.
+2.  **T2**: Found that `cancel all` cleans the half-written file by calling `clear pending insert` (resets `pending insert` and `insert anchor`) and stops generation by calling `cancel level1` (sets `agent cancel`
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de cancelación está completo: la pulsación de Escape se captura en handle user input, que invoca cancel current y cancel all; este último limpia el archivo a medias mediante clear pending insert y detiene la generación con cancel level1. no hay evidencia de captura de clic fuera, pero el flujo de teclado cumple el requisito de limpieza."
+}

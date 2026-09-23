@@ -40,8 +40,11 @@ std::size_t xml_wrapped_byte_to_original(const XmlFragmentWrap& wrap, uint32_t w
 // Inverse: original byte → wrapped byte.
 uint32_t xml_original_byte_to_wrapped(const XmlFragmentWrap& wrap, uint32_t original_byte);
 
+// `highlights[i]` describes line `first_line_0 + i`; pass a non-zero first_line_0 when the
+// vector only covers a window of the document (see highlights_for_document_rows).
 void xml_unmap_highlights_from_wrap(std::vector<LineHighlights>* highlights,
-                                    const XmlFragmentWrap& wrap, const std::string& source);
+                                    const XmlFragmentWrap& wrap, const std::string& source,
+                                    int first_line_0 = 0);
 void xml_unmap_line_highlights_from_wrap(LineHighlights* highlights, int line_0,
                                          const XmlFragmentWrap& wrap, const std::string& source);
 

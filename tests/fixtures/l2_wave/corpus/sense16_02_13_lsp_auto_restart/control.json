@@ -1,0 +1,143 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M7",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/ai/llama_backend.cpp:health_ok"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje cuando falta o se cae",
+      "keep": [
+        "M5",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:ensure_ready",
+        "src/ai/embedding_backend.cpp:start_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se verifica el estado de salud del servidor de lenguaje para decidir si se debe reiniciar",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ai/llama_backend.cpp:wait_until_healthy",
+        "src/ai/llama_backend.cpp:ensure_ready",
+        "src/ai/llama_backend.cpp:health_ok"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el reinicio (restart lsp for workspace), pero falta el disparador (detección de fallo). Busco el origen del trigger."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "health ok"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 encontró el reinicio pero no el disparo; el pack huele 'health ok' como el detector"
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje cuando falta o se cae",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje cuando falta o se cae"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "start server"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack muestra 'start server' en el abierto de T1; busco el disparador de reinicio automático"
+    },
+    {
+      "consulta": "dónde se verifica el estado de salud del servidor de lenguaje para decidir si se debe reiniciar",
+      "consultas": [
+        "dónde se verifica el estado de salud del servidor de lenguaje para decidir si se debe reiniciar"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "health ok"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 leyó 'health ok' y 'schedule debounced lsp restart'. Necesito confirmar si 'health ok' es el mecanismo de detección automática de fallos (crash/no respuesta) que dispara el reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "la aplicación detecta la caída del servidor de lenguaje mediante waitpid y la falta de respuesta mediante health ok en un bucle con timeout (wait until healthy). Sin embargo, no se ha encontrado lógica explícita de reinicio automático en estos cuerpos; solo verificación y reporte de estado. El mecanismo de reinicio automático no está presente en el código leído."
+    }
+  ],
+  "why": "la aplicación detecta la caída del servidor de lenguaje mediante waitpid y la falta de respuesta mediante health ok en un bucle con timeout (wait until healthy). Sin embargo, no se ha encontrado lógica explícita de reinicio automático en estos cuerpos; solo verificación y reporte de estado. El mecanismo de reinicio automático no está presente en el código leído.",
+  "zooms": []
+}

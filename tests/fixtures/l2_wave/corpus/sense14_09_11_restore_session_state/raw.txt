@@ -1,0 +1,7 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+I have three completed jobs:
+1.  **T1**: Asked about cursor position and open files. Result: Read `save workspace session`, `restore workspace session`, etc. The closed status says "ESA pregunta no se relanza...". It seems T1 didn't find the specific mechanism or the result was inconclusive regarding the *exact* restoration of cursor position, or at least the prompt implies I shouldn't relaunch the same claim. However, looking at T2, it found the object.
+2.  **T2**: Asked what session data is saved/restored (cursor, files, panels). Result: Found `Workspace Session` (open tabs, active tab, launch args, launch programs) and `Recent Projects`. It confirms serialization of these fields. It mentions "pestañas abiertas, pestaña activa", but doesn't explicitly mention "cursor position" or "panel visibility" in the summary of found fields, though it says "confirm the exact serialization of these fields".
+3.  **T3**: Asked about sidebar visibility restoration. Result: "no encontré el mecanismo... load solo restaur
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pedía cursor, archivos y paneles. T2 confirma archivos (pestañas) y T3 refuta paneles. El pack no une cursor a un mecanismo de restauración distinto al de archivos; sin camino entre polos leídos cierra el ancla"}

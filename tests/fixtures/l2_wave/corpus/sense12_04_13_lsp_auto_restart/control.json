@@ -1,0 +1,198 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dispara el reinicio del LSP cuando falta la instalación o al abrir el workspace",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el proceso LSP ha caído o dejado de responder y se dispara el reinicio",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dispara el reinicio del LSP cuando falta la instalación o al abrir el workspace",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino detectar la caída y disparar el reinicio",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart', lo que sugiere que la lógica de detección y reinicio reside allí. Necesito ver el mecanismo de detección (heartbeat, error de socket, etc.) para confirmar si es automático."
+    },
+    {
+      "consulta": "dónde se dispara el reinicio del LSP cuando falta la instalación o al abrir el workspace",
+      "consultas": [
+        "dónde se dispara el reinicio del LSP cuando falta la instalación o al abrir el workspace"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mecanismo de reinicio (restart lsp for workspace). El pack muestra dos disparadores extra: 'on lsp missing install' y 'on workspace opened'. Necesito confirmar si alguno de estos detecta la caída/no respuesta y activa el reinicio automático. Empiezo por el primero."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el proceso LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "debounced lsp restart"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró los disparos de inicio/instalación. El ancla pide detección de caída en runtime. T1 leyó 'schedule debounced lsp restart' pero no cerró el mecanismo de detección (heartbeat/error). Hay que cazar el trigger de fallo, no el de arranque."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T3 solo leyeron nombres; T2 confirmó reinicio por instalación/abertura. Falta el disparo por caída (crash/hang). Rompo en detectar caída (A) y confirmar si hay camino (P)."
+    },
+    {
+      "consulta": "dónde se lee el estado del proceso LSP para detectar que ha caído o dejado de responder y se programa el reinicio",
+      "consultas": [
+        "dónde se lee el estado del proceso LSP para detectar que ha caído o dejado de responder y se programa el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 5,
+      "why": "T4 cerró que no hay detector de caída en el flujo actual; el pack M5 nombra 'pending lsp restart' y 'lsp restart deadline' como estado. Necesito encontrar el loop o watcher que lee ese estado y dispara el reinicio automático, no el disparo manual."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de detección automática de caída o timeout del LSP no existe en el código leído; solo hay reinicio manual o por eventos de instalación/abertura, sin loop de vigilancia"
+    }
+  ],
+  "why": "el mecanismo de detección automática de caída o timeout del LSP no existe en el código leído; solo hay reinicio manual o por eventos de instalación/abertura, sin loop de vigilancia",
+  "zooms": []
+}

@@ -1,0 +1,12 @@
+The user wants to restore the exact state of the editor when reopening a project: cursor position, open files, and visible/closed side panels.
+
+I have three completed jobs:
+1.  **T1**: Asked where cursor position is saved on close. Result: `close` (read). This implies the mechanism for saving cursor position wasn't found or `close` is just the trigger, not the storage mechanism. The prompt says "Lo leído no era el disparo" (What was read wasn't the trigger) and "do=cerrar ese mapeo" (close that mapping). So T1 failed to find the save mechanism for cursor position.
+2.  **T2**: Asked where the list of open files is saved on close. Result: `editor panel hpp`, `Make Editor Panel` (read). Similar to T1, this implies the specific save mechanism for the list of open files wasn't found or these are just the objects, not the persistence logic. "do=cerrar ese mapeo". So T2 failed to find the save mechanism for open files.
+3.  **T3**: Asked where the session state is restored when opening an existing project. Result: Found `restore workspace session` called
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "T3 encontró el mecanismo de restauración (restore workspace session), pero T1 y T2 no hallaron dónde se guarda la posición del cursor ni la lista de archivos al cerrar. Sin el guardado, no hay restauración de esos detalles específicos. El pack no nombra otro mecanismo de persistencia para el cursor o los paneles laterales."
+}

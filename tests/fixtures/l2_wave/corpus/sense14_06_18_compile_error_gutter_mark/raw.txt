@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have 3 completed jobs:
+T1: Asked where compilation errors are read from the console to mark them in the editor. Read: console panel cpp, editor panel cpp, diagnostics cpp, lsp client cpp. Closed: "ESA pregunta no se relanza. Lo leído no era el disparo."
+T2: Asked where compilation errors are parsed from console text to extract line and message. Closed: "no hay objeto."
+T3: Asked where shell output is scanned for compilation errors and the editor margin is marked. Read: scan shell output for linker errors. Closed: "no encontré el mecanismo... es un escáner específico para errores de enlace linker que actualiza un panel de símbolos binarios, no los diagnósticos del editor."
+
+The pack shows:
+M1: editor panel
+M2: console expand overlay
+M3: visual highlight
+M4: editor buffer source
+M5: editor context
+M6: raw pty screen
+M7: console panel
+M8: dap backend
+M9: app session raw pty screen shell session
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"las tres cazas cerraron sin hallar el mecanismo: T1 leyó paneles y lsp pero no el disparo; T2 no encontró objeto; T3 encontró un escáner de linker para símbolos binarios, no para diagnósticos del editor. el pack no une consola a margen de errores de compilación; el claim se refuta."}

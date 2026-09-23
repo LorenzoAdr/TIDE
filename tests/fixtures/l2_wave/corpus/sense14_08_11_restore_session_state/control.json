@@ -1,0 +1,205 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:close",
+        "src/editor/editor_state.cpp:reset_to_single_cursor",
+        "src/ai/level2_session.cpp:save_state"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir el proyecto",
+      "keep": [
+        "M5",
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run",
+        "src/app/recent_projects.cpp:load"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se controla la visibilidad de los paneles laterales",
+      "keep": [
+        "M5",
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/source_panel.cpp:handle_source_panel_event",
+        "src/ui/focus_manager.cpp:move_right",
+        "src/ui/focus_manager.cpp:secondary_visible"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [
+          "src/app/application.cpp:reopen_workspace_documents",
+          "src/app/application.cpp:run",
+          "src/app/recent_projects.cpp:load"
+        ],
+        "consulta": "dónde se restauran los archivos abiertos al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se controla la visibilidad de los paneles laterales",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay un mecanismo único que restaura cursor, archivos y paneles al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "estado sesión",
+        "restaurar layout",
+        "panel visible"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar cursor, archivos y paneles al reabrir; busco barrios de estado y layout"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla enumera tres cosas distintas (cursor, archivos, paneles) y dos momentos (cerrar, abrir). cada una es una caza independiente. el puente verifica si hay un mecanismo unificado o si son independientes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide tres estados distintos (cursor, archivos, paneles). El atlas sugiere barrios separados (editor state, app session, panel). Rompo en tres localizadores independientes para ver si convergen en un único restaurador o son mecanismos aislados."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 encontró el mecanismo de restauración de archivos; avanzo a la siguiente fase del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "control: do no legal ahora (no_pasar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el Cerrado de T3 niega el mecanismo de restauración de paneles; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el mecanismo de restauración de archivos se confirma (reopen workspace documents), pero el guardado de la posición del cursor y el control de visibilidad de paneles no se encontraron como disparos de restauración al abrir el proyecto; el ancla pide los tres, y solo uno se confirma como mecanismo de recuerdo activo."
+    }
+  ],
+  "why": "el mecanismo de restauración de archivos se confirma (reopen workspace documents), pero el guardado de la posición del cursor y el control de visibilidad de paneles no se encontraron como disparos de restauración al abrir el proyecto; el ancla pide los tres, y solo uno se confirma como mecanismo de recuerdo activo.",
+  "zooms": []
+}

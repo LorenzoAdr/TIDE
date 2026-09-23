@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de detección automática de caída o no-respuesta del LSP no existe en el código leído; solo hay reinicio manual o por EOF, sin health check ni timeout de inactividad que dispare el reinicio"
+}

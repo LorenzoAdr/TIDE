@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T2 confirma la restauración de archivos abiertos y pestaña activa en restore workspace session, pero refuta la posición del cursor (no se lee línea/columna). T3 refuta la restauración de paneles laterales (no hay objeto). El claim se cierra con confirmación parcial y refutación de los otros dos polos."
+}

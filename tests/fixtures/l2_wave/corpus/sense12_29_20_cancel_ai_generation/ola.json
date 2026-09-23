@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pide cancelar la generación limpiamente sin dejar el archivo a medias. T1 refuta la captura de Escape/clic para cancelar (no hay objeto). T2 y T3 confirman que la cancelación solo limpia el estado interno (pending insert, agent cancel) pero no hay mecanismo que reverta el contenido del archivo ya escrito. El claim se refuta: no existe el comportamiento solicitado."
+}

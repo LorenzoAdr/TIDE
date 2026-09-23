@@ -1,0 +1,151 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder para disparar un reinicio",
+      "keep": [
+        "M5",
+        "M10"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:on_lsp_notification",
+        "src/lsp/lsp_client.cpp:spawn_language_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha dejado de responder o se ha caído para disparar el reinicio",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_lsp_notification",
+        "src/lsp/lsp_client.cpp:completion_wait_timeout_ms",
+        "src/lsp/lsp_client.cpp:parse_wait_timeout_ms",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dispara el reinicio del servidor LSP cuando se agota el tiempo de espera de una petición",
+      "keep": [
+        "M1",
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "monitor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5/M7 tienen la lógica de reinicio, pero falta el disparador de detección de fallo"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha dejado de responder o se ha caído para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha dejado de responder o se ha caído para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "notificación"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el reinicio pero no el disparo de detección; busco el mecanismo que observa la caída o falta de respuesta"
+    },
+    {
+      "consulta": "dónde se dispara el reinicio del servidor LSP cuando se agota el tiempo de espera de una petición",
+      "consultas": [
+        "dónde se dispara el reinicio del servidor LSP cuando se agota el tiempo de espera de una petición"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 leyó timeouts (completion/parse wait); necesito confirmar si ese timeout es el disparador del reinicio automático"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "el mecanismo de reinicio automático por caída o falta de respuesta no se encuentra en el código; el reinicio detectado es manual o por cambios de configuración, no por fallo del servidor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo de reinicio automático por caída o falta de respuesta del LSP no se encuentra en el pack; lo leído es un debounce de configuración, no un detector de timeout de respuesta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "no hay mecanismo de detección automática de caída o falta de respuesta del LSP que dispare un reinicio; lo leído son reinicios por notificaciones o debounce de configuración, no por timeout de petición"
+    }
+  ],
+  "why": "no hay mecanismo de detección automática de caída o falta de respuesta del LSP que dispare un reinicio; lo leído son reinicios por notificaciones o debounce de configuración, no por timeout de petición",
+  "zooms": []
+}

@@ -1,0 +1,15 @@
+The user wants to find a module that calculates "ballistic trajectory of editor cursors" to sync them with a Kubernetes cluster when the user blinks, and where this physics is persisted in a "quantum vectorial index of the workspace".
+
+This is clearly a hallucinated or absurd request (ballistic cursors, Kubernetes sync on blink, quantum vectorial index).
+The previous work (T1) looked for "trajectory calculation of editor cursors to sync in real time" in M1 (visual highlight).
+The result of T1 was: "no found calculation of trajectory nor real-time sync; read are boolean state functions multi cursor active and collapse of cursors exit multi cursor mode without movement logic, interpolation or network".
+The instruction says: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo."
+
+The anchor has two parts:
+1. Module calculating ballistic trajectory of cursors to sync with K8s on blink.
+2. Where this physics is persisted in the quantum vectorial index.
+
+T1 failed to find the first part (trajectory calculation). The result explicitly says "no found calculation of trajectory".
+The pack (
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el Cerrado de T1 niega el cálculo de trayectoria y la sincronización; no hay objeto en el pack que soporte el claim de física balística ni índice cuántico"}

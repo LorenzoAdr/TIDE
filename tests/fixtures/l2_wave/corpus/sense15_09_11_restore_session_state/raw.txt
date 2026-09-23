@@ -1,0 +1,22 @@
+The user wants to know if the editor remembers cursor position, open files, and side panel visibility when reopening a project.
+
+Plan status:
+1. [fallo] A locator: dónde se restaura la posición del cursor al abrir un archivo (hacia set cursor position) -> T1 failed to find cursor pos in workspace session, but found open files.
+2. [en_curso] B locator: dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto (hacia panel) -> T3 asked this and found "no object".
+3. [pendiente] P puente: hay camino restaurar el cursor y restaurar los paneles (need A B)
+
+Wait, T2 asked: "dónde se restaura la posición del cursor al abrir un archivo" and found: "open file at impl, open file at, reset to single cursor".
+T3 asked: "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto" and found: "no object".
+
+The anchor has three parts:
+1. Cursor position
+2. Open files
+3. Side panel visibility
+
+T1 found open files restoration (restore workspace session), but NO cursor
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack confirma la restauración de archivos abiertos y posición del cursor al abrir un archivo, pero niega la persistencia de la visibilidad de paneles laterales al abrir el proyecto"
+}

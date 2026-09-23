@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo: no hay cursores, balística, parpadeo, Kubernetes ni índice cuántico en el atlas; el claim se refuta por ausencia de objeto"}

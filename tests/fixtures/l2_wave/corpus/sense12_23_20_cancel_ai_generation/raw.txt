@@ -1,0 +1,13 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with 3 phases:
+A: locator: where Escape/click outside is captured to cancel AI generation.
+B: locator: where the half-written file is cleaned up when canceling AI generation.
+P: bridge: is there a path between capturing Escape/click and cleaning up the file.
+
+Work 1 (Phase A): Asked where Escape/click is captured. Closed: "no encontré la captura de la tecla Escape ni del clic fuera para cancelar la generación;
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "el Cerrado de T1 niega que se capture Escape/clic para cancelar; salto a la siguiente caza (limpieza del archivo)"
+}

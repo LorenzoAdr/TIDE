@@ -1,0 +1,162 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "keep": [
+        "M7",
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:has_pending_insert"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "qué hace clear pending insert para evitar que el archivo quede a medias",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:begin_insert_at",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos polos: el disparo (Escape/clic fuera) y el efecto (limpieza del archivo). El pack huele M2 para Escape y M8/M6 para cancelación, pero falta ver si unen el disparo con la limpieza."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de la fase A: captura de Escape/clic fuera y llamada a clear pending insert"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de la fase B dice que no hay objeto; salto a la siguiente caza"
+    },
+    {
+      "consulta": "qué hace clear pending insert para evitar que el archivo quede a medias",
+      "consultas": [
+        "qué hace clear pending insert para evitar que el archivo quede a medias"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 encontró el disparo y el efecto inmediato; necesito ver si ese efecto limpia el archivo o solo el estado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo de cancelación (clear pending insert) evita que se complete la inserción fantasma limpiando el estado de intención, pero no realiza rollback de disco; el archivo no se limpia a medias, se impide que se escriba el resto"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "la cancelación se gestiona a nivel de estado del controlador, no de disco: al limpiar la intención de inserción pendiente, se evita que se ejecute la escritura fantasma que dejaría el archivo a medias"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla se confirma: la cancelación limpia se logra a nivel de estado del controlador. al pulsar Escape o hacer clic fuera, se invoca clear pending insert, que resetea la intención de inserción y evita que se ejecute la escritura en disco, impidiendo que el archivo quede a medias."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el ancla pide cancelar sin dejar el archivo a medias. T1 confirma la captura y la llamada a clear pending insert. T3 confirma que clear pending insert solo limpia el estado de intención y previene inserciones fantasma, pero no hace rollback de disco ni limpia el archivo a medias. T2 confirma que no hay objeto de limpieza de archivo. El mecanismo de cancelación no cumple el requisito de limpieza de archivo a medias."
+    }
+  ],
+  "why": "el ancla pide cancelar sin dejar el archivo a medias. T1 confirma la captura y la llamada a clear pending insert. T3 confirma que clear pending insert solo limpia el estado de intención y previene inserciones fantasma, pero no hace rollback de disco ni limpia el archivo a medias. T2 confirma que no hay objeto de limpieza de archivo. El mecanismo de cancelación no cumple el requisito de limpieza de archivo a medias.",
+  "zooms": []
+}

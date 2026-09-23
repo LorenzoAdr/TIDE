@@ -1,0 +1,17 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Looked for Escape key capture. Found `ai trace escape` (string escape), not a key handler.
+T2: Looked for click outside cancellation. Found `handle problems button click`, not the click outside logic.
+T3: Looked for level 1 agent cancellation invocation. Found `cancel level1`, `cancel all`, `cancel`, `ai controller hpp`, `cancel current`, `handle user input`, `handle route`.
+
+The anchor has two triggers: Escape key and Click outside.
+T1 failed to find the Escape handler.
+T2 failed to find the Click outside handler.
+T3 found the cancellation mechanism (`cancel level1`, `cancel all`, etc.) but didn't link it to the triggers.
+
+The pack shows:
+M6 (level1 agent) has `cancel level1`.
+M8 (ai controller) has `cancel level1`.
+T3 found `cancel level1`, `cancel all`, `cancel`, `ai controller hpp`, `cancel current`, `handle user input`, `handle route`.
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une los disparos (Escape, clic fuera) con la cancelación; T1 y T2 no hallaron los handlers de entrada, y T3 solo leyó el mecanismo de cancelación sin el trigger. sin camino entre polos leídos cierra el ancla"}

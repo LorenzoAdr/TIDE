@@ -1,0 +1,193 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la selección del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la selección del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 4,
+      "proposes": 6,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/editor/editor_state.cpp:CursorPos",
+          "src/app/workspace_model.cpp:open_file_at_impl",
+          "src/editor/editor_state.cpp:reset_to_single_cursor"
+        ],
+        "consulta": "dónde se restaura la selección del cursor al abrir el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los archivos abiertos al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los paneles laterales visibles al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 y M5 tienen stems de estado y UI; necesito ver si guardan/restauran sesión o solo estado en vivo."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "consultas": [
+        "dónde se guarda la posición del cursor al cerrar el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide recordar la posición; M1 huele el estado del editor"
+    },
+    {
+      "consulta": "dónde se guarda la selección del cursor al cerrar el editor",
+      "consultas": [
+        "dónde se guarda la selección del cursor al cerrar el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "span"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró la posición; el pack apunta a la selección (span) como siguiente paso para restaurar el estado completo del cursor"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "span on line"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1/T2 hallaron el objeto; ahora busco el efecto de restauración"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "El ancla tiene tres polos: cursor, archivos y paneles. T1-T3 cerraron la posición del cursor. Faltan la selección del cursor, los archivos abiertos y los paneles laterales. Son mecanismos independientes que se pueden cazar en paralelo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 6,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

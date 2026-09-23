@@ -1,0 +1,152 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar errores",
+      "keep": [
+        "M6"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/visual_highlight.cpp",
+        "src/ui/editor_panel.cpp:diagnostic_severity_tr",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen las ubicaciones de los errores del texto de la consola para generar diagnósticos",
+      "keep": [
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/lsp/diagnostics.cpp:diagnostics_for_translation_unit",
+        "src/lsp/diagnostics.cpp:filter_diagnostics_by_paths",
+        "src/util/compiler_location.cpp:parse_gcc_style",
+        "src/util/compiler_location.cpp:parse_msvc_style",
+        "src/util/compiler_location.cpp:parse_trailing_location",
+        "src/util/compiler_location.cpp:find_compiler_location",
+        "src/ui/console_panel.cpp:terminal_row_link"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se envían los diagnósticos extraídos de la consola al editor para que se dibujen",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:sync_diagnostic_cache",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/editor/visual_highlight.cpp:drain_visual_highlight_results",
+        "src/ui/editor_panel.cpp:cached_file_diagnostics",
+        "src/editor/visual_highlight.cpp:apply_visual_highlight_fold_regions",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:diagnostic_severity_tr",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar errores",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el usuario quiere marcar errores con una línea roja; M3 y M10 sugieren que visual highlight es el mecanismo de dibujo en el editor"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación del texto de la consola para extraer la línea y el archivo",
+      "consultas": [
+        "dónde se leen los errores de compilación del texto de la consola para extraer la línea y el archivo"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 cerró el efecto visual (gutter marker). Falta el origen: cómo se extrae la información del error (archivo, línea) del texto de la consola para poder activar ese marcador."
+    },
+    {
+      "consulta": "dónde se extraen las ubicaciones de los errores del texto de la consola para generar diagnósticos",
+      "consultas": [
+        "dónde se extraen las ubicaciones de los errores del texto de la consola para generar diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parseo de errores"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el renderizado; ahora busco el origen: cómo la consola alimenta los diagnósticos del editor"
+    },
+    {
+      "consulta": "dónde se envían los diagnósticos extraídos de la consola al editor para que se dibujen",
+      "consultas": [
+        "dónde se envían los diagnósticos extraídos de la consola al editor para que se dibujen"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "for editor line"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 extrae, T1 dibuja; falta el puente que lleva los datos de la consola al editor. El pack sugiere 'diagnostics for editor line' como posible receptor o paso intermedio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "los diagnósticos se extraen de la consola con find compiler location, se sincronizan al editor con apply lsp diagnostics to panel y se dibujan en el margen con gutter marker y suffix ptr"
+    }
+  ],
+  "why": "los diagnósticos se extraen de la consola con find compiler location, se sincronizan al editor con apply lsp diagnostics to panel y se dibujan en el margen con gutter marker y suffix ptr",
+  "zooms": []
+}

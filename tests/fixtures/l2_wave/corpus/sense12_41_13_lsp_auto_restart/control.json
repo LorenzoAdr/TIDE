@@ -1,0 +1,197 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor LSP de forma automática tras detectar que se ha caído",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:process_build_environment_updates",
+        "src/app/application.cpp:run_custom_event_drain"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace), pero falta el disparador (detection). Necesito encontrar dónde se monitorea la salud del proceso LSP."
+    },
+    {
+      "consulta": "dónde se reinicia el servidor LSP de forma automática tras detectar que se ha caído",
+      "consultas": [
+        "dónde se reinicia el servidor LSP de forma automática tras detectar que se ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "M5 tiene el núcleo de reinicio (schedule debounced lsp restart, restart lsp for workspace). La caza anterior falló en la detección, pero el pack muestra el mecanismo de reinicio. Busco el disparador automático en ese barrio."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 no encontró el detector de caída; T2 encontró el reinicio tras cambio de entorno. Falta el detector de caída real (crash/unresponsive) para completar el claim del usuario."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide detección de caída; T1 falló en M5, pero M1 (lsp missing prompt) huele a detección de estado ausente; un hijo busca el disparador en ese barrio"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 falló vacío; T2 solo cubre reinicio por entorno. Falta el detector de caída (crash/hang) para completar el claim del usuario."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 falló vacío; T2 solo cubre reinicio por entorno. Falta el detector de caída/crash del proceso para completar el claim del usuario."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "caída"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 falló en el latch; el pack huele 'lsp missing prompt' en M1. Busco el detector de caída en el barrio de prompts/estado, no en el reinicio."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "el ancla pide detección de caída; T1 falló en M5, pero el pack tiene M1 (lsp missing prompt) y M2/M4 (lsp symbol provider) que pueden tener lógica de detección de estado del servidor"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "crash"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 9,
+      "why": "T1 falló en encontrar el detector de caída. T2 encontró el reinicio pero solo por cambio de entorno. El ancla pide detección de caída/no respuesta. Necesito encontrar el mecanismo que detecta el fallo del proceso (crash/timeout) para disparar el reinicio."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 10,
+      "why": "T1 falló vacío; T2 solo cubre el disparador de entorno. Falta el detector de caída del proceso (crash/hang) para completar el claim del usuario."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

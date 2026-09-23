@@ -1,0 +1,19 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+I have three completed jobs:
+1.  **T1**: Asked how shell compilation errors are processed to mark them in the editor.
+    *   Read: `scan shell output for linker errors`, `parse linker undefined reference`, `request binary symbols panel`, `tick binary symbols panel`.
+    *   Result: This seems to be about binary symbols/linker errors, not general compilation errors or the UI marking. It's a specific mechanism for binary symbols.
+2.  **T2**: Asked where the red line is drawn in the left margin for errors.
+    *   Read: `rebuild diagnostics by line if changed`, `rebuild diagnostics by line`, `apply lsp diagnostics to panel`, `push active file diagnostics from cache`.
+    *   Result: Found data construction (`rebuild diagnostics`) and cache invalidation, but *not* the actual rendering of the gutter line.
+3.  **T3**: Asked where the red line is painted in the left margin for errors.
+    *   Result: Empty/No object found.
+
+The user's claim
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no une el mecanismo: T1 lee símbolos binarios, T2 lee datos de diagnóstico pero no el renderizado del gutter, T3 no halló objeto; sin camino entre polos leídos"
+}

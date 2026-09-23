@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"las dos cazas leen el mismo objeto (scan shell output for linker errors) y no hallan un mecanismo que una la consola con el margen del editor; el pack no muestra camino entre extraer el error y dibujar la línea roja, por lo que la funcionalidad no existe"}

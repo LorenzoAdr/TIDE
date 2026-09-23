@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se captura la pulsación de Escape o el clic fuera para iniciar la cancelación de la generación","hacia":["handle route"],"why":"T1 y T2 cerraron que no hay limpieza ni parada en buffer. Falta el disparador UI. M2=>M8 une escape a handle route; busco el origen del evento."}

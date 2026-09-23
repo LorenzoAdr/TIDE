@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el guardado del estado del editor al cerrar el proyecto no se encontró; lo leído es el guardado del estado de la sesión de IA, que no persiste el estado UI del editor"
+}

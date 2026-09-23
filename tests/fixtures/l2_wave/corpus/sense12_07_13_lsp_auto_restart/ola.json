@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T2 confirma que el mecanismo de reinicio automático existe y está completo (detecta caída/vía on lsp missing install y reinicia vía restart lsp for workspace). El claim del usuario se cumple."
+}

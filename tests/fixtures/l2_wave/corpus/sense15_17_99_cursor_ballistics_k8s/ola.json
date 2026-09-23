@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pide dos objetos: cálculo de trayectoria balística con sync a Kubernetes y persistencia en índice vectorial cuántico. T1 refuta el primero (no hay objeto, es un editor local). T2 lee un índice de símbolos estándar, no el índice cuántico de física pedido. Ambos polos del claim se refutan: no existe el módulo de trayectoria ni el índice cuántico en este código."
+}

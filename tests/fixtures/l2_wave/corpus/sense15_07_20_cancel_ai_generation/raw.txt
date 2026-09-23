@@ -1,0 +1,12 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Asked where Escape is captured to cancel generation. Result: No object found. Read `ai trace escape` (string formatter) and `ai controller` cancellation system without input link.
+2.  **T2**: Asked where the file is cleaned when generation is cancelled. Result: Read `cancel level1`, `cancel current`, `clear pending insert`, `cancel all`.
+3.  **T3**: Asked where click outside or Escape is captured to cancel generation. Result: No object found.
+
+Analysis:
+-   T1 and T3 failed to find the input capture mechanism (Escape/Click outside). The pack mentions `ai controller` has cancellation logic (`cancel level1`, etc.), but the link from input (Escape/Click) to this logic is missing or not found in the explored areas.
+-   T2 found the cancellation logic itself (`cancel level1`, `clear pending insert`), which suggests the *effect* (cleaning/canceling) exists, but the *trigger* (Escape/Click) is the missing link.
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el sistema de cancelación existe (cancel level1, clear pending insert), pero no se encontró el mecanismo que captura Escape o clic fuera para dispararlo; el ancla pide ese disparador y no está en el pack"}

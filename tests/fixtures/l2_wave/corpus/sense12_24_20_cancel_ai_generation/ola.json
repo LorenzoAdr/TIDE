@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+  "consultas": [
+    "dónde se captura el clic fuera para cancelar la generación de la IA"
+  ],
+  "do": "explorar",
+  "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+  "evita": [
+    "tecla Escape"
+  ],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla nombra dos disparos; el de Escape falló, tiro al de clic fuera"
+}

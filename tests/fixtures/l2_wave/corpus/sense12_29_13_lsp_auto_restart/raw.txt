@@ -1,0 +1,11 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed works (T1, T2, T3).
+T1 and T3 both asked about detecting the crash and triggering the restart.
+T3's closed report says: "encontré el mecanismo de detección de caída: es la lectura de EOF en el loop del transport. reader loop detecta el fallo de lectura, invoca el handler registrado on transport reader eof, que marca el cliente como no listo. El reinicio se dispara desde run al verificar
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el mecanismo de detección y reinicio automático está confirmado: el loop de lectura del transport detecta el fallo (EOF), invoca el handler que marca el cliente como no listo, y el reinicio se dispara automáticamente desde run al verificar el estado del cliente."
+}

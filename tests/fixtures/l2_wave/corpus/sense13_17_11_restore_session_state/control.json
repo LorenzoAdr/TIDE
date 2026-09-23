@@ -1,0 +1,209 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/file_picker.cpp:on_closed"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la lista de archivos abiertos al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/app/workspace_model.cpp:clear_tabs",
+        "src/app/workspace_model.cpp:open_tabs_mru",
+        "src/app/workspace_model.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el editor",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.hpp",
+        "src/app/workspace_model.cpp:clear_tabs"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [
+          "src/app/workspace_model.cpp:clear_tabs",
+          "src/app/workspace_model.cpp:open_tabs_mru",
+          "src/app/workspace_model.hpp"
+        ],
+        "consulta": "dónde se guarda la lista de archivos abiertos al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar el estado al cerrar y restaurarlo al abrir",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "sesión",
+        "persistencia",
+        "layout",
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar estado al reabrir; busco barrios de sesión y persistencia"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M3",
+        "M5"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "necesito ver si editor state, app session o editor panel guardan/restauran la posición del cursor, archivos abiertos y visibilidad de paneles"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide tres recuerdos distintos; cada uno puede vivir en un barrio diferente. el puente verifica si el guardado y la restauración están unidos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 confirmó dónde se guarda la lista de archivos abiertos; paso a la siguiente fase del plan"
+    },
+    {
+      "consulta": "dónde se restaura el estado de los paneles laterales al abrir el editor",
+      "consultas": [
+        "dónde se restaura el estado de los paneles laterales al abrir el editor"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T3 falló guardando; el pack une panel a ui. Cambio el polo: buscar la restauración al abrir, no el guardado al cerrar. T2 ya confirmó que WorkspaceModel guarda archivos; ahora busco si restaura paneles."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "la lista de archivos se guarda en WorkspaceModel; no hay mecanismo leído para cursor ni paneles"
+    }
+  ],
+  "why": "la lista de archivos se guarda en WorkspaceModel; no hay mecanismo leído para cursor ni paneles",
+  "zooms": []
+}

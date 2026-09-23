@@ -1,0 +1,19 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Looked for Escape/click capture. Found `ai trace escape` which is string escaping, not key events. Failed to find the trigger.
+T2: Looked for canceling generation. Found `cancel level1`, `cancel all`.
+T3: Looked for cleaning up the file. Found `clear pending insert`, `cancel current`, `cancel all`, `cancel level1`, `tasks`, `tasks cancel`.
+
+The pack shows:
+T1=>T2: `cancel level1` -> `ai trace escape` (This link seems weak or based on the failed T1 finding, but T2 found `cancel level1`).
+T2=>T3: `mismo objeto: cancel level1`.
+T3 has `clear pending insert`.
+
+The user's claim has two parts:
+1. Trigger: Escape/click outside cancels generation.
+2. Effect: Clean cancellation (no half-written file).
+
+T1 failed to find the trigger mechanism (Escape/click). It found a string escape function.
+T2 and T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une el disparo (Escape/clic) con la cancelación; T1 refuta el mecanismo de captura. T2 y T3 leen cancel level1 y clear pending insert, pero sin el disparo el claim no se confirma"}

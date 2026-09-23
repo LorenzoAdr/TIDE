@@ -1,0 +1,192 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:apply_workspace_settings",
+        "src/app/application.cpp:setup_build_environment_watching",
+        "src/app/application.cpp:process_build_environment_updates"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:clangd_index_healthy",
+        "src/lsp/lsp_client.cpp:process_alive",
+        "src/lsp/lsp_client.cpp:ready"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se consulta la salud del índice clangd para detectar si el servidor se ha caído",
+      "keep": [
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/symbols/lsp_symbol_provider.cpp:clangd_index_healthy",
+        "src/lsp/lsp_client.cpp:ready",
+        "src/lsp/lsp_client.cpp:process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca la comprobación de salud del servidor LSP para detectar si se ha caído",
+      "keep": [
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/lsp/lsp_client.cpp:process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:clangd_index_healthy"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se invoca la comprobación de salud del servidor LSP para detectar si se ha caído",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se decide reiniciar el servidor LSP tras detectar que se ha caído",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino invocar la comprobación de salud y decidir reiniciar el servidor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'restart lsp for workspace' y 'schedule debounced lsp restart'; es el núcleo del mecanismo de reinicio"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "crash"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el reinicio existe pero no se dispara por caída; busco el detector de fallo"
+    },
+    {
+      "consulta": "dónde se consulta la salud del índice clangd para detectar si el servidor se ha caído",
+      "consultas": [
+        "dónde se consulta la salud del índice clangd para detectar si el servidor se ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "custom event drain"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 dice que la detección es activa al consultar la salud; T1=>T2 une run custom event drain con clangd index healthy. Necesito ver si esa consulta ocurre automáticamente (ej. en un loop o evento periódico) o solo bajo demanda, para saber si el reinicio automático ya está cableado o falta el disparador."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 encontró el reinicio, T2/T3 la detección. Falta unirlos: ¿quién llama a la detección y ¿la detección dispara el reinicio? Dos loci: el llamador de la salud y el decisor del reinicio tras la caída."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 5,
+      "why": "T4 no encontró la invocación de la comprobación de salud; el mecanismo de detección automática no existe en el código actual"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

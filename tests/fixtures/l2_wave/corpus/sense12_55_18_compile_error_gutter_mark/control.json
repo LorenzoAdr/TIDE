@@ -1,0 +1,142 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola inferior",
+      "keep": [
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se lee el texto de salida de la consola inferior para procesarlo",
+      "keep": [
+        "M12"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/packet_monitor/pkt_monitor_service.cpp:set_inferior_pid",
+        "src/ui/source_panel.cpp:source_panel_contains_mouse",
+        "src/ui/terminal_ui_channel.hpp:on_pty_output"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M11 menciona escaneo de errores de linker en shell, pero no el mecanismo de decoración en el margen. M3 (visual highlight) y M1 (editor panel) son candidatos para la línea roja, pero sus fichas actuales son vagas (git marks, clear caches). Necesito ver si ya existe un sistema de decoraciones de línea o si hay que crearlo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "dos mecanismos distintos (pintar margen vs parsear consola); el hijo de A no necesita B para cerrar su locus"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 cerró sin objeto; el mapeo de extracción de errores de la consola no se halló. Salto a la siguiente caza."
+    },
+    {
+      "consulta": "dónde se lee el texto de salida de la consola inferior para procesarlo",
+      "consultas": [
+        "dónde se lee el texto de salida de la consola inferior para procesarlo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "consola"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 cerró que no hay extractor; necesito el origen (el texto de la consola) para construir el puente. T1 ya dio el destino (diagnostics)."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de la línea roja existe (line gutter marker, diagnostics on line), pero no hay camino entre la lectura de la consola y el editor; el pack cierra sin camino"
+    }
+  ],
+  "why": "el mecanismo de la línea roja existe (line gutter marker, diagnostics on line), pero no hay camino entre la lectura de la consola y el editor; el pack cierra sin camino",
+  "zooms": []
+}

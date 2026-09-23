@@ -1,0 +1,19 @@
+The user wants to implement an automatic restart of the LSP server if it crashes or becomes unresponsive.
+I have 3 completed jobs:
+T1: Looked for detection of LSP crash/unresponsiveness to trigger restart. Result: No watchdog found. Found health logic for L2 backend and manual debounced restart for clangd on config changes.
+T2: Looked for handling disconnection/error to reconnect. Result: Found `schedule debounced lsp restart`.
+T3: Looked for LSP server initialization. Result: Found `start` -> `spawn language server` -> `fork exec` -> `transport start` -> `initialize`.
+
+The pack shows:
+M5/M7: `application restart lsp for workspace`, `schedule debounced lsp restart`, `pending lsp restart`, `last lsp environment fingerprint`.
+T1 explicitly says "no hay un watchdog que detecte caída del LSP y dispare restart lsp for workspace automáticamente".
+T2 found `schedule debounced lsp restart` but didn't find the trigger for crash/unresponsiveness.
+T3 found the start mechanism.
+
+The anchor claims: "si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detect
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "no existe un mecanismo de detección automática de caída o no-respuesta del LSP que dispare el reinicio; solo hay reinicio manual debounced tras cambios de configuración y lógica de salud para el backend L2, no para el LSP"
+}

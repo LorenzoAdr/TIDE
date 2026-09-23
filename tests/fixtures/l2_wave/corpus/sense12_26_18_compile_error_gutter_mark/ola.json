@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el sistema no parsea errores de compilación de la consola para marcar líneas en el editor; T3 confirmó que no hay objeto que extraiga línea y mensaje del texto de la consola"
+}

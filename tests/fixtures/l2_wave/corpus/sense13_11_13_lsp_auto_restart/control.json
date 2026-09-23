@@ -1,0 +1,126 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:wait_until_healthy",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se maneja la desconexión del servidor de lenguaje LSP para detectar que se ha caído",
+      "keep": [
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_transport.cpp:set_reader_eof_handler",
+        "src/lsp/lsp_transport.cpp:reader_loop"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha desconectado",
+      "keep": [
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:start"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp restart"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace), pero falta el disparador de la detección de fallo (crash/unresponsive). Busco el origen de la señal que activa el reinicio."
+    },
+    {
+      "consulta": "dónde se maneja la desconexión del servidor de lenguaje LSP para detectar que se ha caído",
+      "consultas": [
+        "dónde se maneja la desconexión del servidor de lenguaje LSP para detectar que se ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle disconnect"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 no encontró el watchdog en application; busco el handler de desconexión en la capa de conexión LSP para ver si existe o dónde añadirlo"
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha desconectado",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha desconectado"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró la detección (EOF). Falta confirmar si ese evento dispara el reinicio automático o si hay un puente hacia la lógica de reinicio de M7."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de reinicio automático no existe: la detección de caída (transport reader eof) solo limpia estado, no dispara un reinicio"
+    }
+  ],
+  "why": "el mecanismo de reinicio automático no existe: la detección de caída (transport reader eof) solo limpia estado, no dispara un reinicio",
+  "zooms": []
+}

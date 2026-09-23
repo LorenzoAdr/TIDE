@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"la caza anterior refutó la existencia de la interceptación de Escape o clic fuera para cancelar la IA; el mecanismo leído solo responde a comandos de texto. No hay objeto que conectar, por lo que el claim de que 'pulsa Escape o hace clic fuera... se cancele' se refuta: esa vía no existe en el código actual."}

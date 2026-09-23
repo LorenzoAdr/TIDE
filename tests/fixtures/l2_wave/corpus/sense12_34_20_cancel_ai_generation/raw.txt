@@ -1,0 +1,8 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current state:
+- T1 (Escape/click capture): Closed. No object found. `ai trace escape` is JSON string escaping, not UI event handling.
+- T2 (Clean up half-written file): Closed. Found `cancel level1`, `cancel current`, `clear pending insert`, `cancel all`, `handle user input`.
+- T3 (Clean up half-written file): Closed. Found `cancel current`, `clear pending insert`, `cancel all`, `cancel level1`.
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de cancelación y limpieza ya está identificado en el controlador de IA (cancel level1, clear pending insert); la captura de Escape no existe en el código actual, por lo que el comportamiento deseado no se puede implementar sin añadir el handler de eventos"}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "no_pasar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1, T2 y T4 leen el mismo objeto (restart lsp for workspace). T3 lee otro barrio (notify lsp status). Repetir la misma consulta no avanzará; salto a la siguiente caza del plan."
+}

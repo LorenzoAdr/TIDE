@@ -1,0 +1,238 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura el estado del editor al abrir el proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.hpp",
+        "src/editor/editor_state.cpp",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "hay camino guardar y restaurar el estado del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/editor/editor_state.hpp",
+        "src/editor/editor_state.cpp"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/editor/editor_state.cpp",
+          "src/editor/editor_state.hpp"
+        ],
+        "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [
+          "src/editor/editor_state.hpp",
+          "src/editor/editor_state.cpp",
+          "src/app/application.cpp:restore_workspace_session",
+          "src/app/workspace_model.cpp:open_file"
+        ],
+        "consulta": "dónde se restaura el estado del editor al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar y restaurar el estado del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "fallo"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "dos cierres independientes; el hijo de A no necesita B"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 afirma el objeto de la fase B: se restaura el estado del editor al abrir el proyecto"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se restaura la sesión de trabajo al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la sesión de trabajo al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "workspace"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla pide recordar archivos y paneles; el editor state no serializa; el pack apunta a Application y set workspace"
+    },
+    {
+      "consulta": "dónde se serializa la posición del cursor y los archivos abiertos al cerrar el proyecto",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el plan anterior falló porque buscaba 'guardar/restaurar' en el editor state, que solo gestiona cursores en memoria; ahora busco serialización/deserialización, que es el mecanismo de persistencia real"
+    },
+    {
+      "consulta": "dónde se restaura la sesión de trabajo al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la sesión de trabajo al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "Application"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el editor state no persiste ni restaura; el pack apunta a Application y set workspace como el barrio que maneja la sesión"
+    },
+    {
+      "consulta": "dónde se serializa la posición del cursor y los archivos abiertos al cerrar el proyecto",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "el plan anterior falló porque buscaba 'guardar/restaurar' en el editor state, que solo gestiona cursores en memoria; ahora busco serialización/deserialización, que es el mecanismo de persistencia real"
+    },
+    {
+      "consulta": "dónde se serializa la posición del cursor y los archivos abiertos al cerrar el proyecto",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "el plan anterior falló porque buscaba 'guardar/restaurar estado' en general; ahora busco la serialización/restauración concreta de cursor y archivos"
+    },
+    {
+      "consulta": "dónde se restaura la sesión de trabajo al abrir el proyecto",
+      "consultas": [
+        "dónde se restaura la sesión de trabajo al abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "workspace"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 10,
+      "why": "el editor no persiste su estado; la sesión de trabajo (workspace) es el objeto que guarda y restaura archivos, cursores y paneles"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

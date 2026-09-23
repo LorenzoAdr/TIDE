@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se guarda la posición del cursor al cerrar el editor para restaurarla después","evita":["reset to single cursor"],"why":"T1 no encontró persistencia; T2 usa reset (sin memoria). El ancla pide recordar. Hay que cazar el guardado real, no el reseteo."}

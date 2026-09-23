@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "control: un leído no cierra el ancla; no refuta el existe",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "no hay mecanismo que recuerde la posición del cursor, los archivos abiertos ni la visibilidad de los paneles al volver a abrir un proyecto"
+}

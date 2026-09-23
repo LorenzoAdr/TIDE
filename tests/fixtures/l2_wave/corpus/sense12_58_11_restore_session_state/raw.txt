@@ -1,0 +1,18 @@
+The user wants to know how the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+
+I have three completed investigations:
+1.  **Cursor Position**: `T1` found `load working lines from disk` and `reset to single cursor` in `editor text hpp`.
+2.  **Open Files**: `T2` found `reopen workspace documents` which iterates `workspace tabs` and calls `symbols document opened`.
+3.  **Sidebar Visibility**: `T3` found `load working lines from disk`, `load`, and `reopen workspace documents`.
+
+The user's claim has three parts:
+1.  Cursor position.
+2.  Open files.
+3.  Sidebar visibility.
+
+T1 and T2 have confirmed mechanisms for cursor and files.
+T3 found `load working lines from disk` and `reopen workspace documents` but didn't explicitly confirm the *sidebar visibility* mechanism in the "Cerrado" text provided in the prompt (it just lists what was read). However, looking at the "Abierto" section of T3, it lists `restart lsp for workspace`.
+
+Wait, let's look closer at T3's Cerrado:
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la posición del cursor se restaura en load working lines from disk y reset to single cursor; los archivos abiertos se restauran en reopen workspace documents iterando workspace tabs; la visibilidad de paneles se restaura en load working lines from disk y reopen workspace documents"}

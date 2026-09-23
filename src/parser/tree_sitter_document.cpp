@@ -770,15 +770,19 @@ void TreeSitterDocumentCache::ensure_viewport_preview(const std::string& path,
   if (!ts_node_is_null(root)) {
     const std::string& parse_source = parse_full_document ? canonical : slice;
     const std::string& highlight_source = xml_wrap.active() ? xml_wrap.wrapped : parse_source;
-    std::vector<LineHighlights> doc_highlights =
-        highlights_for_document(root, highlight_source, highlight_lang);
+    // A full-document parse (XML) still only needs the visible rows: running the query and
+    // the wrap unmapping over every line is what froze the UI on multi-thousand-line files.
+    const int row_begin = parse_full_document ? first_line : 0;
+    const int row_end = parse_full_document ? last_line : (last_line - first_line);
+    std::vector<LineHighlights> row_highlights =
+        highlights_for_document_rows(root, highlight_source, row_begin, row_end, highlight_lang);
     if (xml_wrap.active()) {
-      xml_unmap_highlights_from_wrap(&doc_highlights, xml_wrap, parse_source);
+      xml_unmap_highlights_from_wrap(&row_highlights, xml_wrap, parse_source, row_begin);
     }
     for (int line = first_line; line <= last_line; ++line) {
-      const int src_line = parse_full_document ? line : (line - first_line);
-      if (src_line >= 0 && src_line < static_cast<int>(doc_highlights.size())) {
-        preview.by_line.emplace(line, doc_highlights[static_cast<std::size_t>(src_line)]);
+      const int index = line - first_line;
+      if (index >= 0 && index < static_cast<int>(row_highlights.size())) {
+        preview.by_line.emplace(line, row_highlights[static_cast<std::size_t>(index)]);
       }
     }
   }

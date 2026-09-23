@@ -1,0 +1,22 @@
+The user wants to restore the cursor position, open files, and sidebar visibility when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A locator: cursor position (T2 closed: no object)
+2. [en_curso] B locator: open files (T3 closed: "rebuild display", "rebuild display locked" - not the trigger, closed mapping)
+3. [pendiente] C locator: sidebar visibility
+4. [pendiente] P bridge: common mechanism
+
+Current state:
+T1: "Make Editor Panel", "reset helix overlay state", "clear hover state" (closed mapping, not the trigger)
+T2: No object found for cursor restoration.
+T3: "rebuild display", "rebuild display locked" (closed mapping, not the trigger)
+
+The pack shows:
+T1 -> Make Main Layout, ensure buffer
+T3 -> set consumer active, run input sync drain
+
+The user's claim has 3 parts: cursor, files, panels.
+T2 says cursor restoration doesn't exist (or at least not in the way asked).
+T3 says file restoration isn't in "rebuild display".
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la restauración de archivos no vive en rebuild display; la posición del cursor no tiene objeto de restauración; el pack no une un mecanismo común para paneles. el ancla pide tres restauraciones; dos caen y la tercera no tiene barrio en el pack. cierro el claim: no hay orquestación de sesión que recuerde cursor, archivos y paneles al abrir el proyecto"}

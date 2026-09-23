@@ -1,0 +1,16 @@
+{
+  "consulta": "dónde se escribe la posición del cursor en el archivo de sesión al guardar el espacio de trabajo",
+  "consultas": [],
+  "do": "plan",
+  "error": "control: consulta sin objeto (no una categoría)",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": "romper"
+  },
+  "why": "T3 leyó el guardado de sesión pero no el cursor específico; T2 leyó la apertura pero no la restauración de estado. Necesito cerrar el ciclo de persistencia del cursor (guardar y cargar) para confirmar si el mecanismo existe o está roto."
+}

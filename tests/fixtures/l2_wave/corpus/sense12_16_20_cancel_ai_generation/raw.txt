@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se cancela la generación de código de la IA para limpiar el archivo","hacia":["ai controller"],"why":"la captura de UI falló; el pack muestra M8 (ai controller) con cancel level1 y clear ai session; busco el mecanismo de limpieza en el controlador"}

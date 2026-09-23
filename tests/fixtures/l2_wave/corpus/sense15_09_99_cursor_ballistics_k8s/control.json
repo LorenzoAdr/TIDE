@@ -1,0 +1,93 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria balística del cursor para sincronizar con el cluster al parpadear",
+      "keep": [
+        "M1",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ui/cursor_blink.cpp:show",
+        "src/ui/cursor_blink_ui.hpp:cell_decorator"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor",
+        "gesto parpadeo",
+        "índice vectorial"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide un mecanismo muy específico (trayectoria balística, parpadeo, índice cuántico); bosquejo para ver si el pack huele a física de cursores, detección de gestos o persistencia exótica, o si es un barrio inexistente"
+    },
+    {
+      "consulta": "dónde se calcula la trayectoria balística del cursor para sincronizar con el cluster al parpadear",
+      "consultas": [
+        "dónde se calcula la trayectoria balística del cursor para sincronizar con el cluster al parpadear"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "trayectoria"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide un cálculo específico (balística) y un trigger (parpadeo); busco el módulo que une ambos fenómenos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "el decorador visual estático y el toggle de visibilidad no calculan trayectorias ni sincronizan con clusters; el pack no nombra un módulo de física balística ni un índice vectorial cuántico para persistirla"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado de T1 niega la existencia del cálculo de trayectoria balística y la sincronización con cluster al parpadear; el pack no nombra ni sugiere estos mecanismos (solo decoradores visuales estáticos). No hay evidencia de persistencia en índice vectorial cuántico. El ancla describe funcionalidades inexistentes en el sistema."
+    }
+  ],
+  "why": "el Cerrado de T1 niega la existencia del cálculo de trayectoria balística y la sincronización con cluster al parpadear; el pack no nombra ni sugiere estos mecanismos (solo decoradores visuales estáticos). No hay evidencia de persistencia en índice vectorial cuántico. El ancla describe funcionalidades inexistentes en el sistema.",
+  "zooms": []
+}

@@ -1,0 +1,208 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:process_build_environment_updates"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde detecta el proveedor de símbolos LSP que el servidor se ha caído o no responde",
+      "keep": [
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback",
+        "src/symbols/lsp_symbol_provider.cpp:ensure_python_lsp_async",
+        "src/symbols/lsp_symbol_provider.cpp:finish_python_lsp_start_locked"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde detecta la aplicación que el proceso del servidor LSP se ha caído o no responde",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/symbols/lsp_symbol_provider.cpp:ensure_python_lsp_async",
+        "src/symbols/lsp_symbol_provider.cpp:finish_python_lsp_start_locked",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso del servidor LSP ha terminado inesperadamente o ha muerto",
+      "keep": [
+        "M2",
+        "M4"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/lsp_symbol_provider.cpp:ensure_python_lsp_async",
+        "src/symbols/lsp_symbol_provider.cpp:finish_python_lsp_start_locked"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el proceso del servidor LSP ha terminado inesperadamente o ha muerto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el servidor LSP no responde a las peticiones timeout o heartbeat",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "conectan la detección de caída o no respuesta con el reinicio automático del LSP",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'restart lsp for workspace' y 'schedule debounced lsp restart'; hay que ver si ya detecta la caída o solo reinicia por entorno"
+    },
+    {
+      "consulta": "dónde detecta el proveedor de símbolos LSP que el servidor se ha caído o no responde",
+      "consultas": [
+        "dónde detecta el proveedor de símbolos LSP que el servidor se ha caído o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp symbol provider"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el reinicio actual es por entorno o instalación; falta el detector de caída/no respuesta del proceso"
+    },
+    {
+      "consulta": "dónde detecta la aplicación que el proceso del servidor LSP se ha caído o no responde",
+      "consultas": [
+        "dónde detecta la aplicación que el proceso del servidor LSP se ha caído o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "callback de estado"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 leyó el callback de estado pero no el disparo de caída; el hijo busca el detector de muerte del proceso"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 confirmó el reinicio pero no el disparador de caída. T2 y T3 fallaron en encontrar la detección. Necesito localizar explícitamente el monitor de salud (muerte del proceso o timeout) para ver si existe y si dispara el reinicio."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso del servidor LSP ha terminado inesperadamente o ha muerto",
+      "consultas": [
+        "dónde se detecta que el proceso del servidor LSP ha terminado inesperadamente o ha muerto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "on exit"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 5,
+      "why": "T4 no halló el disparo de muerte; el pack apunta a on exit como el barrio del evento de salida del proceso"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 6,
+      "why": "T4 no halló el detector de caída; el pack no une a otro barrio con ese fenómeno. Salto a la siguiente caza del plan (B: timeout/no-respuesta)."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

@@ -1,0 +1,20 @@
+The user wants to automatically detect if the LSP server crashes or becomes unresponsive and restart it without user intervention.
+
+Current state:
+- T1 found the restart mechanism: `restart lsp for workspace` in `Application`. It is triggered by environment changes, build artifacts, or LSP installation. It handles the *restart* part.
+- T2 looked for the *detection* of unresponsiveness (freeze/timeout) triggering the restart. It found specific request timeouts (`completion wait timeout ms`, `parse wait timeout ms`) and a physical disconnect handler (`on transport reader eof`), but *none* of these invoke the restart or implement a global watchdog. T2 concluded there is no global watchdog mechanism currently.
+
+The anchor has two parts:
+1. Detect crash/unresponsiveness.
+2. Restart automatically.
+
+T1 confirmed the restart mechanism exists and is triggered by specific events (EOF, settings change, etc.).
+T2 confirmed that *unresponsiveness* (freeze) is *not* currently detected by a global watchdog that triggers the restart. The timeouts found are per-request and don't seem to trigger the restart.
+
+The user's request implies a feature that might not exist yet ("necesito que...").
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el mecanismo de reinicio existe y se dispara ante caída física (EOF), pero no hay detección automática de congelación (watchdog) que dispare el reinicio; el usuario pide una funcionalidad que no está implementada"
+}

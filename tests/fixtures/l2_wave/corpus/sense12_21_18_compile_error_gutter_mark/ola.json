@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el hijo cerró la fase A: no hay mecanismo que extraiga línea y columna de errores de compilación (solo linker). sin el polo de origen, el puente al dibujo en el margen es imposible; el claim se refuta por ausencia del objeto"
+}

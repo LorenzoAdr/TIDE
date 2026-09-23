@@ -1,0 +1,150 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se analizan los errores de compilación que aparecen en la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/diagnostics_panel.cpp:problems_visible_terminal_lines",
+        "src/ui/console_panel.cpp:problems_tab_active_console",
+        "src/ui/diagnostics_panel.cpp:Event",
+        "src/ui/diagnostics_panel.cpp:document_text_for_path",
+        "src/ui/diagnostics_panel.cpp:visible_line_count",
+        "src/ui/diagnostics_panel.cpp:MakeDiagnosticsPanel",
+        "src/ui/diagnostics_panel.cpp:build_rows"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se actualiza el mapa de diagnósticos por línea a partir de los errores de la consola",
+      "keep": [
+        "M6",
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "margen editor",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con marcas en el margen del editor; busco barrios que manejen parsing de errores y decoración de líneas"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "margen editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores en el margen; M1 huele a editor y M11 a errores de compilación"
+    },
+    {
+      "consulta": "dónde se analizan los errores de compilación que aparecen en la consola inferior",
+      "consultas": [
+        "dónde se analizan los errores de compilación que aparecen en la consola inferior"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "shell output"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el usuario quiere marcar errores de la consola; T1 cubre LSP, necesito ver si existe un analizador de salida de consola (como M11 sugiere) para conectarlo al margen"
+    },
+    {
+      "consulta": "dónde se actualiza el mapa de diagnósticos por línea a partir de los errores de la consola",
+      "consultas": [
+        "dónde se actualiza el mapa de diagnósticos por línea a partir de los errores de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "build rows"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 usan LSP; el pack une build rows con el mapa del margen. Necesito ver si hay un puente que escriba en el mapa del editor desde la consola."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo ya existe: los errores de la consola se analizan en diagnostics panel, se empujan al mapa panel diagnostics by line vía apply lsp diagnostics to panel, y el margen del editor los lee en line gutter marker para pintar la línea roja"
+    }
+  ],
+  "why": "el mecanismo ya existe: los errores de la consola se analizan en diagnostics panel, se empujan al mapa panel diagnostics by line vía apply lsp diagnostics to panel, y el margen del editor los lee en line gutter marker para pintar la línea roja",
+  "zooms": []
+}

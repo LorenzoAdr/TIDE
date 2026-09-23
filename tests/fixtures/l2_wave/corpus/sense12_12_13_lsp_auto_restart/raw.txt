@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático ante caída o no respuesta del LSP no existe: schedule debounced lsp restart solo se invoca al inicio o por cambio de entorno, y la detección de fallo (lsp missing) solo muestra un toast sin disparar reinicio"}

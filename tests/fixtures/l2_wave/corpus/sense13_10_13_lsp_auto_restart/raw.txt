@@ -1,0 +1,13 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have three completed jobs:
+1.  **T1**: Found detection of crash (EOF/error in reader loop -> `on transport reader eof` -> `ready false` -> `waitpid`). No timeout/hang detection found.
+2.  **T2**: Looked for automatic restart trigger after crash. Found `on transport reader eof` only cleans state and waits. `start` is constructor. No code invoking `start` after crash found in immediate callers.
+3.  **T3**: Looked for deferred restart programming. Found `restart lsp for workspace` and `on lsp missing install`.
+
+The "Cerrado" of T2 and T3 explicitly says "ESA pregunta no se relanza... do=cerrar ese mapeo". This implies the specific mapping looked for (restart trigger in `on transport reader eof` or deferred restart in `restart lsp for workspace`) was not the mechanism or didn't exist as expected.
+
+However, T3 found `restart lsp for workspace` and `on lsp missing install`.
+T1 found `on transport reader eof`.
+The pack shows `M5`
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático tras caída no existe en el código leído; la detección de caída limpia el estado pero no dispara el reinicio, y las funciones de reinicio encontradas no se invocan tras el fallo"}

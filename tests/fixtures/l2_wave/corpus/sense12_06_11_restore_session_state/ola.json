@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "plan",
+  "error": "control: plan 2–4 fases",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": "romper"
+  },
+  "why": "el ancla pide recordar cursor y paneles; son dos mecanismos distintos (editor vs layout) que deben leerse por separado para confirmar si el estado persiste y se recupera"
+}

@@ -1,0 +1,16 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+I have a plan with 4 phases: A (cursor), B (open files), C (sidebars), P (bridge).
+Phase A (cursor) failed: T2 read `reopen workspace documents` but it wasn't the trigger for cursor restoration.
+Phase B (open files) is in progress: T3 read `reopen workspace documents`, `run`, `load`, `apply connection and start`.
+The system says "exploradores agotados" (explorers exhausted). I have 3 works done (T1, T2, T3).
+T1: `stabilize scroll after fold change` (not the trigger).
+T2: `reopen workspace documents` (not the trigger for cursor).
+T3: `reopen workspace documents`, `run`, `load`, `apply connection and start` (not the trigger for open files).
+
+The pack shows:
+T2 and T3 both read `reopen workspace documents`.
+T2=>T3 is "mismo objeto: reopen workspace documents".
+T1=>T2 "sin camino".
+T1=>T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de restauración de archivos y cursor al abrir un proyecto no se encuentra en los nombres leídos (reopen workspace documents, stabilize scroll after fold change); el pack no nombra el disparo para la posición del cursor ni la visibilidad de paneles"}

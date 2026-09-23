@@ -1,0 +1,180 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de la IA al pulsar Escape",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se cancela la generación de la IA al pulsar Escape",
+      "consultas": [
+        "dónde se cancela la generación de la IA al pulsar Escape"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escape"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el trigger (escape) y M8 el latch (cancel level1); necesito ver el puente que une el gesto del usuario con la orden de parada limpia"
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 cerró que no hay cancelación por texto; el ancla pide Escape. Busco el handler de teclado que detecte esa tecla y dispare la cancelación."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 cerró que no hay lógica en el handler de texto; el disparo debe estar en la capa de eventos de teclado (UI/Editor) que escucha Escape y emite la señal de cancelación"
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 cerró que no hay cancelación por tecla en el handler de texto; el pack muestra M7 (editor panel) con handle key event y M2 con escape. Busco el interceptor de teclado en la UI, no en el flujo de texto."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 cerró que no hay cancelación por texto; el ancla pide Escape. Busco el handler de teclado que detecte Escape y dispare la cancelación."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 cerró que no hay cancelación por texto; el ancla pide Escape. Busco el handler de teclado que detecte Escape y dispare la cancelación."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 cerró que no hay cancelación por tecla en el handler de texto; el pack muestra M7 (editor panel) con handle key event y M2 (ai trace) con escape. Hay que cazar el interceptor de teclado en la UI, no en el flujo de texto."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 8,
+      "why": "T1 cerró que no hay cancelación por texto; el ancla pide Escape. Busco el handler de teclado que detecte Escape y dispare la cancelación, distinto del flujo de texto leído."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 9,
+      "why": "T1 cerró que no hay cancelación por texto; el ancla pide Escape. Busco el handler de teclado que detecte Escape y dispare la cancelación."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 10,
+      "why": "T1 cerró que no hay cancelación por texto; el ancla pide Escape. Busco el handler de teclado que detecte Escape y dispare la cancelación."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

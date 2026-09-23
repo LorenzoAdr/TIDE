@@ -1,0 +1,145 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:status_text",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/llama_backend.cpp:ensure_completion_server",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se lee el estado del proceso del servidor para saber si está vivo o muerto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/dap/gdb_launcher.cpp:process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se usa el estado del proceso para decidir si reiniciar el servidor",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/ai/llama_backend.cpp:ensure_completion_server",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/ai/embedding_backend.cpp:ensure_ready",
+        "src/ai/embedding_backend.cpp:start_server",
+        "src/ai/embedding_backend.cpp:stop_owned_unlocked",
+        "src/ai/llama_backend.cpp:health_ok"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo del reinicio (pending lsp restart, schedule debounced lsp restart); necesito ver qué dispara ese reinicio automáticamente"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "health ok"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el pack une M5 (application) con el reinicio; busco el disparo de la caída en ese barrio"
+    },
+    {
+      "consulta": "dónde se lee el estado del proceso del servidor para saber si está vivo o muerto",
+      "consultas": [
+        "dónde se lee el estado del proceso del servidor para saber si está vivo o muerto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "server pid"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el disparo de reinicio requiere un detector de muerte; el pack muestra M6 con pid y errno, el barrio de la vida del proceso"
+    },
+    {
+      "consulta": "dónde se usa el estado del proceso para decidir si reiniciar el servidor",
+      "consultas": [
+        "dónde se usa el estado del proceso para decidir si reiniciar el servidor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart lsp"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 leyó el detector (process alive) y T1 el reinicio; necesito el puente que une la detección con la acción"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "la aplicación detecta la caída del servidor LSP mediante process alive (waitpid) y decide reiniciar en ensure ready y start server si el pid es 0 o health ok falla, disparando restart lsp for workspace"
+    }
+  ],
+  "why": "la aplicación detecta la caída del servidor LSP mediante process alive (waitpid) y decide reiniciar en ensure ready y start server si el pid es 0 o health ok falla, disparando restart lsp for workspace",
+  "zooms": []
+}

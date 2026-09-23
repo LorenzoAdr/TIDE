@@ -1,0 +1,10 @@
+# Tick TOOL_EVAL — todas las tools una a una (thinking OFF)
+
+Sentinel: `AGENT_LOOP_WAKE_tool_eval`
+
+1. Si `meta/STOP` → para.
+2. `.tuide/ai/l2_wave/v2_night/TOOL_EVAL/`:
+   - `DONE` → `STATE.json` (floor_final, kept, rounds).
+   - sin DONE → mira `queue.log` / `R3_peek`…`R7_inbody`.
+3. Orden: follow, entre (ya decididos), peek, needles, cerca, atlas, inbody.
+4. Wait: `./tools/l2_wave/t270b_wait_done.sh .tuide/ai/l2_wave/v2_night/TOOL_EVAL AGENT_LOOP_WAKE_tool_eval tools/l2_wave/tool_eval_tick_prompt.txt`

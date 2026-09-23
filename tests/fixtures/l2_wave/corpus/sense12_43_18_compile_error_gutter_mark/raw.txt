@@ -1,0 +1,16 @@
+The user wants to link compilation errors from the console to red lines in the editor margin.
+I have a plan with 3 phases:
+A: locator: parse compilation errors from console output (Done, T4)
+B: locator: create diagnostic marks in the editor margin from extracted errors (Pending)
+P: bridge: path between parsing and creating marks (Pending)
+
+T4 just closed. It found `scan shell output for linker errors`.
+The plan says phase A is done. The next phase is B: "dónde se crean las marcas de diagnóstico en el margen del editor a partir de los errores extraídos".
+However, I need to check if T4's result actually connects to B or if I need to explore a port.
+T4 found `scan shell output for linker errors`.
+The pack shows `T1=>T4 mismo objeto: scan shell output for linker errors`.
+T1 found `rebuild display, styled rows, rebuild cache, rebuild display locked, scan shell output for linker errors, drain output bytes`.
+T3 found `diagnostics on line, diagnostics for editor line, rebuild diagnostics by line, rebuild diagnostics by line if changed`.
+T2 found `build git marks snapshot`.
+---- content ----
+{"action":"control_v1","do":"explorar","consulta":"dónde se crean las marcas de diagnóstico en el margen del editor a partir de los errores extraídos","hacia":["diagnostics"],"why":"fase B del plan; T4 cerró el parseo, ahora busco la creación de marcas en el margen"}

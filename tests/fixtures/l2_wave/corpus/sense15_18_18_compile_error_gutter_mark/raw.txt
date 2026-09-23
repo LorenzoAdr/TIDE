@@ -1,0 +1,19 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor.
+I have three completed jobs:
+T1: Found where compilation errors are detected in the console output (`parse pty filter tokens`).
+T2: Found where the red line is drawn in the left margin (`decoration at`, `apply decoration`, `Render Editor Line`, `line gutter marker`).
+T3: Found the bridge between LSP error detection and editor decorations (`apply lsp diagnostics to panel`, `push active file diagnostics from cache`, `sync diagnostic cache`, `ISymbol Provider`).
+
+The user's request is about *compilation errors from the console*, not LSP errors.
+T1 found `parse pty filter tokens` for console errors.
+T2 found the decoration mechanism.
+T3 found the LSP bridge, but the "entre abiertas" says T1=>T3 is "sin camino" (no path).
+The pack shows T1 (console errors) and T2 (decorations) are separate. T3 is LSP.
+The user wants to connect T1 (console errors) to T2 (decorations).
+T3 shows how LSP does it, but
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide conectar errores de consola con decoraciones; T1 y T2 cierran los polos, pero entre abiertas dice sin camino. T3 cierra el puente LSP, no el de consola. el pack no une consola con margen: el mecanismo no existe en el código actual."
+}

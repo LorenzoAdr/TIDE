@@ -1,0 +1,13 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found: `push active file diagnostics from cache`, `apply lsp diagnostics to panel`, `rebuild diagnostics by line if changed`, `line gutter marker`, `line diagnostic marker from map`, `rebuild diagnostics by line`. This is the mechanism for marking errors in the editor margin (LSP diagnostics).
+T2 found: `buffer text`, `make problem row element`. This is about reading errors from the console to mark them in the editor, but it seems to be about the console's own problem rows, not the editor margin.
+T3 found: `terminal row link` in `console panel` invokes `find compiler location` in `compiler location` which parses GCC/MSVC styles and returns a `Compiler Location Match` (path, line, column). This object is used for navigation links, NOT sent directly to the LSP diagnostics system, but it IS the extraction of compilation errors from the console.
+
+The gap is: T3 extracts the error location (`Compiler Location Match`), but it's used for navigation links. T1 shows how LSP diagnostics are applied to
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de extracción de errores de compilación de la consola (terminal row link -> find compiler location -> Compiler Location Match) existe y devuelve ruta, línea y columna, pero se usa exclusivamente para navegación de enlaces, no se envía al sistema de diagnósticos LSP que marca el margen del editor; no hay camino entre la extracción de la consola y la aplicación de diagnósticos en el margen"
+}

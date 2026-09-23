@@ -1,0 +1,23 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+I have three completed tasks:
+T1: Found where the red line is drawn (`line gutter marker`, `line diagnostic marker from map`, `Make Editor Panel`).
+T2: Asked where compilation errors are read from the console. Result: No object found. The code read was `dap backend` (debugging), not compilation parsing.
+T3: Asked where console output is parsed for compilation errors. Result: No object found.
+
+The pack shows:
+M11 `binary symbols panel` has `scan shell output for linker errors`. This looks promising for parsing console output, but T2/T3 failed to find the general compilation error parser.
+M3 `visual highlight` handles git marks.
+T1 found the drawing mechanism (`line gutter marker`).
+
+The user's request implies a feature that might not exist yet or is implemented differently (e.g., via LSP diagnostics, not a custom console parser).
+T2 and T3 explicitly say "no object found" for reading/parsing compilation errors from the console.
+T1 found the drawing mechanism.
+
+Since T
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de dibujo existe (line gutter marker), pero no hay objeto que lea ni parsee errores de compilación de la consola; el sistema usa dap backend para depuración, no para parsing de compilación"
+}

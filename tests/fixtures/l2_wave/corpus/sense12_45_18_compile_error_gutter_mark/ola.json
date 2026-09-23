@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "no existe mecanismo que lea errores de compilación de la consola ni los marque en el margen; el sistema solo pinta marcas de git y parsea errores de linker, por lo que la funcionalidad solicitada no está implementada"
+}

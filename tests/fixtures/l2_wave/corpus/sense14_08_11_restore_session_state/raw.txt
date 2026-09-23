@@ -1,0 +1,18 @@
+The user wants to know if the application remembers the cursor position, open files, and side panel visibility when reopening a project.
+I have a plan with 4 phases:
+1.  [fallo] A locator: dónde se guarda la posición del cursor al cerrar el editor
+2.  [paso] B locator: dónde se restauran los archivos abiertos al abrir el proyecto
+3.  [en_curso] C locator: dónde se controla la visibilidad de los paneles laterales
+4.  [pendiente] P puente: hay un mecanismo único que restaura cursor, archivos y paneles al abrir el proyecto (need A B C)
+
+Work 1 (A): Asked "dónde se guarda la posición del cursor al cerrar el editor".
+Closed: "leído: close, reset to single cursor, save state".
+This implies the cursor position is reset to a single cursor and state is saved, but the closed message says "ESA pregunta no se relanza. Lo leído no era el disparo." and "do=cerrar ese mapeo".
+Wait, the closed message for T1 says: "leído: close, reset to single cursor, save state".
+The prompt says
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de restauración de archivos se confirma (reopen workspace documents), pero el guardado de la posición del cursor y el control de visibilidad de paneles no se encontraron como disparos de restauración al abrir el proyecto; el ancla pide los tres, y solo uno se confirma como mecanismo de recuerdo activo."
+}

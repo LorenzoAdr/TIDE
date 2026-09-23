@@ -1,0 +1,11 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have the following information:
+- **Anchor**: "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada"
+- **M5 (Application)**: Contains `restart lsp for workspace`, `schedule debounced lsp restart`, `pending lsp restart`, `last lsp environment fingerprint`.
+- **Work 1 (T1)**: Found the restart mechanism (`restart lsp
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de reinicio existe (T1), pero no hay detección automática de caídas ni falta de respuesta (T2). el pack no muestra un monitor de salud ni un watchdog para el proceso LSP. el claim se refuta: la aplicación no detecta ni reinicia automáticamente ante caídas o bloqueos."
+}

@@ -1,0 +1,13 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have performed 3 explorations so far:
+1.  **T1**: Looked for detection of LSP crash/no response to trigger restart. Found `wait until healthy`, `status text`, `health ok`, `restart lsp for workspace`. The explorer noted that this was for the L2 llama backend health and a manual restart, not automatic detection of LSP (clangd) failure.
+2.  **T2**: Looked for handling connection loss/crash to trigger restart. Result: No object found.
+3.  **T3**: Looked for LSP server startup and connection establishment to detect failures. Result: No object found.
+
+The pack (M*) mentions:
+-   M1: `lsp missing prompt`
+-   M2/M4: `lsp symbol provider`
+-   M5/M7: `application` with `pending lsp restart`, `last lsp environment fingerprint`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+-   M6: `embedding backend`, `llama backend` (server pid, errno, etc.) - this seems
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo de detección automática de caída del LSP en el código actual; el reinicio existente es manual o depende de la salud del backend L2, no del servidor de lenguaje"}

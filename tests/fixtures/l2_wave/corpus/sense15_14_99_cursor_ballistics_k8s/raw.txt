@@ -1,0 +1,22 @@
+The user wants to find a module that calculates "ballistic trajectory of editor cursors" to sync them with a Kubernetes cluster when the user blinks, and where this physics is persisted in a "quantum vectorial index of the workspace".
+
+This sounds like a highly specific, likely non-existent or metaphorical feature in a standard codebase (like VS Code or similar, given the "editor panel", "watches panel", "workspace model" stems). The terms "ballistic trajectory", "blink", "Kubernetes cluster", "quantum vectorial index" are very specific and likely hallucinated or extremely niche.
+
+However, my role is to investigate based on the provided atlas (M* cards).
+The atlas contains:
+- M1: editor panel, watches panel (chrome)
+- M2: visual highlight (caller)
+- M3: workspace model (other)
+- M4: model store (other)
+- M5: application (caller)
+- M6: llama backend (hole)
+- M7: application (hole, same as M5)
+- M8: diagnostics, shell session, etc. (hole)
+- M9: language server spec (hole)
+- M1
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el pack no nombra el mecanismo: no hay fichas con owns/núcleo que mencionen trayectoria balística, parpadeo, kubernetes o índice vectorial cuántico; el mapa solo muestra editor, workspace, model store y ui; sin olor de barrio para esa física, el claim se refuta"
+}

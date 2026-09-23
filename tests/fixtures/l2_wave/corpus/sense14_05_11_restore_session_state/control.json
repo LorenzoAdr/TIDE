@@ -1,0 +1,160 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el proyecto",
+      "keep": [
+        "M2",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_config.cpp:save",
+        "src/app/recent_projects.cpp:remember"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el proyecto",
+      "keep": [
+        "M8",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+      "keep": [
+        "M1",
+        "M12"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "restaurar sesión",
+        "guardar estado",
+        "layout",
+        "cursor",
+        "paneles"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide persistencia de estado (cursor, archivos, paneles) al reabrir un proyecto; busco barrios que manejen el ciclo de vida de la sesión o el layout"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M3",
+        "M5"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M1 huele a estado del editor (cursor); M3 a sesión (app session); M5 a paneles. Necesito ver si guardan/restauran el estado completo o por partes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar cursor, archivos y paneles; empiezo por el cursor (visto en M1, M3, M4) y rompo en guardar vs restaurar para ver si hay mecanismo de persistencia"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el explorador no halló el mecanismo de guardado; el claim de persistencia de cursor al cerrar se refuta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 no halló el mecanismo de restauración del cursor; el claim del ancla requiere confirmar o refutar la persistencia completa (cursor, archivos, paneles). Falta explorar el estado del editor y la sesión."
+    },
+    {
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+      "consultas": [
+        "dónde se guarda el estado del editor al cerrar el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el ancla pide recordar posición, archivos y paneles; T1 y T2 fallaron en cursor; M1 huele el estado del editor; busco el guardado del estado completo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "T1 y T3 refutan la persistencia: no hay mecanismo que guarde la posición del cursor ni el estado del editor al cerrar. T2 confirma que se restaura la sesión del workspace, pero sin el estado detallado del editor, el sistema no puede recordar la posición exacta del cursor ni la configuración de paneles."
+    }
+  ],
+  "why": "T1 y T3 refutan la persistencia: no hay mecanismo que guarde la posición del cursor ni el estado del editor al cerrar. T2 confirma que se restaura la sesión del workspace, pero sin el estado detallado del editor, el sistema no puede recordar la posición exacta del cursor ni la configuración de paneles.",
+  "zooms": []
+}

@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático está implementado: on lsp missing install detecta la ausencia/caída y llama a restart lsp for workspace, que ejecuta el reinicio sin intervención del usuario"}

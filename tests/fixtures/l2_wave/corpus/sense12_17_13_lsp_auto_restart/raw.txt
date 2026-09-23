@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático ya existe: schedule debounced lsp restart detecta la caída y dispara restart lsp for workspace. el pack confirma el ciclo sin necesidad de intervención manual."}

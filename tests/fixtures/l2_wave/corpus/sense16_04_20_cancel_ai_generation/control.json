@@ -1,0 +1,190 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "qué hace cancel level1 para limpiar el archivo a medias",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:AiController"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo cuando se cancela la escritura de la IA",
+      "keep": [
+        "M2",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se trunca o borra el contenido del archivo cuando se cancela la inserción pendiente",
+      "keep": [
+        "M1",
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/l2_effect_summary.cpp:truncate_list_impl",
+        "src/ai/l2_effect_registry.cpp:truncate_utf8",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "qué hace cancel level1 para limpiar el archivo a medias",
+      "consultas": [
+        "qué hace cancel level1 para limpiar el archivo a medias"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M8 tiene el latch y el cancel; necesito ver si limpia el pending insert o el archivo"
+    },
+    {
+      "consulta": "dónde se limpia el archivo cuando se cancela la escritura de la IA",
+      "consultas": [
+        "dónde se limpia el archivo cuando se cancela la escritura de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "file write logic"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró que cancel level1 no limpia; busco el efecto en la lógica de escritura"
+    },
+    {
+      "consulta": "dónde se trunca o borra el contenido del archivo cuando se cancela la inserción pendiente",
+      "consultas": [
+        "dónde se trunca o borra el contenido del archivo cuando se cancela la inserción pendiente"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "cancel level1 solo levanta un flag; el pack nombra pending insert y clear pending insert como el mecanismo de limpieza real. Cazo el efecto de escritura."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "el mecanismo de limpieza del archivo al cancelar la generación no se encuentra en el flujo de cancelación actual; cancel level1 y clear pending insert solo gestionan flags y el ciclo de escritura, sin truncar ni limpiar el contenido en disco"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo de cancelación actual no limpia el archivo a medias; solo resetea flags y despierta el ciclo, sin evidencia de truncamiento o borrado en disco"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el mecanismo de limpieza del archivo al cancelar la generación no se encuentra en el flujo de cancelación; cancel level1 y clear pending insert solo gestionan flags y buffers en memoria, sin truncar ni limpiar el archivo en disco"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el mecanismo de limpieza del archivo al cancelar la generación no se encuentra en el flujo de cancelación; cancel current solo resetea flags y despierta el ciclo, sin truncar ni borrar el archivo en disco"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "el mecanismo de cancelación actual no limpia el archivo a medias; solo resetea flags y despierta el ciclo, sin truncamiento en disco"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: un leído no cierra el ancla; no refuta el existe",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "no hay mecanismo de limpieza del archivo al cancelar la generación; el flujo solo resetea flags y despierta el ciclo, sin truncar ni borrar el contenido en disco"
+    }
+  ],
+  "why": "control: un leído no cierra el ancla; no refuta el existe",
+  "zooms": []
+}

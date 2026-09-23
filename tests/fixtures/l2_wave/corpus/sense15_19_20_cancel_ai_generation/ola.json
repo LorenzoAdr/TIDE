@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla se confirma: la captura de Escape y clic fuera está en handle ai console keys y handle console panel mouse, que invocan cancel current; este bifurca a clear pending insert (si hay inserción pendiente) o cancel all -> cancel level1 (si está ocupado), limpiando el estado y cancelando tareas sin dejar el archivo a medias"
+}

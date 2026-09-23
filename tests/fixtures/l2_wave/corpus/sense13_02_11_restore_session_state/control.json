@@ -1,0 +1,147 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_text.hpp",
+        "src/app/workspace_model.cpp",
+        "src/ui/editor_panel.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+      "keep": [
+        "M5",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/app/workspace_session.cpp:save",
+        "src/app/workspace_session.cpp:load"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/app/workspace_session.cpp:save",
+          "src/app/workspace_session.cpp:load"
+        ],
+        "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 owns editor state y tiene CursorPos; es el barrio más directo para la posición del cursor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla tiene tres polos; el cursor ya se cazó (T1). Quedan archivos y paneles. Son mecanismos distintos que el usuario quiere restaurar; los parto en dos encargos independientes para que el hijo cierre cada uno sin esperar al otro."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "el mecanismo de restauración de archivos abiertos se confirma (T2); la posición del cursor no tiene objeto explícito en el pack (T1 lee pero no halla); la visibilidad de paneles laterales no tiene objeto (T3). el claim se cierra con lo hallado y las refutaciones."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el ancla pide recordar cursor, archivos y paneles. T2 confirma archivos. T3 niega paneles. T1 leyó los archivos del editor pero no reportó mecanismo de persistencia del cursor; sin evidencia de guardado/restauración de posición, el claim queda parcialmente refutado (solo archivos)."
+    }
+  ],
+  "why": "el ancla pide recordar cursor, archivos y paneles. T2 confirma archivos. T3 niega paneles. T1 leyó los archivos del editor pero no reportó mecanismo de persistencia del cursor; sin evidencia de guardado/restauración de posición, el claim queda parcialmente refutado (solo archivos).",
+  "zooms": []
+}

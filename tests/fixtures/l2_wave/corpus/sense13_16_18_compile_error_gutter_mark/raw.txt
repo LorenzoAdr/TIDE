@@ -1,0 +1,11 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have 3 completed works:
+T1: Found the mechanism for painting the red line in the left margin (`line diagnostic marker from map`, `line gutter marker`). It relies on `diagnostics for editor line`.
+T2: Asked where compilation errors from the console are parsed to create diagnostics. Read `parse obj command output`. The system says "ESA pregunta no se relanza. Lo leído no era el disparo."
+T3: Asked where compilation error diagnostics are created from console output. Read `diagnostics cpp, diagnostics panel cpp`. The system says "ESA pregunta no se relanza. Lo leído no era el disparo."
+
+The system explicitly states: "exploradores agotados. Lo leído no era el disparo. Cierra ese mapeo; no cites esos nombres como el mecanismo del ancla. PROHIBIDO una coletilla ('el ancla queda contestada'). PROHIBIDO copiar ids. JSON ahora. Primer carácter `{`."
+
+This means I must close the investigation. The claim is that the errors from the console should be marked
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"los exploradores agotados no hallaron el disparo; el mapeo se cierra sin confirmar el puente entre consola y margen"}

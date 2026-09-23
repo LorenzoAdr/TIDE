@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se llama a restart lsp for workspace cuando el proceso LSP muere",
+  "consultas": [
+    "dónde se llama a restart lsp for workspace cuando el proceso LSP muere"
+  ],
+  "do": "explorar",
+  "error": "control: do no legal ahora (explorar)",
+  "evita": [],
+  "hacia": [
+    "on process exit"
+  ],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T2 cerró que no encontró el disparo; T3 y T4 leyeron clangd process alive pero no el cuerpo. El pack muestra on process exit como extra en T2; es el candidato para el detector de muerte que dispara el reinicio."
+}

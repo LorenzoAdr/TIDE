@@ -1,0 +1,226 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 7,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+          "src/lsp/diagnostics.cpp:diagnostics_on_line",
+          "src/ui/editor_panel.cpp:line_gutter_marker",
+          "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+          "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+        ],
+        "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se leen los errores de compilación de la consola inferior",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino leer los errores de la consola y marcarlos en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) lee errores de shell. Necesito ver si M3 expone la API para dibujar líneas rojas y si M11 o M6 (pty) emiten los eventos de error para conectarlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack muestra M11 leyendo errores de shell y M3 manejando highlights visuales, pero no hay port entre ellos; necesito confirmar si existe un flujo que una la lectura de la consola con la pintura del margen"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 refuta el mapeo: no hay lectura de errores de compilación en la consola inferior (solo linker en símbolos binarios). Salto a la siguiente caza para buscar el origen real de los diagnostics."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T2 falló en el barrio equivocado; el pack abre 'parse compilation errors' como semilla. Necesito el origen de los datos (diagnostics) antes de unirlos al margen."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 falló buscando en el barrio equivocado; el pack abre 'parse compilation errors' como semilla. Necesito el origen de los diagnostics antes de unirlos al margen."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T2 falló buscando en el barrio equivocado; el pack abre 'parse compilation errors' como semilla. Necesito el origen de los diagnostics antes de unirlos al margen."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "T2 falló buscando en el barrio equivocado; el pack abre 'parse compilation errors' como semilla. Necesito el origen de los diagnostics (T1) para unirlos al margen."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 9,
+      "why": "T2 falló buscando en el barrio equivocado; el pack abre 'parse compilation errors' como semilla. Necesito el origen de los datos (diagnostics) antes de unir con T1."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 10,
+      "why": "T2 falló buscando en el barrio equivocado; el pack abre 'parse compilation errors' como semilla. Necesito el origen de los datos (diagnostics) antes de unir con T1."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

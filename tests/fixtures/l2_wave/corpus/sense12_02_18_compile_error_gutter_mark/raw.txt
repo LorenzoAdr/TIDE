@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se parsean los errores de compilación de la consola para generar diagnósticos","hacia":["diagnósticos"],"why":"T4 cerró el lado del editor (pintura). Falta el lado de la consola: cómo se convierten los logs en diagnósticos que alimenten el mapa leído en T4."}

@@ -1,0 +1,12 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se captura la pulsación de Escape o el clic fuera para interrumpir la generación de la IA
+2. [fallo] B locator: dónde se limpia el archivo parcialmente escrito al cancelar la generación de la IA
+3. [pendiente] P puente: hay camino capturar la interrupción y limpiar el archivo a medias (need A B)
+
+Work 1 (A) failed: "no encontré la captura de Escape clic para interrumpir la IA; lo leído son parsers de secuencias de escape del terminal skip escape y escapado de strings para logs ai trace escape, sin lógica de interrupción". Opened: handle csi, clear hover if.
+Work 2 (B) failed: "leído: cancel current, clear pending insert, cancel all, busy, begin insert at". Opened: handle user input, handle route.
+
+The system says: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese m
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une la captura de Escape/clic con la limpieza del archivo; las cazas fallaron y no hay mecanismo visible para el claim"}

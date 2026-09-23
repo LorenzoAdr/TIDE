@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 found that margin highlights are applied as text suffixes in the gutter via `rebuild diagnostic suffix cache` in `editor panel`. It stores strings/icons/codes per line in `diagnostic suffix by line`, queried in `show diagnostic suffix line` and rendered in the gutter drawing. `visual highlight` handles folds/brackets, not errors.
+- T2 looked for parsing compilation errors from the console to feed editor diagnostics. Found `scan shell output for linker errors` which feeds the binary symbols panel, not the editor diagnostics system (which uses LSP).
+- T3 looked for building the diagnostic suffix map. Found `rebuild diagnostic suffix cache`.
+
+The pack shows:
+- `diagnostic suffix cache` / `rebuild diagnostic suffix cache` is the mechanism for margin rendering.
+- `apply lsp diagnostics to panel` / `push active file diagnostics from cache` are extra hops from T3.
+- The user wants *compilation errors from the console* to trigger this.
+- T2 refuted that there's a direct parser from
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el margen se pinta con sufijos de diagnóstico (rebuild diagnostic suffix cache) que dependen de LSP; no existe en el pack un mecanismo que extraiga errores de la consola inferior y los inyecte en ese mapa. el claim se refuta: el sistema actual no une la consola con el margen del editor."
+}

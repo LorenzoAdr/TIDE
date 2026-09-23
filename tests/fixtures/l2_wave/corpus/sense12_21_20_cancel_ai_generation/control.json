@@ -1,0 +1,269 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:wake",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura el contenido del archivo a su estado anterior al iniciar la generación de la IA",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 7,
+      "visto": [
+        "src/ai/ai_controller.cpp:snapshot_lines",
+        "src/ai/level2_session.cpp:rollback_pending"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca la restauración del archivo al cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/level2_session.cpp:rollback_pending",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se invoca la restauración del archivo al cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino la captura de Escape y la restauración del archivo",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape en el trace; necesito el locus que decide abortar la acción del usuario"
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "consultas": [
+        "dónde se limpia el archivo a medias al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el disparo (Escape) y el inicio de la cancelación (clear pending insert). Falta verificar el efecto final: que el archivo no quede corrupto. Busco la lógica que limpia o deshace los cambios en el buffer de edición tras la cancelación."
+    },
+    {
+      "consulta": "dónde se restaura el contenido del archivo a su estado anterior al iniciar la generación de la IA",
+      "consultas": [
+        "dónde se restaura el contenido del archivo a su estado anterior al iniciar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "snapshot"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 confirmó que no hay truncado; la limpieza 'limpia' requiere una restauración desde un backup o snapshot tomado antes de la inserción. Busco ese mecanismo de rollback."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T3 encontró el mecanismo de restauración (rollback pending) pero no su disparo. T1 encontró el disparo (Escape) pero no la restauración. T2 refutó limpieza directa. Necesito unir el disparo con la restauración y verificar el otro polo (clic fuera)."
+    },
+    {
+      "consulta": "quién invoca la restauración del archivo al cancelar la generación de la IA",
+      "consultas": [
+        "quién invoca la restauración del archivo al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 5,
+      "why": "T4 leyó los símbolos pero no el invocador; el pack une cancel current con handle route. Necesito ver si rollback pending se llama en ese flujo."
+    },
+    {
+      "consulta": "quién invoca la restauración del archivo al cancelar la generación de la IA",
+      "consultas": [
+        "quién invoca la restauración del archivo al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 6,
+      "why": "T4 leyó los símbolos pero no el invocador; el pack une T1->T4 vía handle route. Necesito confirmar si cancel current llama a rollback pending."
+    },
+    {
+      "consulta": "quién invoca la restauración del archivo al cancelar la generación de la IA",
+      "consultas": [
+        "quién invoca la restauración del archivo al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 7,
+      "why": "T4 leyó los símbolos pero no el invocador; el pack une T1 (Escape) con T4 vía handle route. Necesito confirmar que cancel current llama a rollback pending en ese flujo."
+    },
+    {
+      "consulta": "quién invoca la restauración del archivo al cancelar la generación de la IA",
+      "consultas": [
+        "quién invoca la restauración del archivo al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T4 leyó los símbolos pero no el invocador; el pack une T1 (Escape) con T4 vía handle route. Necesito confirmar que cancel current llama a rollback pending en ese flujo."
+    },
+    {
+      "consulta": "quién invoca la restauración del archivo al cancelar la generación de la IA",
+      "consultas": [
+        "quién invoca la restauración del archivo al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "T4 leyó los símbolos pero no el invocador; el pack une T1 (Escape) con T4 vía handle route. Necesito confirmar que cancel current llama a rollback pending en ese flujo."
+    },
+    {
+      "consulta": "quién invoca la restauración del archivo al cancelar la generación de la IA",
+      "consultas": [
+        "quién invoca la restauración del archivo al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 10,
+      "why": "T4 leyó los símbolos pero no el invocador; el pack une cancel current con handle route. Necesito confirmar si el flujo de cancelación dispara rollback pending."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

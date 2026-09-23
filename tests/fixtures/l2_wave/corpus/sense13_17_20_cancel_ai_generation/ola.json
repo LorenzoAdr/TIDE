@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "la captura de Escape y clic fuera se confirma en handle ai console keys y handle console panel mouse, que invocan clear pending insert y cancel current; sin embargo, no existe mecanismo de limpieza del archivo a medias ni deshacer de inserción parcial en el buffer del editor al cancelar, por lo que el claim de limpieza limpia no se cumple"
+}

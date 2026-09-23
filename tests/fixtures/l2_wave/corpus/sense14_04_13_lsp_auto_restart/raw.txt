@@ -1,0 +1,27 @@
+The user wants to ensure that if the LSP process crashes or becomes unresponsive, the application automatically detects it and restarts it without user intervention.
+
+T1 found the mechanism: `health ok` detects the crash via a GET health timeout or HTTP failure, and `start completion server` triggers the restart if `health ok` fails or the stamp changes.
+
+The user's request is "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada".
+
+T1 confirmed the detection and restart mechanism exists.
+The "Abierto" section of T1 lists:
+- start server
+- http ensure connected unlocked
+- http exchange unlocked
+
+The "extra" section of T1 lists:
+- cache dir
+- stop listener on port
+
+The pack shows:
+M5 (application) has `pending lsp restart`, `last lsp environment fingerprint`.
+M5=>M7 `application restart lsp for workspace` -write-> `status message`.
+M6 (embedding backend) has `server pid`, `errno`, `server stamp`.
+M6=>M3 `llama backend ensure completion server`
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "T1 confirmó que health ok detecta la caída y start completion server dispara el reinicio automático; el mecanismo ya existe y cubre el claim del usuario"
+}

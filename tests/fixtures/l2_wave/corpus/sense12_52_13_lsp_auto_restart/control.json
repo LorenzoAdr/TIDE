@@ -1,0 +1,123 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_client.cpp:stop",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se programa el reinicio del servidor LSP tras detectar que ha caído",
+      "keep": [
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp",
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se llama a schedule debounced lsp restart cuando el servidor deja de responder",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp for workspace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace), pero falta el disparador de detección de fallo. El hijo debe encontrar el código que decide llamar a ese reinicio."
+    },
+    {
+      "consulta": "dónde se programa el reinicio del servidor LSP tras detectar que ha caído",
+      "consultas": [
+        "dónde se programa el reinicio del servidor LSP tras detectar que ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró la detección (EOF) pero no el reinicio. M5 tiene 'restart lsp for workspace' y 'schedule debounced lsp restart'. Hay que ver si se conecta a la detección de caída."
+    },
+    {
+      "consulta": "dónde se llama a schedule debounced lsp restart cuando el servidor deja de responder",
+      "consultas": [
+        "dónde se llama a schedule debounced lsp restart cuando el servidor deja de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "timeout"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 encontró el método de reinicio; ahora busco el disparador automático (timeout/heartbeat) que lo invoque, no el manual"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección (transport reader eof) no dispara el reinicio; solo limpia estado. el reinicio existe pero no se activa automáticamente ante caída"
+    }
+  ],
+  "why": "el mecanismo de detección (transport reader eof) no dispara el reinicio; solo limpia estado. el reinicio existe pero no se activa automáticamente ante caída",
+  "zooms": []
+}

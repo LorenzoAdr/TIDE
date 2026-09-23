@@ -1,0 +1,15 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have two completed jobs:
+1.  **T1 (Locator)**: Looked for Escape/click capture. Result: Not found. Read `ai trace escape` (string util) and `clear hover` (state), not the event handler.
+2.  **T2 (Locator)**: Looked for file cleanup/undo partial insert. Result: Not found. Read `clear pending insert` (internal state), `cancel all` (signals), but no code restoring the editor buffer or undoing partial text.
+
+Current state:
+-   T1 failed to find the trigger (Escape/click).
+-   T2 failed to find the effect (buffer restore).
+-   The pack shows `ai controller` (M8) has `cancel level1` and `clear pending insert`.
+-   `ai trace` (M2) has `ai trace escape`.
+-   `editor panel` (M7) has `handle breadcrumb click`.
+-   `console panel` (M5) has `handle ai console keys`.
+-   `level1 agent` (M6
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo: no hay handler de Escape/clic ni código que restaure el buffer del editor al cancelar; el ancla queda refutado"}

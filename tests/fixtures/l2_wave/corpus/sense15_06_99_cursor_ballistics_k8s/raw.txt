@@ -1,0 +1,21 @@
+The user wants to find:
+1. The module calculating ballistic cursor trajectory for real-time sync with Kubernetes on blink.
+2. Where this physics is persisted in the quantum vector index of the workspace.
+
+Current state:
+- T1 found `mouse to cursor` and `handle editor mouse` for cursor trajectory calculation.
+- T1 closed.
+- Opened: `byte index to visual column`, `tab display width`.
+- Pack shows M1 (visual highlight), M2 (editor panel), M3 (workspace model), M5 (application), etc.
+- Bridges: T1[M9,M5], T2[M2,M1], T3[M9,M5], T4[M10,M2].
+- Holes: model store llama bundle dir for, workspace model stamp tab disk mtime, diagnostics panel MakeDiagnosticsPanel, language server spec make texlab spec.
+
+The anchor claim is highly specific and likely fictional/hallucinated ("ballistic cursor trajectory", "sync with Kubernetes on blink", "quantum vector index").
+T1 found a real cursor calculation (`mouse to cursor`), but it's just standard mouse-to-cursor conversion, not ballistic or Kubernetes-synced.
+The second part
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el cálculo del cursor es una conversión estándar de coordenadas de ratón a posición lógica (mouse to cursor), sin trayectoria balística ni sincronización con Kubernetes; el índice del workspace es un modelo de estado local sin persistencia cuántica vectorial. el ancla mezcla fenómenos reales con conceptos inexistentes en el sistema."
+}

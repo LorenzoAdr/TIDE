@@ -1,0 +1,19 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have three completed jobs:
+T1: Looked for reading shell errors to mark in editor. Found linker error parser for binary symbols panel, not editor marks.
+T2: Looked for parsing shell errors to generate diagnostics. Found `parse gfortran stderr`.
+T3: Looked for applying compilation diagnostics to editor margin to paint red line. Found LSP diagnostic application (`apply lsp diagnostics to panel`, `line gutter marker`, etc.).
+
+The anchor claims that compilation errors appearing in the console should *also* be marked with a red line in the editor margin.
+Currently, T3 shows that LSP diagnostics are applied to the editor margin (`apply lsp diagnostics to panel`, `line gutter marker`).
+T2 shows that `parse gfortran stderr` exists.
+T1 shows that the shell output reading for linker errors goes to a binary symbols panel, not the editor.
+
+The user's request implies a feature that might not exist yet, or exists partially (LSP does it, but maybe not for raw shell output unless parsed by a language server).
+The prompt
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el sistema ya pinta líneas rojas en el margen para diagnósticos (T3: apply lsp diagnostics, line gutter marker), pero no hay mecanismo que lea errores crudos del shell y los convierta en esas marcas (T1: solo parser de linker para panel de símbolos; T2: parse gfortran stderr aislado). el ancla pide una integración que no existe en el flujo actual."
+}

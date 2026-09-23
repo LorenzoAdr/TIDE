@@ -1,0 +1,21 @@
+{
+  "consulta": "dónde se intercepta la tecla Escape en el panel de edición para abortar la acción en curso",
+  "consultas": [
+    "dónde se intercepta la tecla Escape en el panel de edición para abortar la acción en curso"
+  ],
+  "do": "explorar",
+  "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+  "evita": [
+    "escape de strings",
+    "comandos de texto"
+  ],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 descartó el barrio de trace; el foco es la UI (editor panel M7) donde ocurre la interacción del usuario. Busco el handler de teclado que detecta Escape y decide abortar."
+}

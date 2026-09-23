@@ -1,0 +1,18 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Looked for detection of crash/no response and restart trigger.
+    *   Result: Found `health ok` detects HTTP GET health failure, `start completion server` uses it to abort start, but no monitoring loop or restart trigger found in `ensure completion server` (only starts once).
+    *   Conclusion: No automatic restart mechanism found in this path.
+2.  **T2**: Looked for detection of crash/no response and restart trigger.
+    *   Result: Found `restart lsp for workspace`, `schedule debounced lsp restart`, `completion wait timeout ms`.
+    *   Conclusion: Found symbols related to restart, but didn't confirm the *automatic detection* of a crash triggering it.
+3.  **T3**: Looked for where `schedule debounced lsp restart` is called.
+    *   Result: Found it is called from `setup build environment watching` callbacks (environment/artifact changes) and executed in the UI guard tick when the deadline expires.
+    *   Conclusion: The restart
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de reinicio automático al detectar caída o falta de respuesta no existe; el reinicio se dispara solo por cambios en el entorno de compilación o al vencer un timeout de espera de completado, no por monitorización de salud del servidor"
+}

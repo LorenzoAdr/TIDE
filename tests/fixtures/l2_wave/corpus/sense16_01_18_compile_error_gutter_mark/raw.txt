@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor.
+I have two completed jobs:
+T1: "dónde se marcan los errores de compilación en el margen izquierdo del editor" -> Found `push active file diagnostics from cache`, `collect diagnostic decorations`, `Render Editor Line`, `line gutter marker`, `apply decoration`.
+T2: "dónde se leen los errores de compilación de la salida de la consola" -> Closed: "no hay objeto".
+
+The user's claim is: "errors appearing in the bottom console should ALSO be marked with a red line in the left margin".
+T1 found where errors are marked (decorations/gutter markers).
+T2 found that there is no object reading errors from the console output directly (or at least, the specific mapping asked for wasn't found).
+
+The gap is: How do errors from the console get into the system that T1 found (diagnostics/decorations)?
+T2 said "no hay objeto" for reading errors from console output. This implies the current system doesn't parse the console text to extract errors and feed them to the editor diagnostics.
+However, the user wants this
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el sistema actual no lee los errores de la consola para marcarlos en el editor; T2 cerró que no hay objeto que haga ese puente. el ancla pide un comportamiento que no existe en el código leído."
+}

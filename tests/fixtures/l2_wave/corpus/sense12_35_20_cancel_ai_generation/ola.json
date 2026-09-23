@@ -1,0 +1,18 @@
+{
+  "consulta": "dónde se cancela la generación de código al hacer clic fuera del área de edición",
+  "consultas": [
+    "dónde se cancela la generación de código al hacer clic fuera del área de edición"
+  ],
+  "do": "explorar",
+  "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla tiene dos disparadores; T1 falló en Escape. Busco el otro polo: clic fuera. El hijo busca el gesto de desactivar la IA al perder foco o clic externo."
+}

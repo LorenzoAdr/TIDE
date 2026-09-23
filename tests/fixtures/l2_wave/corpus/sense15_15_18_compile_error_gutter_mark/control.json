@@ -1,0 +1,147 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M8",
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/diagnostics_panel.cpp:buffer_text",
+        "src/ui/diagnostics_panel.cpp:make_problem_row_element"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para enviarlos al sistema de diagnósticos",
+      "keep": [
+        "M2",
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/util/compiler_location.cpp:parse_gcc_style",
+        "src/util/compiler_location.cpp:parse_msvc_style",
+        "src/util/compiler_location.cpp:find_compiler_location",
+        "src/ui/console_panel.cpp:terminal_row_link"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "línea roja margen",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack nombra visual highlight y scan shell output for linker errors; busco el puente entre ambos"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el mecanismo de LSP (T1) no es el disparo para los errores de consola; busco el puente que lee la consola y dispara la marca"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para enviarlos al sistema de diagnósticos",
+      "consultas": [
+        "dónde se extraen los errores de compilación del texto de la consola para enviarlos al sistema de diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parseo"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 encontró el efecto (marcador en margen) y T2 encontró un elemento de consola pero no el disparo. Falta el puente: la extracción de errores de la consola que alimenta a T1."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de extracción de errores de compilación de la consola (terminal row link -> find compiler location -> Compiler Location Match) existe y devuelve ruta, línea y columna, pero se usa exclusivamente para navegación de enlaces, no se envía al sistema de diagnósticos LSP que marca el margen del editor; no hay camino entre la extracción de la consola y la aplicación de diagnósticos en el margen"
+    }
+  ],
+  "why": "el mecanismo de extracción de errores de compilación de la consola (terminal row link -> find compiler location -> Compiler Location Match) existe y devuelve ruta, línea y columna, pero se usa exclusivamente para navegación de enlaces, no se envía al sistema de diagnósticos LSP que marca el margen del editor; no hay camino entre la extracción de la consola y la aplicación de diagnósticos en el margen",
+  "zooms": []
+}

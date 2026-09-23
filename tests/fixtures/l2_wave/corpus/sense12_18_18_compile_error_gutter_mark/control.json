@@ -1,0 +1,190 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen la línea y el número de columna de los errores de compilación del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se extraen la línea y el número de columna de los errores de compilación del texto de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el análisis del error de compilación y el dibujo de la línea roja en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) lee errores de shell. Necesito ver si M3 expone la API para dibujar líneas rojas y si M11 o M6 (pty) emiten los eventos de error que deben disparar ese dibujo."
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el pack no une la consola con el editor; M11 huele la lectura de errores pero no el dibujo; M3 huele el dibujo pero no la fuente; necesito confirmar si existe el arco o si hay que crearlo"
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla une dos polos: la fuente (consola) y el efecto visual (margen). M11 sugiere que la consola se escanea, pero no une al editor. M3 sugiere highlights, pero no une a la consola. Necesito confirmar si existe el puente o si hay que crearlo."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer línea y archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el pack muestra M11 (escaneo de errores) y M3 (visual highlight) pero sin conexión; necesito confirmar si el flujo existe o si hay un hueco"
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla une dos polos: origen (consola) y efecto (margen). M11 huele el origen pero no el efecto. M3 huele el efecto pero no el origen. Necesito localizar ambos mecanismos y luego verificar si están conectados o si falta el puente."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer línea y archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 6,
+      "why": "el ancla une dos polos: la fuente (consola) y el efecto visual (margen). M11 huele la fuente pero no el efecto. M3 huele el efecto pero no la fuente. Necesito localizar ambos mecanismos y luego verificar si están conectados o si falta el puente."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla une dos polos (consola y margen). M11 huele el parseo de errores, M3 huele los highlights visuales. Necesito confirmar si existe el puente causal entre ambos."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 8,
+      "why": "el ancla une dos polos: la fuente (consola) y el efecto visual (margen). M11 sugiere que la consola se escanea, pero no une al editor. M3 sugiere highlights, pero no une a la consola. Necesito confirmar si existe el puente o si hay que crearlo."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 9,
+      "why": "el ancla une dos polos: la fuente (consola) y el efecto visual (margen). M11 sugiere que la consola se escanea, pero no une al editor. M3 sugiere highlights, pero no une a la consola. Necesito localizar ambos mecanismos y verificar si existe el arco que los conecta."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 10,
+      "why": "el pack muestra M11 (parseo de errores) y M3 (visual highlight) como barrios separados sin conexión directa; necesito confirmar si existe el puente que une la detección del error con su visualización en el editor"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

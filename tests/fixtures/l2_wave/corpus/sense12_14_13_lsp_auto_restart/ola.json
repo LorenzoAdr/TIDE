@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se conecta el evento de fin de transporte al reinicio del servidor LSP",
+  "consultas": [
+    "dónde se conecta el evento de fin de transporte al reinicio del servidor LSP"
+  ],
+  "do": "explorar",
+  "error": "control: do no legal ahora (explorar)",
+  "evita": [],
+  "hacia": [
+    "async worker"
+  ],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T4 leyó 'on transport reader eof' y abrió 'start async worker'. Hay que ver si ese listener dispara el reinicio o si falta el puente."
+}

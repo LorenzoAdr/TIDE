@@ -1,0 +1,175 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape; el hijo busca el trigger del usuario"
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla nombra dos disparadores: Escape y clic fuera. Trabajo 1 descartó Escape. Ahora busco el otro polo: el clic fuera que cancela."
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla tiene dos disparadores; el de Escape falló, pruebo el otro polo"
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla tiene dos disparadores; el de Escape falló, pruebo el otro polo"
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla tiene dos disparadores; el de Escape falló, busco el otro polo (clic fuera) para ver si existe el mecanismo de cancelación"
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 6,
+      "why": "el ancla tiene dos disparadores; el de teclado falló, busco el de ratón"
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla tiene dos disparadores (Escape o clic fuera). El primero falló; busco el segundo para ver si existe el mecanismo de cancelación por clic."
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "editor panel"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 8,
+      "why": "el ancla tiene dos disparadores (Escape o clic fuera). La caza de Escape falló (M2 no es el handler). El pack muestra M7 (editor panel) y M5 (console panel) como candidatos para interacciones de UI. M7 tiene 'handle breadcrumb click', M5 'handle ai console keys'. El clic fuera suele ser un evento de overlay o panel. M7 huele a panel de edición donde ocurre la generación. Busco el handler de clic fuera en el barrio del editor."
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 9,
+      "why": "el ancla tiene dos disparadores; el de Escape falló (era escape de JSON). Busco el otro polo: clic fuera."
+    },
+    {
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 10,
+      "why": "el ancla nombra dos disparos; el de Escape falló, tiro al de clic fuera"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

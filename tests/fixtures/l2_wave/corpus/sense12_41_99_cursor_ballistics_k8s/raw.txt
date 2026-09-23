@@ -1,0 +1,10 @@
+The user wants to find:
+1. The module calculating ballistic trajectory of editor cursors for real-time sync with a Kubernetes cluster when the user blinks.
+2. Where this physics is persisted in the quantum vectorial index of the workspace.
+
+This sounds like a highly specific, likely non-existent or hallucinated feature in a standard codebase (VS Code-like based on the M* cards: `editor panel`, `workspace model`, `visual highlight`, `llama backend`).
+The M* cards show:
+- M1: `visual highlight` (fold regions, brackets, colored braces).
+- M2
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra trayectoria balística, cluster kubernetes, parpadeo ni índice vectorial cuántico; el mecanismo no existe en el código leído"}

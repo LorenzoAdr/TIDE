@@ -1,0 +1,17 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Looked for Escape key capture. Found `ai trace escape` which is string escaping, not key handling.
+T2: Looked for canceling generation. Found `cancel level1`, `cancel all`, `stop completion server`.
+T3: Looked for cleaning up the file. Found `cancel level1`, `cancel current`, `cancel all`, `clear pending insert`.
+
+The "Cerrado" of T1 says "no encontré la captura de la tecla Escape".
+The "Cerrado" of T2 and T3 list symbols related to cancellation (`cancel level1`, `clear pending insert`), but the prompt says "Lo leído no era el disparo" (what was read wasn't the trigger).
+Wait, the prompt says "ESA pregunta no se relanza... do=cerrar ese mapeo".
+The user's claim is "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias".
+The pack shows
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no une el disparo (Escape/clic) con el efecto (cancelación limpia); T1 refuta el handler de Escape y T2/T3 leen cancelación sin el disparo"
+}

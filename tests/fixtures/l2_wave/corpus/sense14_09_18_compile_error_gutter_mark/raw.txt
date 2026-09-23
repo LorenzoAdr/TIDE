@@ -1,0 +1,14 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Plan status:
+1. [fallo] A locator: dónde se extraen los errores de compilación del texto de la consola -> T1 closed: "no hay objeto".
+2. [en_curso] B locator: dónde se pinta el indicador de error en el margen del editor -> T3 closed: "leído: line gutter marker, fold gutter marker, line diagnostic marker from map".
+3. [pendiente] P puente: hay camino extraer el error de la consola y dibujar la línea en el margen (need A B)
+
+T1 found nothing. T3 found "line diagnostic marker from map".
+The anchor asks for a feature: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error".
+This is a feature request / modification request, not a bug report or existing behavior investigation.
+Wait, the prompt says "quiero que...". It's a request to implement or modify behavior.
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide una modificación (marcar errores de consola en el margen). T1 no halló extracción automática; T3 halló el mecanismo de pintura (line diagnostic marker). El pack no une consola con margen; el claim se cierra como requerimiento de puente entre diagnóstico y margen, sin camino actual."}

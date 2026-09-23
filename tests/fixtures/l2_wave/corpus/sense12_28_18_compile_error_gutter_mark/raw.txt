@@ -1,0 +1,11 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact error line.
+I have a plan:
+1. A locator: where compilation errors from the bottom console are parsed to extract line and message.
+2. B locator: where diagnostic markers are created in the left margin of the editor.
+3. P bridge: how parsed console errors connect to creating markers in the editor margin.
+
+Work done:
+T1: Asked where compilation errors are marked in the bottom console. Closed: not found, read linker error parser, not visual marker.
+
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"el Cerrado niega este pico; salto a la siguiente caza"}

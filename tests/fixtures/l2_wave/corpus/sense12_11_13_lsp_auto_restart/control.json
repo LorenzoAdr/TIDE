@@ -1,0 +1,95 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:on_lsp_missing_bundle"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia el reinicio del servidor LSP tras detectar que falta o ha caído",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:on_lsp_missing_bundle",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 (application) tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el barrio que huele a detección y acción de reinicio. Un hijo cierra el mecanismo de detección y disparo."
+    },
+    {
+      "consulta": "dónde se inicia el reinicio del servidor LSP tras detectar que falta o ha caído",
+      "consultas": [
+        "dónde se inicia el reinicio del servidor LSP tras detectar que falta o ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart lsp"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección (on lsp missing). El pack une T1 con 'restart lsp for workspace' en M5. Necesito leer el mecanismo de reinicio para confirmar que es automático y sin intervención del usuario."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack y los trabajos leídos confirman el mecanismo: la aplicación detecta la caída o ausencia del LSP (on lsp missing) y dispara automáticamente el reinicio (restart lsp for workspace / schedule debounced lsp restart) sin intervención del usuario. El claim se cumple con lo visto."
+    }
+  ],
+  "why": "el pack y los trabajos leídos confirman el mecanismo: la aplicación detecta la caída o ausencia del LSP (on lsp missing) y dispara automáticamente el reinicio (restart lsp for workspace / schedule debounced lsp restart) sin intervención del usuario. El claim se cumple con lo visto.",
+  "zooms": []
+}

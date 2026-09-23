@@ -1,0 +1,13 @@
+The user wants to cancel AI code generation by pressing Escape or clicking outside, cleanly, without leaving the file half-written.
+The previous work (T1) looked for "where code generation is cancelled on Escape or click outside" and found that cancellation is purely textual ("cancel", "cancelar") in the console input handler, with no detection of keyboard/mouse events for this purpose.
+The "Cerrado" of T1 explicitly states: "ESA pregunta no se relanza... no encontré el mecanismo... sin detección de eventos de teclado o ratón".
+So the mechanism for cancelling via Escape/click outside *does not exist* in the current codebase.
+The user's claim is a feature request or a desired behavior that isn't implemented yet.
+My role is to close the claim based on the evidence. The evidence says the trigger (Escape/click outside) is not detected for cancellation.
+I should close the investigation stating that the mechanism is missing.
+Action: cerrar.
+Why: The previous search confirmed that cancellation is only textual. There is no handler for Escape or click outside to trigger cancellation. The claim is refuted (the feature doesn't exist).
+
+Wait, let's verify if I should look for "
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo no existe: la cancelación es puramente textual en la consola; no hay detección de Escape ni clic fuera para detener la generación"}

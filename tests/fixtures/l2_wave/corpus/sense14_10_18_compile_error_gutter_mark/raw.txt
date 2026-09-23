@@ -1,0 +1,17 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact error line.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error
+2. [en_curso] B locator: dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error
+3. [pendiente] P puente: hay camino leer los errores de la consola y pintar la línea roja en el margen (need A B)
+
+Wait, the plan says:
+1. [fallo] A locator: dónde se pinta la línea roja...
+2. [en_curso] B locator: dónde se pinta la línea roja...
+3. [pendiente] P puente: hay camino leer los errores de la consola y pintar la línea roja en el margen (need A B)
+
+Actually, the plan seems to have been modified or I'm looking at the current state.
+The user provided:
+Trabajos ya hechos:
+T1: dónde se pinta la línea roja... -> leído: line gutter marker, handle gutter marker click
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de decisión del marcador (line gutter marker) se lee, pero no hay camino desde la consola inferior hacia el margen del editor; el pack no une ambos polos y los exploradores agotados no hallaron el puente"}

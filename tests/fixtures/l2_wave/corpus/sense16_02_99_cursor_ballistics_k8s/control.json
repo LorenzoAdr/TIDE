@@ -1,0 +1,94 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 2,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor",
+      "keep": [
+        "M11",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": []
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "trayectoria cursor",
+        "sincronización cluster",
+        "parpadeo usuario",
+        "índice vectorial"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide mecanismos muy específicos (balística, k8s, parpadeo, cuántico) que no aparecen en el pack actual; bosquejo para ver si existe algún barrio que huela a física de cursores o sincronización remota"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "trayectoria cursor",
+        "sincronización cluster",
+        "parpadeo usuario",
+        "índice vectorial"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla menciona conceptos muy específicos (balística, kubernetes, parpadeo, cuántico) que no aparecen en el pack actual; necesito ver si existen barrios que los contengan o si son metáforas de funcionalidades existentes"
+    },
+    {
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor",
+      "consultas": [
+        "dónde se calcula la trayectoria balística de los cursores del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide localizar el módulo de cálculo de trayectoria; busco el fenómeno de movimiento del cursor en el editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide un módulo de trayectoria balística y persistencia en índice cuántico; T1 cerró que no hay cálculo de trayectoria (solo estado instantáneo). el pack no nombra ni kubernetes ni índice vectorial cuántico. el claim se refuta: no hay objeto."
+    }
+  ],
+  "why": "el ancla pide un módulo de trayectoria balística y persistencia en índice cuántico; T1 cerró que no hay cálculo de trayectoria (solo estado instantáneo). el pack no nombra ni kubernetes ni índice vectorial cuántico. el claim se refuta: no hay objeto.",
+  "zooms": []
+}

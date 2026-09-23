@@ -1,0 +1,130 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:process_build_environment_updates",
+        "src/app/application.cpp:on_lsp_missing_install"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o dejado de responder para invocar el reinicio diferido",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:process_build_environment_updates",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/lsp/lsp_client.cpp:process_alive",
+        "src/app/application.cpp:run_custom_event_drain",
+        "src/app/application.cpp:run"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el punto de anclaje para la lógica de detección y recuperación automática. Un hijo cierra el mecanismo de trigger y acción."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mecanismo de reinicio (restart lsp for workspace). El pack muestra un hop hacia 'on lsp missing install', que es el candidato lógico para la detección de la caída (el trigger). Necesito confirmar si este evento es el que dispara el reinicio automático."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o dejado de responder para invocar el reinicio diferido",
+      "consultas": [
+        "dónde se detecta que el proceso LSP ha muerto o dejado de responder para invocar el reinicio diferido"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 leyó el disparador 'on lsp missing install' pero no el mecanismo de detección de la caída. El pack sugiere que este es el puente hacia la lógica de reinicio. Necesito ver si hay un monitor de salud o un handler de eventos de proceso que llame a esto."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección y reinicio automático está confirmado: el sistema monitorea la vida del proceso (process alive) y, al detectar su caída, invoca el reinicio diferido (schedule debounced lsp restart) sin intervención del usuario"
+    }
+  ],
+  "why": "el mecanismo de detección y reinicio automático está confirmado: el sistema monitorea la vida del proceso (process alive) y, al detectar su caída, invoca el reinicio diferido (schedule debounced lsp restart) sin intervención del usuario",
+  "zooms": []
+}

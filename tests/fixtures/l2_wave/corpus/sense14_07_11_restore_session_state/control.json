@@ -1,0 +1,155 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor posición del cursor, archivos abiertos, paneles visibles al cerrar y abrir un proyecto",
+      "keep": [
+        "M5",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:process_pending_workspace_load",
+        "src/app/application.cpp:set_workspace",
+        "src/app/application.cpp:resolve_workspace_for_anchor"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos y paneles visibles al iniciar el bootstrap del workspace",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:process_pending_workspace_load",
+        "src/app/application.cpp:set_workspace",
+        "src/app/application.cpp:resolve_workspace_for_anchor",
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/workspace_model.cpp:reload_stale_tabs_from_disk"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor posición del cursor, archivos abiertos, paneles visibles al cerrar y abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor posición del cursor, archivos abiertos, paneles visibles al cerrar y abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "workspace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide persistencia de estado de UI al reabrir; M1 (editor state) y M5/M6 (paneles) sugieren un gestor de sesión o workspace que serializa/restaura estas vistas"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 falló en el disparo global; atomizo el claim. M1 huele el estado del cursor; un hijo caza la restauración de ese polo."
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T2 cerró sin objeto en el barrio de workspace load; M1 huele 'editor state' y 'CursorPos'. Cambio de barrio para ver si el estado vive en el editor y no en el workspace."
+    },
+    {
+      "consulta": "dónde se restauran los archivos abiertos y paneles visibles al iniciar el bootstrap del workspace",
+      "consultas": [
+        "dónde se restauran los archivos abiertos y paneles visibles al iniciar el bootstrap del workspace"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "begin workspace bootstrap"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 abrió begin workspace bootstrap; T2 falló en cursor. Busco la restauración de archivos/paneles en ese bootstrap para confirmar si el estado se guarda/restaura ahí."
+    },
+    {
+      "consulta": "dónde se restauran los archivos abiertos y paneles visibles al cargar la sesión del workspace",
+      "consultas": [
+        "dónde se restauran los archivos abiertos y paneles visibles al cargar la sesión del workspace"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "load workspace session"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "T3 cerró el bootstrap pero abrió load workspace session y restore workspace layout; ahí vive la restauración"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de restauración no existe: set workspace limpia pestañas y reopen workspace documents solo notifica al LSP sin abrir archivos; no hay objeto que recuerde la posición del cursor ni los paneles"
+    }
+  ],
+  "why": "el mecanismo de restauración no existe: set workspace limpia pestañas y reopen workspace documents solo notifica al LSP sin abrir archivos; no hay objeto que recuerde la posición del cursor ni los paneles",
+  "zooms": []
+}

@@ -1,0 +1,13 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+
+Current state:
+- T1 found the restart mechanism (`restart lsp for workspace`, `schedule debounced lsp restart`), triggered by environment changes or config updates.
+- T2 asked "where is it detected that the LSP server has crashed or stopped responding" and returned "no object" (empty). This means there is currently *no* detection mechanism for crashes/unresponsiveness in the codebase.
+
+The anchor claim is: "if the LSP server process crashes or stops responding, the application automatically
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide detección automática de caída o falta de respuesta. T2 confirmó que no existe mecanismo de detección (no hay objeto). T1 mostró reinicio por entorno, no por fallo. el claim se refuta: no hay detección automática de caídas."
+}

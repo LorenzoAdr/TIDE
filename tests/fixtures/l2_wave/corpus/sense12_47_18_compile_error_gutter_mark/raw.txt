@@ -1,0 +1,16 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line.
+
+Current state:
+- T1 found `line gutter marker` and `fold gutter marker` (where the red line is painted).
+- T2 looked for where compilation errors are extracted from the console text to create markers, but found nothing ("no hay objeto").
+- The pack shows `M11` (binary symbols panel) has `scan shell output for linker errors`, but T2 didn't find the object there or elsewhere.
+- The user's request implies a feature that might not exist yet or is implemented differently (e.g., via a language server, not directly from console text parsing in the UI layer).
+- However, the user *wants* this feature. The claim is "quiero que...". This is a feature request or a request to find where to implement it.
+- Since T2 found "no hay objeto" for extracting errors from console text to create markers, it suggests this specific mechanism (parsing console text to create markers) doesn't exist in the current codebase in the way T2 looked for it.
+- The user's request is "quiero
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de extraer errores de la consola para pintar marcadores no existe; el pack no lo nombra y T2 cerró sin objeto. el claim se refuta: no hay código que hacer ese puente hoy."
+}

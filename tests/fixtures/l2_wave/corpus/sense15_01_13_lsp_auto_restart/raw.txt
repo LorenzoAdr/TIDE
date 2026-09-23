@@ -1,0 +1,10 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have already done one job (T1) which looked for the detection mechanism and restart trigger.
+T1 concluded: "no encontré el mecanismo de detección de no responde timeout que dispare el reinicio; lo leído muestra que la detección de caída EOF en reader loop solo limpia estado transport reader eof sin reiniciar, y el único reinicio restart lsp for workspace se dispara manualmente o tras instalación, no tras fallo de comunicación."
+This means the automatic restart mechanism *does not exist* yet. The user's request is a feature request ("necesito que...").
+The anchor is a claim: "si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie".
+Since T1 found that the detection of EOF doesn't trigger a restart, and the restart function exists but is manual/install-triggered, the mechanism is missing.
+I need to confirm if there's *any* other detection mechanism (like timeout) or if the feature is completely absent.
+T1 checked "reader loop", "start", "on transport reader eof", "
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de detección automática de caída/no-respuesta y reinicio del LSP no existe; T1 confirmó que el EOF solo limpia estado y el reinicio es manual/instalación. el ancla pide una funcionalidad ausente."}

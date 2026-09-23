@@ -1,0 +1,134 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor LSP tras un fallo o reinicio de la aplicación",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'schedule debounced lsp restart' y 'pending lsp restart'. Necesito ver qué evento o condición activa este reinicio (detección de fallo)."
+    },
+    {
+      "consulta": "dónde se reinicia el servidor LSP tras un fallo o reinicio de la aplicación",
+      "consultas": [
+        "dónde se reinicia el servidor LSP tras un fallo o reinicio de la aplicación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "la caza anterior no halló detección automática de caída; busco el mecanismo de reinicio existente (ej. al arrancar) para extenderlo a la detección de fallos"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 no encontró objeto; T2 encontró reinicio por entorno pero no por fallo. El pack (M5) tiene 'pending lsp restart' y 'schedule debounced lsp restart'. Necesito confirmar si existe un detector de fallo (crash/unresponsive) que dispare el reinicio, o si solo se reinicia por cambios de entorno. Si no hay detector, el claim se refuta o se requiere implementación nueva."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 no halló el objeto, pero T2 confirmó el mecanismo de reinicio. Falta el disparador de fallo/caída. Busco el detector de estado del proceso LSP."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 cerró con 'no hay objeto', pero el ancla pide detectar caída/no respuesta. T2 confirmó el mecanismo de reinicio (restart lsp for workspace). Falta el disparador de detección de fallo. Exploro si existe un watcher o health check que llame a restart lsp for workspace al detectar un fallo del proceso."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el pack y las cazas confirman que el reinicio del LSP se dispara por instalación de toolpacks o cambios en settings/entorno, pero no existe mecanismo que detecte caída o falta de respuesta del proceso para reiniciarlo automáticamente. el claim se refuta."
+    }
+  ],
+  "why": "el pack y las cazas confirman que el reinicio del LSP se dispara por instalación de toolpacks o cambios en settings/entorno, pero no existe mecanismo que detecte caída o falta de respuesta del proceso para reiniciarlo automáticamente. el claim se refuta.",
+  "zooms": []
+}

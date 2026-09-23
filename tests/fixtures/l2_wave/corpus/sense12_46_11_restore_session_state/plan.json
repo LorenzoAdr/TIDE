@@ -1,0 +1,44 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/workspace_model.cpp:open_file"
+      ],
+      "consulta": "dónde se guardan los archivos abiertos al cerrar el proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "C",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se restauran los archivos abiertos al abrir el proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "D",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino guardar y restaurar los archivos abiertos",
+      "evita": [],
+      "hacia": [],
+      "id": "Q",
+      "kind": "puente",
+      "need": [
+        "C",
+        "D"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

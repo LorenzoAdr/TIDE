@@ -1,0 +1,137 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "qué hace cancel level1 y cancel current para limpiar el archivo y detener la generación",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 tiene 'ai trace escape'; necesito ver cómo se dispara la cancelación desde la UI"
+    },
+    {
+      "consulta": "dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 refutó el disparo en el rastro de texto; busco el evento de teclado/ratón en la consola o editor"
+    },
+    {
+      "consulta": "qué hace cancel level1 y cancel current para limpiar el archivo y detener la generación",
+      "consultas": [
+        "qué hace cancel level1 y cancel current para limpiar el archivo y detener la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "workspace config load"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 leyó los nombres de cancelación; ahora hay que ver si limpian el archivo y detienen el proceso, o si solo marcan un estado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 no encontró la captura de Escape/clic; T2 y T3 confirmaron el mecanismo de cancelación (cancel level1/cancel current) pero no su disparador por teclado/ratón. Necesito localizar dónde se capturan esos eventos y si enlazan con el mecanismo de cancelación ya leído."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el ancla pide cancelar con Escape o clic fuera; T1 refuta ese disparo (no hay captura de teclado/ratón, solo comandos de texto). T3 confirma el efecto: cancel current limpia el archivo pendiente y cancel level1 detiene la generación. el mecanismo existe pero no se activa con los gestos pedidos."
+    }
+  ],
+  "why": "el ancla pide cancelar con Escape o clic fuera; T1 refuta ese disparo (no hay captura de teclado/ratón, solo comandos de texto). T3 confirma el efecto: cancel current limpia el archivo pendiente y cancel level1 detiene la generación. el mecanismo existe pero no se activa con los gestos pedidos.",
+  "zooms": []
+}

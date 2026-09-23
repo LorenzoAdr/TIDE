@@ -1,0 +1,15 @@
+The user wants to automatically detect when the LSP server crashes or becomes unresponsive and restart it.
+The previous work (T1 and T2) investigated where the detection happens.
+T1 found that detection is only via EOF on transport reader, and restart is triggered by config changes or startup, not server failure.
+T2 found `completion wait timeout ms`, `wait response`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+However, T2's closed says "Lo leído no era el disparo" (What was read wasn't the trigger). It seems T2 found the timeout mechanism but maybe didn't confirm it triggers the restart for *unresponsiveness* specifically in the way the user wants, or perhaps the "restart" found was for a different reason.
+Wait, T2 read `completion wait timeout ms`, `wait response`, `restart lsp for workspace`. This looks like a timeout mechanism.
+The closed says "Lo leído no era el disparo". This implies the timeout found might not be the one that triggers the restart, or the restart found isn't triggered by the timeout.
+Actually, T2's closed says "ESA pregunta no se relanza... do=cerrar ese mapeo".
+
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el ancla pide detección automática de caída/no respuesta y reinicio. T1 refuta detección de no respuesta (heartbeat/timeout) y reinicio por fallo; solo hay EOF y reinicio por config. T2 lee timeout pero niega que sea el disparo del reinicio. el pack no muestra mecanismo de detección de no respuesta que dispare reinicio. el claim se refuta: no existe el mecanismo solicitado."
+}

@@ -1,0 +1,66 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código al pulsar Escape o hacer clic fuera",
+      "keep": [
+        "M3",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se cancela la generación de código al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se cancela la generación de código al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el pack nombra ai controller cancel level1 y ai trace escape; un hijo cierra el disparo de cancelación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el mecanismo no existe: la cancelación es puramente textual en la consola; no hay detección de Escape ni clic fuera para detener la generación"
+    }
+  ],
+  "why": "el mecanismo no existe: la cancelación es puramente textual en la consola; no hay detección de Escape ni clic fuera para detener la generación",
+  "zooms": []
+}

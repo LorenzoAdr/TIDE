@@ -1,0 +1,13 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have a plan:
+1. [en_curso] A locator: dónde se parsean los errores de compilación del texto de la consola inferior
+2. [pendiente] B locator: dónde se insertan diagnósticos manuales en el mapa del editor para marcar líneas
+3. [pendiente] P puente: hay camino parsear errores de consola e insertar diagnósticos en el editor (need A B)
+
+T4 was the
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "T4 niega el objeto de la fase A: no hay parser general de errores de compilación en la consola; solo un parser específico de linker en binary symbols panel. Salto a la siguiente caza."
+}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pide un comportamiento que no existe en el sistema actual; T1 confirmó que no hay rama de eventos de teclado ni mouse para cancelar la IA, solo texto. el claim se refuta: no hay mecanismo que cancelar por Escape o clic fuera"
+}

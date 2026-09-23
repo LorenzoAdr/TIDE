@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "las dos localizaciones fallaron: no hay mecanismo de persistencia ni restauración del estado del editor (cursor, archivos, paneles) al cerrar o abrir el proyecto; el sistema crea estado nuevo cada vez"
+}

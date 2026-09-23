@@ -1,0 +1,149 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático",
+      "keep": [
+        "M1",
+        "M10"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:completion_wait_timeout_ms"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio automático",
+      "keep": [
+        "M2",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:completion_wait_timeout_ms",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_transport.cpp:set_reader_eof_handler",
+        "src/lsp/lsp_client.cpp:start"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "qué evento o error dispara la función de reinicio del servidor de lenguaje",
+      "keep": [
+        "M5",
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 7,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_transport.cpp:set_reader_eof_handler",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 menciona 'restart lsp for workspace' y 'schedule debounced lsp restart'; necesito ver el disparador de detección y el flujo de reinicio automático"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio automático",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio automático"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp for workspace"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 leyó el mecanismo de reinicio (restart lsp for workspace) pero no el disparo de detección de fallo. Necesito encontrar qué evento o condición invoca a restart lsp for workspace cuando el servidor cae."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio automático",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio automático"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "transport reader eof"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "los trabajos anteriores encontraron los símbolos de detección (eof, timeout) y reinicio, pero no confirmaron el disparo automático; necesito ver el código que une la detección con el reinicio"
+    },
+    {
+      "consulta": "qué evento o error dispara la función de reinicio del servidor de lenguaje",
+      "consultas": [
+        "qué evento o error dispara la función de reinicio del servidor de lenguaje"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "transport reader eof"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "los trabajos anteriores encontraron el reinicio pero no el disparador; el pack sugiere 'on transport reader eof' como posible trigger de caída"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el Cerrado de T3 niega el disparo automático: el EOF del transporte solo limpia estado sin reiniciar, y la función de reinicio se invoca manualmente o por configuración, no por detección de fallo"
+    }
+  ],
+  "why": "el Cerrado de T3 niega el disparo automático: el EOF del transporte solo limpia estado sin reiniciar, y la función de reinicio se invoca manualmente o por configuración, no por detección de fallo",
+  "zooms": []
+}

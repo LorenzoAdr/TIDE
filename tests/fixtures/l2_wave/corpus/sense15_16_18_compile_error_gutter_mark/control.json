@@ -1,0 +1,196 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 2,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la salida de la consola",
+      "keep": [
+        "M2",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se convierten los errores leídos de la consola en diagnósticos para el editor",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/lsp/lsp_client.cpp:parse_diagnostic",
+        "src/lsp/lsp_client.cpp:diagnostics_for_file",
+        "src/lsp/lsp_client.cpp:parse_publish_diagnostics",
+        "src/lsp/lsp_client.cpp:on_lsp_notification"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error compilación",
+        "línea roja margen",
+        "diagnóstico editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide conectar errores de consola con marcas visuales en el editor; busco barrios de diagnóstico y resaltado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error compilación",
+        "línea roja margen",
+        "diagnóstico editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "línea roja margen",
+        "diagnóstico editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "diagnóstico error",
+        "margen línea",
+        "consola inferior",
+        "editor texto",
+        "marca visual",
+        "compilación"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "necesito localizar el barrio que gestiona los errores de compilación y el que pinta las marcas en el margen del editor para ver si existe un camino entre ambos o si hay que crearlo"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "margen"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 5,
+      "why": "el usuario quiere ver la línea roja; busco el mecanismo que pinta el margen con errores"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la salida de la consola",
+      "consultas": [
+        "dónde se leen los errores de compilación de la salida de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "shell output"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de marcar ya existe; falta ver si la consola alimenta ese mecanismo o si hay un parser de errores en la salida"
+    },
+    {
+      "consulta": "dónde se convierten los errores leídos de la consola en diagnósticos para el editor",
+      "consultas": [
+        "dónde se convierten los errores leídos de la consola en diagnósticos para el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnóstico"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 7,
+      "why": "T1 y T2 están desconectados; busco el puente que alimenta el margen con la consola"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el margen se marca en line diagnostic marker from map si hay diagnósticos; los errores de consola se leen en scan shell output for linker errors pero no hay camino a los diagnósticos del editor"
+    }
+  ],
+  "why": "el margen se marca en line diagnostic marker from map si hay diagnósticos; los errores de consola se leen en scan shell output for linker errors pero no hay camino a los diagnósticos del editor",
+  "zooms": []
+}

@@ -1,0 +1,11 @@
+The user wants to mark compilation errors from the console with a red line in the editor's left margin.
+I have a plan with 3 phases:
+A: locator: dónde se extrae la línea del error del texto de la consola
+B: locator: dónde se marca una línea en el margen del editor con un color
+P: puente: hay camino extraer la línea del error y marcar la línea en el margen (need A B)
+
+Current status:
+T1 asked: dónde se leen los errores de compilación de la consola inferior -> Found `scan shell output for linker errors`
+
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"T4 cerró la fase A (extracción de línea del error). El pack no une A con B; T2/T3 no hallaron el dibujo de la línea roja. Cambio de rumbo: busco el mecanismo de marca de error en el margen del editor (diagnostics/gutter) para luego puentear con la extracción."}

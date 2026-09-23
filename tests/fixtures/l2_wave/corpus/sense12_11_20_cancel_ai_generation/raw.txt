@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se llama a la cancelación de la generación de IA al pulsar Escape o hacer clic fuera","evita":["escape de caracteres"],"why":"T1 falló en el trigger UI; el pack huele M5 (console panel keys) y M4 (picker cancel) como barrios de input; busco el puente entre el gesto y la orden de cancelación"}

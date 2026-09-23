@@ -1,0 +1,18 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Looked for Escape/click capture. Found `handle editor escape` (UI only) and `cancel level1` (effect, not connected to handler).
+T2: Looked for file cleanup/undo partial insertion. Found `cancel current` clears memory state (`pending insert`, `insert anchor`) and calls `cancel level1`, but doesn't touch the file system.
+T3: Looked for file content revert. Found `cancel current` and `clear pending insert` only clear memory state and notify UI, don't touch editor buffer or disk file.
+
+The pack shows:
+T1 => T2: same object `cancel level1`
+T1 => T3: `cancel current` -> `cancel all` -> `cancel level1`
+T2 => T3: same object `cancel current`
+T1 -> Ai Controller, clear primary selection
+T2 -> Ai Controller, Symbol Filter Runner
+
+The user's claim has two parts:
+1. Trigger: Escape or click outside cancels generation.
+2. Effect: Clean cancellation without
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide dos cosas: capturar Escape/clic para cancelar, y limpiar el archivo sin dejarlo a medias. T1 confirma que no hay captura de Escape/clic conectada a la cancelación (solo UI de editor). T2 y T3 confirman que la cancelación actual solo limpia estado en memoria y no revierte ni limpia el buffer/archivo. El mecanismo solicitado no existe en el código leído; el flujo actual no une el disparo con el efecto, ni el efecto con la limpieza de disco/buffer. Cierra el claim como refutado."}

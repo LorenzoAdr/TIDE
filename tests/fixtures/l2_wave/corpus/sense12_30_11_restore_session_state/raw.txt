@@ -1,0 +1,25 @@
+The user wants the editor to remember the cursor position, open files, and sidebar panel states when reopening a previously opened project.
+This is a "session persistence" or "workspace state restoration" feature.
+The anchor mentions:
+1. Cursor position
+2. Open files (tabs)
+3. Sidebar panels (visible/closed)
+
+Looking at the `plano`:
+- `app`: `workspace_session`, `editor_tabs`, `workspace_detect`
+- `editor`: `cursor_history`, `editor_buffer_source`
+- `ui`: `busy_strip`, `bindings_store` (maybe panels?)
+
+The
+---- content ----
+{
+  "action": "control_v1",
+  "do": "agujas",
+  "agujas": [
+    "workspace_session",
+    "editor_tabs",
+    "cursor_history",
+    "panel"
+  ],
+  "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto; busco dónde se guarda y restaura ese estado"
+}

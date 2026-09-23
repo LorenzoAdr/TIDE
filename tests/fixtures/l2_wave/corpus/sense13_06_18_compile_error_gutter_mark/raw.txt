@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found the mechanism for marking errors in the gutter: `line diagnostic marker from map` queries `diagnostics for editor line` which is used by `line gutter marker` to decide what to paint.
+T2 and T3 failed to find the mechanism for extracting errors from the console text. The "Cerrado" for T2 and T3 says "ESA pregunta no se relanza...".
+
+The pack shows:
+T1 => T2: `handle problems button click` -> `make diagnostic modal` -> `diagnostic severity tr`
+T1 => T3: sin camino
+T2 => T3: sin camino
+
+The user's claim is about connecting the console errors to the editor margin.
+T1 found the margin marking mechanism.
+T2 and T3 tried to find the console parsing mechanism but failed.
+The pack says "exploradores agotados. Cierra citando el mecanismo leído o la refutación."
+
+I should close the investigation citing the mechanism found in T1 for the margin marking, and note that the console parsing mechanism was not
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el margen se marca mediante line diagnostic marker from map que consulta diagnostics for editor line; el mecanismo de extracción de la consola no se halló"}

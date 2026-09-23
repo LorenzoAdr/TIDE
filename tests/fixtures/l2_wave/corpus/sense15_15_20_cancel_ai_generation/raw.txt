@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera (hacia cancel level1)
+2. [en_curso] B locator: dónde se limpia el archivo a medias al cancelar la generación (hacia clear)
+3. [pendiente] P puente: hay camino cancelar la generación y limpiar el archivo a medias (need A B)
+
+Wait, the plan says:
+1. [fallo] A locator: dónde se cancela la generación de la IA al pulsar Escape o hacer clic fuera (hacia cancel level1)
+2. [en_curso] B locator: dónde se limpia el archivo a medias al cancelar la generación (hacia clear)
+3. [pendiente] P puente: hay camino cancelar la generación y limpiar el archivo a medias (need A B)
+
+But the "Trabajos ya hechos" show:
+Trabajo 1: asked about capturing Escape/click outside. Closed: not found. Read: ai trace escape, clear.
+Tr
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra un handler de Escape ni clic fuera para cancelar la IA; lo leído son escapes de string y cancelaciones por texto o movimiento de cursor. el polo de captura de input no existe en el código actual, por lo que el claim de cancelar limpiamente con esos gestos se refuta."}

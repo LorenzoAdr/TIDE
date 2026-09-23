@@ -1,0 +1,129 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al volver a abrir un proyecto",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/app_settings.cpp:save",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/app_settings.hpp",
+        "src/app/workspace_model.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo que ya estaba abierto",
+      "keep": [
+        "M2",
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:navigate_editor_to_line",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M8",
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/source_panel.cpp:handle_source_panel_event",
+        "src/ui/panel.hpp:SplitSeparatorVertical"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al volver a abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor y los archivos abiertos al volver a abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 huele el estado del editor y la posición del cursor; necesito ver si persiste y restaura la sesión"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo que ya estaba abierto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un archivo que ya estaba abierto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restore workspace session"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el mecanismo de sesión pero no el disparo; busco el efecto concreto del cursor en la restauración"
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "layout"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide paneles laterales; T1 y T2 no cubren el layout"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "los tres trabajos cerraron sin hallar el disparo; el pack no une un mecanismo que una la posición del cursor, los archivos abiertos y la visibilidad de paneles al reabrir un proyecto"
+    }
+  ],
+  "why": "los tres trabajos cerraron sin hallar el disparo; el pack no une un mecanismo que una la posición del cursor, los archivos abiertos y la visibilidad de paneles al reabrir un proyecto",
+  "zooms": []
+}

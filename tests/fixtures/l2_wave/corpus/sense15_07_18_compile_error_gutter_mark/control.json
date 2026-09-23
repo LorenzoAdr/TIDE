@@ -1,0 +1,181 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la consola",
+      "keep": [
+        "M3",
+        "M10"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/lsp/diagnostics.cpp:count_workspace_diagnostics",
+        "src/ui/diagnostics_panel.cpp:MakeDiagnosticsPanel",
+        "src/lsp/diagnostics.cpp:count_errors",
+        "src/ui/diagnostics_panel.cpp:build_rows",
+        "src/ui/console_panel.cpp:MakeConsolePanel",
+        "src/lsp/diagnostics.cpp:diagnostics_display_allowed"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibujan las marcas visuales en el margen del editor",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/editor/editor_render.cpp:apply_decoration",
+        "src/editor/editor_render.cpp:render_rich_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/editor/editor_folds.cpp:fold_gutter_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se envían los diagnósticos de compilación desde la consola al editor",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:parse_diagnostic",
+        "src/lsp/lsp_client.cpp:parse_publish_diagnostics",
+        "src/lsp/lsp_client.cpp:on_lsp_notification",
+        "src/lsp/lsp_client.cpp:set_diagnostics_notify_callback",
+        "src/app/application.cpp:Application"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se envían los diagnósticos de compilación desde la consola al editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se suscribe el editor a los cambios de diagnósticos para dibujar marcas",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el envío de diagnósticos de la consola y la suscripción del editor para dibujar marcas",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico compilación",
+        "línea error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide pintar una línea roja en el margen al detectar errores en la consola; busco barrios que manejen decoraciones de editor o diagnósticos de compilación"
+    },
+    {
+      "consulta": "dónde se detectan los errores de compilación en la consola",
+      "consultas": [
+        "dónde se detectan los errores de compilación en la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnóstico"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack nombra M11 (binary symbols panel) que escanea salida de shell; necesito confirmar si ahí nace la señal de error"
+    },
+    {
+      "consulta": "dónde se dibujan las marcas visuales en el margen del editor",
+      "consultas": [
+        "dónde se dibujan las marcas visuales en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack une visual highlight con el editor; busco el dibujo del margen para luego conectarlo con los errores"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 son polos desconectados. Necesito encontrar el puente que falta: dónde se emiten los datos de error y dónde se esperan para pintar el margen."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack une la detección en consola (T1) con el dibujo en margen (T2) y el envío de diagnósticos (T3); sin camino entre T1 y T2/T3 indica que la integración no existe aún, confirmando que falta el puente para marcar errores de consola en el editor"
+    }
+  ],
+  "why": "el pack une la detección en consola (T1) con el dibujo en margen (T2) y el envío de diagnósticos (T3); sin camino entre T1 y T2/T3 indica que la integración no existe aún, confirmando que falta el puente para marcar errores de consola en el editor",
+  "zooms": []
+}

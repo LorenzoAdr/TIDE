@@ -1,0 +1,199 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_transport.cpp:send_request",
+        "src/lsp/lsp_transport.cpp:wait_response",
+        "src/lsp/lsp_transport.cpp:write_request"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/lsp/lsp_transport.cpp:send_request",
+        "src/lsp/lsp_transport.cpp:wait_response"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'pending lsp restart' y 'schedule debounced lsp restart', lo que sugiere que ya existe lógica para reiniciar el LSP. Necesito encontrar dónde se dispara esta detección de fallo."
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección (send/wait/write). El pack muestra M5 con 'restart lsp for workspace' y 'schedule debounced lsp restart'. Necesito ver el mecanismo de reinicio para completar el claim de 'detectar y reiniciar'."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se lanzó; cierra el ancla o parte",
+      "hacia": [
+        "on child exit"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 y T2 no hallaron el disparo; el pack apunta a on child exit y poll loop como candidatos para la detección automática"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se lanzó; cierra el ancla o parte",
+      "hacia": [
+        "wait response"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 leyó la capa de transporte pero no el mecanismo de detección; T2 confirmó que no hay código que observe el fallo. Necesito encontrar dónde se observa el fallo de wait response para disparar el reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "invalid",
+      "error": "control sin objeto JSON",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": ""
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se lanzó; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 y T2 no encontraron el mecanismo de detección; hay que buscar en la capa de transporte o en el ciclo de vida del proceso hijo"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se lanzó; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 y T2 no hallaron el disparo; el pack apunta a TUIDE MON y request scope como posibles observadores del fallo"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se lanzó; cierra el ancla o parte",
+      "hacia": [
+        "wait response"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "T1 leyó la capa de transporte pero no el observador del fallo; T2 confirmó que no hay disparo automático. Hay que cazar el mecanismo que observa el timeout o el error de la capa de transporte y decide reiniciar."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "invalid",
+      "error": "control sin objeto JSON",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 9,
+      "why": ""
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se lanzó; cierra el ancla o parte",
+      "hacia": [
+        "wait response"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 10,
+      "why": "T1 y T2 no hallaron el disparo; el pack apunta a wait response como capa de transporte que retorna false en timeout error; un hijo caza el observador de ese fallo"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

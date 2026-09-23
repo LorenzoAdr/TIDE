@@ -1,0 +1,138 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al cerrar y abrir el proyecto",
+      "keep": [
+        "M2",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_config.cpp:save"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al volver a abrir el proyecto",
+      "keep": [
+        "M8",
+        "M10"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:on_workspace_complete"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto",
+      "keep": [
+        "M8",
+        "M12"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:open_workspace_wizard",
+        "src/app/application.cpp:reopen_workspace_documents"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar la posición del cursor; M1 huele el estado del editor y su cursor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla tiene tres polos independientes (cursor, archivos, paneles). T1 falló en cursor; parto en tres cazas paralelas para encontrar cada mecanismo de persistencia/restauración y luego unirlos si comparten origen."
+    },
+    {
+      "consulta": "dónde se restauran los archivos abiertos al volver a abrir el proyecto",
+      "consultas": [
+        "dónde se restauran los archivos abiertos al volver a abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor panel"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el cursor falló; pruebo el segundo polo del ancla (archivos abiertos) para ver si hay un mecanismo de restauración de sesión"
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar paneles laterales; T1 y T2 cubren cursor y archivos, pero falta el estado de los paneles"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "los mecanismos leídos (save, reopen workspace documents, open workspace wizard) no son el disparo de la restauración de estado; el pack no une los polos y no hay camino entre ellos"
+    }
+  ],
+  "why": "los mecanismos leídos (save, reopen workspace documents, open workspace wizard) no son el disparo de la restauración de estado; el pack no une los polos y no hay camino entre ellos",
+  "zooms": []
+}

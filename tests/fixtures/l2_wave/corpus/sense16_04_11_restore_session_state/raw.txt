@@ -1,0 +1,18 @@
+The user wants to know if the application remembers the cursor position, open files, and visible/closed side panels when reopening a previously opened project.
+
+I have three completed jobs:
+1.  **T1**: Asked about saving/restoring editor state. Result: "no object".
+2.  **T2**: Asked about saving/restoring cursor position. Result: "load" only persists recent workspace paths, no cursor state.
+3.  **T3**: Asked about saving/restoring open files list. Result: "load working lines from disk", "remove tab mru", "open tabs mru", "close tab".
+
+Analysis of T3:
+The "Cerrado" for T3 lists: `load working lines from disk`, `remove tab mru`, `open tabs mru`, `close tab`.
+These names strongly suggest a mechanism for remembering open files (tabs). "open tabs mru" (Most Recently Used) and "load working lines from disk" imply persistence of the editor's view state (which files were open).
+However, the prompt instructions say: "Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo."
+Wait,
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el mecanismo de recordar archivos abiertos existe (open tabs mru, load working lines from disk); no hay mecanismo para recordar la posición del cursor ni el estado de paneles laterales"
+}
