@@ -18,7 +18,7 @@ Sustituye el hot path L0→L1→L2 del tab AI. El código legacy permanece compi
   Veredicto tipado `encontrado|no_encontrado|parcial`. Hasta `kAdminMaxExplores` (4).
   Stub solo si no hay brain (tests). `read` acepta `path`, `path:N`, `path:N:M`,
   `path:N-M`, `path:N-M,a-b` y `path:Class::method`; explore omite re-head del mismo path.
-- `editar` / `cerrar` (con notebook): **verificador adversarial** (N≤4 + contra-pregunta
+- `editar` / `cerrar` (con notebook): **verificador adversarial** (N≤6 + contra-pregunta
   si hay miss tipados) y, si aún `sostiene`, un **pase refutador** LLM. Sin reescritura
   heurística de dominio. Tope de pases → `dudoso` (bloquea; no absuelve).
   Entrada: consulta + anclas + veredictos tipados (explore/read/search) + `evidencia`

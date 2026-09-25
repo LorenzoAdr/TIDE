@@ -465,7 +465,7 @@ def run_exit_verify(
         thesis,
         root,
         vlog,
-        max_steps=4,
+        max_steps=6,
         exam=exam,
         variant="exam_hard",
         show_job_verdicts=True,
