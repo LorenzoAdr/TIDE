@@ -87,12 +87,21 @@ def explorer_system(tools: list[str]) -> str:
             "entre: ¿hay co-ocurrencia/camino débil entre dos símbolos? sin camino también es evidencia."
         )
     lines.append(
-        '{"do":"cerrar","veredicto":"hay|no_hay|no_concluyente","simbolos":["path:symbol"],'
-        '"evidencia":["..."],"why":"..."}'
+        '{"do":"cerrar","veredicto":"encontrado|no_encontrado|parcial","simbolos":["path:symbol"],'
+        '"evidencia":["path:línea o cita corta"],'
+        '"falta":["parte de TU consulta no confirmada; [] solo si lo cubriste todo"],'
+        '"why":"..."}'
     )
     lines.append(
         "pattern = regex ripgrep. read: path relativo; offset/limit de líneas. "
-        "Responde SOLO a TU consulta. Si lo leído es otra cosa: veredicto no_hay. "
+        "Responde SOLO a TU consulta (el brief del piloto), no al claim final del usuario. "
+        "cerrar.veredicto = si hallaste el objeto de ESA consulta: encontrado / no_encontrado / parcial. "
+        "why = hechos y citas; NO digas que la feature del usuario existe o que hay que implementarla. "
+        "falta (alias no_visto) = OBLIGATORIO al cerrar: lista de partes de TU consulta no confirmadas "
+        "(vacía [] solo si lo cubriste todo). Si niegas el objeto de TU consulta (no está / no hay / "
+        "no se halló), NO uses veredicto=encontrado: usa no_encontrado o parcial y ponlo en falta. "
+        "Si lo leído es otra cosa o solo un vecino: parcial o no_encontrado, y dilo en falta. "
+        "Cuando ya puedas citar path:symbol (o ausencia clara), cierra; no agotes olas por costumbre. "
         "PROHIBIDO inventar paths no devueltos por grep/cerca. "
         "Máximo ~10 olas totales; ~6 greps y ~6 reads; luego cierra."
     )
@@ -523,6 +532,32 @@ def tool_atlas(query: str, root: Path) -> str:
     return "\n".join(lines)
 
 
+def close_pressure(
+    step: int,
+    max_steps: int,
+    seen_paths: set[str],
+    greps: int,
+    reads: int,
+) -> str:
+    """Runtime pressure to close once the hunt has anchorage — not case-specific."""
+    used = step + 1
+    left = max_steps - used
+    parts = [f"Olas {used}/{max_steps} (quedan {left})."]
+    anchored = bool(seen_paths) and reads >= 1
+    if anchored and used >= 3:
+        parts.append(
+            "Si ya puedes nombrar el objeto de TU consulta con path:symbol (o citar ausencia), "
+            "cierra ahora (encontrado|parcial|no_encontrado). No hace falta agotar olas."
+        )
+    if left <= 3:
+        parts.append("Presión alta: preferí cerrar con lo leído a otro grep de pesca.")
+    if left <= 1:
+        parts.append("Última ola útil: cierra con veredicto.")
+    if left <= 2 and greps >= 3 and reads >= 2:
+        parts.append("Ya hubo greps+reads suficientes; cierra.")
+    return " ".join(parts)
+
+
 def run_explorer(
     api: str,
     model: str,
@@ -542,11 +577,17 @@ def run_explorer(
             "role": "user",
             "content": (
                 f"## Consulta\n{consulta}\n\n"
-                f"Elige UNA ola ({'/'.join(tools)}/cerrar). Tope {max_steps} olas."
+                f"Elige UNA ola ({'/'.join(tools)}/cerrar). Tope {max_steps} olas. "
+                f"Cierra en cuanto puedas citar el mecanismo (o su ausencia); no agotes el tope por costumbre."
             ),
         },
     ]
     greps = reads = follows = entres = cercas = 0
+
+    def follow_up(body: str, step: int) -> str:
+        press = close_pressure(step, max_steps, seen_paths, greps, reads)
+        return f"{body}\n\n{press}"
+
     for step in range(max_steps):
         raw = chat(api, model, messages)
         log.append(f"explorer_raw[{step}]: {raw[:800]}")
@@ -563,6 +604,19 @@ def run_explorer(
             continue
         do = (ola.get("do") or "").lower()
         if do == "grep" and "grep" in tools:
+            left = max_steps - (step + 1)
+            if left <= 2 and reads >= 1 and seen_paths:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": follow_up(
+                            "Presión: no más grep de pesca con poca cuota. Cierra con lo anclado.",
+                            step,
+                        ),
+                    }
+                )
+                continue
             if greps >= 6:
                 messages.append({"role": "assistant", "content": raw})
                 messages.append(
@@ -596,9 +650,10 @@ def run_explorer(
             messages.append(
                 {
                     "role": "user",
-                    "content": (
+                    "content": follow_up(
                         f"## Resultado grep\n```\n{result[:6000]}\n```\n"
-                        f"{path_note}\n\nSiguiente ola (read solo de paths anclados)."
+                        f"{path_note}\n\nSiguiente ola (read solo de paths anclados).",
+                        step,
                     ),
                 }
             )
@@ -628,7 +683,10 @@ def run_explorer(
             messages.append(
                 {
                     "role": "user",
-                    "content": f"## Resultado read\n```\n{result[:8000]}\n```\n\nSiguiente ola.",
+                    "content": follow_up(
+                        f"## Resultado read\n```\n{result[:8000]}\n```\n\nSiguiente ola.",
+                        step,
+                    ),
                 }
             )
             continue
@@ -650,7 +708,10 @@ def run_explorer(
             messages.append(
                 {
                     "role": "user",
-                    "content": f"## Resultado follow\n```\n{result[:6000]}\n```\n\nSiguiente ola.",
+                    "content": follow_up(
+                        f"## Resultado follow\n```\n{result[:6000]}\n```\n\nSiguiente ola.",
+                        step,
+                    ),
                 }
             )
             continue
@@ -672,7 +733,10 @@ def run_explorer(
             messages.append(
                 {
                     "role": "user",
-                    "content": f"## Resultado entre\n```\n{result[:5000]}\n```\n\nSiguiente ola.",
+                    "content": follow_up(
+                        f"## Resultado entre\n```\n{result[:5000]}\n```\n\nSiguiente ola.",
+                        step,
+                    ),
                 }
             )
             continue
@@ -691,7 +755,10 @@ def run_explorer(
             messages.append(
                 {
                     "role": "user",
-                    "content": f"## Resultado peek\n```\n{result[:4000]}\n```\n\nSiguiente ola.",
+                    "content": follow_up(
+                        f"## Resultado peek\n```\n{result[:4000]}\n```\n\nSiguiente ola.",
+                        step,
+                    ),
                 }
             )
             continue
@@ -709,7 +776,10 @@ def run_explorer(
             messages.append(
                 {
                     "role": "user",
-                    "content": f"## Resultado needles\n```\n{result[:6000]}\n```\n\nSiguiente ola.",
+                    "content": follow_up(
+                        f"## Resultado needles\n```\n{result[:6000]}\n```\n\nSiguiente ola.",
+                        step,
+                    ),
                 }
             )
             continue
@@ -733,10 +803,11 @@ def run_explorer(
             messages.append(
                 {
                     "role": "user",
-                    "content": (
+                    "content": follow_up(
                         f"## Resultado cerca\n```\n{result[:4000]}\n```\n"
                         "OBLIGATORIO: siguiente ola = read de uno de READABLE_PATHS "
-                        "(o grep con glob en ese directorio). No inventes paths.\n"
+                        "(o grep con glob en ese directorio). No inventes paths.",
+                        step,
                     ),
                 }
             )
@@ -755,7 +826,10 @@ def run_explorer(
             messages.append(
                 {
                     "role": "user",
-                    "content": f"## Resultado atlas\n```\n{result[:4000]}\n```\n\nSiguiente ola.",
+                    "content": follow_up(
+                        f"## Resultado atlas\n```\n{result[:4000]}\n```\n\nSiguiente ola.",
+                        step,
+                    ),
                 }
             )
             continue
@@ -768,7 +842,12 @@ def run_explorer(
             resolved, err = resolve_read_path(path, root, seen_paths)
             if err:
                 messages.append({"role": "assistant", "content": raw})
-                messages.append({"role": "user", "content": err + "\nSiguiente ola."})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": follow_up(err + "\nSiguiente ola.", step),
+                    }
+                )
                 continue
             greps += 1
             result = tool_inbody(resolved, str(ola.get("pattern") or ""), root)
@@ -777,7 +856,10 @@ def run_explorer(
             messages.append(
                 {
                     "role": "user",
-                    "content": f"## Resultado inbody\n```\n{result[:4000]}\n```\n\nSiguiente ola.",
+                    "content": follow_up(
+                        f"## Resultado inbody\n```\n{result[:4000]}\n```\n\nSiguiente ola.",
+                        step,
+                    ),
                 }
             )
             continue
@@ -796,21 +878,70 @@ def run_explorer(
             for p in sorted(seen_paths)[:8]:
                 if p not in visto:
                     visto.append(p)
+            raw_v = str(ola.get("veredicto") or "parcial").strip().lower()
+            # Map legacy hay/no_hay to factual labels (hijo no vende el claim del usuario).
+            vmap = {
+                "hay": "encontrado",
+                "no_hay": "no_encontrado",
+                "no_concluyente": "parcial",
+                "encontrado": "encontrado",
+                "no_encontrado": "no_encontrado",
+                "parcial": "parcial",
+            }
+            verd = vmap.get(raw_v, "parcial")
+            # falta obligatorio (alias no_visto). Key must be present.
+            if "falta" not in ola and "no_visto" not in ola:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": follow_up(
+                            "cerrar exige campo falta (lista; [] solo si cubriste toda TU consulta). "
+                            'Ejemplo: {"do":"cerrar","veredicto":"parcial","simbolos":[],'
+                            '"evidencia":[],"falta":["…"],"why":"…"}',
+                            step,
+                        ),
+                    }
+                )
+                continue
+            falta = ola.get("falta") if "falta" in ola else ola.get("no_visto")
+            if isinstance(falta, str):
+                falta = [falta] if falta.strip() else []
+            if not isinstance(falta, list):
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": follow_up(
+                            "falta debe ser una lista JSON (puedes usar []). Reemite cerrar.",
+                            step,
+                        ),
+                    }
+                )
+                continue
+            falta = [str(x)[:120] for x in falta if str(x).strip()][:6]
+            # Forma: encontrado con falta no vacía → parcial (el hijo ya señaló hueco).
+            if verd == "encontrado" and falta:
+                verd = "parcial"
             return {
                 "consulta": consulta,
                 "visto": visto[:16],
                 "cerrado": json.dumps(
                     {
-                        "veredicto": ola.get("veredicto") or "no_concluyente",
+                        "veredicto": verd,
                         "simbolos": ola.get("simbolos") or [],
                         "evidencia": ola.get("evidencia") or [],
+                        "falta": falta,
+                        "no_visto": falta,  # alias para notebooks viejos
                         "why": ola.get("why") or "",
                     },
                     ensure_ascii=False,
                 ),
                 "notebook": "\n\n".join(notebook),
                 "why": ola.get("why") or "",
-                "veredicto": ola.get("veredicto") or "no_concluyente",
+                "veredicto": verd,
+                "falta": falta,
+                "no_visto": falta,
             }
         messages.append({"role": "assistant", "content": raw})
         messages.append(

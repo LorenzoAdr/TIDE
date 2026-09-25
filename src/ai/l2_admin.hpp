@@ -13,7 +13,11 @@ namespace tuide {
 
 inline constexpr int kAdminMaxProposes = 12;
 inline constexpr int kAdminMaxSpawns = 8;
+inline constexpr int kAdminMaxExplores = 3;
+inline constexpr int kAdminMaxVerifyPasses = 2;
+inline constexpr int kAdminVerifyMaxSteps = 4;
 inline constexpr int kAdminSummaryChars = 4000;
+inline constexpr int kAdminNotebookSummaryChars = 2000;
 inline constexpr int kAdminClipHeadChars = 1200;
 inline constexpr int kAdminClipTailChars = 1200;
 inline constexpr int kAdminWhyMin = 4;
@@ -25,7 +29,15 @@ inline constexpr int kAdminNotebookFactChars = 240;
 inline constexpr int kAdminUiSelectionChars = 400;
 inline constexpr int kAdminReadMaxChars = 3000;
 
-enum class AdminDo { Invalid, Spawn, Cerrar, AskUser };
+enum class AdminDo {
+  Invalid,
+  Spawn,
+  Cerrar,
+  AskUser,
+  Editar,            // pide pasar a edición → runtime pide confirmación
+  ConfirmarEditar,   // segunda pasada: cubre + falta
+  SeguirExplorando   // tras confirmación: hueco → explore
+};
 
 enum class AdminSpawnTipo {
   Invalid,
@@ -57,6 +69,8 @@ struct AdminOla {
   AdminSpawn spawn;
   std::string why;
   std::string reply;
+  std::string cubre;  // confirmar_editar: qué del pedido cubre el notebook
+  std::string falta;  // confirmar_editar: qué falta (o "nada")
   std::string error;
   std::string raw_json;
 };
@@ -100,9 +114,26 @@ struct AdminState {
   int spawns = 0;
   bool done = false;
   bool clarify = false;
+  bool awaiting_edit_confirm = false;  // tras do=editar
+  bool edit_confirmed = false;         // tras confirmar_editar → spawn edit legal
+  bool verify_reject_pending = false;  // tras verificador refuta/dudoso → piloto decide
+  int verify_passes = 0;               // verificador adversarial (editar/cerrar)
+  std::string last_verify_verdict;     // sostiene|refuta|dudoso
+  std::string last_verify_why;
   std::string reply;
   std::string last_error;
+  std::string edit_cubre;
+  std::string edit_falta;
   std::vector<std::string> legal_hint;
+};
+
+struct AdminVerifyResult {
+  bool ok = false;
+  bool blocks = false;  // refuta|dudoso
+  std::string veredicto;  // sostiene|refuta|dudoso
+  std::string why;
+  std::string report;  // texto para last_error / piloto
+  int steps = 0;
 };
 
 struct AdminJobResult {
@@ -199,6 +230,10 @@ AdminJobResult admin_run_web_search_stub(const std::string& query);
 AdminJobResult admin_run_web_fetch(const std::string& url, const AdminState& st);
 AdminJobResult admin_run_web_fetch_stub(const std::string& url);
 bool admin_url_fetch_allowed(const std::string& url);
+
+// Verificador adversarial (post-explore, pre-aceptar editar/cerrar).
+AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::string& thesis,
+                                   const std::string& workspace_root, const AdminLoopOpts& opts);
 
 bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::string* err);
 

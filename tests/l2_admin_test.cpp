@@ -136,13 +136,6 @@ int main() {
     expect(admin_notebook_markdown(st).find("Evidencias") != std::string::npos, "notebook md");
   }
   {
-    AdminOla ola = admin_parse(
-        R"({"action":"admin_v1","do":"spawn","why":"edit","spawn":{"tipo":"edit","brief":"e","arg":"src/ai/l2_admin.hpp","search":"a","replace":"b"}})");
-    std::string err;
-    expect(admin_legal(st, ola, kAdminMaxProposes, kAdminMaxSpawns, &err),
-           "edit legal with notebook path");
-  }
-  {
     AdminState empty;
     empty.consulta = "x";
     AdminOla ola = admin_parse(
@@ -150,6 +143,33 @@ int main() {
     std::string err;
     expect(!admin_legal(empty, ola, kAdminMaxProposes, kAdminMaxSpawns, &err),
            "edit ilegal sin ancla");
+  }
+  {
+    // edit exige confirmación previa aunque el path esté anclado
+    std::string err;
+    AdminOla raw_edit = admin_parse(
+        R"({"action":"admin_v1","do":"spawn","why":"edit","spawn":{"tipo":"edit","brief":"e","arg":"src/ai/l2_admin.hpp","search":"a","replace":"b"}})");
+    expect(!admin_legal(st, raw_edit, kAdminMaxProposes, kAdminMaxSpawns, &err),
+           "edit ilegal sin confirmar_editar");
+    AdminOla ped = admin_parse(R"({"action":"admin_v1","do":"editar","why":"listo para parche"})");
+    expect(ped.ok && ped.do_kind == AdminDo::Editar, "parse editar");
+    expect(admin_legal(st, ped, kAdminMaxProposes, kAdminMaxSpawns, &err), "editar legal");
+    expect(admin_apply(&st, ped, {}, &err), "apply editar");
+    expect(st.awaiting_edit_confirm, "awaiting after editar");
+    const auto during = admin_legal_dos(st, kAdminMaxProposes, kAdminMaxSpawns);
+    expect(std::find(during.begin(), during.end(), "confirmar_editar") != during.end(),
+           "confirm legal during await");
+    expect(std::find(during.begin(), during.end(), "spawn") == during.end(),
+           "spawn ilegal during await");
+    AdminOla conf = admin_parse(
+        R"({"action":"admin_v1","do":"confirmar_editar","why":"cubre polo A","cubre":"render de diagnósticos en editor","falta":"arco consola→margen"})");
+    expect(conf.ok && conf.do_kind == AdminDo::ConfirmarEditar, "parse confirmar");
+    expect(admin_legal(st, conf, kAdminMaxProposes, kAdminMaxSpawns, &err), "confirmar legal");
+    expect(admin_apply(&st, conf, {}, &err), "apply confirmar");
+    expect(st.edit_confirmed && !st.awaiting_edit_confirm, "edit_confirmed");
+    expect(st.edit_falta.find("arco") != std::string::npos, "falta stored");
+    expect(admin_legal(st, raw_edit, kAdminMaxProposes, kAdminMaxSpawns, &err),
+           "edit legal after confirmar");
   }
   {
     expect(tuide::admin_shell_cmd_allowed("ls -la .tuide"), "allow ls");
