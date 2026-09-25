@@ -32,7 +32,6 @@
 #include "ui/busy_strip.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
-#include "ui/text_input_style.hpp"
 #include "ui/ui_wake.hpp"
 #include "util/include_tree.hpp"
 #include "util/path_normalize.hpp"
@@ -614,9 +613,9 @@ std::vector<std::string> AiController::snapshot_lines() const {
 }
 
 void AiController::append(const std::string& line) {
-  // Multiline payloads (investigate lists, tool dumps) must become separate rows:
-  // the AI console renders each vector entry with ftxui::text() at height 1 (no wrap).
-  constexpr int kAiTranscriptWrapCols = 96;
+  // Multiline payloads (investigate lists, tool dumps) must become separate rows.
+  // El wrap al ancho del panel lo hace render_ai_console (antes: tope fijo 96 cols
+  // que dejaba la mitad del panel vacía y cortaba frases a mitad de palabra).
   std::vector<std::string> parts;
   {
     std::string normalized;
@@ -630,14 +629,7 @@ void AiController::append(const std::string& line) {
     std::istringstream iss(normalized);
     std::string part;
     while (std::getline(iss, part)) {
-      // Soft-wrap long rows so ask_user/cerrar no se vean “cortados” en el panel.
-      if (static_cast<int>(part.size()) > kAiTranscriptWrapCols) {
-        for (const auto& range : soft_wrap_ranges(part, kAiTranscriptWrapCols)) {
-          parts.push_back(part.substr(range.first, range.second - range.first));
-        }
-      } else {
-        parts.push_back(std::move(part));
-      }
+      parts.push_back(std::move(part));
     }
     if (parts.empty()) {
       parts.push_back(std::string{});
@@ -1055,9 +1047,10 @@ void AiController::run_admin_async(const std::string& message) {
         if (message.size() > st.consulta.size() + 8) {
           append("→ Tomo tu mensaje como la consulta principal");
           st.consulta = message;
+          admin_begin_consulta_budgets(&st);
         }
-      } else if (admin_should_keep_session(st, message)) {
-        // Follow-up del mismo tema: conserva notebook + episodios.
+      } else {
+        // Misma ejecución: conserva notebook + episodios. Presupuesto fresco.
         append("→ Sigo el hilo con la evidencia ya reunida");
         st.consulta = message;
         st.done = false;
@@ -1065,20 +1058,7 @@ void AiController::run_admin_async(const std::string& message) {
         st.pending_question.clear();
         st.reply.clear();
         st.last_error.clear();
-        st.proposes = 0;
-        st.spawns = 0;
-        st.verify_passes = 0;
-        st.verify_reject_pending = false;
-        st.awaiting_edit_confirm = false;
-        st.edit_confirmed = false;
-        st.edit_cubre.clear();
-        st.edit_falta.clear();
-      } else {
-        // Tema nuevo: no mezclar con la investigación anterior.
-        append("→ Nueva consulta (dejo la investigación anterior)");
-        (void)admin_clear_session(root, nullptr);
-        st = AdminState{};
-        st.consulta = message;
+        admin_begin_consulta_budgets(&st);
       }
     } else {
       (void)admin_clear_session(root, nullptr);
@@ -1230,30 +1210,9 @@ void AiController::run_admin_async(const std::string& message) {
       }
       return admin_run_shell_safe(s.arg, root);
     };
-    ops.run_read = [this, root](const AdminSpawn& s) {
-      // path:Symbol|path:N|path:N:M → admin (offset); path plano → tool.
-      const auto colon = s.arg.find(':');
-      if (colon != std::string::npos && s.arg.find('/') != std::string::npos) {
-        return admin_run_read_file(s.arg, root);
-      }
-      ensure_tools();
-      if (tools_.has("read_file")) {
-        const AiToolResult tr = tools_.invoke("read_file", s.arg);
-        AdminJobResult r;
-        r.ok = tr.ok;
-        bool trunc = false;
-        int raw = 0;
-        r.log_tail = admin_clip_output(tr.text, &trunc, &raw);
-        r.truncated = trunc;
-        r.raw_bytes = raw;
-        r.paths.push_back(s.arg);
-        r.summary = tr.ok ? ("read " + s.arg) : tr.text;
-        r.facts.push_back("leído:" + s.arg);
-        if (!tr.ok) {
-          r.error = tr.text;
-        }
-        return r;
-      }
+    ops.run_read = [root](const AdminSpawn& s) {
+      // Siempre admin_run_read_file: la tool read_file corta a ~400 líneas y
+      // ocultaba factories/MakeXxx al final de .cpp grandes.
       return admin_run_read_file(s.arg, root);
     };
     ops.run_diagnostics = [this](const AdminSpawn& s) {

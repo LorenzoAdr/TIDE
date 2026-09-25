@@ -13,6 +13,7 @@ namespace fs = std::filesystem;
 using tuide::AdminClarifyTurn;
 using tuide::AdminDo;
 using tuide::AdminEvidenceItem;
+using tuide::AdminJob;
 using tuide::AdminJobResult;
 using tuide::AdminLoopOpts;
 using tuide::AdminOla;
@@ -22,8 +23,11 @@ using tuide::AdminSpawn;
 using tuide::AdminSpawnTipo;
 using tuide::AdminState;
 using tuide::admin_apply;
+using tuide::admin_begin_consulta_budgets;
 using tuide::admin_clip_output;
 using tuide::admin_explore_stub;
+using tuide::admin_explores_used_this_consulta;
+using tuide::admin_run_explore_lite;
 using tuide::admin_legal;
 using tuide::admin_legal_dos;
 using tuide::admin_notebook_append;
@@ -31,8 +35,11 @@ using tuide::admin_notebook_has_path;
 using tuide::admin_notebook_markdown;
 using tuide::admin_parse;
 using tuide::admin_run_read_file;
+using tuide::admin_split_read_args;
 using tuide::admin_run_search_rg;
 using tuide::admin_run_shell_safe;
+using tuide::admin_verify_context_prompt;
+using tuide::admin_verify_readable_paths;
 using tuide::admin_run_web_fetch;
 using tuide::admin_run_web_fetch_stub;
 using tuide::admin_run_web_search;
@@ -47,6 +54,7 @@ using tuide::admin_shell_enrich_result;
 using tuide::admin_shell_stays_in_workspace;
 using tuide::admin_url_fetch_allowed;
 using tuide::admin_user_prompt;
+using tuide::kAdminMaxExplores;
 using tuide::kAdminMaxProposes;
 using tuide::kAdminMaxSpawns;
 using tuide::run_admin_loop;
@@ -144,6 +152,38 @@ int main() {
                ranged.log_tail.find("line_7") != std::string::npos,
            "read :N:M");
     expect(ranged.log_tail.find("line_9") == std::string::npos, "read :N:M clipped");
+    const auto dash = admin_run_read_file("src/b.cpp:10-12", root.string());
+    expect(dash.ok && dash.log_tail.find("line_10") != std::string::npos &&
+               dash.log_tail.find("line_12") != std::string::npos,
+           "read :N-M");
+    expect(dash.log_tail.find("line_14") == std::string::npos, "read :N-M clipped");
+    const auto multi = admin_run_read_file("src/b.cpp:5-7,15-17", root.string());
+    expect(multi.ok && multi.log_tail.find("line_5") != std::string::npos &&
+               multi.log_tail.find("line_15") != std::string::npos &&
+               multi.log_tail.find("line_17") != std::string::npos,
+           "read multi :N-M,a-b");
+    expect(multi.log_tail.find("line_9") == std::string::npos, "read multi skips gap");
+    {
+      std::ofstream mf(root / "src" / "c.cpp");
+      mf << "namespace X {\nstruct Foo {\n  void bar() { int x = 1; }\n};\n}\n";
+    }
+    const auto sym = admin_run_read_file("src/c.cpp:Foo::bar", root.string());
+    expect(sym.ok && sym.log_tail.find("bar") != std::string::npos, "read Class::method");
+    expect(sym.summary.find("Foo::bar") != std::string::npos ||
+               std::find(sym.facts.begin(), sym.facts.end(), "read:symbol=Foo::bar") !=
+                   sym.facts.end(),
+           "read Class::method notes symbol");
+    const auto multi_paths =
+        admin_run_read_file("src/a.cpp,src/b.cpp", root.string());
+    expect(multi_paths.ok && multi_paths.paths.size() >= 2, "read path,path both");
+    expect(multi_paths.log_tail.find("int main") != std::string::npos ||
+               multi_paths.summary.find("read×") != std::string::npos,
+           "read path,path has content");
+    const auto still_ranges = admin_split_read_args("src/b.cpp:5-7,15-17");
+    expect(still_ranges.size() == 1 && still_ranges[0].find("5-7,15-17") != std::string::npos,
+           "split keeps range commas");
+    const auto two = admin_split_read_args("src/a.cpp,src/b.cpp");
+    expect(two.size() == 2, "split two paths");
     const std::string prompt =
         admin_user_prompt(AdminState{}, kAdminMaxProposes, kAdminMaxSpawns, root.string());
     expect(prompt.find("WORKSPACE_ROOT") != std::string::npos, "prompt has workspace root");
@@ -172,6 +212,47 @@ int main() {
       }
       expect(in_src, "search path in src ui");
       expect(!in_tuide, "search excludes .tuide");
+
+      // El explorador a menudo emite "class.*Tab" creyendo que es regex; el
+      // runtime es literal, pero .* se trata como hueco en la misma línea.
+      const auto gap = admin_run_search_rg("class.*Tab", root.string());
+      expect(gap.ok && !gap.paths.empty() && gap.summary.find("(0 hits)") == std::string::npos,
+             "search class.*Tab finds Tab types");
+      bool tabish = false;
+      for (const auto& p : gap.paths) {
+        if (p.find("tab") != std::string::npos || p.find("Tab") != std::string::npos) {
+          tabish = true;
+        }
+      }
+      expect(tabish || gap.log_tail.find("Tab") != std::string::npos, "search .* gap hits Tab");
+      {
+        const std::string miss_a = "ZzNoSuchStem";
+        const std::string miss_b = "QqNoSuchTail";
+        const auto lit_miss = admin_run_search_rg(miss_a + ".*" + miss_b, root.string());
+        expect(lit_miss.ok && lit_miss.paths.empty(), "search .* still requires parts");
+      }
+
+      // Explore lite conservador: varios patterns en una ola + cerrar.
+      AdminScriptedBrain explore_brain({
+          R"({"do":"grep","patterns":["MakeFileTreePanel","FileTreeNode"],"why":"batch"})",
+          R"({"do":"cerrar","veredicto":"encontrado","simbolos":["src/ui/file_tree_panel.cpp:MakeFileTreePanel"],"evidencia":[],"falta":[],"why":"panel localizado"})",
+      });
+      AdminSpawn esp;
+      esp.tipo = AdminSpawnTipo::Explore;
+      esp.brief = "localiza FileTree";
+      AdminLoopOpts eopts;
+      eopts.workspace_root = root.string();
+      const auto er = admin_run_explore_lite(esp, explore_brain, root.string(), eopts);
+      expect(er.ok && er.veredicto == "encontrado", "explore multi-grep cierra encontrado");
+      expect(!er.paths.empty() || !er.simbolos.empty(), "explore deja anclas");
+
+      // Read sin grep previo → no anclado (script: read primero, luego cerrar).
+      AdminScriptedBrain bad_read({
+          R"({"do":"read","paths":["src/ui/file_tree_panel.cpp"],"why":"sin ancla"})",
+          R"({"do":"cerrar","veredicto":"parcial","simbolos":[],"evidencia":[],"falta":["ancla"],"why":"sin read"})",
+      });
+      const auto er2 = admin_run_explore_lite(esp, bad_read, root.string(), eopts);
+      expect(er2.ok, "explore sobrevivió read no anclado");
     }
   }
   {
@@ -255,6 +336,75 @@ int main() {
     expect(!st.notebook.empty() && admin_notebook_has_path(st, "src/ai/l2_admin.hpp"),
            "notebook has path");
     expect(admin_notebook_markdown(st).find("Evidencias") != std::string::npos, "notebook md");
+  }
+  {
+    // Verificador: contexto factual engordado (evidencia + reads), sin tesis del piloto.
+    AdminState vs;
+    vs.consulta = "dónde se crean las pestañas de consola";
+    AdminJob ex;
+    ex.id = 8;
+    ex.tipo = "explore";
+    ex.veredicto = "encontrado";
+    ex.summary =
+        "build_console_panel_view ancla la creación de tabs en console_panel.cpp:3292";
+    ex.simbolos.push_back("build_console_panel_view");
+    ex.evidencia.push_back("src/ui/console_panel.cpp:3292-3293");
+    vs.jobs.push_back(ex);
+    AdminJob rd;
+    rd.id = 9;
+    rd.tipo = "read";
+    rd.veredicto = "parcial";
+    rd.summary = "lectura de rangos en console_panel";
+    rd.evidencia.push_back("src/ui/console_panel.cpp:3280");
+    vs.jobs.push_back(rd);
+    AdminEvidenceItem nb;
+    nb.job_id = 8;
+    nb.tipo = "explore";
+    nb.summary = ex.summary;
+    nb.paths.push_back("src/ui/console_panel.cpp");
+    nb.simbolos.push_back("build_console_panel_view");
+    nb.facts.push_back("hit:build_console_panel_view @ console_panel.cpp:3292");
+    vs.notebook.push_back(nb);
+    const std::string blob = admin_verify_context_prompt(vs);
+    expect(blob.find("job8 (explore)") != std::string::npos, "verify ctx explore job");
+    expect(blob.find("job9 (read)") != std::string::npos, "verify ctx incluye read");
+    expect(blob.find("src/ui/console_panel.cpp:3292-3293") != std::string::npos,
+           "verify ctx evidencia tipada");
+    expect(blob.find("hit:build_console_panel_view") != std::string::npos,
+           "verify ctx hechos notebook");
+    expect(blob.find("build_console_panel_view ancla la creación") != std::string::npos,
+           "verify ctx summary >140");
+    {
+      // Summaries largos no se deben partir a ~400 (bug previo del verificador).
+      AdminState long_st;
+      long_st.consulta = "arco A→B";
+      AdminJob long_job;
+      long_job.id = 1;
+      long_job.tipo = "explore";
+      long_job.veredicto = "encontrado";
+      long_job.summary = std::string(500, 'x') + " FINAL_MARKER_OK";
+      long_st.jobs.push_back(long_job);
+      const std::string long_blob = admin_verify_context_prompt(long_st);
+      expect(long_blob.find("FINAL_MARKER_OK") != std::string::npos,
+             "verify ctx no corta summary a 400");
+    }
+    {
+      AdminState read_st;
+      read_st.consulta = "lee rango";
+      AdminJob rj;
+      rj.id = 2;
+      rj.tipo = "read";
+      rj.veredicto = "parcial";
+      rj.summary = "read console_panel bytes=900";
+      rj.log_tail = "3290| void build_console_panel_view() {\n3291|   tabs.push_back(...);\n";
+      read_st.jobs.push_back(rj);
+      const std::string rb = admin_verify_context_prompt(read_st);
+      expect(rb.find("build_console_panel_view") != std::string::npos,
+             "verify ctx incluye extracto log_tail de read");
+    }
+    const auto vpaths = admin_verify_readable_paths(vs);
+    expect(std::find(vpaths.begin(), vpaths.end(), "src/ui/console_panel.cpp") != vpaths.end(),
+           "verify paths desde evidencia");
   }
   {
     AdminState empty;
@@ -490,15 +640,53 @@ int main() {
 
     AdminState topic = loaded;
     expect(tuide::admin_should_keep_session(topic, "y qué hace con eso del gutter"),
-           "keep: anaphora follow-up");
+           "keep: related follow-up");
     expect(tuide::admin_should_keep_session(topic, "más detalle del gutter izquierdo"),
            "keep: same topic words");
-    expect(!tuide::admin_should_keep_session(
+    expect(tuide::admin_should_keep_session(
                topic, "explícame cómo funciona el embebido de stems y el índice de símbolos"),
-           "drop: new topic");
+           "keep: even if wording differs (no auto-clear mid-run)");
     topic.clarify = true;
     expect(tuide::admin_should_keep_session(topic, "el margen izquierdo del editor"),
            "keep: clarify answer always");
+
+    // Presupuesto de explore fresco en follow-up aunque jobs viejos estén llenos.
+    AdminState capped = loaded;
+    capped.done = false;
+    capped.reply.clear();
+    for (int i = 0; i < kAdminMaxExplores; ++i) {
+      AdminJob j;
+      j.id = i + 1;
+      j.tipo = "explore";
+      j.ok = true;
+      j.summary = "old";
+      capped.jobs.push_back(j);
+    }
+    capped.explore_jobs_baseline = 0;
+    expect(admin_explores_used_this_consulta(capped) >= kAdminMaxExplores, "cap full before");
+    AdminOla explore_ola = admin_parse(
+        R"({"action":"admin_v1","do":"spawn","why":"hace falta otro polo","spawn":{"tipo":"explore","brief":"otro polo concreto a cazar"}})");
+    expect(explore_ola.ok, "explore ola parses");
+    std::string cap_err;
+    expect(!admin_legal(capped, explore_ola, kAdminMaxProposes, kAdminMaxSpawns, &cap_err),
+           "blocked when cap exhausted");
+    admin_begin_consulta_budgets(&capped);
+    expect(admin_explores_used_this_consulta(capped) == 0, "budget reset keeps jobs");
+    expect(capped.jobs.size() == static_cast<std::size_t>(kAdminMaxExplores),
+           "jobs preserved after budget reset");
+    expect(admin_legal(capped, explore_ola, kAdminMaxProposes, kAdminMaxSpawns, &cap_err),
+           "explore legal after begin_consulta_budgets");
+    // Prompt marca explore agotado cuando el cupo de esta consulta está lleno.
+    {
+      AdminState full = capped;
+      // Tras begin_consulta_budgets used=0; forzar baseline 0 → used == nº explores.
+      full.explore_jobs_baseline = 0;
+      const std::string pfull =
+          admin_user_prompt(full, kAdminMaxProposes, kAdminMaxSpawns);
+      expect(pfull.find("Explore agotado") != std::string::npos ||
+                 pfull.find("AGOTADO") != std::string::npos,
+             "prompt marks explore exhausted");
+    }
     fs::remove_all(root, ec);
   }
 

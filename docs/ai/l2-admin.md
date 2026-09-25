@@ -13,12 +13,18 @@ Sustituye el hot path L0→L1→L2 del tab AI. El código legacy permanece compi
 
 - **Sin plan multi-fase.** El “plan” es el **notebook** de sesión: cada spawn aporta paths/facts; el admin reacciona al inbox + notebook + UI.
 - `explore` = hijo **lite grep+read** (`admin_run_explore_lite`): el brain caza con
-  `grep`/`read`/`cerrar` y deja veredicto tipado `encontrado|no_encontrado|parcial`.
-  Hasta `kAdminMaxExplores` (4). Stub solo si no hay brain (tests).
+  `grep`/`read`/`cerrar`. Por ola admite **varios** `patterns[]` (≤3) y **varios**
+  `paths[]` (≤2, solo anclados a hits de grep de ese explore). Totales ≤4 greps / ≤3 reads.
+  Veredicto tipado `encontrado|no_encontrado|parcial`. Hasta `kAdminMaxExplores` (4).
+  Stub solo si no hay brain (tests). `read` acepta `path`, `path:N`, `path:N:M`,
+  `path:N-M`, `path:N-M,a-b` y `path:Class::method`; explore omite re-head del mismo path.
 - `editar` / `cerrar` (con notebook): **verificador adversarial** (N≤4 + contra-pregunta
   si hay miss tipados) y, si aún `sostiene`, un **pase refutador** LLM. Sin reescritura
   heurística de dominio. Tope de pases → `dudoso` (bloquea; no absuelve).
-  Entrada: consulta + anclas + veredictos del notebook, **sin** narrativa del explorador.
+  Entrada: consulta + anclas + veredictos tipados (explore/read/search) + `evidencia`
+  path:línea + hechos del notebook + extractos de `log_tail` en read/search.
+  **Sin** tesis/prosa del piloto ni del explorador. Summaries completos del job
+  (≤`kAdminSummaryChars`); paths legibles también desde evidencia.
 - `editar` no edita: pide el handoff a edición. El runtime exige una **segunda pasada** (`confirmar_editar` con `cubre`/`falta`, o `seguir_explorando` con brief del hueco, o `cerrar`).
 - `edit` (spawn) exige path anclado + `search`/`replace` únicos **y** `edit_confirmed` (tras `confirmar_editar`).
 - `web` = búsqueda en internet (Brave/DDG/stub); distinto de `search` (rg en repo).
@@ -26,9 +32,12 @@ Sustituye el hot path L0→L1→L2 del tab AI. El código legacy permanece compi
   La siguiente línea NL del usuario es la respuesta: se guarda en el diálogo, se reabre el
   lazo con la **consulta original** intacta y el notebook previo.
 - Al **arrancar** la app se limpia `.tuide/ai/l2_admin/` (salvo `ask_user` pendiente),
-  para no arrastrar la investigación de la ejecución anterior. Dentro de la misma
-  ejecución, un mensaje de **tema nuevo** también limpia; un follow-up (“eso”, mismo
-  léxico) conserva notebook + episodios. `/new` limpia todo siempre.
+  para no arrastrar la investigación de la ejecución anterior. Durante la misma
+  ejecución **no** se limpia al cambiar de consulta: notebook + episodios se
+  conservan, pero el **presupuesto** (proposes/spawns/explores/verify) se renueva
+  por consulta. Si el cupo de explore se agota mid-consulta, el runtime degrada
+  nuevos `explore` a `search` y el prompt prohíbe más exploradores. Solo un
+  Reset/borrar del panel AI (o `/new`) limpia a mano.
 - Abrir el panel AI **no** arranca mapa de símbolos ni embeds de stems (eso era L0/L1).
   Con `ai.admin_enabled=false` vuelve el warm legacy.
 

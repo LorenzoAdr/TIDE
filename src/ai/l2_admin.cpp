@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -238,6 +239,9 @@ std::string verdicto_verify_ui(const std::string& v) {
 std::string humanize_admin_reject(const std::string& err) {
   if (err.find("tope de explore") != std::string::npos) {
     return "Ya hay bastantes exploraciones; sigue con buscar/leer o cierra.";
+  }
+  if (err.find("explore agotado: OBLIGATORIO") != std::string::npos) {
+    return "Sin cupo de explorador: cierra o usa buscar/leer con lo ya hallado.";
   }
   if (err.find("do ilegal") != std::string::npos && err.find("spawn") != std::string::npos) {
     return "En este turno no cabe otra investigación (cierra, pregunta o cambia de enfoque).";
@@ -565,111 +569,10 @@ bool admin_is_continuable(const std::string& workspace_root) {
   return st.clarify || !st.done || !st.notebook.empty() || !st.episodes.empty();
 }
 
-namespace {
-
-std::vector<std::string> admin_content_tokens(const std::string& text) {
-  std::vector<std::string> out;
-  std::string cur;
-  auto flush = [&]() {
-    if (cur.size() >= 4) {
-      out.push_back(cur);
-    }
-    cur.clear();
-  };
-  for (unsigned char uc : text) {
-    const char c = static_cast<char>(std::tolower(uc));
-    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-        static_cast<unsigned char>(c) >= 0x80) {
-      cur.push_back(c);
-    } else {
-      flush();
-    }
-  }
-  flush();
-  return out;
-}
-
-bool admin_has_followup_cue(const std::string& low) {
-  // Cues fuertes (pueden aparecer en cualquier sitio).
-  static const char* kStrong[] = {
-      "sobre eso",   "de eso",       "lo mismo",     "lo de",      "el anterior",
-      "la anterior", "como dijiste", "como antes",   "más detalle", "mas detalle",
-      "explica más", "explica mas",
-  };
-  for (const char* cue : kStrong) {
-    if (low.find(cue) != std::string::npos) {
-      return true;
-    }
-  }
-  // Anáforas cortas: solo al inicio del mensaje (si no, "y el" dispara en prosa normal).
-  static const char* kLead[] = {
-      "eso ",    "esa ",    "ese ",   "esos ",  "esas ",  "ahí ",   "ahi ",
-      "aquí ",   "aqui ",   "y qué",  "y que",  "y los ", "y las ", "y el ",
-      "también", "tambien", "además", "ademas", "sigue ", "continúa", "continua ",
-  };
-  for (const char* cue : kLead) {
-    if (low.rfind(cue, 0) == 0) {
-      return true;
-    }
-  }
-  // "eso"/"ahí" como mensaje casi entero.
-  if (low == "eso" || low == "esa" || low == "ese" || low == "ahí" || low == "ahi" ||
-      low == "aquí" || low == "aqui") {
-    return true;
-  }
-  return false;
-}
-
-double admin_token_overlap(const std::vector<std::string>& a,
-                           const std::vector<std::string>& b) {
-  if (a.empty() || b.empty()) {
-    return 0.0;
-  }
-  std::size_t hits = 0;
-  for (const auto& t : a) {
-    if (std::find(b.begin(), b.end(), t) != b.end()) {
-      ++hits;
-    }
-  }
-  const std::size_t denom = std::max(a.size(), b.size());
-  return static_cast<double>(hits) / static_cast<double>(denom);
-}
-
-}  // namespace
-
-bool admin_should_keep_session(const AdminState& st, const std::string& message) {
-  const std::string msg = trim_copy(message);
-  if (msg.empty()) {
-    return true;
-  }
-  // Respuesta a ask_user: siempre mismo hilo.
-  if (st.clarify) {
-    return true;
-  }
-  const std::string low = ascii_lower(msg);
-  if (admin_has_followup_cue(low)) {
-    return true;
-  }
-  // Mensajes muy cortos sin anáfora rara vez son un tema nuevo completo.
-  if (msg.size() < 36) {
-    return true;
-  }
-
-  std::string prior = st.consulta;
-  for (const auto& ep : st.episodes) {
-    if (!ep.consulta.empty()) {
-      prior += ' ';
-      prior += ep.consulta;
-    }
-  }
-  const auto prior_tok = admin_content_tokens(prior);
-  const auto msg_tok = admin_content_tokens(msg);
-  const double overlap = admin_token_overlap(msg_tok, prior_tok);
-  // Misma familia léxica → follow-up; si no, tema nuevo (no mezclar notebooks).
-  if (overlap >= 0.22) {
-    return true;
-  }
-  return false;
+bool admin_should_keep_session(const AdminState& /*st*/, const std::string& /*message*/) {
+  // La sesión mid-run nunca se descarta por heurística de tema: solo limpia el
+  // arranque de la app (AiController::set_deps) o un Reset/borrar explícito.
+  return true;
 }
 
 bool admin_clear_session(const std::string& workspace_root, std::string* err) {
@@ -735,6 +638,7 @@ nlohmann::json admin_state_to_json(const AdminState& st) {
         {"git_branch", st.ui.git_branch}}},
       {"proposes", st.proposes},
       {"spawns", st.spawns},
+      {"explore_jobs_baseline", st.explore_jobs_baseline},
       {"done", st.done},
       {"clarify", st.clarify},
       {"pending_question", st.pending_question},
@@ -762,6 +666,7 @@ bool admin_state_from_json(const nlohmann::json& j, AdminState* st, std::string*
   st->consulta = j.value("consulta", "");
   st->proposes = j.value("proposes", 0);
   st->spawns = j.value("spawns", 0);
+  st->explore_jobs_baseline = j.value("explore_jobs_baseline", 0);
   st->done = j.value("done", false);
   st->clarify = j.value("clarify", false);
   st->pending_question = j.value("pending_question", "");
@@ -1034,6 +939,35 @@ std::vector<std::string> admin_notebook_paths(const AdminState& st) {
   return out;
 }
 
+int admin_count_explore_jobs(const AdminState& st) {
+  int n = 0;
+  for (const auto& j : st.jobs) {
+    if (j.tipo == "explore") {
+      ++n;
+    }
+  }
+  return n;
+}
+
+int admin_explores_used_this_consulta(const AdminState& st) {
+  return std::max(0, admin_count_explore_jobs(st) - st.explore_jobs_baseline);
+}
+
+void admin_begin_consulta_budgets(AdminState* st) {
+  if (st == nullptr) {
+    return;
+  }
+  st->proposes = 0;
+  st->spawns = 0;
+  st->verify_passes = 0;
+  st->verify_reject_pending = false;
+  st->awaiting_edit_confirm = false;
+  st->edit_confirmed = false;
+  st->edit_cubre.clear();
+  st->edit_falta.clear();
+  st->explore_jobs_baseline = admin_count_explore_jobs(*st);
+}
+
 AdminOla admin_parse(const std::string& raw) {
   AdminOla out;
   std::string blob = extract_action_json(raw);
@@ -1232,13 +1166,7 @@ bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, in
     return false;
   }
   if (ola.do_kind == AdminDo::Spawn && ola.spawn.tipo == AdminSpawnTipo::Explore) {
-    int explores = 0;
-    for (const auto& j : st.jobs) {
-      if (j.tipo == "explore") {
-        ++explores;
-      }
-    }
-    if (explores >= kAdminMaxExplores) {
+    if (admin_explores_used_this_consulta(st) >= kAdminMaxExplores) {
       if (err) {
         *err = "tope de explore; cierra, ask_user, o usa search/read/edit";
       }
@@ -1260,13 +1188,7 @@ bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, in
     }
   }
   if (ola.do_kind == AdminDo::SeguirExplorando) {
-    int explores = 0;
-    for (const auto& j : st.jobs) {
-      if (j.tipo == "explore") {
-        ++explores;
-      }
-    }
-    if (explores >= kAdminMaxExplores) {
+    if (admin_explores_used_this_consulta(st) >= kAdminMaxExplores) {
       if (err) {
         *err = "tope de explore; confirma edición, cierra o ask_user";
       }
@@ -1310,29 +1232,208 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
   AdminJobResult r;
   const std::string consulta =
       !spawn.brief.empty() ? spawn.brief : (!spawn.arg.empty() ? spawn.arg : std::string("explore"));
-  const std::string sys =
-      "Eres el EXPLORADOR del WORKSPACE abierto (C++ u otros). Tools: grep|read|cerrar. UN JSON:\n"
-      "{\"do\":\"grep\",\"pattern\":\"…\",\"why\":\"…\"}\n"
-      "{\"do\":\"read\",\"path\":\"src/…\",\"offset\":1,\"why\":\"…\"}\n"
-      "{\"do\":\"cerrar\",\"veredicto\":\"encontrado|no_encontrado|parcial\","
-      "\"simbolos\":[\"path:symbol\"],\"evidencia\":[\"path:línea\"],"
-      "\"falta\":[],\"why\":\"…\"}\n"
-      "Solo paths bajo WORKSPACE_ROOT. Caza identificadores reales (FileTree, file_tree_panel, "
-      "MakeFileTreePanel, workspace_indexer, …). Ignora .tuide/ y build/. "
-      "Responde SOLO a TU consulta (brief). why = hechos; falta obligatorio al cerrar.";
+  std::ostringstream sys_oss;
+  sys_oss
+      << "Eres el EXPLORADOR del WORKSPACE abierto (C++ u otros). Tools: grep|read|cerrar.\n"
+      << "UN JSON por ola (puedes pedir VARIOS greps o VARIOS reads en la misma ola):\n"
+      << "{\"do\":\"grep\",\"patterns\":[\"A\",\"B\"],\"why\":\"…\"}\n"
+      << "{\"do\":\"grep\",\"pattern\":\"A\",\"why\":\"…\"}\n"
+      << "{\"do\":\"read\",\"paths\":[\"src/a.cpp\",\"src/b.hpp:200-350\"],\"why\":\"…\"}\n"
+      << "{\"do\":\"read\",\"path\":\"src/…:Class::method\",\"why\":\"…\"}\n"
+      << "{\"do\":\"cerrar\",\"veredicto\":\"encontrado|no_encontrado|parcial\","
+      << "\"simbolos\":[\"path:symbol\"],\"evidencia\":[\"path:línea\"],"
+      << "\"falta\":[],\"why\":\"…\"}\n"
+      << "Límites por ola: ≤" << kAdminExploreMaxGrepPerWave << " greps, ≤"
+      << kAdminExploreMaxReadPerWave
+      << " reads. Reads SOLO de paths ya vistos en greps de ESTE explore "
+      << "(no inventes paths). Preferí path:N-M / path:N-M,a-b / path:Class::method "
+      << "tras el head; no re-leas el mismo path sin selector. Totales: ≤"
+      << kAdminExploreMaxGrep << " greps / ≤" << kAdminExploreMaxRead << " reads.\n"
+      << "Solo paths bajo WORKSPACE_ROOT. Caza identificadores reales (FileTree, "
+      << "file_tree_panel, MakeFileTreePanel, workspace_indexer, …). Ignora .tuide/ y build/.\n"
+      << "pattern: literal (≤80 chars) o trozos unidos con .* (hueco en la misma línea); "
+      << "alternativas con | . PROHIBIDO regex real, \\\\n repetidos ni multilínea.\n"
+      << "Responde SOLO a TU consulta (brief). why = hechos; falta obligatorio al cerrar.";
+  const std::string sys = sys_oss.str();
 
   std::string conversation =
       "## Consulta (brief del piloto)\n" + consulta +
       "\n\nWORKSPACE_ROOT=`" + workspace_root +
-      "` — solo paths bajo este root (src/ preferido). "
-      "Empieza por grep de símbolos (FileTree|file_tree|indexer) en src/.\n"
-      "Elige UNA acción JSON.\n";
+      "` — solo paths bajo este root (src/ preferido).\n";
+  // Si el piloto pasó paths en arg, priorízalos (antes se ignoraban).
+  {
+    std::vector<std::string> hint_paths;
+    auto push_hint = [&](std::string p) {
+      p = trim_copy(std::move(p));
+      if (p.empty()) {
+        return;
+      }
+      if (p.find('/') == std::string::npos && p.find('.') == std::string::npos) {
+        return;
+      }
+      if (std::find(hint_paths.begin(), hint_paths.end(), p) != hint_paths.end()) {
+        return;
+      }
+      hint_paths.push_back(std::move(p));
+    };
+    std::string cur;
+    for (char ch : spawn.arg) {
+      if (ch == ',' || ch == ' ' || ch == '|' || ch == ';') {
+        push_hint(std::move(cur));
+        cur.clear();
+      } else {
+        cur.push_back(ch);
+      }
+    }
+    push_hint(std::move(cur));
+    if (!hint_paths.empty()) {
+      conversation += "Paths sugeridos por el piloto (prioridad al grep/read):";
+      const int n = std::min(6, static_cast<int>(hint_paths.size()));
+      for (int i = 0; i < n; ++i) {
+        conversation += " `" + hint_paths[static_cast<std::size_t>(i)] + "`";
+      }
+      conversation += "\n";
+    }
+  }
+  conversation +=
+      "Empieza por grep (puedes mandar varios patterns a la vez, p.ej. "
+      "FileTree|file_tree y indexer).\n"
+      "Stack tipico: C++/FTXUI (no busques Qt/QWidget/libvte salvo evidencia).\n"
+      "Elige UNA acción JSON (grep|read|cerrar).\n";
   int greps = 0;
   int reads = 0;
   std::vector<std::string> seen_paths;
   std::vector<std::string> read_paths;
 
-  ui_note(opts, "→ Explorador: " + ui_clip(consulta, 160));
+  auto pattern_pathological = [](const std::string& p) {
+    if (p.empty() || p.size() > 120) {
+      return true;
+    }
+    int nl_esc = 0;
+    for (std::size_t i = 0; i + 1 < p.size(); ++i) {
+      if (p[i] == '\\' && (p[i + 1] == 'n' || p[i + 1] == 'N')) {
+        ++nl_esc;
+      }
+    }
+    if (nl_esc > 2) {
+      return true;
+    }
+    if (p.find('\n') != std::string::npos || p.find('\r') != std::string::npos) {
+      return true;
+    }
+    int dots = 0;
+    for (std::size_t i = 0; i + 1 < p.size(); ++i) {
+      if (p[i] == '.' && p[i + 1] == '*') {
+        ++dots;
+      }
+    }
+    return dots > 4;
+  };
+
+  auto collect_patterns = [&](const nlohmann::json& jobj) {
+    std::vector<std::string> out;
+    auto push = [&](std::string s) {
+      s = trim_copy(std::move(s));
+      if (s.empty()) {
+        return;
+      }
+      if (std::find(out.begin(), out.end(), s) != out.end()) {
+        return;
+      }
+      out.push_back(std::move(s));
+    };
+    if (jobj.contains("patterns") && jobj["patterns"].is_array()) {
+      for (const auto& item : jobj["patterns"]) {
+        if (item.is_string()) {
+          push(item.get<std::string>());
+        }
+      }
+    }
+    if (out.empty()) {
+      push(json_str(jobj, "pattern"));
+    }
+    if (static_cast<int>(out.size()) > kAdminExploreMaxGrepPerWave) {
+      out.resize(static_cast<std::size_t>(kAdminExploreMaxGrepPerWave));
+    }
+    return out;
+  };
+
+  auto collect_read_targets = [&](const nlohmann::json& jobj) {
+    std::vector<std::string> out;
+    auto push = [&](std::string s) {
+      s = trim_copy(std::move(s));
+      if (s.empty()) {
+        return;
+      }
+      // Conservar path:Symbol / path:N para el read; ancla = path sin sufijo.
+      if (std::find(out.begin(), out.end(), s) != out.end()) {
+        return;
+      }
+      out.push_back(std::move(s));
+    };
+    if (jobj.contains("paths") && jobj["paths"].is_array()) {
+      for (const auto& item : jobj["paths"]) {
+        if (item.is_string()) {
+          push(item.get<std::string>());
+        }
+      }
+    }
+    if (out.empty()) {
+      push(json_str(jobj, "path"));
+    }
+    if (static_cast<int>(out.size()) > kAdminExploreMaxReadPerWave) {
+      out.resize(static_cast<std::size_t>(kAdminExploreMaxReadPerWave));
+    }
+    return out;
+  };
+
+  auto path_stem = [](std::string path) {
+    path = trim_copy(path);
+    static const char* kExts[] = {".cpp", ".hpp", ".hh", ".h", ".cc", ".c",
+                                  ".md",  ".cmake", ".txt", ".json"};
+    std::size_t cut = std::string::npos;
+    for (const char* ext : kExts) {
+      const std::size_t el = std::strlen(ext);
+      std::size_t pos = 0;
+      while ((pos = path.find(ext, pos)) != std::string::npos) {
+        const std::size_t end = pos + el;
+        if (end == path.size() || path[end] == ':') {
+          if (cut == std::string::npos || end > cut) {
+            cut = end;
+          }
+        }
+        pos = end;
+      }
+    }
+    if (cut != std::string::npos) {
+      return path.substr(0, cut);
+    }
+    const auto colon = path.find(':');
+    if (colon != std::string::npos && path.find('/') != std::string::npos) {
+      return path.substr(0, colon);
+    }
+    return path;
+  };
+
+  auto path_has_selector = [&](const std::string& target) {
+    const std::string stem = path_stem(target);
+    return !stem.empty() && stem.size() < target.size() && target[stem.size()] == ':';
+  };
+
+  auto path_is_anchored = [&](const std::string& target) {
+    const std::string stem = path_stem(target);
+    if (stem.empty()) {
+      return false;
+    }
+    for (const auto& p : seen_paths) {
+      if (p == stem || p.rfind(stem, 0) == 0 || stem.rfind(p, 0) == 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  ui_note(opts, "→ Explorador: " + consulta);
 
   for (int step = 0; step < kAdminExploreMaxSteps; ++step) {
     if (opts.cancel != nullptr && opts.cancel->load()) {
@@ -1374,8 +1475,8 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     try {
       j = nlohmann::json::parse(blob);
     } catch (...) {
-      conversation += "\n\n## Asistente\n" + raw.substr(0, 600) +
-                      "\n\n## Usuario\nJSON inválido. grep|read|cerrar.\n";
+      conversation += "\n\n## Usuario\nJSON inválido. grep|read|cerrar "
+                      "(patterns[]/paths[] permitidos).\n";
       continue;
     }
     const std::string do_kind = ascii_lower(trim_copy(json_str(j, "do")));
@@ -1412,7 +1513,6 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
           }
         }
       }
-      // Solo paths leídos (no todos los hits de grep: envenenan el notebook con .tuide/).
       for (const auto& p : read_paths) {
         if (!admin_path_is_noise(p) &&
             std::find(r.paths.begin(), r.paths.end(), p) == r.paths.end()) {
@@ -1420,7 +1520,6 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
         }
       }
       if (verd == "no_encontrado") {
-        // No adjuntar rastros de grep fallido.
         r.paths.clear();
       }
       r.facts.push_back("explore:veredicto=" + verd);
@@ -1456,55 +1555,91 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
         conversation += "\n\n## Usuario\nTope grep. Cierra o read.\n";
         continue;
       }
-      ++greps;
-      const std::string pattern = trim_copy(json_str(j, "pattern"));
-      AdminJobResult hit =
-          grep_fn ? grep_fn(pattern) : admin_run_search_rg(pattern, workspace_root);
-      {
-        std::ostringstream line;
-        line << "  · buscar «" << ui_clip(pattern, 80) << "»";
-        if (!hit.paths.empty()) {
-          line << " → " << hit.paths.size() << " archivo"
-               << (hit.paths.size() == 1 ? "" : "s");
-          line << " (p.ej. `" << hit.paths.front() << "`)";
-        } else if (hit.summary.find("(0 hits)") != std::string::npos) {
-          line << " → sin coincidencias";
-        }
-        ui_note(opts, line.str());
+      auto patterns = collect_patterns(j);
+      if (patterns.empty()) {
+        conversation += "\n\n## Usuario\ngrep exige pattern o patterns[]. Reemite.\n";
+        continue;
       }
-      for (const auto& p : hit.paths) {
-        if (admin_path_is_noise(p)) {
+      const int room = kAdminExploreMaxGrep - greps;
+      if (static_cast<int>(patterns.size()) > room) {
+        patterns.resize(static_cast<std::size_t>(room));
+      }
+      std::ostringstream wave_body;
+      int ran = 0;
+      int rejected = 0;
+      for (const auto& pattern : patterns) {
+        if (pattern_pathological(pattern)) {
+          ++rejected;
+          ui_note(opts, "  · buscar rechazado (pattern inválido/demasiado largo)");
+          wave_body << "## grep rechazado `" << ui_clip(pattern, 40)
+                    << "` — usa ≤80 chars, sin \\\\n/`.*` encadenados\n";
           continue;
         }
-        if (std::find(seen_paths.begin(), seen_paths.end(), p) == seen_paths.end()) {
-          seen_paths.push_back(p);
+        ++greps;
+        ++ran;
+        AdminJobResult hit =
+            grep_fn ? grep_fn(pattern) : admin_run_search_rg(pattern, workspace_root);
+        {
+          std::ostringstream line;
+          line << "  · buscar «" << ui_clip(pattern, 80) << "»";
+          if (!hit.paths.empty()) {
+            line << " → " << hit.paths.size() << " archivo"
+                 << (hit.paths.size() == 1 ? "" : "s");
+            line << " (p.ej. `" << hit.paths.front() << "`)";
+          } else if (hit.summary.find("(0 hits)") != std::string::npos) {
+            line << " → sin coincidencias";
+          }
+          ui_note(opts, line.str());
         }
-      }
-      // Resume al hijo: solo paths útiles (src/), no basura .tuide.
-      std::string grep_body = hit.summary.substr(0, 2500);
-      if (!hit.facts.empty()) {
-        std::ostringstream useful;
-        int n = 0;
-        for (const auto& f : hit.facts) {
-          if (admin_path_is_noise(f)) {
+        for (const auto& p : hit.paths) {
+          if (admin_path_is_noise(p)) {
             continue;
           }
-          useful << f << "\n";
-          if (++n >= 12) {
-            break;
+          if (std::find(seen_paths.begin(), seen_paths.end(), p) == seen_paths.end()) {
+            seen_paths.push_back(p);
           }
         }
-        if (n > 0) {
-          grep_body = useful.str();
-        } else if (hit.facts.empty() && hit.summary.find("(0 hits)") != std::string::npos) {
-          grep_body = hit.summary;
-        } else {
-          grep_body = hit.summary + "\n(sin hits fuera de .tuide/build — prueba otro pattern en src/)\n";
+        std::string grep_body = hit.summary.substr(0, 1200);
+        if (!hit.facts.empty()) {
+          std::ostringstream useful;
+          int n = 0;
+          for (const auto& f : hit.facts) {
+            if (admin_path_is_noise(f)) {
+              continue;
+            }
+            useful << f << "\n";
+            if (++n >= 8) {
+              break;
+            }
+          }
+          if (n > 0) {
+            grep_body = useful.str();
+          } else if (hit.summary.find("(0 hits)") != std::string::npos) {
+            grep_body = hit.summary;
+          }
         }
+        wave_body << "## grep `" << ui_clip(pattern, 80) << "`\n" << grep_body << "\n";
       }
-      conversation += "\n\n## Asistente\n" + raw.substr(0, 400) + "\n\n## Usuario\n## grep `" +
-                      pattern + "`\n" + grep_body +
-                      "\n\nSiguiente (grep|read|cerrar).\n";
+      if (ran == 0) {
+        conversation +=
+            "\n\n## Usuario\nNingún pattern válido en esta ola. "
+            "Ej: {\"do\":\"grep\",\"patterns\":[\"FileTree\",\"OnClick\"]}.\n" +
+            wave_body.str();
+        continue;
+      }
+      conversation += "\n\n## Usuario\n" + wave_body.str();
+      if (!seen_paths.empty()) {
+        conversation += "Paths vistos (para read): ";
+        for (std::size_t i = 0; i < seen_paths.size() && i < 10; ++i) {
+          if (i) {
+            conversation += ", ";
+          }
+          conversation += "`" + seen_paths[i] + "`";
+        }
+        conversation += "\n";
+      }
+      conversation += "Siguiente (grep|read|cerrar).\n";
+      (void)rejected;
       continue;
     }
     if (do_kind == "read") {
@@ -1512,35 +1647,73 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
         conversation += "\n\n## Usuario\nTope read. Cierra.\n";
         continue;
       }
-      ++reads;
-      std::string path = trim_copy(json_str(j, "path"));
-      const auto colon = path.find(':');
-      if (colon != std::string::npos) {
-        path = path.substr(0, colon);
-      }
-      if (admin_path_is_noise(path)) {
-        conversation += "\n\n## Asistente\n" + raw.substr(0, 400) +
-                        "\n\n## Usuario\npath bajo .tuide/build ignorado. Lee src/…\n";
+      if (seen_paths.empty()) {
+        conversation +=
+            "\n\n## Usuario\nread solo tras grep: aún no hay paths anclados. "
+            "Haz grep primero.\n";
         continue;
       }
-      AdminJobResult hit = admin_run_read_file(path, workspace_root);
-      ui_note(opts, "  · leer `" + path + "`" +
-                        (hit.ok ? (hit.truncated ? " (recorte)" : "") : " — falló"));
-      if (!path.empty() &&
-          std::find(seen_paths.begin(), seen_paths.end(), path) == seen_paths.end()) {
-        seen_paths.push_back(path);
+      auto targets = collect_read_targets(j);
+      if (targets.empty()) {
+        conversation += "\n\n## Usuario\nread exige path o paths[]. Reemite.\n";
+        continue;
       }
-      if (!path.empty() &&
-          std::find(read_paths.begin(), read_paths.end(), path) == read_paths.end()) {
-        read_paths.push_back(path);
+      const int room = kAdminExploreMaxRead - reads;
+      if (static_cast<int>(targets.size()) > room) {
+        targets.resize(static_cast<std::size_t>(room));
       }
-      conversation += "\n\n## Asistente\n" + raw.substr(0, 400) + "\n\n## Usuario\n## read `" +
-                      path + "`\n" + hit.summary.substr(0, 3000) +
-                      "\n\nSiguiente (grep|read|cerrar).\n";
+      std::ostringstream wave_body;
+      int ran = 0;
+      for (const auto& target : targets) {
+        const std::string stem = path_stem(target);
+        if (admin_path_is_noise(stem)) {
+          wave_body << "## read ignorado `" << stem << "` (.tuide/build)\n";
+          continue;
+        }
+        if (!path_is_anchored(target)) {
+          ui_note(opts, "  · leer rechazado `" + stem + "` (no anclado a grep)");
+          wave_body << "## read rechazado `" << stem
+                    << "` — solo paths vistos en grep de este explore\n";
+          continue;
+        }
+        const bool already =
+            !stem.empty() &&
+            std::find(read_paths.begin(), read_paths.end(), stem) != read_paths.end();
+        if (already && !path_has_selector(target)) {
+          ui_note(opts, "  · leer omitido `" + stem + "` (ya leído; usa :N-M o :Symbol)");
+          wave_body << "## read omitido `" << stem
+                    << "` — head ya leído; pide path:N-M, path:N-M,a-b o path:Class::method\n";
+          continue;
+        }
+        ++reads;
+        ++ran;
+        AdminJobResult hit = admin_run_read_file(target, workspace_root);
+        // Clip más agresivo en batch para no hinchar el prompt.
+        const std::size_t clip =
+            targets.size() > 1 ? static_cast<std::size_t>(1800) : static_cast<std::size_t>(3000);
+        std::string body = hit.log_tail.empty() ? hit.summary : hit.log_tail;
+        utf8_resize(&body, clip);
+        const std::string shown =
+            path_has_selector(target) ? (stem + target.substr(stem.size())) : stem;
+        ui_note(opts, "  · leer `" + shown + "`" +
+                          (hit.ok ? (hit.truncated ? " (recorte)" : "") : " — falló"));
+        if (!stem.empty() &&
+            std::find(read_paths.begin(), read_paths.end(), stem) == read_paths.end()) {
+          read_paths.push_back(stem);
+        }
+        wave_body << "## read `" << shown << "`\n" << body << "\n";
+      }
+      if (ran == 0) {
+        conversation +=
+            "\n\n## Usuario\nNingún read anclado. Elige paths de la lista vista tras grep.\n" +
+            wave_body.str() + "Siguiente (grep|read|cerrar).\n";
+        continue;
+      }
+      conversation += "\n\n## Usuario\n" + wave_body.str() + "Siguiente (grep|read|cerrar).\n";
       continue;
     }
-    conversation += "\n\n## Asistente\n" + raw.substr(0, 400) +
-                    "\n\n## Usuario\ndo inválido. grep|read|cerrar.\n";
+    conversation += "\n\n## Usuario\ndo inválido. grep|read|cerrar "
+                    "(patterns[] / paths[] OK).\n";
   }
   r.ok = true;
   r.veredicto = "no_concluyente";
@@ -1652,11 +1825,18 @@ bool admin_shell_cmd_allowed(const std::string& cmd) {
 }
 
 std::string admin_clip_output(const std::string& text, bool* truncated, int* raw_bytes) {
+  return admin_clip_output(text, kAdminClipHeadChars, kAdminClipTailChars, truncated, raw_bytes);
+}
+
+std::string admin_clip_output(const std::string& text, int head_chars, int tail_chars,
+                              bool* truncated, int* raw_bytes) {
   const int raw = static_cast<int>(text.size());
   if (raw_bytes) {
     *raw_bytes = raw;
   }
-  const int budget = kAdminClipHeadChars + kAdminClipTailChars + 80;
+  head_chars = std::max(200, head_chars);
+  tail_chars = std::max(200, tail_chars);
+  const int budget = head_chars + tail_chars + 80;
   if (raw <= budget) {
     if (truncated) {
       *truncated = false;
@@ -1666,12 +1846,11 @@ std::string admin_clip_output(const std::string& text, bool* truncated, int* raw
   if (truncated) {
     *truncated = true;
   }
-  std::string head = text.substr(0, static_cast<std::size_t>(kAdminClipHeadChars));
-  std::string tail =
-      text.substr(text.size() - static_cast<std::size_t>(kAdminClipTailChars));
+  std::string head = text.substr(0, static_cast<std::size_t>(head_chars));
+  std::string tail = text.substr(text.size() - static_cast<std::size_t>(tail_chars));
   std::ostringstream out;
-  out << "[truncated raw_bytes=" << raw << " head=" << kAdminClipHeadChars
-      << " tail=" << kAdminClipTailChars << "]\n--- head ---\n"
+  out << "[truncated raw_bytes=" << raw << " head=" << head_chars << " tail=" << tail_chars
+      << "]\n--- head ---\n"
       << head << "\n--- tail ---\n"
       << tail << "\n";
   return out.str();
@@ -2048,7 +2227,43 @@ AdminJobResult admin_run_search_rg(const std::string& query, const std::string& 
   };
   auto line_hits = [&](const std::string& line) -> bool {
     for (const auto& n : needles) {
-      if (line.find(n) != std::string::npos) {
+      // Literal por defecto. Si el patrón trae ".*" / ".+" (el LLM a menudo
+      // cree que es regex), exige los trozos en orden en la misma línea.
+      if (n.find(".*") == std::string::npos && n.find(".+") == std::string::npos) {
+        if (line.find(n) != std::string::npos) {
+          return true;
+        }
+        continue;
+      }
+      std::vector<std::string> parts;
+      std::string cur;
+      for (std::size_t i = 0; i < n.size();) {
+        if (i + 1 < n.size() && n[i] == '.' && (n[i + 1] == '*' || n[i + 1] == '+')) {
+          parts.push_back(std::move(cur));
+          cur.clear();
+          i += 2;
+          continue;
+        }
+        cur.push_back(n[i]);
+        ++i;
+      }
+      parts.push_back(std::move(cur));
+      std::size_t pos = 0;
+      bool ok = true;
+      bool any = false;
+      for (const auto& part : parts) {
+        if (part.empty()) {
+          continue;
+        }
+        any = true;
+        const auto f = line.find(part, pos);
+        if (f == std::string::npos) {
+          ok = false;
+          break;
+        }
+        pos = f + part.size();
+      }
+      if (ok && any) {
         return true;
       }
     }
@@ -2236,53 +2451,244 @@ void admin_collect_search_hits(const std::string& text, AdminJobResult* r) {
   }
 }
 
-AdminJobResult admin_run_read_file(const std::string& target, const std::string& cwd) {
-  AdminJobResult r;
-  std::string path = trim_copy(target);
-  std::string symbol;
-  int line_start = 0;
-  int line_end = 0;
-  // Soporta path:Symbol | path:N | path:N:M (pelar sufijos de derecha a izquierda).
-  while (path.find('/') != std::string::npos) {
-    const auto col = path.rfind(':');
-    if (col == std::string::npos || col == 0) {
+std::vector<std::string> admin_split_read_args(const std::string& raw) {
+  const std::string t = trim_copy(raw);
+  if (t.empty()) {
+    return {};
+  }
+  if (t.find(',') == std::string::npos) {
+    return {t};
+  }
+  std::vector<std::string> tokens;
+  std::size_t i = 0;
+  while (i < t.size()) {
+    const std::size_t comma = t.find(',', i);
+    const std::string tok =
+        trim_copy(comma == std::string::npos ? t.substr(i) : t.substr(i, comma - i));
+    if (!tok.empty()) {
+      tokens.push_back(tok);
+    }
+    if (comma == std::string::npos) {
       break;
     }
-    const std::string maybe = path.substr(0, col);
-    const std::string suf = path.substr(col + 1);
-    if (maybe.find('.') == std::string::npos) {
-      break;
+    i = comma + 1;
+  }
+  auto range_only = [](const std::string& s) {
+    if (s.empty() || !std::isdigit(static_cast<unsigned char>(s.front()))) {
+      return false;
     }
-    bool all_digit = !suf.empty();
-    for (char ch : suf) {
-      if (!std::isdigit(static_cast<unsigned char>(ch))) {
-        all_digit = false;
-        break;
+    for (char ch : s) {
+      if (!(std::isdigit(static_cast<unsigned char>(ch)) || ch == '-' || ch == ':')) {
+        return false;
       }
     }
-    if (all_digit) {
-      const int n = std::atoi(suf.c_str());
-      if (line_end == 0) {
-        line_end = n;
-      } else {
-        line_start = n;
-      }
-      path = maybe;
+    return true;
+  };
+  std::vector<std::string> out;
+  for (const auto& tok : tokens) {
+    if (range_only(tok) && !out.empty()) {
+      // path:N-M,a-b → un solo target
+      out.back().push_back(',');
+      out.back() += tok;
       continue;
     }
-    if (line_start == 0 && line_end == 0 && symbol.empty() && !suf.empty()) {
-      symbol = suf;
-      path = maybe;
+    out.push_back(tok);
+  }
+  return out.empty() ? std::vector<std::string>{t} : out;
+}
+
+AdminJobResult admin_run_read_file(const std::string& target, const std::string& cwd) {
+  const auto parts = admin_split_read_args(target);
+  if (parts.empty()) {
+    AdminJobResult r;
+    r.error = "read sin path";
+    r.summary = r.error;
+    return r;
+  }
+  if (parts.size() > 1) {
+    // El piloto a veces manda "a.hpp,b.cpp"; leer cada uno (tope 3).
+    constexpr int kMax = 3;
+    AdminJobResult merged;
+    merged.ok = false;
+    std::ostringstream body;
+    int ok_n = 0;
+    const int n = std::min(static_cast<int>(parts.size()), kMax);
+    for (int i = 0; i < n; ++i) {
+      AdminJobResult hit = admin_run_read_file(parts[static_cast<std::size_t>(i)], cwd);
+      if (i) {
+        body << "---\n";
+      }
+      if (hit.ok) {
+        ++ok_n;
+        merged.ok = true;
+        body << hit.log_tail;
+        for (const auto& p : hit.paths) {
+          if (std::find(merged.paths.begin(), merged.paths.end(), p) == merged.paths.end()) {
+            merged.paths.push_back(p);
+          }
+        }
+        for (const auto& f : hit.facts) {
+          merged.facts.push_back(f);
+        }
+        for (const auto& s : hit.simbolos) {
+          merged.simbolos.push_back(s);
+        }
+        merged.raw_bytes += hit.raw_bytes;
+        if (hit.truncated) {
+          merged.truncated = true;
+        }
+      } else {
+        body << "## read falló `" << parts[static_cast<std::size_t>(i)] << "`\n"
+             << (hit.error.empty() ? hit.summary : hit.error) << "\n";
+        if (!hit.error.empty()) {
+          merged.error += (merged.error.empty() ? "" : "; ") + hit.error;
+        }
+      }
     }
-    break;
+    if (static_cast<int>(parts.size()) > kMax) {
+      body << "---\n(omitidos " << (static_cast<int>(parts.size()) - kMax)
+           << " paths; máx " << kMax << " por read)\n";
+    }
+    // No re-clipar con el presupuesto chico: cada hit ya viene head+tail/rango.
+    merged.log_tail = body.str();
+    merged.raw_bytes = static_cast<int>(merged.log_tail.size());
+    if (merged.log_tail.size() > 16000) {
+      bool trunc = false;
+      int raw = 0;
+      merged.log_tail = admin_clip_output(merged.log_tail, 5000, 5000, &trunc, &raw);
+      merged.truncated = true;
+      merged.raw_bytes = raw;
+    }
+    merged.summary = "read×" + std::to_string(ok_n) + "/" + std::to_string(n) +
+                     " bytes=" + std::to_string(merged.raw_bytes);
+    if (merged.truncated) {
+      merged.summary += " truncated=1";
+    }
+    if (!merged.ok && merged.error.empty()) {
+      merged.error = merged.summary;
+    }
+    return merged;
   }
-  if (line_start == 0 && line_end > 0) {
-    line_start = line_end;
-    line_end = line_start + 80;
+
+  AdminJobResult r;
+  struct ReadSel {
+    std::string path;
+    std::string symbol;
+    std::vector<std::pair<int, int>> ranges;  // 1-based inclusive
+  };
+  auto parse_target = [](const std::string& raw) -> ReadSel {
+    ReadSel sel;
+    const std::string t = trim_copy(raw);
+    if (t.empty()) {
+      return sel;
+    }
+    static const char* kExts[] = {".cpp", ".hpp", ".hh", ".h", ".cc", ".c",
+                                  ".md",  ".cmake", ".txt", ".json"};
+    std::size_t cut = std::string::npos;
+    for (const char* ext : kExts) {
+      const std::size_t el = std::strlen(ext);
+      std::size_t pos = 0;
+      while ((pos = t.find(ext, pos)) != std::string::npos) {
+        const std::size_t end = pos + el;
+        if (end == t.size() || t[end] == ':') {
+          if (cut == std::string::npos || end > cut) {
+            cut = end;
+          }
+        }
+        pos = end;
+      }
+    }
+    if (cut == std::string::npos) {
+      // Fallback: path sin extensión reconocida.
+      const auto col = t.find(':');
+      if (col != std::string::npos && t.find('/') != std::string::npos) {
+        sel.path = t.substr(0, col);
+        sel.symbol = t.substr(col + 1);
+      } else {
+        sel.path = t;
+      }
+      return sel;
+    }
+    sel.path = t.substr(0, cut);
+    if (cut >= t.size() || t[cut] != ':') {
+      return sel;
+    }
+    const std::string spec = t.substr(cut + 1);
+    if (spec.empty()) {
+      return sel;
+    }
+    auto is_rangeish = [](const std::string& s) {
+      if (s.empty()) {
+        return false;
+      }
+      for (char ch : s) {
+        if (!(std::isdigit(static_cast<unsigned char>(ch)) || ch == '-' || ch == ':' ||
+              ch == ',')) {
+          return false;
+        }
+      }
+      return static_cast<bool>(std::isdigit(static_cast<unsigned char>(s.front())));
+    };
+    if (!is_rangeish(spec)) {
+      sel.symbol = spec;  // Incluye Class::method
+      return sel;
+    }
+    auto push_range = [&](int a, int b) {
+      if (a <= 0) {
+        return;
+      }
+      if (b <= 0) {
+        b = a + 80;
+      }
+      if (b < a) {
+        std::swap(a, b);
+      }
+      if (b - a > 200) {
+        b = a + 200;
+      }
+      sel.ranges.push_back({a, b});
+    };
+    std::size_t i = 0;
+    while (i < spec.size() && sel.ranges.size() < 4) {
+      while (i < spec.size() && (spec[i] == ',' || spec[i] == ' ')) {
+        ++i;
+      }
+      if (i >= spec.size()) {
+        break;
+      }
+      std::size_t j = i;
+      while (j < spec.size() && spec[j] != ',') {
+        ++j;
+      }
+      const std::string tok = trim_copy(spec.substr(i, j - i));
+      i = j;
+      if (tok.empty()) {
+        continue;
+      }
+      const auto dash = tok.find('-');
+      const auto colon = tok.find(':');
+      if (dash != std::string::npos && (colon == std::string::npos || dash < colon)) {
+        push_range(std::atoi(tok.substr(0, dash).c_str()),
+                   std::atoi(tok.substr(dash + 1).c_str()));
+      } else if (colon != std::string::npos) {
+        push_range(std::atoi(tok.substr(0, colon).c_str()),
+                   std::atoi(tok.substr(colon + 1).c_str()));
+      } else {
+        const int n = std::atoi(tok.c_str());
+        push_range(n, n + 80);
+      }
+    }
+    return sel;
+  };
+
+  const ReadSel sel = parse_target(parts.front());
+  std::string path = sel.path;
+  if (path.empty()) {
+    r.error = "read sin path";
+    r.summary = r.error;
+    return r;
   }
-  if (line_start > 0 && line_end < line_start) {
-    std::swap(line_start, line_end);
-  }
+
   std::string abs;
   std::string rel;
   std::string perr;
@@ -2302,7 +2708,8 @@ AdminJobResult admin_run_read_file(const std::string& target, const std::string&
     r.summary = r.error;
     return r;
   }
-  if (line_start > 0) {
+
+  auto slice_range = [&](int line_start, int line_end) {
     std::istringstream iss(body);
     std::ostringstream slice;
     std::string line;
@@ -2321,37 +2728,103 @@ AdminJobResult admin_run_read_file(const std::string& target, const std::string&
         break;
       }
     }
-    body = slice.str();
-    if (body.empty()) {
-      r.facts.push_back("read:line fuera de rango " + std::to_string(line_start));
-      body = read_file(abs.empty() ? path : abs);
-      utf8_resize(&body, static_cast<std::size_t>(kAdminReadMaxChars));
-    } else {
-      r.facts.push_back("read:lines=" + std::to_string(line_start) + "-" +
-                        std::to_string(line_end > 0 ? line_end : line_start));
+    return slice.str();
+  };
+
+  if (!sel.ranges.empty()) {
+    std::ostringstream joined;
+    for (std::size_t ri = 0; ri < sel.ranges.size(); ++ri) {
+      const int a = sel.ranges[ri].first;
+      const int b = sel.ranges[ri].second;
+      const std::string part = slice_range(a, b);
+      if (part.empty()) {
+        r.facts.push_back("read:line fuera de rango " + std::to_string(a));
+        continue;
+      }
+      if (ri) {
+        joined << "---\n";
+      }
+      joined << part;
+      r.facts.push_back("read:lines=" + std::to_string(a) + "-" + std::to_string(b));
     }
-  } else if (!symbol.empty() && !std::isdigit(static_cast<unsigned char>(symbol[0]))) {
-    const auto pos = body.find(symbol);
+    if (!joined.str().empty()) {
+      body = joined.str();
+    } else {
+      utf8_resize(&body, static_cast<std::size_t>(kAdminReadMaxChars));
+    }
+    utf8_sanitize_inplace(&body);
+    // El slice ya está acotado: no volver a head+tail a 1200 (rompía path:1-300).
+    r.log_tail = body;
+    r.truncated = false;
+    r.raw_bytes = static_cast<int>(body.size());
+    if (body.size() > 14000) {
+      bool trunc = false;
+      int raw = 0;
+      r.log_tail = admin_clip_output(body, 5000, 5000, &trunc, &raw);
+      r.truncated = trunc;
+      r.raw_bytes = raw;
+    }
+  } else if (!sel.symbol.empty()) {
+    // Preferir el símbolo completo (Class::method); si no, el leaf tras ::.
+    std::string needle = sel.symbol;
+    auto pos = body.find(needle);
+    if (pos == std::string::npos) {
+      const auto col = needle.rfind(':');
+      if (col != std::string::npos && col + 1 < needle.size()) {
+        needle = needle.substr(col + 1);
+        while (!needle.empty() && needle.front() == ':') {
+          needle.erase(needle.begin());
+        }
+        pos = body.find(needle);
+      }
+    }
     if (pos != std::string::npos) {
       const std::size_t start = pos > 400 ? pos - 400 : 0;
       body = body.substr(start, static_cast<std::size_t>(kAdminReadMaxChars));
-      r.simbolos.push_back(path + ":" + symbol);
+      r.simbolos.push_back(path + ":" + sel.symbol);
+      r.facts.push_back("read:symbol=" + sel.symbol);
     } else {
       utf8_resize(&body, static_cast<std::size_t>(kAdminReadMaxChars));
       r.facts.push_back("símbolo no encontrado en archivo; head clip");
     }
+    utf8_sanitize_inplace(&body);
+    // Ventana alrededor del símbolo: conservar sin re-clip agresivo.
+    r.log_tail = body;
+    r.truncated = false;
+    r.raw_bytes = static_cast<int>(body.size());
+    if (body.size() > 14000) {
+      bool trunc = false;
+      int raw = 0;
+      r.log_tail = admin_clip_output(body, 5000, 5000, &trunc, &raw);
+      r.truncated = trunc;
+      r.raw_bytes = raw;
+    }
   } else {
-    utf8_resize(&body, static_cast<std::size_t>(kAdminReadMaxChars));
+    // Sin selector: head+tail del archivo completo (no solo head ni tope 400 líneas).
+    // Si no, MakeXxx / factories al final del .cpp quedan invisibles.
+    utf8_sanitize_inplace(&body);
+    bool trunc = false;
+    int raw = 0;
+    constexpr int kReadHead = 2800;
+    constexpr int kReadTail = 2800;
+    r.log_tail = admin_clip_output(body, kReadHead, kReadTail, &trunc, &raw);
+    r.truncated = trunc;
+    r.raw_bytes = raw;
+    if (trunc) {
+      r.facts.push_back(
+          "read:head+tail; para el medio usa path:N-M, path:N-M,a-b o path:Symbol");
+    }
   }
-  utf8_sanitize_inplace(&body);
-  bool trunc = false;
-  int raw = 0;
-  r.log_tail = admin_clip_output(body, &trunc, &raw);
-  r.truncated = trunc;
-  r.raw_bytes = raw;
   r.paths.push_back(path);
   r.ok = true;
-  r.summary = "read " + path + " bytes=" + std::to_string(raw);
+  r.summary = "read " + path + " bytes=" + std::to_string(r.raw_bytes);
+  if (!sel.symbol.empty()) {
+    r.summary += " sym=" + sel.symbol;
+  } else if (!sel.ranges.empty()) {
+    r.summary += " ranges=" + std::to_string(sel.ranges.size());
+  } else if (r.truncated) {
+    r.summary += " truncated=1";
+  }
   r.facts.push_back("leído:" + path);
   return r;
 }
@@ -2879,6 +3352,163 @@ AdminJobResult admin_run_web_fetch(const std::string& url, const AdminState& st)
   return r;
 }
 
+std::vector<std::string> admin_verify_readable_paths(const AdminState& st) {
+  std::vector<std::string> out = admin_notebook_paths(st);
+  auto path_from_token = [](const std::string& ev) -> std::string {
+    const auto col = ev.find(':');
+    if (col == std::string::npos || col == 0) {
+      return {};
+    }
+    const std::string p = ev.substr(0, col);
+    if (p.find('/') != std::string::npos || p.find('.') != std::string::npos) {
+      return p;
+    }
+    return {};
+  };
+  auto add = [&](const std::string& p) {
+    if (p.empty()) {
+      return;
+    }
+    if (std::find(out.begin(), out.end(), p) == out.end()) {
+      out.push_back(p);
+    }
+  };
+  for (const auto& j : st.jobs) {
+    for (const auto& ev : j.evidencia) {
+      add(path_from_token(ev));
+    }
+    for (const auto& s : j.simbolos) {
+      add(path_from_token(s));
+    }
+  }
+  for (const auto& e : st.notebook) {
+    for (const auto& p : e.paths) {
+      add(p);
+    }
+  }
+  return out;
+}
+
+std::string admin_verify_context_prompt(const AdminState& st) {
+  // Factual only: tipados + evidencia path:línea + hechos cortos. Sin thesis/why del piloto.
+  std::ostringstream anchors;
+  int n_anch = 0;
+  auto emit_anchor = [&](const std::string& s) {
+    if (s.empty() || n_anch >= kAdminVerifyMaxAnchors) {
+      return;
+    }
+    anchors << "- `" << s << "`\n";
+    ++n_anch;
+  };
+  for (const auto& j : st.jobs) {
+    for (const auto& s : j.simbolos) {
+      emit_anchor(s);
+    }
+  }
+  if (n_anch == 0) {
+    for (const auto& e : st.notebook) {
+      for (const auto& s : e.simbolos) {
+        emit_anchor(s);
+      }
+      for (const auto& p : e.paths) {
+        emit_anchor(p);
+      }
+    }
+  }
+  if (n_anch == 0) {
+    anchors << "(sin anclas)\n";
+  }
+
+  std::ostringstream verdicts;
+  verdicts << "## Veredictos del notebook (hechos tipados; no narrativa del piloto)\n";
+  verdicts << "Un no_encontrado/parcial en un polo NO se borra porque otro job haya "
+              "encontrado otra cosa. Incluye explore/read/search anclados.\n";
+  if (st.jobs.empty()) {
+    verdicts << "(sin jobs)\n";
+  } else {
+    for (const auto& j : st.jobs) {
+      const std::string tipo = j.tipo.empty() ? "explore" : j.tipo;
+      std::string sum = j.summary;
+      utf8_resize(&sum, static_cast<std::size_t>(kAdminVerifySummaryChars));
+      verdicts << "- job" << j.id << " (" << tipo
+               << "): veredicto=" << (j.veredicto.empty() ? "-" : j.veredicto);
+      if (!sum.empty()) {
+        verdicts << " | " << sum;
+      }
+      verdicts << "\n";
+      int n_ev = 0;
+      for (const auto& ev : j.evidencia) {
+        if (ev.empty() || n_ev >= kAdminVerifyMaxEvidenciaPerJob) {
+          continue;
+        }
+        if (n_ev == 0) {
+          verdicts << "  evidencia:";
+        }
+        verdicts << " `" << ev << "`";
+        ++n_ev;
+      }
+      if (n_ev > 0) {
+        verdicts << "\n";
+      }
+      // read/search: el summary es metadato; el contenido útil está en log_tail.
+      if (!j.log_tail.empty() && (tipo == "read" || tipo == "search")) {
+        std::string tail = j.log_tail;
+        utf8_resize(&tail, static_cast<std::size_t>(kAdminVerifyLogTailChars));
+        verdicts << "  extracto:\n" << tail << "\n";
+      }
+    }
+  }
+
+  std::ostringstream evidencia;
+  evidencia << "## Evidencia tipada (path:línea / símbolos; no prosa)\n";
+  int n_ev_total = 0;
+  for (const auto& j : st.jobs) {
+    for (const auto& ev : j.evidencia) {
+      if (ev.empty() || n_ev_total >= kAdminVerifyMaxEvidenciaTotal) {
+        continue;
+      }
+      evidencia << "- job" << j.id << ": `" << ev << "`\n";
+      ++n_ev_total;
+    }
+  }
+  if (n_ev_total == 0) {
+    evidencia << "(sin evidencia tipada en jobs)\n";
+  }
+
+  std::ostringstream facts;
+  facts << "## Hechos del notebook (líneas cortas acumuladas)\n";
+  int n_facts = 0;
+  for (const auto& e : st.notebook) {
+    for (const auto& f : e.facts) {
+      if (f.empty() || n_facts >= kAdminVerifyMaxFacts) {
+        continue;
+      }
+      facts << "- #" << e.job_id << ": " << f << "\n";
+      ++n_facts;
+    }
+  }
+  if (n_facts == 0) {
+    facts << "(sin hechos)\n";
+  }
+
+  const auto paths = admin_verify_readable_paths(st);
+  std::ostringstream path_list;
+  for (std::size_t i = 0; i < paths.size() && i < 40; ++i) {
+    if (i) {
+      path_list << ", ";
+    }
+    path_list << paths[i];
+  }
+
+  std::ostringstream out;
+  out << verdicts.str() << "\n";
+  out << evidencia.str() << "\n";
+  out << facts.str() << "\n";
+  out << "## Anclas (sin narrativa del explorador)\n" << anchors.str() << "\n";
+  out << "## Paths legibles\n" << path_list.str() << "\n";
+  return out.str();
+}
+
 AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::string& thesis,
                                    const std::string& workspace_root, const AdminLoopOpts& opts) {
   AdminVerifyResult out;
@@ -2907,14 +3537,7 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
     return out;
   }
 
-  const auto paths = admin_notebook_paths(*st);
-  std::ostringstream path_list;
-  for (std::size_t i = 0; i < paths.size() && i < 40; ++i) {
-    if (i) {
-      path_list << ", ";
-    }
-    path_list << paths[i];
-  }
+  const auto paths = admin_verify_readable_paths(*st);
 
   auto is_miss = [](const std::string& v) {
     const std::string x = ascii_lower(trim_copy(v));
@@ -2931,76 +3554,23 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
     }
   }
 
-  (void)thesis;  // sin narrativa del piloto; solo consulta + anclas + veredictos
+  (void)thesis;  // sin narrativa del piloto; solo consulta + hechos tipados
   const std::string sys =
-      "Eres VERIFICADOR. No explores features nuevas. Te dan la consulta, ANCLAS "
-      "(símbolos/paths) y veredictos tipados del notebook. Refuta si no demuestran "
-      "el arco A→B del pedido (co-ocurrencia ≠ puente). Un no_encontrado/parcial "
-      "no se borra porque otro job encontró otra cosa. Tools: entre|read|cerrar. "
-      "read solo paths anclados. Al cerrar: "
+      "Eres VERIFICADOR. No explores features nuevas. Te dan la consulta, ANCLAS, "
+      "veredictos tipados, evidencia path:línea y hechos cortos del notebook. "
+      "Refuta si no demuestran el arco A→B del pedido (co-ocurrencia ≠ puente). "
+      "Un no_encontrado/parcial no se borra porque otro job encontró otra cosa. "
+      "Tools: entre|read|cerrar. read solo paths anclados. Al cerrar: "
       "{\"do\":\"cerrar\",\"veredicto\":\"sostiene|refuta|dudoso\",\"ataques\":[],"
       "\"arco\":{\"de\":\"\",\"a\":\"\"},\"why\":\"…\"}";
 
-  std::ostringstream anchors;
-  int n_anch = 0;
-  for (const auto& j : st->jobs) {
-    for (const auto& s : j.simbolos) {
-      if (s.empty() || n_anch >= 16) {
-        continue;
-      }
-      anchors << "- `" << s << "`\n";
-      ++n_anch;
-    }
-  }
-  if (n_anch == 0) {
-    for (const auto& e : st->notebook) {
-      for (const auto& s : e.simbolos) {
-        if (s.empty() || n_anch >= 16) {
-          continue;
-        }
-        anchors << "- `" << s << "`\n";
-        ++n_anch;
-      }
-      for (const auto& p : e.paths) {
-        if (p.empty() || n_anch >= 16) {
-          continue;
-        }
-        anchors << "- `" << p << "`\n";
-        ++n_anch;
-      }
-    }
-  }
-  if (n_anch == 0) {
-    anchors << "(sin anclas)\n";
-  }
-
-  std::ostringstream verdicts;
-  verdicts << "## Veredictos del notebook (hechos del hijo; no narrativa)\n";
-  verdicts << "Un no_encontrado/parcial en un polo NO se borra porque otro job haya "
-              "encontrado otra cosa.\n";
-  bool any_job = false;
-  for (const auto& j : st->jobs) {
-    if (j.tipo != "explore" && !j.tipo.empty()) {
-      continue;
-    }
-    any_job = true;
-    verdicts << "- job" << j.id << ": veredicto=" << (j.veredicto.empty() ? "-" : j.veredicto)
-             << " | " << j.summary.substr(0, 140) << "\n";
-  }
-  if (!any_job) {
-    for (const auto& j : st->jobs) {
-      verdicts << "- job" << j.id << " (" << j.tipo
-               << "): veredicto=" << (j.veredicto.empty() ? "-" : j.veredicto) << "\n";
-    }
-  }
+  const std::string facts_blob = admin_verify_context_prompt(*st);
 
   std::ostringstream user;
   user << "## Consulta del usuario\n" << st->consulta << "\n\n";
-  user << verdicts.str() << "\n";
-  user << "## Anclas (sin narrativa del explorador)\n" << anchors.str() << "\n";
-  user << "## Paths legibles\n" << path_list.str() << "\n\n";
+  user << facts_blob << "\n";
   user << "N=" << kAdminVerifyMaxSteps
-       << ". Ataca si estas anclas demuestran el arco de la consulta; "
+       << ". Ataca si estas anclas/evidencia demuestran el arco de la consulta; "
           "si solo co-ocurren, refuta/dudoso. Elige UNA acción JSON "
           "(entre|read|cerrar).\n";
 
@@ -3034,9 +3604,9 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
       ui_note(opts, "  · pasada adversaria: ¿confunde con un mecanismo vecino?");
       const std::string refute_sys =
           "Eres REFUTADOR adversarial. NO explores el repo. Te dan consulta, "
-          "cobertura/veredicto del verificador y anclas. ÚNICA misión: tumbar "
-          "si confunde un mecanismo VECINO con el pedido LITERAL. "
-          "Responde UN JSON: "
+          "cobertura/veredicto del verificador, anclas y evidencia tipada. "
+          "ÚNICA misión: tumbar si confunde un mecanismo VECINO con el pedido "
+          "LITERAL. Responde UN JSON: "
           "{\"veredicto\":\"sostiene|refuta|dudoso\",\"ataques\":[{\"id\":\"e1\","
           "\"tumbado\":true|false,\"why\":\"…\"}],\"why\":\"…\"}";
       std::ostringstream ru;
@@ -3047,7 +3617,7 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
            << j["cobertura"].dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)
            << "\n";
       }
-      ru << "\n## Anclas\n" << anchors.str() << "\nIntenta tumbar. UN JSON.\n";
+      ru << "\n" << facts_blob << "\nIntenta tumbar. UN JSON.\n";
       L2BrainRequest rreq;
       rreq.system_prompt = refute_sys;
       rreq.user_prompt = ru.str();
@@ -3450,7 +4020,8 @@ Tipos spawn:
   del usuario mezcla varios (p.ej. consola y margen, o A y B), parte: un explore por polo.
   No metas "vincular/conectar/ambos" en el mismo brief. Respeta el tope explore del presupuesto.
 - search: arg=query (rg en el repo)
-- read: arg=path o path:Symbol (clip)
+- read: arg=path | path,path (≤3) | path:N | path:N-M | path:N-M,a-b | path:Class::method
+  (archivos grandes → head+tail; para el medio usa selector)
 - shell: allowlist ls/find/rg/head… (opcional | head -N). Para localizar código usa search/explore,
   no inventes stack (.ts/.js) — mira WORKSPACE_ROOT (aquí suele ser C++ en src/).
 - git: arg=status|log|diff|show|branches
@@ -3501,13 +4072,27 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
   }
   // Sin pistas runtime: el piloto elige el gesto (mismo criterio que explorer bruto).
   out << "## Presupuesto\nproposes=" << st.proposes << "/" << max_proposes
-      << " spawns=" << st.spawns << "/" << max_spawns << "\n";
+      << " spawns=" << st.spawns << "/" << max_spawns
+      << " explores=" << admin_explores_used_this_consulta(st) << "/" << kAdminMaxExplores;
+  const bool explore_agotado =
+      admin_explores_used_this_consulta(st) >= kAdminMaxExplores;
+  if (explore_agotado) {
+    out << " AGOTADO";
+  }
+  out << "\n";
   const auto legal = admin_legal_dos(st, max_proposes, max_spawns);
   out << "do legales:";
   for (const auto& d : legal) {
     out << " " << d;
   }
-  out << "\n\n";
+  out << "\n";
+  if (explore_agotado) {
+    out << "## Explore agotado (esta consulta)\n"
+           "PROHIBIDO `spawn` con tipo=explore y PROHIBIDO `seguir_explorando`. "
+           "Sigue solo con `spawn` search|read (paths/símbolos del notebook), "
+           "`cerrar`, `editar` o `ask_user`. Sintetiza evidencias y cierra si ya basta.\n";
+  }
+  out << "\n";
 
   if (st.awaiting_edit_confirm) {
     out << "## Confirmación de edición\n"
@@ -3515,10 +4100,15 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
            "(no inventes paths no listados).\n"
            "{\"action\":\"admin_v1\",\"do\":\"confirmar_editar\",\"why\":\"…\","
            "\"cubre\":\"qué del pedido ya cubre el notebook\","
-           "\"falta\":\"qué falta (o nada)\",\"reply\":\"…\"}\n"
-           "{\"action\":\"admin_v1\",\"do\":\"seguir_explorando\",\"why\":\"…\","
-           "\"spawn\":{\"tipo\":\"explore\",\"brief\":\"hueco concreto a cazar\"}}\n"
-           "{\"action\":\"admin_v1\",\"do\":\"cerrar\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
+           "\"falta\":\"qué falta (o nada)\",\"reply\":\"…\"}\n";
+    if (!explore_agotado) {
+      out << "{\"action\":\"admin_v1\",\"do\":\"seguir_explorando\",\"why\":\"…\","
+             "\"spawn\":{\"tipo\":\"explore\",\"brief\":\"hueco concreto a cazar\"}}\n";
+    } else {
+      out << "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
+             "\"spawn\":{\"tipo\":\"search\",\"arg\":\"símbolo o path del notebook\"}}\n";
+    }
+    out << "{\"action\":\"admin_v1\",\"do\":\"cerrar\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
   }
 
   out << "## Sesion UI\n";
@@ -3592,6 +4182,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
   } else {
     ui_note(opts, "→ Sigo con la evidencia ya reunida…");
   }
+  int explore_cap_rejects = 0;
   while (!st->done && !st->clarify && !cancelled(opts)) {
     const std::string sys = admin_system_prompt();
     const std::string user = admin_user_prompt(*st, max_p, max_s, opts.workspace_root);
@@ -3604,22 +4195,84 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
     req.temperature = opts.settings.temperature;
     req.enable_thinking = false;
 
+    const auto t0 = std::chrono::steady_clock::now();
     L2BrainResult br = brain.propose(req, opts.cancel);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t0)
+                        .count();
     if (cancelled(opts)) {
       result.error = "cancelado";
       break;
     }
     if (!br.ok) {
       result.error = br.error.empty() ? "brain propose falló" : br.error;
-      ui_note(opts, "→ Error del modelo: " + result.error);
+      ui_note(opts, "→ Error del modelo (" + std::to_string(ms) + " ms): " + result.error);
       break;
+    }
+    {
+      std::ostringstream timing;
+      if (ms < 1000) {
+        timing << ms << " ms";
+      } else {
+        const int whole = static_cast<int>(ms / 1000);
+        const int tenths = static_cast<int>((ms % 1000) / 100);
+        if (whole >= 10 || tenths == 0) {
+          timing << whole << " s";
+        } else {
+          timing << whole << "." << tenths << " s";
+        }
+      }
+      ui_note(opts, "→ Modelo respondió en " + timing.str());
     }
 
     AdminOla ola = admin_parse(br.text.empty() ? br.raw : br.text);
     std::string lerr;
-    if (!admin_legal(*st, ola, max_p, max_s, &lerr)) {
+    bool legal_ok = admin_legal(*st, ola, max_p, max_s, &lerr);
+    // Cupo explore agotado: degradar explore → search (rompe el bucle de rechazos).
+    if (!legal_ok && lerr.find("tope de explore") != std::string::npos &&
+        (ola.do_kind == AdminDo::Spawn || ola.do_kind == AdminDo::SeguirExplorando) &&
+        (ola.do_kind == AdminDo::SeguirExplorando ||
+         ola.spawn.tipo == AdminSpawnTipo::Explore)) {
+      AdminOla deg = ola;
+      deg.do_kind = AdminDo::Spawn;
+      deg.spawn.tipo = AdminSpawnTipo::Search;
+      std::string q = trim_copy(ola.spawn.brief);
+      if (q.size() < 4) {
+        q = trim_copy(ola.spawn.arg);
+      }
+      // Args tipo "src/a.cpp src/b.hpp" no sirven como needle: quedarse con brief.
+      if (q.find('/') != std::string::npos &&
+          (q.find(' ') != std::string::npos || q.find(',') != std::string::npos)) {
+        q = trim_copy(ola.spawn.brief);
+      }
+      utf8_resize(&q, 120);
+      deg.spawn.arg = q;
+      deg.spawn.brief.clear();
+      deg.ok = true;
+      deg.error.clear();
+      std::string lerr2;
+      if (q.size() >= 3 && admin_legal(*st, deg, max_p, max_s, &lerr2)) {
+        ola = std::move(deg);
+        legal_ok = true;
+        lerr.clear();
+        explore_cap_rejects = 0;
+        ui_note(opts, "→ Explore agotado: busco «" + ui_clip(ola.spawn.arg, 70) + "»");
+      }
+    }
+    if (!legal_ok) {
       ++st->proposes;
+      if (lerr.find("tope de explore") != std::string::npos) {
+        ++explore_cap_rejects;
+      } else {
+        explore_cap_rejects = 0;
+      }
       st->last_error = lerr;
+      if (explore_cap_rejects >= 2) {
+        st->last_error =
+            "explore agotado: OBLIGATORIO do=cerrar|ask_user|editar o spawn "
+            "search|read (sin explore). " +
+            lerr;
+      }
       if (!ola.raw_json.empty()) {
         std::string clip = ola.raw_json;
         utf8_resize(&clip, 240);
@@ -3632,6 +4285,9 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
         }
       }
       ui_note(opts, "→ " + humanize_admin_reject(lerr));
+      if (explore_cap_rejects >= 2) {
+        ui_note(opts, "→ Sin más exploradores en esta consulta: cierra o busca/lee con lo ya hallado.");
+      }
       if (!opts.workspace_root.empty()) {
         admin_save_state(opts.workspace_root, *st, nullptr);
       }
@@ -3641,6 +4297,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       }
       continue;
     }
+    explore_cap_rejects = 0;
     ++st->proposes;
 
     // Verificador adversarial antes de aceptar editar/cerrar (si hay notebook).
@@ -3719,13 +4376,18 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       std::ostringstream line;
       if (ola.do_kind == AdminDo::SeguirExplorando) {
         line << "→ Siguiendo el hueco";
+        if (!ola.spawn.brief.empty()) {
+          line << " — " << ola.spawn.brief;
+        } else if (!ola.spawn.arg.empty()) {
+          line << " `" << ola.spawn.arg << "`";
+        }
       } else {
         line << "→ Piloto: " << spawn_tipo_ui(ola.spawn.tipo);
-      }
-      if (!ola.spawn.arg.empty()) {
-        line << " `" << ui_clip(ola.spawn.arg, 90) << "`";
-      } else if (!ola.spawn.brief.empty()) {
-        line << " — " << ui_clip(ola.spawn.brief, 140);
+        if (!ola.spawn.arg.empty()) {
+          line << " `" << ola.spawn.arg << "`";
+        } else if (!ola.spawn.brief.empty()) {
+          line << " — " << ola.spawn.brief;
+        }
       }
       ui_note(opts, line.str());
     } else if (ola.do_kind == AdminDo::Editar) {

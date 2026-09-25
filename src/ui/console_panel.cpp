@@ -151,6 +151,12 @@ struct ConsolePanelState {
   int64_t last_term_click_ms = 0;
   int last_term_click_count = 0;
   std::vector<std::string> ai_line_cache;
+  // Filas visuales tras wrap al ancho del historial (fuente → segmento [begin,end)).
+  std::vector<int> ai_visual_to_source;
+  std::vector<std::string> ai_visual_text;
+  std::vector<std::size_t> ai_visual_begin;
+  std::vector<std::size_t> ai_visual_end;
+  int ai_last_wrap_cols = 0;
   std::string last_workspace_root;
   std::array<Box, 12> tab_boxes;
   Box hide_box;
@@ -265,6 +271,10 @@ int visible_column_count(const Box& box) {
 int max_first_visible(int total_lines, int visible_lines) {
   return std::max(0, total_lines - visible_lines);
 }
+
+int ai_source_row_from_visual(const ConsolePanelState* state, int visual_row);
+void rebuild_ai_visual_rows(ConsolePanelState* state, const std::vector<std::string>& lines,
+                            int wrap_cols);
 
 bool terminal_box_valid(const Box& box);
 bool terminal_body_contains(const ConsolePanelState* state, int x, int y);
@@ -917,7 +927,8 @@ bool update_ai_result_hover(ConsolePanelState* state, MainLayoutState* layout_st
   }
 
   const int visual_row = y - state->ai_history_box.y_min;
-  const int row_index = state->ai_first_visible + visual_row;
+  const int visual_index = state->ai_first_visible + visual_row;
+  const int row_index = ai_source_row_from_visual(state, visual_index);
   const std::vector<std::string> lines = ai->snapshot_lines();
   std::optional<int> hover;
   if (row_index >= 0 && row_index < static_cast<int>(lines.size()) &&
@@ -946,7 +957,8 @@ bool try_open_ai_result_at(ConsolePanelState* state, AiController* ai, Workspace
     return false;
   }
   const int visual_row = y - state->ai_history_box.y_min;
-  const int row_index = state->ai_first_visible + visual_row;
+  const int row_index =
+      ai_source_row_from_visual(state, state->ai_first_visible + visual_row);
   const std::vector<std::string> lines = ai->snapshot_lines();
   if (row_index < 0 || row_index >= static_cast<int>(lines.size())) {
     return false;
@@ -1008,7 +1020,9 @@ void scroll_ai_by_lines(ConsolePanelState* state, int delta) {
   if (state == nullptr || delta == 0) {
     return;
   }
-  const int total = static_cast<int>(state->ai_last_output_size);
+  const int total = !state->ai_visual_to_source.empty()
+                        ? static_cast<int>(state->ai_visual_to_source.size())
+                        : static_cast<int>(state->ai_last_output_size);
   const int visible = std::max(1, state->ai_last_visible_lines);
   const int max_first = max_first_visible(total, visible);
   if (delta < 0) {
@@ -1018,6 +1032,58 @@ void scroll_ai_by_lines(ConsolePanelState* state, int delta) {
       std::max(0, std::min(state->ai_first_visible + delta, max_first));
   if (state->ai_first_visible >= max_first) {
     state->ai_follow_tail = true;
+  }
+}
+
+int ai_source_row_from_visual(const ConsolePanelState* state, int visual_row) {
+  if (state == nullptr || visual_row < 0) {
+    return -1;
+  }
+  if (!state->ai_visual_to_source.empty()) {
+    if (visual_row >= static_cast<int>(state->ai_visual_to_source.size())) {
+      return -1;
+    }
+    return state->ai_visual_to_source[static_cast<std::size_t>(visual_row)];
+  }
+  return visual_row;
+}
+
+void rebuild_ai_visual_rows(ConsolePanelState* state, const std::vector<std::string>& lines,
+                            int wrap_cols) {
+  if (state == nullptr) {
+    return;
+  }
+  wrap_cols = std::max(16, wrap_cols);
+  state->ai_last_wrap_cols = wrap_cols;
+  state->ai_visual_to_source.clear();
+  state->ai_visual_text.clear();
+  state->ai_visual_begin.clear();
+  state->ai_visual_end.clear();
+  state->ai_visual_to_source.reserve(lines.size());
+  state->ai_visual_text.reserve(lines.size());
+  state->ai_visual_begin.reserve(lines.size());
+  state->ai_visual_end.reserve(lines.size());
+  for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
+    const std::string& line = lines[static_cast<std::size_t>(i)];
+    if (static_cast<int>(line.size()) <= wrap_cols) {
+      state->ai_visual_to_source.push_back(i);
+      state->ai_visual_text.push_back(line);
+      state->ai_visual_begin.push_back(0);
+      state->ai_visual_end.push_back(line.size());
+      continue;
+    }
+    for (const auto& range : soft_wrap_ranges(line, wrap_cols, true)) {
+      state->ai_visual_to_source.push_back(i);
+      state->ai_visual_text.push_back(line.substr(range.first, range.second - range.first));
+      state->ai_visual_begin.push_back(range.first);
+      state->ai_visual_end.push_back(range.second);
+    }
+  }
+  if (state->ai_visual_to_source.empty()) {
+    state->ai_visual_to_source.push_back(0);
+    state->ai_visual_text.push_back(std::string{});
+    state->ai_visual_begin.push_back(0);
+    state->ai_visual_end.push_back(0);
   }
 }
 
@@ -1543,7 +1609,9 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
         y = std::max(state->ai_history_box.y_min, std::min(y, state->ai_history_box.y_max));
       }
       const int visual_row = y - state->ai_history_box.y_min;
-      update_console_drag_head(state, model, state->ai_first_visible + visual_row,
+      const int source_row =
+          ai_source_row_from_visual(state, state->ai_first_visible + visual_row);
+      update_console_drag_head(state, model, source_row,
                                std::max(0, x - state->ai_history_box.x_min));
       wake_console(layout_state);
       return true;
@@ -1890,7 +1958,8 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   if (ai_tab_active(layout_state) && state->ai_history_box.Contain(m.x, m.y)) {
     refresh_ai_line_cache(state, ai);
     const int visual_row = m.y - state->ai_history_box.y_min;
-    const int row_index = state->ai_first_visible + visual_row;
+    const int row_index =
+        ai_source_row_from_visual(state, state->ai_first_visible + visual_row);
     const int col = std::max(0, m.x - state->ai_history_box.x_min);
     const int64_t now_ms = console_now_ms();
     const ConsoleMultiClick multi =
@@ -2785,13 +2854,23 @@ Element render_ai_console(ConsolePanelState* state, AiController* ai,
   }
   const std::vector<std::string> terminal_lines = ai->snapshot_lines();
   state->ai_line_cache = terminal_lines;
-  const int total = static_cast<int>(terminal_lines.size());
 
   int visible = visible_line_count(state->ai_history_box);
   if (visible <= 1 && state->panel_box.y_max > state->panel_box.y_min) {
     visible = std::max(1, visible_line_count(state->panel_box) - 2);
   }
   state->ai_last_visible_lines = visible;
+
+  // Ancho útil del historial (scrollbar aparte en el hbox). Reserva 2 cols por el
+  // indent de replies en render_ai_transcript_line.
+  int wrap_cols = 48;
+  if (!state->ai_history_box.IsEmpty()) {
+    wrap_cols = std::max(16, visible_column_count(state->ai_history_box) - 2);
+  } else if (!state->panel_box.IsEmpty()) {
+    wrap_cols = std::max(16, visible_column_count(state->panel_box) - 4);
+  }
+  rebuild_ai_visual_rows(state, terminal_lines, wrap_cols);
+  const int total = static_cast<int>(state->ai_visual_to_source.size());
 
   const std::size_t output_size = terminal_lines.size();
   if (output_size > state->ai_last_output_size) {
@@ -2802,22 +2881,32 @@ Element render_ai_console(ConsolePanelState* state, AiController* ai,
   } else if (output_size < state->ai_last_output_size) {
     state->ai_last_output_size = output_size;
     state->ai_first_visible = max_first_visible(total, visible);
+  } else if (state->ai_follow_tail) {
+    // Resize del panel: re-wrap cambia el total visual.
+    state->ai_first_visible = max_first_visible(total, visible);
   }
   state->ai_first_visible =
       std::max(0, std::min(state->ai_first_visible, max_first_visible(total, visible)));
 
   const int end = std::min(total, state->ai_first_visible + visible);
   Elements history;
-  for (int i = state->ai_first_visible; i < end; ++i) {
-    const std::string& line = terminal_lines[static_cast<std::size_t>(i)];
-    if (console_line_in_selection(state, ConsoleSelectionKind::kAi, i)) {
-      history.push_back(render_plain_line_with_selection(line, i, state, ConsoleSelectionKind::kAi,
+  for (int v = state->ai_first_visible; v < end; ++v) {
+    const int src = state->ai_visual_to_source[static_cast<std::size_t>(v)];
+    const std::string& line = state->ai_visual_text[static_cast<std::size_t>(v)];
+    const std::size_t seg_begin = state->ai_visual_begin[static_cast<std::size_t>(v)];
+    const std::size_t seg_end = state->ai_visual_end[static_cast<std::size_t>(v)];
+    if (console_line_in_selection(state, ConsoleSelectionKind::kAi, src)) {
+      history.push_back(render_plain_line_with_selection(line, src, state, ConsoleSelectionKind::kAi,
                                                          theme::Header()));
       continue;
     }
     const bool hovered =
-        state->ai_result_hover_row.has_value() && *state->ai_result_hover_row == i;
-    history.push_back(render_ai_transcript_line(line, hovered));
+        state->ai_result_hover_row.has_value() && *state->ai_result_hover_row == src;
+    const std::string& full =
+        (src >= 0 && static_cast<std::size_t>(src) < terminal_lines.size())
+            ? terminal_lines[static_cast<std::size_t>(src)]
+            : line;
+    history.push_back(render_ai_transcript_line(full, hovered, seg_begin, seg_end));
   }
   if (history.empty()) {
     history.push_back(text(i18n::tr("console.ai.no_output")) | color(theme::Muted()) |

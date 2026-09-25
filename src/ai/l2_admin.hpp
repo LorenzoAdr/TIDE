@@ -12,7 +12,7 @@
 namespace tuide {
 
 inline constexpr int kAdminMaxEpisodes = 6;
-inline constexpr int kAdminEpisodeReplyChars = 800;
+inline constexpr int kAdminEpisodeReplyChars = 4000;
 inline constexpr int kAdminMaxProposes = 12;
 inline constexpr int kAdminMaxSpawns = 8;
 inline constexpr int kAdminMaxExplores = 4;
@@ -21,13 +21,24 @@ inline constexpr int kAdminVerifyMaxSteps = 4;
 inline constexpr int kAdminExploreMaxSteps = 6;
 inline constexpr int kAdminExploreMaxGrep = 4;
 inline constexpr int kAdminExploreMaxRead = 3;
+// Por ola (conservador): varios greps independientes; reads solo anclados a hits.
+inline constexpr int kAdminExploreMaxGrepPerWave = 3;
+inline constexpr int kAdminExploreMaxReadPerWave = 2;
 inline constexpr int kAdminSummaryChars = 4000;
 inline constexpr int kAdminNotebookSummaryChars = 2000;
+// Prompt del verificador: no recortar el summary del job (ya ≤ kAdminSummaryChars).
+// Extra: extracto de log_tail en read/search.
+inline constexpr int kAdminVerifySummaryChars = kAdminSummaryChars;
+inline constexpr int kAdminVerifyLogTailChars = 2500;
+inline constexpr int kAdminVerifyMaxEvidenciaPerJob = 12;
+inline constexpr int kAdminVerifyMaxEvidenciaTotal = 64;
+inline constexpr int kAdminVerifyMaxFacts = 48;
+inline constexpr int kAdminVerifyMaxAnchors = 32;
 inline constexpr int kAdminClipHeadChars = 1200;
 inline constexpr int kAdminClipTailChars = 1200;
 inline constexpr int kAdminWhyMin = 4;
 inline constexpr int kAdminWhyMax = 400;
-inline constexpr int kAdminReplyMax = 2000;
+inline constexpr int kAdminReplyMax = 8000;
 inline constexpr int kAdminBriefMax = 400;
 inline constexpr int kAdminNotebookMaxItems = 24;
 inline constexpr int kAdminNotebookFactChars = 240;
@@ -128,6 +139,9 @@ struct AdminState {
   AdminSessionUi ui;
   int proposes = 0;
   int spawns = 0;
+  // Explores en `jobs` anteriores a esta consulta (no cuentan para kAdminMaxExplores).
+  // Al abrir un follow-up con evidencia, se fija al nº actual de explores.
+  int explore_jobs_baseline = 0;
   bool done = false;
   bool clarify = false;  // pausa: esperando respuesta del usuario en el panel AI
   std::string pending_question;  // texto de ask_user mientras clarify
@@ -210,7 +224,7 @@ std::string admin_dir(const std::string& workspace_root);
 std::string admin_state_path(const std::string& workspace_root);
 std::string admin_notebook_path(const std::string& workspace_root);
 bool admin_is_continuable(const std::string& workspace_root);
-// true = conservar notebook/episodios; false = la consulta es tema nuevo → sesión limpia.
+// true = conservar notebook/episodios (siempre mid-run; el clear es solo boot o Reset).
 bool admin_should_keep_session(const AdminState& st, const std::string& message);
 bool admin_clear_session(const std::string& workspace_root, std::string* err);
 bool admin_save_state(const std::string& workspace_root, const AdminState& st, std::string* err);
@@ -223,6 +237,12 @@ void admin_notebook_append(AdminState* st, const AdminJob& job, const AdminJobRe
 std::string admin_notebook_markdown(const AdminState& st);
 bool admin_notebook_has_path(const AdminState& st, const std::string& path);
 std::vector<std::string> admin_notebook_paths(const AdminState& st);
+
+// Explores que cuentan para el tope de esta consulta (jobs totales − baseline).
+int admin_count_explore_jobs(const AdminState& st);
+int admin_explores_used_this_consulta(const AdminState& st);
+// Marca el baseline = explores actuales (presupuesto fresco; conserva jobs/notebook).
+void admin_begin_consulta_budgets(AdminState* st);
 
 AdminOla admin_parse(const std::string& raw);
 bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, int max_spawns,
@@ -239,6 +259,9 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
                                       AdminGrepFn grep_fn = {});
 bool admin_shell_cmd_allowed(const std::string& cmd);
 std::string admin_clip_output(const std::string& text, bool* truncated, int* raw_bytes);
+// Clip con presupuestos explícitos (p.ej. read de archivos grandes: más head+tail).
+std::string admin_clip_output(const std::string& text, int head_chars, int tail_chars,
+                              bool* truncated, int* raw_bytes);
 // Infer typed paths/facts from shell cmd + raw stdout (ls/find/head/tail/wc/…).
 void admin_shell_enrich_result(const std::string& cmd, const std::string& captured,
                                const std::string& cwd, AdminJobResult* r);
@@ -256,6 +279,9 @@ AdminJobResult admin_run_search_rg(const std::string& query, const std::string& 
 // Parsea salida de search (rg crudo o ToolRegistry: top_files + path:line:col).
 void admin_collect_search_hits(const std::string& text, AdminJobResult* r);
 AdminJobResult admin_run_read_file(const std::string& target, const std::string& cwd);
+
+// Parte arg de read en targets. "a.hpp,b.hpp" → 2; "a.hpp:5-7,15-17" → 1 (rangos).
+std::vector<std::string> admin_split_read_args(const std::string& raw);
 AdminJobResult admin_run_diagnostics_stub(const AdminSpawn& spawn);
 AdminJobResult admin_run_test_stub(const AdminSpawn& spawn);
 AdminJobResult admin_run_edit_file(const AdminSpawn& spawn, const AdminState& st,
@@ -268,6 +294,12 @@ AdminJobResult admin_run_web_search_stub(const std::string& query);
 AdminJobResult admin_run_web_fetch(const std::string& url, const AdminState& st);
 AdminJobResult admin_run_web_fetch_stub(const std::string& url);
 bool admin_url_fetch_allowed(const std::string& url);
+
+// Contexto factual del verificador (veredictos + evidencia tipada + hechos;
+// sin tesis/prosa del piloto). Usado por admin_run_verify y tests.
+std::string admin_verify_context_prompt(const AdminState& st);
+// Paths legibles por el verificador: notebook + paths inferidos de evidencia.
+std::vector<std::string> admin_verify_readable_paths(const AdminState& st);
 
 // Verificador adversarial (post-explore, pre-aceptar editar/cerrar).
 AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::string& thesis,

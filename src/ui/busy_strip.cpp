@@ -121,6 +121,43 @@ void paint_ansi_unlocked(BusyStripState* state) {
   std::cout << oss.str() << std::flush;
 }
 
+std::string format_elapsed_label(std::string_view base, int64_t started_ms, int64_t now_ms) {
+  if (base.empty()) {
+    return {};
+  }
+  if (started_ms <= 0 || now_ms < started_ms) {
+    return std::string(base);
+  }
+  const int64_t elapsed_ms = now_ms - started_ms;
+  const int64_t secs = elapsed_ms / 1000;
+  std::ostringstream oss;
+  oss << base << " · ";
+  if (secs < 60) {
+    oss << secs << "s";
+  } else {
+    const int64_t m = secs / 60;
+    const int64_t s = secs % 60;
+    oss << m << "m ";
+    if (s < 10) {
+      oss << '0';
+    }
+    oss << s << "s";
+  }
+  return oss.str();
+}
+
+void refresh_elapsed_label_unlocked(BusyStripState* state, int64_t now_ms) {
+  if (state == nullptr || state->label_base.empty()) {
+    return;
+  }
+  // Live clock on AI thinking (and download while waiting on model) — spinner tick paints it.
+  if (state->activity != BusyActivity::AiThinking &&
+      state->activity != BusyActivity::AiDownloading) {
+    return;
+  }
+  state->label = format_elapsed_label(state->label_base, state->activity_started_ms, now_ms);
+}
+
 void ensure_spinner_thread(BusyStripState* state) {
   if (state == nullptr || state->halted.load(std::memory_order_acquire) ||
       state->ticker_running.load(std::memory_order_acquire)) {
@@ -143,7 +180,9 @@ void ensure_spinner_thread(BusyStripState* state) {
         continue;
       }
       state->spinner_frame = (state->spinner_frame + 1) % kBrailleFrameCount;
-      state->last_spinner_ms = steady_now_ms();
+      const int64_t now = steady_now_ms();
+      state->last_spinner_ms = now;
+      refresh_elapsed_label_unlocked(state, now);
       paint_ansi_unlocked(state);
     }
   });
@@ -235,16 +274,26 @@ void set_busy_spinner(MainLayoutState* layout, BusyActivity activity, std::strin
       return;
     }
     const BusyActivity previous = state.activity;
+    const bool restart_clock =
+        previous != activity || state.kind == BusyIndicatorKind::None || state.activity_started_ms == 0;
     state.kind = BusyIndicatorKind::Spinner;
     state.activity = activity;
     state.percent = 0;
     if (!label.empty()) {
-      state.label = std::string(label);
-    } else if (state.label.empty() || previous != activity) {
-      state.label = i18n::tr(busy_activity_i18n_key(activity));
+      state.label_base = std::string(label);
+    } else if (state.label_base.empty() || previous != activity) {
+      state.label_base = i18n::tr(busy_activity_i18n_key(activity));
+    }
+    const int64_t now = steady_now_ms();
+    if (restart_clock) {
+      state.activity_started_ms = now;
+    }
+    refresh_elapsed_label_unlocked(&state, now);
+    if (state.label.empty()) {
+      state.label = state.label_base;
     }
     state.spinner_frame = 0;
-    state.last_spinner_ms = steady_now_ms();
+    state.last_spinner_ms = now;
     paint_ansi_unlocked(&state);
   }
   ensure_spinner_thread(&state);
@@ -265,6 +314,8 @@ void set_busy_percent(MainLayoutState* layout, BusyActivity activity, int percen
     const bool was_active = state.kind == BusyIndicatorKind::Spinner ||
                             state.kind == BusyIndicatorKind::Percent;
     const BusyActivity previous = state.activity;
+    const bool restart_clock =
+        previous != activity || !was_active || state.activity_started_ms == 0;
     state.kind = BusyIndicatorKind::Percent;
     state.activity = activity;
     // Negative percent (legacy "indeterminate") → keep 0 but prefer spinner via label-only callers.
@@ -273,13 +324,21 @@ void set_busy_percent(MainLayoutState* layout, BusyActivity activity, int percen
       state.kind = BusyIndicatorKind::Spinner;
     }
     if (!label.empty()) {
-      state.label = std::string(label);
-    } else if (state.label.empty() || previous != activity) {
-      state.label = i18n::tr(busy_activity_i18n_key(activity));
+      state.label_base = std::string(label);
+    } else if (state.label_base.empty() || previous != activity) {
+      state.label_base = i18n::tr(busy_activity_i18n_key(activity));
+    }
+    const int64_t now = steady_now_ms();
+    if (restart_clock) {
+      state.activity_started_ms = now;
+    }
+    refresh_elapsed_label_unlocked(&state, now);
+    if (state.label.empty()) {
+      state.label = state.label_base;
     }
     if (!was_active) {
       state.spinner_frame = 0;
-      state.last_spinner_ms = steady_now_ms();
+      state.last_spinner_ms = now;
     }
     paint_ansi_unlocked(&state);
   }
@@ -306,6 +365,8 @@ void clear_busy(MainLayoutState* layout) {
     state.activity = BusyActivity::Idle;
     state.percent = 0;
     state.label.clear();
+    state.label_base.clear();
+    state.activity_started_ms = 0;
     state.spinner_frame = 0;
     paint_ansi_unlocked(&state);
   }
@@ -324,6 +385,8 @@ void halt_busy_strip(MainLayoutState* layout) {
       state.activity = BusyActivity::Idle;
       state.percent = 0;
       state.label.clear();
+      state.label_base.clear();
+      state.activity_started_ms = 0;
       state.spinner_frame = 0;
       paint_ansi_unlocked(&state);
       state.halted.store(true, std::memory_order_release);
