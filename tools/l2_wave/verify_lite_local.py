@@ -399,17 +399,37 @@ def job_miss_verdicts(jobs: list[dict]) -> list[dict]:
 
 
 def format_job_verdicts(jobs: list[dict]) -> str:
+    """Factual verify context (mirrors admin_verify_context_prompt in C++)."""
     lines = [
-        "## Veredictos del notebook (hechos del hijo; no narrativa)",
-        "Un no_encontrado/parcial en un polo NO se borra porque otro job haya encontrado otra cosa.",
+        "## Veredictos del notebook (hechos tipados; no narrativa del piloto)",
+        "Un no_encontrado/parcial en un polo NO se borra porque otro job haya "
+        "encontrado otra cosa. Incluye explore/read/search anclados.",
     ]
+    if not jobs:
+        lines.append("(sin jobs)")
+    evid_lines: list[str] = []
     for j in jobs:
-        if j.get("tipo") and j.get("tipo") != "explore":
-            continue
+        tipo = (j.get("tipo") or "explore") or "explore"
         v = j.get("veredicto") or "-"
-        lines.append(
-            f"- job{j.get('id')}: veredicto={v} | {(j.get('brief') or '')[:140]}"
-        )
+        # Prefer cerrado why / summary; fall back to brief. Cap high (C++ uses ≤4k).
+        sum_txt = (
+            str(j.get("summary") or j.get("why") or j.get("brief") or j.get("arg") or "")
+        )[:4000]
+        lines.append(f"- job{j.get('id')} ({tipo}): veredicto={v} | {sum_txt}")
+        evs = [str(e) for e in (j.get("evidencia") or []) if e][:12]
+        if evs:
+            lines.append("  evidencia: " + " ".join(f"`{e}`" for e in evs))
+            for e in evs:
+                evid_lines.append(f"- job{j.get('id')}: `{e}`")
+        tail = str(j.get("log_tail") or "")
+        if tail and tipo in ("read", "search"):
+            lines.append("  extracto:\n" + tail[:2500])
+    lines.append("")
+    lines.append("## Evidencia tipada (path:línea / símbolos; no prosa)")
+    if evid_lines:
+        lines.extend(evid_lines[:64])
+    else:
+        lines.append("(sin evidencia tipada en jobs)")
     return "\n".join(lines)
 
 

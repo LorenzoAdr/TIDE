@@ -464,6 +464,7 @@ def run_exit_verify(
         max_steps=4,
         exam=exam,
         variant="exam_hard",
+        show_job_verdicts=True,
         counterask=True,
         refute_pass=True,
     )
