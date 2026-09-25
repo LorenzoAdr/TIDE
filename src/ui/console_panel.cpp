@@ -3420,7 +3420,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   auto ai = std::make_shared<AiController>(ai_deps);
   if (layout_state != nullptr) {
     layout_state->ai_controller = ai;
-    // Map + stem embeds start only when the AI tab is opened (on_ai_tab_opened).
+    // Map + stem embeds: solo si ai.admin_enabled=false (legacy L0/L1).
   }
   PerformanceSampler* sampler =
       layout_state != nullptr ? &layout_state->performance_sampler : nullptr;

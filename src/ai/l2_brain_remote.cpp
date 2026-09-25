@@ -117,7 +117,12 @@ L2BrainResult RemoteL2Brain::propose(const L2BrainRequest& req, std::atomic<bool
       out.error = "no se pudo escribir payload temporal";
       return out;
     }
-    outf << body.dump();
+    try {
+      outf << body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    } catch (const std::exception& ex) {
+      out.error = std::string("json dump remote: ") + ex.what();
+      return out;
+    }
   }
 
   const std::string url = cfg_.api_base + "/chat/completions";

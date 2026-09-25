@@ -137,7 +137,8 @@ class Application {
   std::string launch_cwd_for_program(const std::string& program) const;
   void restart_lsp_for_workspace();
   void sync_symbol_workspace_indexer(bool force = false);
-  // Start AI symbol map + stem embeddings (idempotent). Triggered on first AI tab open.
+  // Start legacy L0/L1 AI symbol map + stem embeddings (idempotent). No-op if admin_enabled.
+  // Triggered on first AI tab open when ai.admin_enabled=false.
   void request_ai_indexes();
   void set_status(const std::string& message);
   void set_workspace_status(const std::string& message);

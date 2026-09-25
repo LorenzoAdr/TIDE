@@ -909,6 +909,11 @@ void Application::sync_symbol_workspace_indexer(bool force) {
 }
 
 void Application::request_ai_indexes() {
+	// Con admin (hot path por defecto) no hace falta mapa de símbolos ni embeds de stems:
+	// el piloto usa search/read/explore. Evita busy-strip y trabajo de fondo al abrir el panel.
+	if (workspace_config_.ai.admin_enabled) {
+		return;
+	}
 	const bool first = !ai_indexes_requested_;
 	ai_indexes_requested_ = true;
 	if (first) {

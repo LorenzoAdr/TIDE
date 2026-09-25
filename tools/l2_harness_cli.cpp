@@ -9939,7 +9939,6 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
   st.consulta = prompt;
 
   tuide::AdminOps ops;
-  ops.run_explore = [](const tuide::AdminSpawn& s) { return tuide::admin_explore_stub(s); };
   ops.run_build = [](const tuide::AdminSpawn& s) {
     tuide::AdminJobResult r;
     r.ok = true;
@@ -10004,6 +10003,16 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
   tuide::AdminLoopOpts opts;
   opts.workspace_root = admin_root;
   opts.on_line = [](const std::string& line) { std::cout << line << std::endl; };
+  if (!script_path.empty()) {
+    // Scripted: stub explore (guion no alimenta hijo LLM).
+    ops.run_explore = [](const tuide::AdminSpawn& s) { return tuide::admin_explore_stub(s); };
+  } else {
+    ops.run_explore = [&brain, workspace_root, &opts](const tuide::AdminSpawn& s) {
+      return tuide::admin_run_explore_lite(s, *brain, workspace_root, opts);
+    };
+    const AiSettings settings = load_ai_settings(workspace_root);
+    opts.settings = settings.level2;
+  }
   const auto res = tuide::run_admin_loop(&st, *brain, ops, opts);
   const auto state_json = tuide::admin_state_to_json(st);
   {

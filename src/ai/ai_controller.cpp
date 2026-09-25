@@ -32,6 +32,7 @@
 #include "ui/busy_strip.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/text_input_style.hpp"
 #include "ui/ui_wake.hpp"
 #include "util/include_tree.hpp"
 #include "util/path_normalize.hpp"
@@ -396,6 +397,18 @@ void AiController::set_deps(AiControllerDeps deps) {
   deps_ = std::move(deps);
   tools_ready_ = false;
   refresh_settings();
+  // Arranque en frío: no arrastrar notebook de una ejecución anterior.
+  // Solo se conserva si hay ask_user pendiente (clarify).
+  if (settings_.admin_enabled && deps_.workspace != nullptr && !deps_.workspace->root.empty()) {
+    const std::string& root = deps_.workspace->root;
+    if (admin_is_continuable(root)) {
+      AdminState st;
+      std::string err;
+      if (admin_load_state(root, &st, &err) && !st.clarify) {
+        (void)admin_clear_session(root, nullptr);
+      }
+    }
+  }
 }
 
 void AiController::refresh_settings() {
@@ -602,7 +615,8 @@ std::vector<std::string> AiController::snapshot_lines() const {
 
 void AiController::append(const std::string& line) {
   // Multiline payloads (investigate lists, tool dumps) must become separate rows:
-  // the AI console renders each vector entry with ftxui::text() at height 1.
+  // the AI console renders each vector entry with ftxui::text() at height 1 (no wrap).
+  constexpr int kAiTranscriptWrapCols = 96;
   std::vector<std::string> parts;
   {
     std::string normalized;
@@ -616,7 +630,14 @@ void AiController::append(const std::string& line) {
     std::istringstream iss(normalized);
     std::string part;
     while (std::getline(iss, part)) {
-      parts.push_back(std::move(part));
+      // Soft-wrap long rows so ask_user/cerrar no se vean “cortados” en el panel.
+      if (static_cast<int>(part.size()) > kAiTranscriptWrapCols) {
+        for (const auto& range : soft_wrap_ranges(part, kAiTranscriptWrapCols)) {
+          parts.push_back(part.substr(range.first, range.second - range.first));
+        }
+      } else {
+        parts.push_back(std::move(part));
+      }
     }
     if (parts.empty()) {
       parts.push_back(std::string{});
@@ -967,7 +988,7 @@ void AiController::run_admin_async(const std::string& message) {
       // Prefer remote when settings only have dry_run/harness legacy modes.
       if (!settings_.level2.api_base.empty()) {
         mode = "remote";
-        append("Admin ▸ mode dry_run/harness → usando remote (" + settings_.level2.api_base + ")");
+        append("Usando backend remote (" + settings_.level2.api_base + ")");
       } else {
         append("Admin: configura /backend local|remote (ahora=" + effective_level2_mode() + ")");
         agent_busy_.store(false);
@@ -1014,16 +1035,51 @@ void AiController::run_admin_async(const std::string& message) {
       if (!admin_load_state(root, &st, &err)) {
         append("Admin: no se pudo reabrir sesión — " + err);
         st = AdminState{};
+        st.consulta = message;
+      } else if (st.clarify) {
+        // Respuesta a ask_user.
+        append("→ Continúo tras tu respuesta");
+        AdminClarifyTurn turn;
+        turn.question =
+            !st.pending_question.empty() ? st.pending_question : st.reply;
+        turn.answer = message;
+        st.clarifies.push_back(std::move(turn));
+        st.clarify = false;
+        st.pending_question.clear();
+        st.done = false;
+        st.reply.clear();
+        st.last_error.clear();
+        // Si el usuario aporta la tarea real (p.ej. tras un saludo ask_user),
+        // promueve la respuesta a consulta — si no, el piloto se queda con "hola"
+        // y vuelve a preguntar el contexto (VS Code, etc.).
+        if (message.size() > st.consulta.size() + 8) {
+          append("→ Tomo tu mensaje como la consulta principal");
+          st.consulta = message;
+        }
+      } else if (admin_should_keep_session(st, message)) {
+        // Follow-up del mismo tema: conserva notebook + episodios.
+        append("→ Sigo el hilo con la evidencia ya reunida");
+        st.consulta = message;
+        st.done = false;
+        st.clarify = false;
+        st.pending_question.clear();
+        st.reply.clear();
+        st.last_error.clear();
+        st.proposes = 0;
+        st.spawns = 0;
+        st.verify_passes = 0;
+        st.verify_reject_pending = false;
+        st.awaiting_edit_confirm = false;
+        st.edit_confirmed = false;
+        st.edit_cubre.clear();
+        st.edit_falta.clear();
       } else {
-        append("Admin ▸ reabre sesión (notebook=" + std::to_string(st.notebook.size()) + ")");
-      }
-      st.done = false;
-      st.clarify = false;
-      // Keep notebook/jobs; refresh consulta with follow-up.
-      if (!message.empty()) {
+        // Tema nuevo: no mezclar con la investigación anterior.
+        append("→ Nueva consulta (dejo la investigación anterior)");
+        (void)admin_clear_session(root, nullptr);
+        st = AdminState{};
         st.consulta = message;
       }
-      st.reply.clear();
     } else {
       (void)admin_clear_session(root, nullptr);
       st.consulta = message;
@@ -1044,7 +1100,59 @@ void AiController::run_admin_async(const std::string& message) {
     }
 
     AdminOps ops;
-    ops.run_explore = [](const AdminSpawn& s) { return admin_explore_stub(s); };
+    ops.run_search = [this, root](const AdminSpawn& s) {
+      ensure_tools();
+      if (tools_.has("search")) {
+        const AiToolResult tr = tools_.invoke("search", s.arg);
+        AdminJobResult r;
+        r.ok = tr.ok;
+        bool trunc = false;
+        int raw = 0;
+        r.log_tail = admin_clip_output(tr.text, &trunc, &raw);
+        r.truncated = trunc;
+        r.raw_bytes = raw;
+        // ToolRegistry formatea top_files + path:line:col — no mirar solo las 10
+        // primeras líneas (metadatos needles_tried / explorer: N).
+        admin_collect_search_hits(tr.text, &r);
+        if (r.paths.empty() && tr.ok) {
+          // Fallback: búsqueda in-process bajo workspace root.
+          AdminJobResult rg = admin_run_search_rg(s.arg, root);
+          if (!rg.paths.empty()) {
+            r.paths = std::move(rg.paths);
+            if (r.facts.empty()) {
+              r.facts = std::move(rg.facts);
+            }
+          }
+        }
+        r.summary = tr.ok ? ("search hits≈" + std::to_string(r.paths.size()) +
+                             " bytes=" + std::to_string(raw))
+                          : tr.text;
+        if (!tr.ok) {
+          r.error = tr.text;
+        }
+        return r;
+      }
+      return admin_run_search_rg(s.arg, root);
+    };
+    auto search_op = ops.run_search;
+    ops.run_explore = [&brain, root, this, search_op](const AdminSpawn& s) {
+      AdminLoopOpts eopts;
+      eopts.workspace_root = root;
+      eopts.settings = settings_.level2;
+      eopts.on_line = [this](const std::string& line) { append(line); };
+      eopts.cancel = &agent_cancel_;
+      AdminGrepFn grep;
+      if (search_op) {
+        grep = [search_op](const std::string& pattern) {
+          AdminSpawn sp;
+          sp.tipo = AdminSpawnTipo::Search;
+          sp.arg = pattern;
+          sp.brief = pattern;
+          return search_op(sp);
+        };
+      }
+      return admin_run_explore_lite(s, *brain, root, eopts, grep);
+    };
     ops.run_build = [this, root](const AdminSpawn& s) {
       AdminJobResult r;
       sync_task_runner();
@@ -1122,48 +1230,15 @@ void AiController::run_admin_async(const std::string& message) {
       }
       return admin_run_shell_safe(s.arg, root);
     };
-    ops.run_search = [this, root](const AdminSpawn& s) {
-      ensure_tools();
-      if (tools_.has("search")) {
-        const AiToolResult tr = tools_.invoke("search", s.arg);
-        AdminJobResult r;
-        r.ok = tr.ok;
-        bool trunc = false;
-        int raw = 0;
-        r.log_tail = admin_clip_output(tr.text, &trunc, &raw);
-        r.truncated = trunc;
-        r.raw_bytes = raw;
-        r.summary = tr.ok ? ("search ok bytes=" + std::to_string(raw)) : tr.text;
-        // paths inferred later from log lines in notebook_append facts
-        std::istringstream iss(tr.text);
-        std::string line;
-        int n = 0;
-        while (std::getline(iss, line) && n < 10) {
-          const auto c1 = line.find(':');
-          if (c1 != std::string::npos && line.find('/') != std::string::npos) {
-            const std::string p = line.substr(0, c1);
-            if (!p.empty()) {
-              r.paths.push_back(p);
-            }
-          }
-          ++n;
-        }
-        if (!tr.ok) {
-          r.error = tr.text;
-        }
-        return r;
-      }
-      return admin_run_search_rg(s.arg, root);
-    };
     ops.run_read = [this, root](const AdminSpawn& s) {
+      // path:Symbol|path:N|path:N:M → admin (offset); path plano → tool.
+      const auto colon = s.arg.find(':');
+      if (colon != std::string::npos && s.arg.find('/') != std::string::npos) {
+        return admin_run_read_file(s.arg, root);
+      }
       ensure_tools();
       if (tools_.has("read_file")) {
-        std::string path = s.arg;
-        const auto col = path.rfind(':');
-        if (col != std::string::npos && path.find('/') != std::string::npos) {
-          path = path.substr(0, col);
-        }
-        const AiToolResult tr = tools_.invoke("read_file", path);
+        const AiToolResult tr = tools_.invoke("read_file", s.arg);
         AdminJobResult r;
         r.ok = tr.ok;
         bool trunc = false;
@@ -1171,9 +1246,9 @@ void AiController::run_admin_async(const std::string& message) {
         r.log_tail = admin_clip_output(tr.text, &trunc, &raw);
         r.truncated = trunc;
         r.raw_bytes = raw;
-        r.paths.push_back(path);
-        r.summary = tr.ok ? ("read " + path) : tr.text;
-        r.facts.push_back("leído:" + path);
+        r.paths.push_back(s.arg);
+        r.summary = tr.ok ? ("read " + s.arg) : tr.text;
+        r.facts.push_back("leído:" + s.arg);
         if (!tr.ok) {
           r.error = tr.text;
         }
@@ -1262,9 +1337,12 @@ void AiController::run_admin_async(const std::string& message) {
 
     const AdminLoopResult res = run_admin_loop(&st, *brain, ops, opts);
     if (!res.ok) {
-      append("Admin ✗ " + (res.error.empty() ? std::string("fallo") : res.error));
+      append("→ No pude terminar: " + (res.error.empty() ? std::string("fallo") : res.error));
+    } else if (res.clarify && !res.reply.empty()) {
+      append(res.reply);
+      append("(Escribe tu respuesta en este panel para continuar.)");
     } else if (!res.reply.empty()) {
-      append(res.clarify ? ("Admin pregunta: " + res.reply) : res.reply);
+      append(res.reply);
     }
     (void)admin_save_state(root, st, nullptr);
 
@@ -1732,6 +1810,10 @@ void AiController::on_symbol_map_ready() {
     return;
   }
   refresh_settings();
+  // Admin no usa stems/embeds; no lanzar warm al completar el mapa.
+  if (settings_.admin_enabled) {
+    return;
+  }
   const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
   if (root.empty()) {
     return;
@@ -1751,6 +1833,10 @@ void AiController::on_symbol_map_ready() {
 }
 
 void AiController::maybe_start_coding_stem_warm_async() {
+  refresh_settings();
+  if (settings_.admin_enabled) {
+    return;
+  }
   if (coding_stem_index_.ready()) {
     return;
   }
@@ -2014,13 +2100,13 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
   switch (route.kind) {
     case AiRouteKind::Help: {
       append("Comandos:");
-      append("  NL → Administrador LLM (spawn explore|build|git|shell; cerrar; ask_user)");
+      append("  NL → Administrador (investiga con explorar/buscar/leer; cierra o pregunta)");
       append("  /help  /build|/compile  /launch  /search <q>  /diag  /git [status|pull|branch|log]");
       append("  /read <path>  /ls [filter]  /symbols <q>  /hover [path:line:col]");
       append("  /model […]  /backend local|remote  /trace …  /cancel  /new|/reset");
       append("Legacy L0/L1/L2 (desactivado en hot path; ai.admin_enabled=false para reactivar):");
       append("  /l1 /explain /l2_* /mode agent|ask|plan|git");
-      append("Admin: .tuide/ai/l2_admin/  |  Explore wave (sense): l2_harness_cli wave-explore");
+      append("Sesión: .tuide/ai/l2_admin/  |  en panel: → Piloto / · buscar·leer / veredictos");
       break;
     }
     case AiRouteKind::ResolveTool:

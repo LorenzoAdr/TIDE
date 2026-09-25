@@ -11,11 +11,16 @@
 
 namespace tuide {
 
+inline constexpr int kAdminMaxEpisodes = 6;
+inline constexpr int kAdminEpisodeReplyChars = 800;
 inline constexpr int kAdminMaxProposes = 12;
 inline constexpr int kAdminMaxSpawns = 8;
-inline constexpr int kAdminMaxExplores = 3;
+inline constexpr int kAdminMaxExplores = 4;
 inline constexpr int kAdminMaxVerifyPasses = 2;
 inline constexpr int kAdminVerifyMaxSteps = 4;
+inline constexpr int kAdminExploreMaxSteps = 6;
+inline constexpr int kAdminExploreMaxGrep = 4;
+inline constexpr int kAdminExploreMaxRead = 3;
 inline constexpr int kAdminSummaryChars = 4000;
 inline constexpr int kAdminNotebookSummaryChars = 2000;
 inline constexpr int kAdminClipHeadChars = 1200;
@@ -105,6 +110,17 @@ struct AdminSessionUi {
   std::string git_branch;
 };
 
+struct AdminClarifyTurn {
+  std::string question;
+  std::string answer;
+};
+
+// Episodio cerrado (do=cerrar): conserva hilo entre mensajes del usuario.
+struct AdminEpisode {
+  std::string consulta;
+  std::string reply;
+};
+
 struct AdminState {
   std::string consulta;
   std::vector<AdminJob> jobs;
@@ -113,7 +129,10 @@ struct AdminState {
   int proposes = 0;
   int spawns = 0;
   bool done = false;
-  bool clarify = false;
+  bool clarify = false;  // pausa: esperando respuesta del usuario en el panel AI
+  std::string pending_question;  // texto de ask_user mientras clarify
+  std::vector<AdminClarifyTurn> clarifies;  // Q&A ya respondidas (historial)
+  std::vector<AdminEpisode> episodes;  // consultas/replies cerradas (mismo hilo)
   bool awaiting_edit_confirm = false;  // tras do=editar
   bool edit_confirmed = false;         // tras confirmar_editar → spawn edit legal
   bool verify_reject_pending = false;  // tras verificador refuta/dudoso → piloto decide
@@ -191,6 +210,8 @@ std::string admin_dir(const std::string& workspace_root);
 std::string admin_state_path(const std::string& workspace_root);
 std::string admin_notebook_path(const std::string& workspace_root);
 bool admin_is_continuable(const std::string& workspace_root);
+// true = conservar notebook/episodios; false = la consulta es tema nuevo → sesión limpia.
+bool admin_should_keep_session(const AdminState& st, const std::string& message);
 bool admin_clear_session(const std::string& workspace_root, std::string* err);
 bool admin_save_state(const std::string& workspace_root, const AdminState& st, std::string* err);
 bool admin_load_state(const std::string& workspace_root, AdminState* st, std::string* err);
@@ -209,14 +230,31 @@ bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, in
 std::vector<std::string> admin_legal_dos(const AdminState& st, int max_proposes, int max_spawns);
 
 AdminJobResult admin_explore_stub(const AdminSpawn& spawn);
+// Grep del explore: por defecto admin_run_search_rg; el controller puede pasar ToolRegistry.
+using AdminGrepFn = std::function<AdminJobResult(const std::string& pattern)>;
+// Hijo lite: grep+read vía brain (mismo contrato que tools/l2_wave/explore_lite_local).
+AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
+                                      const std::string& workspace_root,
+                                      const AdminLoopOpts& opts,
+                                      AdminGrepFn grep_fn = {});
 bool admin_shell_cmd_allowed(const std::string& cmd);
 std::string admin_clip_output(const std::string& text, bool* truncated, int* raw_bytes);
 // Infer typed paths/facts from shell cmd + raw stdout (ls/find/head/tail/wc/…).
 void admin_shell_enrich_result(const std::string& cmd, const std::string& captured,
                                const std::string& cwd, AdminJobResult* r);
 AdminJobResult admin_run_shell_safe(const std::string& cmd, const std::string& cwd);
-// Built-in FS helpers (CLI / fallback when ops unset).
+// Built-in FS helpers (CLI / fallback when ops unset). Confinadas a workspace_root.
+bool admin_path_inside_workspace(const std::string& workspace_root, const std::string& path);
+// Resuelve path (relativo o absoluto) bajo root → abs canónico + rel genérico.
+// false si escapa del root o root vacío con path absoluto externo.
+bool admin_resolve_in_workspace(const std::string& workspace_root, const std::string& path,
+                                std::string* abs_out, std::string* rel_out, std::string* err);
+bool admin_shell_stays_in_workspace(const std::string& cmd, const std::string& workspace_root,
+                                    std::string* err);
+
 AdminJobResult admin_run_search_rg(const std::string& query, const std::string& cwd);
+// Parsea salida de search (rg crudo o ToolRegistry: top_files + path:line:col).
+void admin_collect_search_hits(const std::string& text, AdminJobResult* r);
 AdminJobResult admin_run_read_file(const std::string& target, const std::string& cwd);
 AdminJobResult admin_run_diagnostics_stub(const AdminSpawn& spawn);
 AdminJobResult admin_run_test_stub(const AdminSpawn& spawn);
@@ -238,7 +276,9 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
 bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::string* err);
 
 std::string admin_system_prompt();
-std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns);
+// workspace_root: proyecto abierto (perímetro FS). Vacío solo en tests sin cwd.
+std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
+                              const std::string& workspace_root = {});
 
 AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& ops,
                                const AdminLoopOpts& opts);
