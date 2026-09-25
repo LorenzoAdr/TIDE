@@ -26,6 +26,7 @@ from verify_lite_local import (  # noqa: E402
     decompose_claim,
     format_pilot_verify_report,
     run_verifier,
+    skip_verify_verdict,
 )
 
 # Probe diet: explore-only for localization (no search/read shortcuts).
@@ -429,12 +430,15 @@ def run_exit_verify(
     if not jobs:
         return None, "", exam
     if verify_count >= max_verify:
+        # Mirror C++ admin_run_verify: never absuelve as sostiene on cap.
+        # Empty block msg = omit gate (cierre permitido sin afirmar el arco).
         return {
-            "veredicto": "sostiene",
+            "veredicto": skip_verify_verdict(),
             "ataques": [],
             "arco": {"de": "", "a": ""},
-            "why": "tope global de verificadores; se omite",
+            "why": "tope de verificadores; se omite el gate (cierre permitido)",
             "skipped": True,
+            "omit_gate": True,
         }, "", exam
 
     vlog: list[str] = []

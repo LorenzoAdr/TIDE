@@ -82,11 +82,13 @@ def score_case(case: dict, summary: dict | None, err: str | None) -> dict:
             "trigger": r.get("trigger"),
             "veredicto": r.get("veredicto"),
             "why": (r.get("why") or "")[:200],
+            "skipped": bool(r.get("skipped")),
+            "omit_gate": bool(r.get("omit_gate")),
         }
         for r in (summary.get("verify_reports") or [])
     ]
     out["verify_blocked_any"] = any(
-        (r.get("veredicto") or "") in ("refuta", "dudoso")
+        (r.get("veredicto") or "") in ("refuta", "dudoso") and not r.get("omit_gate")
         for r in (summary.get("verify_reports") or [])
     )
     out["verify_last"] = (
@@ -94,6 +96,14 @@ def score_case(case: dict, summary: dict | None, err: str | None) -> dict:
         if summary.get("verify_reports")
         else None
     )
+    if any(r.get("omit_gate") for r in (summary.get("verify_reports") or [])):
+        out["flags"].append("verify_cap_omit")
+    # Cap must never look like a successful sostienen.
+    for r in summary.get("verify_reports") or []:
+        if r.get("skipped") or r.get("omit_gate"):
+            if (r.get("veredicto") or "").lower() == "sostiene":
+                out["flags"].append("verify_cap_absuelve")
+                out["ok"] = False
 
     expect_exit = gold.get("expect_exit")
     if expect_exit and closed.get("do") not in expect_exit:
