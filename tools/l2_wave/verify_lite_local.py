@@ -674,17 +674,21 @@ def run_verifier(
                 "why": ref.get("why"),
                 "ok": ref.get("ok"),
             }
-            rv = str(ref.get("veredicto") or "dudoso")
-            if rv in ("refuta", "dudoso"):
-                out["veredicto"] = rv
-                out["veredicto_refutador"] = rv
-                out["why"] = (
-                    f"[refutador] {(ref.get('why') or '')[:500]}"
-                    if ref.get("why")
-                    else out["why"]
-                )
-            elif rv == "sostiene":
-                out["veredicto_refutador"] = "sostiene"
+            # Parse/LLM fail: keep verificador (como C++); no tumbar a dudoso por basura JSON.
+            if not ref.get("ok"):
+                out["refute_ignored"] = True
+            else:
+                rv = str(ref.get("veredicto") or "dudoso")
+                if rv in ("refuta", "dudoso"):
+                    out["veredicto"] = rv
+                    out["veredicto_refutador"] = rv
+                    out["why"] = (
+                        f"[refutador] {(ref.get('why') or '')[:500]}"
+                        if ref.get("why")
+                        else out["why"]
+                    )
+                elif rv == "sostiene":
+                    out["veredicto_refutador"] = "sostiene"
         return out
     for step in range(budget):
         last_wave = step >= budget - 1
