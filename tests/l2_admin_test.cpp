@@ -284,7 +284,8 @@ int main() {
     AdminScriptedBrain brain({
         R"({"action":"admin_v1","do":"spawn","why":"buscar en la red","spawn":{"tipo":"web","brief":"nlohmann","arg":"nlohmann json latest release github"}})",
         R"({"action":"admin_v1","do":"spawn","why":"leer cuerpo url","spawn":{"tipo":"web_fetch","brief":"fetch","arg":"https://duckduckgo.com/?q=nlohmann+json+latest+release+github"}})",
-        R"({"action":"admin_v1","do":"cerrar","why":"fetch en notebook","reply":"Tras web+web_fetch, el notebook tiene fetch:text con Stub fetch / nlohmann json releases."})",
+        R"({"action":"admin_v1","do":"cerrar","why":"fetch en notebook"})",
+        R"({"action":"admin_v1","do":"confirmar_cerrar","why":"fetch en notebook","cubre":"búsqueda web + fetch de la URL","falta":"nada","reply":"Tras web+web_fetch, el notebook tiene fetch:text con Stub fetch / nlohmann json releases."})",
     });
     AdminOps ops;
     ops.run_web = [](const AdminSpawn& s) { return admin_run_web_search(s.arg); };
@@ -540,7 +541,8 @@ int main() {
     AdminScriptedBrain brain({
         R"({"action":"admin_v1","do":"spawn","why":"search","spawn":{"tipo":"search","brief":"s","arg":"AdminEvidenceItem"}})",
         R"({"action":"admin_v1","do":"spawn","why":"read","spawn":{"tipo":"read","brief":"r","arg":"src/ai/l2_admin.hpp"}})",
-        R"({"action":"admin_v1","do":"cerrar","why":"notebook basta","reply":"AdminEvidenceItem está en l2_admin.hpp según search+read."})",
+        R"({"action":"admin_v1","do":"cerrar","why":"notebook basta"})",
+        R"({"action":"admin_v1","do":"confirmar_cerrar","why":"notebook basta","cubre":"ubicación de AdminEvidenceItem","falta":"nada","reply":"AdminEvidenceItem está en l2_admin.hpp según search+read."})",
     });
     AdminOps ops;
     ops.run_search = [](const AdminSpawn&) {
@@ -589,7 +591,8 @@ int main() {
     st.reply.clear();
     expect(st.consulta == "arregla lo del margen", "consulta original intacta");
     AdminScriptedBrain brain2({
-        R"({"action":"admin_v1","do":"cerrar","why":"ya concreto","reply":"Voy a mirar el gutter izquierdo."})",
+        R"({"action":"admin_v1","do":"cerrar","why":"ya concreto"})",
+        R"({"action":"admin_v1","do":"confirmar_cerrar","why":"ya concreto","cubre":"identificado el margen: gutter izquierdo","falta":"nada","reply":"Voy a mirar el gutter izquierdo."})",
     });
     const auto res2 = run_admin_loop(&st, brain2, ops, opts);
     expect(res2.ok && !res2.clarify && st.done, "resume after answer closes");
@@ -611,7 +614,8 @@ int main() {
     ev.facts = {"gutter izquierdo"};
     st.notebook.push_back(ev);
     AdminScriptedBrain brain({
-        R"({"action":"admin_v1","do":"cerrar","why":"localizado","reply":"El gutter está en editor.cpp."})",
+        R"({"action":"admin_v1","do":"cerrar","why":"localizado"})",
+        R"({"action":"admin_v1","do":"confirmar_cerrar","why":"localizado","cubre":"ubicación del gutter","falta":"nada","reply":"El gutter está en editor.cpp."})",
     });
     AdminOps ops;
     AdminLoopOpts opts;

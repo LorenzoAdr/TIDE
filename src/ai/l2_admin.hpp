@@ -48,10 +48,11 @@ inline constexpr int kAdminReadMaxChars = 3000;
 enum class AdminDo {
   Invalid,
   Spawn,
-  Cerrar,
+  Cerrar,            // pide cerrar → runtime pide confirmación (igual que Editar)
   AskUser,
   Editar,            // pide pasar a edición → runtime pide confirmación
   ConfirmarEditar,   // segunda pasada: cubre + falta
+  ConfirmarCerrar,   // segunda pasada de Cerrar: cubre + falta (P0/P8)
   SeguirExplorando   // tras confirmación: hueco → explore
 };
 
@@ -148,6 +149,7 @@ struct AdminState {
   std::vector<AdminClarifyTurn> clarifies;  // Q&A ya respondidas (historial)
   std::vector<AdminEpisode> episodes;  // consultas/replies cerradas (mismo hilo)
   bool awaiting_edit_confirm = false;  // tras do=editar
+  bool awaiting_close_confirm = false; // tras do=cerrar (P0/P8: mismo cerrojo que editar)
   bool edit_confirmed = false;         // tras confirmar_editar → spawn edit legal
   bool verify_reject_pending = false;  // tras verificador refuta/dudoso → piloto decide
   int verify_passes = 0;               // verificador adversarial (editar/cerrar)
