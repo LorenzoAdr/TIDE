@@ -582,6 +582,55 @@ int main() {
            "P4: brief lleva el digest del notebook previo");
   }
   {
+    // P13: el explorador cierra "no_encontrado" sin haber leído un path que
+    // la propia consulta menciona y que SÍ existe -> el runtime fuerza una
+    // ola de corrección en vez de aceptar el cierre (caso real: 047_deseo,
+    // "El archivo consultado console_panel.cpp no existe" siendo falso).
+    const fs::path root = fs::temp_directory_path() / "tuide_p13_explore";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "src", ec);
+    {
+      std::ofstream f((root / "src" / "foo.cpp").string());
+      f << "int super_widget_xyz() { return 1; }\n";
+    }
+    AdminJobResult empty_hit;
+    empty_hit.ok = true;
+    empty_hit.summary = "(0 hits)";
+    tuide::AdminGrepFn stub_grep = [&](const std::string&) { return empty_hit; };
+
+    AdminSpawn p13sp;
+    p13sp.tipo = AdminSpawnTipo::Explore;
+    p13sp.brief = "¿Existe la función foo en src/foo.cpp?";
+    AdminLoopOpts p13opts;
+    p13opts.workspace_root = root.string();
+
+    AdminScriptedBrain p13_brain({
+        R"({"do":"grep","pattern":"foo_no_existe_xyz","why":"buscar"})",
+        R"({"do":"cerrar","veredicto":"no_encontrado","simbolos":[],"evidencia":[],"falta":["no encontrado"],"why":"no se encontró tras grep"})",
+        R"({"do":"read","paths":["src/foo.cpp"],"why":"comprobando tras aviso"})",
+        R"({"do":"cerrar","veredicto":"encontrado","simbolos":["src/foo.cpp:super_widget_xyz"],"evidencia":["src/foo.cpp:1"],"falta":[],"why":"confirmado tras leer"})",
+    });
+    const auto p13_res =
+        admin_run_explore_lite(p13sp, p13_brain, root.string(), p13opts, stub_grep);
+    expect(p13_res.ok && p13_res.veredicto == "encontrado",
+           "P13: corrige cierre falso 'no existe' antes de aceptarlo");
+
+    // Control: consulta sin ningún path real mencionado -> no debe interceptar.
+    AdminSpawn p13sp_ctrl;
+    p13sp_ctrl.tipo = AdminSpawnTipo::Explore;
+    p13sp_ctrl.brief = "¿Existe la función bar_inexistente en el proyecto?";
+    AdminScriptedBrain p13_brain_ctrl({
+        R"({"do":"grep","pattern":"bar_inexistente","why":"buscar"})",
+        R"({"do":"cerrar","veredicto":"no_encontrado","simbolos":[],"evidencia":[],"falta":["no encontrado"],"why":"no existe bar_inexistente"})",
+    });
+    const auto p13_ctrl =
+        admin_run_explore_lite(p13sp_ctrl, p13_brain_ctrl, root.string(), p13opts, stub_grep);
+    expect(p13_ctrl.ok && p13_ctrl.veredicto == "no_encontrado",
+           "P13 control: sin path mencionado, cierre normal sin corrección");
+    fs::remove_all(root, ec);
+  }
+  {
     AdminState empty;
     empty.consulta = "x";
     AdminOla ola = admin_parse(

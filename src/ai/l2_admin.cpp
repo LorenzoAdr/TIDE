@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <regex>
 #include <sstream>
 #include <thread>
 
@@ -1355,6 +1356,35 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
   AdminJobResult r;
   const std::string consulta =
       !spawn.brief.empty() ? spawn.brief : (!spawn.arg.empty() ? spawn.arg : std::string("explore"));
+  // P13 (docs/plans/l2-admin-verify-round-reduction.md): paths mencionados
+  // literalmente en la consulta, con existencia precomputada (determinista,
+  // sin LLM). Detecta el caso 047_deseo: el explorador afirmó "no existe
+  // console_panel.cpp" (sí existe) sin haberlo leído nunca — un grep sin
+  // hits no es lo mismo que comprobar el archivo.
+  std::vector<std::pair<std::string, bool>> mentioned_paths;
+  {
+    static const std::regex kPathRe(
+        R"([A-Za-z0-9_./-]+\.(cpp|hpp|hh|h|cc|c|py|md|cmake|txt|json|yaml|yml|sh))");
+    auto begin = std::sregex_iterator(consulta.begin(), consulta.end(), kPathRe);
+    for (auto it = begin; it != std::sregex_iterator(); ++it) {
+      const std::string p = it->str();
+      if (std::find_if(mentioned_paths.begin(), mentioned_paths.end(),
+                        [&](const auto& kv) { return kv.first == p; }) !=
+          mentioned_paths.end()) {
+        continue;
+      }
+      std::string abs;
+      std::string rel;
+      std::string err;
+      bool exists = false;
+      if (admin_resolve_in_workspace(workspace_root, p, &abs, &rel, &err)) {
+        std::error_code ec;
+        exists = fs::exists(abs, ec) && fs::is_regular_file(abs, ec);
+      }
+      mentioned_paths.push_back({p, exists});
+    }
+  }
+  bool p13_correction_used = false;
   std::ostringstream sys_oss;
   sys_oss
       << "Eres el EXPLORADOR del WORKSPACE abierto (C++ u otros). Tools: grep|read|cerrar.\n"
@@ -1608,6 +1638,36 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       std::string verd = ascii_lower(trim_copy(json_str(j, "veredicto")));
       if (verd != "encontrado" && verd != "no_encontrado" && verd != "parcial") {
         verd = "no_concluyente";
+      }
+      // P13: si cierra con un miss sin haber leído un path que la propia
+      // consulta menciona y que SÍ existe, fuerza una ola de corrección en
+      // vez de aceptar el cierre a ciegas (no gasta LLM extra: el fs::exists
+      // ya se precomputó; solo cuesta 1 ola más del presupuesto del explore).
+      if (!last && !p13_correction_used &&
+          (verd == "no_encontrado" || verd == "parcial")) {
+        for (const auto& [mp, exists] : mentioned_paths) {
+          if (!exists) {
+            continue;
+          }
+          const std::string mp_stem = path_stem(mp);
+          const bool already_read =
+              std::find(read_paths.begin(), read_paths.end(), mp_stem) != read_paths.end();
+          if (already_read) {
+            continue;
+          }
+          p13_correction_used = true;
+          ui_note(opts, "  · aviso determinista: `" + mp + "` sí existe, aún no leído");
+          conversation += "\n\n## Aviso determinista (no es el modelo, es un chequeo del "
+                          "runtime)\nEl path `" +
+                          mp +
+                          "` mencionado en la consulta SÍ existe en el workspace, pero no lo "
+                          "has leído. Antes de cerrar con " +
+                          verd + ", léelo con `read` y confirma.\n";
+          break;
+        }
+        if (p13_correction_used) {
+          continue;
+        }
       }
       r.ok = true;
       r.veredicto = verd;

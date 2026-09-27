@@ -558,6 +558,32 @@ def close_pressure(
     return " ".join(parts)
 
 
+_MENTIONED_PATH_RE = re.compile(
+    r"[A-Za-z0-9_./-]+\.(cpp|hpp|hh|h|cc|c|py|md|cmake|txt|json|yaml|yml|sh)"
+)
+
+
+def mentioned_paths_with_existence(consulta: str, root: Path) -> list[tuple[str, bool]]:
+    """P13 (docs/plans/l2-admin-verify-round-reduction.md): paths mencionados
+    literalmente en la consulta, con existencia precomputada (determinista,
+    sin LLM). Mirror de la extracción equivalente en l2_admin.cpp."""
+    out: list[tuple[str, bool]] = []
+    seen: set[str] = set()
+    for m in _MENTIONED_PATH_RE.finditer(consulta or ""):
+        p = m.group(0)
+        if p in seen:
+            continue
+        seen.add(p)
+        exists = False
+        try:
+            full = (root / p).resolve()
+            exists = str(full).startswith(str(root.resolve())) and full.is_file()
+        except OSError:
+            exists = False
+        out.append((p, exists))
+    return out
+
+
 def run_explorer(
     api: str,
     model: str,
@@ -570,6 +596,9 @@ def run_explorer(
     tools = tools or ["grep", "read"]
     notebook: list[str] = []
     seen_paths: set[str] = set()
+    read_paths_actual: set[str] = set()
+    mentioned_paths = mentioned_paths_with_existence(consulta, root)
+    p13_correction_used = False
     last_grep_key = ""
     messages = [
         {"role": "system", "content": explorer_system(tools)},
@@ -667,6 +696,7 @@ def run_explorer(
                 continue
             reads += 1
             path = ola.get("path") or ""
+            read_paths_actual.add(str(path))
             result = tool_read(
                 str(path),
                 int(ola.get("offset") or 1),
@@ -747,6 +777,7 @@ def run_explorer(
                 continue
             reads += 1
             path = ola.get("path") or ""
+            read_paths_actual.add(str(path))
             result = tool_read(
                 str(path), int(ola.get("offset") or 1), 40, root, allowed=seen_paths
             )
@@ -923,6 +954,37 @@ def run_explorer(
             # Forma: encontrado con falta no vacía → parcial (el hijo ya señaló hueco).
             if verd == "encontrado" and falta:
                 verd = "parcial"
+            # P13: cierra con un miss sin haber leído un path que la propia
+            # consulta menciona y que SÍ existe -> fuerza una ola de
+            # corrección en vez de aceptar el cierre a ciegas.
+            if step < max_steps - 1 and not p13_correction_used and verd in (
+                "no_encontrado",
+                "parcial",
+            ):
+                hit_path = None
+                for mp, exists in mentioned_paths:
+                    if not exists:
+                        continue
+                    if any(mp in rp or rp in mp for rp in read_paths_actual):
+                        continue
+                    hit_path = mp
+                    break
+                if hit_path:
+                    p13_correction_used = True
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": follow_up(
+                                "## Aviso determinista (no es el modelo, es un chequeo del "
+                                f"runtime)\nEl path `{hit_path}` mencionado en la consulta SÍ "
+                                "existe en el workspace, pero no lo has leído. Antes de cerrar "
+                                f"con {verd}, léelo con read/peek y confirma.",
+                                step,
+                            ),
+                        }
+                    )
+                    continue
             return {
                 "consulta": consulta,
                 "visto": visto[:16],
