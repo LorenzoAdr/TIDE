@@ -21,6 +21,10 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from explore_lite_local import run_explorer  # noqa: E402
+from admin_session_metrics import (  # noqa: E402
+    SessionTracer,
+    build_session_from_probe,
+)
 from verify_lite_local import (  # noqa: E402
     blocks_exit,
     decompose_claim,
@@ -71,6 +75,92 @@ Has pedido cerrar. Declara cobertura del pedido del usuario vs el NOTEBOOK tipad
 {"action":"admin_v1","do":"editar","why":"…"}
 {"action":"admin_v1","do":"ask_user","why":"…","reply":"…"}
 """
+
+_FALTA_NADA = frozenset(
+    {"nada", "ninguna", "ninguno", "none", "n/a", "na", "-", "—", "ok", "todo"}
+)
+
+
+def falta_is_nada(falta: str) -> bool:
+    f = (falta or "").strip().lower()
+    if not f:
+        return True
+    return f in _FALTA_NADA or f.startswith("nada ")
+
+
+def last_real_verify(reports: list[dict] | None) -> dict | None:
+    """Último informe de verificador real (no omit_gate / skipped)."""
+    for r in reversed(reports or []):
+        if not isinstance(r, dict):
+            continue
+        if r.get("omit_gate") or r.get("skipped"):
+            continue
+        return r
+    return None
+
+
+def confirm_close_user(
+    *,
+    omit_gate: bool = False,
+    last_block_verd: str = "",
+    last_why: str = "",
+    hueco_hint: str = "",
+) -> str:
+    """Prompt de confirmación de cierre; endurece si el juicio real fue adverso."""
+    verd = (last_block_verd or "").strip().lower()
+    adverse = omit_gate or verd in ("refuta", "dudoso")
+    if not adverse:
+        return CONFIRM_CLOSE_USER
+    lines = [
+        "## Confirmación de cierre",
+        "## Verificador (NO absuelve)",
+    ]
+    if omit_gate:
+        lines.append(
+            "El gate se OMITIÓ por tope de comprobaciones. Eso NO es un veredicto OK."
+        )
+    if verd:
+        lines.append(f"último juicio real: {verd}")
+    if last_why:
+        lines.append(f"why: {last_why[:500]}")
+    if hueco_hint:
+        lines.append(f"hueco pendiente: {hueco_hint[:300]}")
+    lines.extend(
+        [
+            "PROHIBIDO falta=\"nada\" / \"ninguna\" / vacío mientras quede ese hueco.",
+            "falta DEBE nombrar qué del pedido del usuario aún no está demostrado.",
+            "",
+            '{"action":"admin_v1","do":"confirmar_cerrar","why":"…","cubre":"…",'
+            '"falta":"qué falta del pedido (NO nada)","reply":"mensaje al usuario"}',
+            '{"action":"admin_v1","do":"seguir_explorando","why":"…",'
+            '"spawn":{"tipo":"explore","brief":"hueco concreto"}}',
+            '{"action":"admin_v1","do":"editar","why":"…"}',
+            '{"action":"admin_v1","do":"ask_user","why":"…","reply":"…"}',
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def hueco_hint_from_report(report: dict | None, exam: dict | None = None) -> str:
+    if not report:
+        return ""
+    cob = report.get("cobertura") or []
+    elems = {
+        str(e.get("id")): e
+        for e in ((exam or {}).get("elementos") or [])
+        if isinstance(e, dict)
+    }
+    for c in cob:
+        if not isinstance(c, dict):
+            continue
+        est = str(c.get("estado") or "").lower()
+        if est in ("hueco", "no_inspeccionado", "falta", "cuestionado"):
+            cid = str(c.get("id") or "")
+            que = str((elems.get(cid) or {}).get("que") or cid)
+            return que
+    why = str(report.get("why") or "").strip()
+    return why[:200] if why else ""
 
 
 def normalize_act(act: dict) -> dict:
@@ -167,11 +257,13 @@ def parse_admin(
     verify_reject_pending: bool = False,
     explores: int = 0,
     max_explore: int = 12,
+    forbid_falta_nada: bool = False,
 ) -> tuple[dict | None, str]:
     """Mirror admin_v1 enough for this probe (+ edit/close confirmation).
 
     awaiting_confirm: None | "edit" | "close"
     verify_reject_pending: after adversarial block — allow seguir_explorando without confirm.
+    forbid_falta_nada: after adverse verify / omit_gate — falta must name a hole.
     """
     act = normalize_act(act)
     action = (act.get("action") or "").strip()
@@ -237,6 +329,12 @@ def parse_admin(
             return None, "confirmar_cerrar exige cubre"
         if len(falta) < 1:
             return None, "confirmar_cerrar exige falta (o nada)"
+        if forbid_falta_nada and falta_is_nada(falta):
+            return (
+                None,
+                "confirmar_cerrar: el último juicio del verificador fue adverso/omitido; "
+                'falta no puede ser "nada" — nombra qué del pedido aún falta',
+            )
         if len(reply) < 8:
             return None, "confirmar_cerrar exige reply (mensaje al usuario)"
         return {"do": do, "why": why, "reply": reply, "cubre": cubre, "falta": falta}, ""
@@ -245,6 +343,12 @@ def parse_admin(
             return None, "confirmar_editar exige cubre"
         if len(falta) < 1:
             return None, "confirmar_editar exige falta (o nada)"
+        if forbid_falta_nada and falta_is_nada(falta):
+            return (
+                None,
+                "confirmar_editar: el último juicio del verificador fue adverso/omitido; "
+                'falta no puede ser "nada" — nombra qué del pedido aún falta',
+            )
         return {"do": do, "why": why, "reply": reply, "cubre": cubre, "falta": falta}, ""
     if do == "seguir_explorando":
         spawn = act.get("spawn") if isinstance(act.get("spawn"), dict) else {}
@@ -436,7 +540,7 @@ def run_exit_verify(
             "veredicto": skip_verify_verdict(),
             "ataques": [],
             "arco": {"de": "", "a": ""},
-            "why": "tope de verificadores; se omite el gate (cierre permitido)",
+            "why": "tope de verificadores; se omite el gate (NO absuelve el juicio anterior)",
             "skipped": True,
             "omit_gate": True,
         }, "", exam
@@ -539,13 +643,33 @@ def main() -> None:
     verify_reports: list[dict] = []
     verify_exam: dict | None = None
     crash: str | None = None
+    forbid_falta_nada = False
+    close_confirm_ctx: dict = {}
+    first_exit_intent: str | None = None
+    tracer = SessionTracer(out, case_id=out.name, prompt=args.prompt)
 
     def write_summary() -> None:
+        session = build_session_from_probe(
+            tracer=tracer,
+            prompt=args.prompt,
+            model=args.model,
+            api=args.api,
+            closed=closed,
+            jobs=jobs,
+            verify_reports=verify_reports,
+            verify_exam=verify_exam,
+            crash=crash,
+            turns=turns,
+            max_turns=args.max_turns,
+            explores=explores,
+            first_exit_intent=first_exit_intent,
+            forbid_falta_nada=forbid_falta_nada,
+        )
         summary = {
             "prompt": args.prompt,
             "model": args.model,
             "api": args.api,
-            "wall_sec": round(time.time() - t0, 1),
+            "wall_sec": session["wall_sec"],
             "turns": turns,
             "jobs": [
                 {
@@ -565,9 +689,13 @@ def main() -> None:
             "verify_reports": verify_reports,
             "verify_exam": verify_exam,
             "crash": crash,
+            "session": session,
         }
         (out / "SUMMARY.json").write_text(
             json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (out / "SESSION.json").write_text(
+            json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         (out / "lite.log").write_text("\n".join(log), encoding="utf-8")
 
@@ -596,13 +724,24 @@ def main() -> None:
                     except Exception as e2:  # noqa: BLE001
                         crash = f"chat failed: {e2}"
                         print(f"-- CRASH {crash}", flush=True)
+                        tracer.emit("crash", {"err": crash})
                         break
                 else:
                     crash = f"chat failed: {e}"
                     print(f"-- CRASH {crash}", flush=True)
+                    tracer.emit("crash", {"err": crash})
                     break
 
             log.append(f"pilot_raw[{turn}]: {raw[:1200]}")
+            tracer.bump("pilot")
+            tracer.emit(
+                "pilot_raw",
+                {
+                    "turn": turn,
+                    "awaiting_confirm": awaiting_confirm,
+                    "raw_head": raw[:400],
+                },
+            )
             (out / "turns.jsonl").open("a", encoding="utf-8").write(
                 json.dumps(
                     {
@@ -619,6 +758,8 @@ def main() -> None:
             try:
                 act = extract_json(raw)
             except Exception as e:  # noqa: BLE001
+                tracer.bump("parse_reject")
+                tracer.emit("parse_reject", {"turn": turn, "err": str(e)[:200]})
                 msgs.append({"role": "assistant", "content": raw})
                 msgs.append(
                     {"role": "user", "content": f"JSON inválido ({e}). Solo un objeto admin_v1."}
@@ -631,6 +772,7 @@ def main() -> None:
                 verify_reject_pending=verify_reject_pending,
                 explores=explores,
                 max_explore=args.max_explore,
+                forbid_falta_nada=forbid_falta_nada and awaiting_confirm in ("close", "edit"),
             )
             turns.append(
                 {
@@ -647,10 +789,22 @@ def main() -> None:
             )
 
             if perr:
+                is_confirm_rej = awaiting_confirm in ("close", "edit") and (
+                    "falta" in perr or "cubre" in perr or "confirmar" in perr
+                )
+                if is_confirm_rej:
+                    tracer.bump("confirm_reject")
+                    tracer.emit(
+                        "confirm_reject",
+                        {"turn": turn, "err": perr[:200], "falta": act.get("falta")},
+                    )
+                else:
+                    tracer.bump("parse_reject")
+                    tracer.emit("legal_reject", {"turn": turn, "err": perr[:200]})
                 if awaiting_confirm == "edit":
                     confirm_help = CONFIRM_EDIT_USER
                 elif awaiting_confirm == "close":
-                    confirm_help = CONFIRM_CLOSE_USER
+                    confirm_help = confirm_close_user(**close_confirm_ctx)
                 elif explores >= explore_cap(
                     max_explore=args.max_explore,
                     verify_reject_pending=verify_reject_pending,
@@ -671,6 +825,15 @@ def main() -> None:
 
             assert parsed is not None
             do = parsed["do"]
+            if first_exit_intent is None and do in (
+                "cerrar",
+                "editar",
+                "ask_user",
+                "confirmar_cerrar",
+                "confirmar_editar",
+            ):
+                first_exit_intent = do
+                tracer.emit("first_exit_intent", {"do": do, "turn": turn})
 
             if do == "editar":
                 report, block, verify_exam = run_exit_verify(
@@ -687,9 +850,21 @@ def main() -> None:
                 if report is not None:
                     verify_count += 1
                     verify_reports.append({"trigger": "editar", **report})
+                    tracer.bump("verify")
+                    if report.get("refute_pass") or report.get("refute"):
+                        tracer.bump("refute")
                 if block:
                     awaiting_confirm = None
                     verify_reject_pending = True
+                    forbid_falta_nada = True
+                    tracer.emit(
+                        "verify_block",
+                        {
+                            "trigger": "editar",
+                            "veredicto": (report or {}).get("veredicto"),
+                            "why": ((report or {}).get("why") or "")[:200],
+                        },
+                    )
                     print(
                         f"-- editar → verificador BLOQUEA ({(report or {}).get('veredicto')})",
                         flush=True,
@@ -710,7 +885,27 @@ def main() -> None:
                     continue
                 verify_reject_pending = False
                 awaiting_confirm = "edit"
-                print("-- editar → verificador OK → confirmación", flush=True)
+                real = last_real_verify(verify_reports)
+                omit = bool((report or {}).get("omit_gate"))
+                if omit or (
+                    real and str(real.get("veredicto") or "").lower() in ("refuta", "dudoso")
+                ):
+                    forbid_falta_nada = True
+                if omit:
+                    print(
+                        "-- editar → verificador OMITIDO (no absuelve) → confirmación",
+                        flush=True,
+                    )
+                    tracer.emit(
+                        "verify_omit",
+                        {"trigger": "editar", "last_verd": str((real or {}).get("veredicto") or "")},
+                    )
+                else:
+                    print("-- editar → verificador sostiene → confirmación", flush=True)
+                    tracer.emit(
+                        "verify_pass",
+                        {"trigger": "editar", "veredicto": (report or {}).get("veredicto")},
+                    )
                 msgs.append({"role": "assistant", "content": raw})
                 msgs.append(
                     {
@@ -735,9 +930,21 @@ def main() -> None:
                 if report is not None:
                     verify_count += 1
                     verify_reports.append({"trigger": "cerrar", **report})
+                    tracer.bump("verify")
+                    if report.get("refute_pass") or report.get("refute"):
+                        tracer.bump("refute")
                 if block:
                     awaiting_confirm = None
                     verify_reject_pending = True
+                    forbid_falta_nada = True
+                    tracer.emit(
+                        "verify_block",
+                        {
+                            "trigger": "cerrar",
+                            "veredicto": (report or {}).get("veredicto"),
+                            "why": ((report or {}).get("why") or "")[:200],
+                        },
+                    )
                     print(
                         f"-- cerrar → verificador BLOQUEA ({(report or {}).get('veredicto')})",
                         flush=True,
@@ -758,23 +965,58 @@ def main() -> None:
                     continue
                 verify_reject_pending = False
                 awaiting_confirm = "close"
-                print("-- cerrar → verificador OK → confirmación", flush=True)
+                real = last_real_verify(verify_reports)
+                omit = bool((report or {}).get("omit_gate"))
+                last_verd = str((real or {}).get("veredicto") or "")
+                last_why = str((real or {}).get("why") or "")
+                if omit or last_verd.lower() in ("refuta", "dudoso"):
+                    forbid_falta_nada = True
+                close_confirm_ctx = {
+                    "omit_gate": omit,
+                    "last_block_verd": last_verd,
+                    "last_why": last_why,
+                    "hueco_hint": hueco_hint_from_report(real, verify_exam),
+                }
+                confirm_msg = confirm_close_user(**close_confirm_ctx)
+                if omit:
+                    print(
+                        "-- cerrar → verificador OMITIDO (no absuelve) → confirmación",
+                        flush=True,
+                    )
+                    tracer.emit(
+                        "verify_omit",
+                        {"trigger": "cerrar", "last_verd": last_verd},
+                    )
+                else:
+                    print("-- cerrar → verificador sostiene → confirmación", flush=True)
+                    tracer.emit(
+                        "verify_pass",
+                        {"trigger": "cerrar", "veredicto": (report or {}).get("veredicto")},
+                    )
                 msgs.append({"role": "assistant", "content": raw})
                 msgs.append(
                     {
                         "role": "user",
-                        "content": CONFIRM_CLOSE_USER + f"\n## NOTEBOOK\n{notebook_md(jobs)}\n",
+                        "content": confirm_msg + f"\n## NOTEBOOK\n{notebook_md(jobs)}\n",
                     }
                 )
                 continue
 
             if do == "confirmar_editar":
                 closed = {**parsed, "raw": act, "confirmed": True, "kind": "edit"}
+                tracer.emit(
+                    "terminal",
+                    {"code": "T_edit", "falta": parsed.get("falta"), "cubre": parsed.get("cubre")},
+                )
                 print("-- EXIT confirmar_editar", flush=True)
                 break
 
             if do == "confirmar_cerrar":
                 closed = {**parsed, "raw": act, "confirmed": True, "kind": "close"}
+                tracer.emit(
+                    "terminal",
+                    {"code": "T_close", "falta": parsed.get("falta"), "cubre": parsed.get("cubre")},
+                )
                 print("-- EXIT confirmar_cerrar", flush=True)
                 break
 
@@ -795,6 +1037,8 @@ def main() -> None:
 
             if do in ("cerrar", "ask_user"):
                 closed = {**parsed, "raw": act}
+                code = "T_ask" if do == "ask_user" else "T_close"
+                tracer.emit("terminal", {"code": code, "do": do})
                 print(f"-- EXIT do={do}", flush=True)
                 break
 
@@ -847,6 +1091,19 @@ def main() -> None:
             print(
                 f"-- explore done verd={result['veredicto']} falta={falta!r}",
                 flush=True,
+            )
+            # explore child does multiple LLM calls; attribute ≥1 (+steps if known)
+            steps = int(job.get("steps") or 1)
+            tracer.bump("explore", max(1, steps))
+            tracer.emit(
+                "explore_done",
+                {
+                    "id": jid,
+                    "brief": brief[:160],
+                    "veredicto": result.get("veredicto"),
+                    "falta": falta,
+                    "steps": steps,
+                },
             )
 
             jobs.append(

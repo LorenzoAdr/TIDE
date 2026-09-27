@@ -17,11 +17,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from explore_lite_local import run_explorer  # noqa: E402
 from probe_admin_pilot import (  # noqa: E402
     ADMIN_SYS,
-    CONFIRM_CLOSE_USER,
     CONFIRM_EDIT_USER,
     chat,
+    confirm_close_user,
     explore_cap,
     extract_json,
+    hueco_hint_from_report,
+    last_real_verify,
     legal_line,
     notebook_md,
     parse_admin,
@@ -108,6 +110,14 @@ def main() -> None:
     turns: list[dict] = []
     log: list[str] = []
     t0 = time.time()
+    forbid_falta_nada = True  # we resume AFTER a blocking verify
+    close_confirm_ctx: dict = {
+        "omit_gate": False,
+        "last_block_verd": str(report0.get("veredicto") or ""),
+        "last_why": str(report0.get("why") or ""),
+        "hueco_hint": hueco_hint_from_report(report0, exam),
+    }
+    max_verify = 2
 
     for turn in range(args.max_turns):
         raw = chat(api, model, msgs)
@@ -125,6 +135,7 @@ def main() -> None:
             verify_reject_pending=verify_reject_pending,
             explores=explores,
             max_explore=max_explore,
+            forbid_falta_nada=forbid_falta_nada and awaiting_confirm in ("close", "edit"),
         )
         turns.append({"turn": turn, "act": act, "parse_error": perr})
         print(
@@ -136,18 +147,22 @@ def main() -> None:
         print(json.dumps(act, ensure_ascii=False)[:500], flush=True)
 
         if perr:
+            help_txt = ""
+            if awaiting_confirm == "close":
+                help_txt = "\n" + confirm_close_user(**close_confirm_ctx)
+            elif awaiting_confirm == "edit":
+                help_txt = "\n" + CONFIRM_EDIT_USER
+            else:
+                help_txt = "\n" + legal_line(
+                    explores=explores,
+                    max_explore=max_explore,
+                    verify_reject_pending=verify_reject_pending,
+                )
             msgs.append({"role": "assistant", "content": raw})
             msgs.append(
                 {
                     "role": "user",
-                    "content": (
-                        f"Rechazado: {perr}. "
-                        + legal_line(
-                            explores=explores,
-                            max_explore=max_explore,
-                            verify_reject_pending=verify_reject_pending,
-                        )
-                    ),
+                    "content": f"Rechazado: {perr}.{help_txt}",
                 }
             )
             continue
@@ -176,21 +191,30 @@ def main() -> None:
 
         if do == "editar":
             # second verify pass allowed
-            vlog: list[str] = []
-            report = run_verifier(
-                api,
-                model,
-                prompt,
-                jobs,
-                "",
-                ROOT,
-                vlog,
-                max_steps=4,
-                exam=exam,
-                variant="exam_hard",
-                counterask=True,
-                refute_pass=True,
-            )
+            if verify_count >= max_verify:
+                report = {
+                    "veredicto": "dudoso",
+                    "why": "tope de verificadores; se omite el gate (NO absuelve el juicio anterior)",
+                    "omit_gate": True,
+                    "skipped": True,
+                    "cobertura": [],
+                }
+            else:
+                vlog: list[str] = []
+                report = run_verifier(
+                    api,
+                    model,
+                    prompt,
+                    jobs,
+                    "",
+                    ROOT,
+                    vlog,
+                    max_steps=4,
+                    exam=exam,
+                    variant="exam_hard",
+                    counterask=True,
+                    refute_pass=True,
+                )
             verify_count += 1
             verify_reports.append({"trigger": "editar", **report})
             (out / f"verify_{verify_count}.json").write_text(
@@ -198,8 +222,9 @@ def main() -> None:
             )
             from verify_lite_local import blocks_exit  # noqa: PLC0415
 
-            if blocks_exit(str(report.get("veredicto") or "")):
+            if blocks_exit(str(report.get("veredicto") or "")) and not report.get("omit_gate"):
                 verify_reject_pending = True
+                forbid_falta_nada = True
                 block2 = format_pilot_verify_report(report, exam)
                 print(f"-- editar BLOQUEA {report.get('veredicto')}", flush=True)
                 msgs.append({"role": "assistant", "content": raw})
@@ -218,6 +243,9 @@ def main() -> None:
                 continue
             awaiting_confirm = "edit"
             verify_reject_pending = False
+            if report.get("omit_gate"):
+                forbid_falta_nada = True
+                print("-- editar OMITIDO (no absuelve) → confirmación", flush=True)
             msgs.append({"role": "assistant", "content": raw})
             msgs.append(
                 {
@@ -228,21 +256,30 @@ def main() -> None:
             continue
 
         if do == "cerrar" and awaiting_confirm != "edit":
-            vlog = []
-            report = run_verifier(
-                api,
-                model,
-                prompt,
-                jobs,
-                "",
-                ROOT,
-                vlog,
-                max_steps=4,
-                exam=exam,
-                variant="exam_hard",
-                counterask=True,
-                refute_pass=True,
-            )
+            if verify_count >= max_verify:
+                report = {
+                    "veredicto": "dudoso",
+                    "why": "tope de verificadores; se omite el gate (NO absuelve el juicio anterior)",
+                    "omit_gate": True,
+                    "skipped": True,
+                    "cobertura": [],
+                }
+            else:
+                vlog = []
+                report = run_verifier(
+                    api,
+                    model,
+                    prompt,
+                    jobs,
+                    "",
+                    ROOT,
+                    vlog,
+                    max_steps=4,
+                    exam=exam,
+                    variant="exam_hard",
+                    counterask=True,
+                    refute_pass=True,
+                )
             verify_count += 1
             verify_reports.append({"trigger": "cerrar", **report})
             (out / f"verify_{verify_count}.json").write_text(
@@ -250,8 +287,9 @@ def main() -> None:
             )
             from verify_lite_local import blocks_exit  # noqa: PLC0415
 
-            if blocks_exit(str(report.get("veredicto") or "")):
+            if blocks_exit(str(report.get("veredicto") or "")) and not report.get("omit_gate"):
                 verify_reject_pending = True
+                forbid_falta_nada = True
                 block2 = format_pilot_verify_report(report, exam)
                 print(f"-- cerrar BLOQUEA {report.get('veredicto')}", flush=True)
                 msgs.append({"role": "assistant", "content": raw})
@@ -270,11 +308,28 @@ def main() -> None:
                 continue
             awaiting_confirm = "close"
             verify_reject_pending = False
+            real = last_real_verify(verify_reports)
+            omit = bool(report.get("omit_gate"))
+            last_verd = str((real or {}).get("veredicto") or "")
+            last_why = str((real or {}).get("why") or "")
+            if omit or last_verd.lower() in ("refuta", "dudoso"):
+                forbid_falta_nada = True
+            close_confirm_ctx = {
+                "omit_gate": omit,
+                "last_block_verd": last_verd,
+                "last_why": last_why,
+                "hueco_hint": hueco_hint_from_report(real, exam),
+            }
+            confirm_msg = confirm_close_user(**close_confirm_ctx)
+            if omit:
+                print("-- cerrar OMITIDO (no absuelve) → confirmación", flush=True)
+            else:
+                print("-- cerrar sostiene → confirmación", flush=True)
             msgs.append({"role": "assistant", "content": raw})
             msgs.append(
                 {
                     "role": "user",
-                    "content": CONFIRM_CLOSE_USER + f"\n## NOTEBOOK\n{notebook_md(jobs)}\n",
+                    "content": confirm_msg + f"\n## NOTEBOOK\n{notebook_md(jobs)}\n",
                 }
             )
             continue
@@ -285,7 +340,10 @@ def main() -> None:
             break
         if do == "confirmar_cerrar":
             closed = {**parsed, "kind": "close", "confirmed": True}
-            print("-- EXIT confirmar_cerrar", flush=True)
+            print(
+                f"-- EXIT confirmar_cerrar falta={(parsed.get('falta') or '')[:120]!r}",
+                flush=True,
+            )
             break
         if do == "cerrar" and awaiting_confirm == "edit":
             closed = {**parsed, "kind": "close"}
@@ -354,8 +412,14 @@ def main() -> None:
         "max_explore_base": max_explore,
         "closed": closed,
         "turns": turns,
+        "forbid_falta_nada": forbid_falta_nada,
         "verify_reports": [
-            {"trigger": r.get("trigger"), "veredicto": r.get("veredicto"), "cobertura": r.get("cobertura")}
+            {
+                "trigger": r.get("trigger"),
+                "veredicto": r.get("veredicto"),
+                "omit_gate": r.get("omit_gate"),
+                "cobertura": r.get("cobertura"),
+            }
             for r in verify_reports
         ],
         "last_briefs": [j.get("brief") for j in jobs[-3:]],
@@ -366,6 +430,7 @@ def main() -> None:
         "# Synth post-verify (+1 explore)",
         f"source: `{args.summary}`",
         f"exit: {(closed or {}).get('do')}",
+        f"falta: {(closed or {}).get('falta')!r}",
         f"explores_end: {explores} (base {max_explore})",
         f"verify: {board['verify_reports']}",
         "",
@@ -380,7 +445,18 @@ def main() -> None:
         )
     (out / "RESUME.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("DONE", out, flush=True)
-    print(json.dumps({"exit": (closed or {}).get("do"), "explores": explores, "turns": len(turns)}, ensure_ascii=False), flush=True)
+    print(
+        json.dumps(
+            {
+                "exit": (closed or {}).get("do"),
+                "falta": (closed or {}).get("falta"),
+                "explores": explores,
+                "turns": len(turns),
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Autonomous overnight battery: probe_admin_pilot × N prompts.
 
-Sequential. Skips cases with DONE. Writes SCOREBOARD.json at the end.
-Does not touch wave-explore / sense.
+Sequential. Skips cases with DONE. STOP file halts before next case.
+Writes SCOREBOARD + BASELINE (axes A–D). Does not touch wave-explore / sense.
 """
 from __future__ import annotations
 
@@ -15,6 +15,9 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from admin_session_metrics import aggregate_baseline, score_session  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = Path(__file__).resolve().parent / "probe_admin_pilot.py"
@@ -37,130 +40,42 @@ def api_ok(api: str) -> bool:
         return False
 
 
-def score_case(case: dict, summary: dict | None, err: str | None) -> dict:
-    gold = case.get("gold") or {}
-    out: dict = {
-        "id": case["id"],
-        "kind": case.get("kind"),
-        "difficulty": case.get("difficulty"),
-        "style": case.get("style"),
-        "ok": False,
-        "flags": [],
-        "exit_do": None,
-        "n_explore": 0,
-        "wall_sec": None,
-        "error": err,
-    }
-    if summary is None:
-        out["flags"].append("no_summary")
-        return out
-
-    closed = summary.get("closed") or {}
-    jobs = summary.get("jobs") or []
-    explores = [j for j in jobs if j.get("tipo") == "explore"]
-    out["n_explore"] = len(explores)
-    out["wall_sec"] = summary.get("wall_sec")
-    out["exit_do"] = closed.get("do")
-    out["exit_kind"] = closed.get("kind")
-    out["falta_pilot"] = (closed.get("falta") or "")[:200]
-    out["cubre_pilot"] = (closed.get("cubre") or "")[:200]
-    out["reply_head"] = (closed.get("reply") or "")[:240]
-    out["job_verdicts"] = [j.get("veredicto") for j in explores]
-    out["job_faltas"] = [j.get("falta") for j in explores]
-
-    blob = " ".join(
-        [
-            str(closed.get("why") or ""),
-            str(closed.get("reply") or ""),
-            str(closed.get("cubre") or ""),
-            str(closed.get("falta") or ""),
-        ]
-    ).lower()
-
-    out["verify_reports"] = [
-        {
-            "trigger": r.get("trigger"),
-            "veredicto": r.get("veredicto"),
-            "why": (r.get("why") or "")[:200],
-            "skipped": bool(r.get("skipped")),
-            "omit_gate": bool(r.get("omit_gate")),
-        }
-        for r in (summary.get("verify_reports") or [])
-    ]
-    out["verify_blocked_any"] = any(
-        (r.get("veredicto") or "") in ("refuta", "dudoso") and not r.get("omit_gate")
-        for r in (summary.get("verify_reports") or [])
-    )
-    out["verify_last"] = (
-        (summary.get("verify_reports") or [{}])[-1].get("veredicto")
-        if summary.get("verify_reports")
-        else None
-    )
-    if any(r.get("omit_gate") for r in (summary.get("verify_reports") or [])):
-        out["flags"].append("verify_cap_omit")
-    # Cap must never look like a successful sostienen.
-    for r in summary.get("verify_reports") or []:
-        if r.get("skipped") or r.get("omit_gate"):
-            if (r.get("veredicto") or "").lower() == "sostiene":
-                out["flags"].append("verify_cap_absuelve")
-                out["ok"] = False
-
-    expect_exit = gold.get("expect_exit")
-    if expect_exit and closed.get("do") not in expect_exit:
-        out["flags"].append(f"exit_unexpected:{closed.get('do')}")
-
-    if gold.get("prefer_ask_user") and closed.get("do") != "ask_user":
-        out["flags"].append("prefer_ask_user")
-
-    if gold.get("expect_not_already_implemented"):
-        bad_phrases = gold.get("false_friend_forbid_in_cubre_or_reply") or [
-            "ya está implementad",
-            "ya está en el código",
-            "funcionalidad solicitada ya",
-            "ya implementada",
-        ]
-        if any(p.lower() in blob for p in bad_phrases):
-            out["flags"].append("false_already_implemented")
-        if (closed.get("falta") or "").strip().lower() in ("nada", "ninguna", "none", ""):
-            if closed.get("do") == "confirmar_cerrar" and "modific" in blob:
-                out["flags"].append("falta_nada_but_will_edit")
-
-    for p in gold.get("false_friend_forbid_in_cubre_or_reply") or []:
-        if p.lower() in blob:
-            out["flags"].append(f"forbid_phrase:{p[:40]}")
-
-    symbols_any = gold.get("symbols_any") or []
-    if symbols_any:
-        sym_blob = " ".join(
-            str(x)
-            for j in explores
-            for x in (j.get("simbolos") or [])
-        ) + " " + " ".join(str(j.get("summary_head") or "") for j in explores)
-        if not any(s.lower() in sym_blob.lower() for s in symbols_any):
-            out["flags"].append("symbols_miss")
-
-    if gold.get("expect_atomize_or_multi_explore") and len(explores) < 2:
-        out["flags"].append("no_atomize")
-
-    # Soft pass: finished without crash and no hard false-already on hole cases
-    hard = {"false_already_implemented", "no_summary"}
-    out["ok"] = err is None and not (hard & set(out["flags"]))
-    if gold.get("prefer_ask_user") and closed.get("do") == "ask_user":
-        out["ok"] = True
-        out["flags"] = [f for f in out["flags"] if f != "prefer_ask_user"]
-    return out
+def score_case(case: dict, summary: dict | None, err: str | None, case_dir: Path | None = None) -> dict:
+    session = None
+    if summary and isinstance(summary.get("session"), dict):
+        session = summary["session"]
+    elif case_dir and (case_dir / "SESSION.json").is_file():
+        try:
+            session = json.loads((case_dir / "SESSION.json").read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            session = None
+    row = score_session(case=case, summary=summary, session=session, err=err)
+    row.setdefault("kind", case.get("kind") or case.get("intent"))
+    row.setdefault("difficulty", case.get("difficulty"))
+    row.setdefault("style", case.get("style") or case.get("user_skill"))
+    return row
 
 
 def write_scoreboard(battery_out: Path, cases: list[dict], rows: list[dict]) -> None:
+    baseline = aggregate_baseline(rows, n_planned=len(cases))
     by_kind: dict[str, dict] = {}
     by_diff: dict[str, dict] = {}
     for r in rows:
-        for key, bucket in (("kind", by_kind), ("difficulty", by_diff)):
-            k = str(r.get(key) or "?")
-            b = bucket.setdefault(k, {"n": 0, "ok": 0, "flags": {}})
+        for key, bucket in (("intent", by_kind), ("difficulty", by_diff)):
+            k = str(r.get(key) or r.get("kind") or "?") if key == "intent" else str(r.get(key) or "?")
+            b = bucket.setdefault(
+                k, {"n": 0, "ok": 0, "process_ok": 0, "honest_ok": 0, "lie": 0, "flags": {}}
+            )
             b["n"] += 1
             if r.get("ok"):
                 b["ok"] += 1
+            sc = r.get("scores") or {}
+            if sc.get("process_ok"):
+                b["process_ok"] += 1
+            if sc.get("honest_ok"):
+                b["honest_ok"] += 1
+            if sc.get("lie"):
+                b["lie"] += 1
             for f in r.get("flags") or []:
                 b["flags"][f] = b["flags"].get(f, 0) + 1
 
@@ -169,49 +84,80 @@ def write_scoreboard(battery_out: Path, cases: list[dict], rows: list[dict]) -> 
         "n_cases": len(cases),
         "n_scored": len(rows),
         "ok_frac": (sum(1 for r in rows if r.get("ok")) / len(rows)) if rows else 0.0,
+        "process_ok_frac": baseline.get("process_ok_frac"),
+        "honest_frac": baseline.get("honest_frac"),
+        "lie_frac": baseline.get("lie_frac"),
+        "terminal_mix": baseline.get("terminal_mix"),
         "by_kind": by_kind,
         "by_difficulty": by_diff,
+        "by_intent": baseline.get("by_intent"),
+        "by_trap": baseline.get("by_trap"),
         "rows": rows,
-        "weak_flags": sorted(
-            (
-                (f, sum(1 for r in rows if f in (r.get("flags") or [])))
-                for f in {x for r in rows for x in (r.get("flags") or [])}
-            ),
-            key=lambda t: -t[1],
-        ),
+        "baseline": baseline,
+        "weak_flags": baseline.get("weak_flags") or [],
     }
     (battery_out / "SCOREBOARD.json").write_text(
         json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    # Human one-pager
+    (battery_out / "BASELINE.json").write_text(
+        json.dumps(baseline, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     lines = [
-        f"# Admin explore battery scoreboard ({utc_now()})",
-        f"ok_frac={board['ok_frac']:.2f}  scored={board['n_scored']}/{board['n_cases']}",
+        f"# Admin vibecode battery ({board['generated_at']})",
+        f"scored={board['n_scored']}/{board['n_cases']}",
+        f"process_ok={baseline.get('process_ok_frac')}  honest={baseline.get('honest_frac')}  "
+        f"lie={baseline.get('lie_frac')}  soft_ok={board['ok_frac']:.2f}",
+        f"terminal_mix={baseline.get('terminal_mix')}",
+        f"cost wall p50/p90={baseline.get('cost_wall_p50')}/{baseline.get('cost_wall_p90')}  "
+        f"llm p50/p90={baseline.get('cost_llm_p50')}/{baseline.get('cost_llm_p90')}",
         "",
-        "## By kind",
+        "## By intent",
     ]
-    for k, b in sorted(by_kind.items()):
-        lines.append(f"- {k}: {b['ok']}/{b['n']}")
-    lines.append("")
-    lines.append("## Weak flags")
-    for f, n in board["weak_flags"][:12]:
-        lines.append(f"- {f}: {n}")
-    lines.append("")
-    lines.append("## Cases")
-    for r in rows:
+    for k, b in sorted((baseline.get("by_intent") or {}).items()):
         lines.append(
-            f"- {r['id']}: ok={r['ok']} exit={r.get('exit_do')} "
-            f"explores={r.get('n_explore')} verify={r.get('verify_last')} "
-            f"blocked={r.get('verify_blocked_any')} flags={r.get('flags')}"
+            f"- {k}: n={b['n']} process={b['process_ok_frac']} honest={b['honest_ok_frac']} "
+            f"lie={b['lie_frac']} ask={b['ask_frac']}"
+        )
+    lines.extend(["", "## Weak flags"])
+    for f, n in (baseline.get("weak_flags") or [])[:20]:
+        lines.append(f"- {f}: {n}")
+    lines.extend(["", "## Cases"])
+    for r in rows:
+        sc = r.get("scores") or {}
+        lines.append(
+            f"- {r['id']}: term={r.get('terminal_code')} exit={r.get('exit_do')} "
+            f"process={sc.get('process_ok')} honest={sc.get('honest_ok')} lie={sc.get('lie')} "
+            f"explores={r.get('n_explore')} shape={r.get('path_shape')} flags={r.get('flags')}"
         )
     (battery_out / "SCOREBOARD.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (battery_out / "BASELINE.md").write_text(
+        "\n".join(
+            [
+                "# Baseline vibecode",
+                f"coverage={baseline.get('coverage')}",
+                f"process_ok={baseline.get('process_ok_frac')}",
+                f"honest={baseline.get('honest_frac')}",
+                f"lie={baseline.get('lie_frac')}",
+                f"lie_deseo={baseline.get('lie_frac_deseo')}",
+                f"easy_locate_ok={baseline.get('easy_locate_ok_frac')}",
+                f"trap_handled={baseline.get('trap_handled_frac')}",
+                f"omit_rate={baseline.get('omit_rate')}",
+                f"terminal_mix={baseline.get('terminal_mix')}",
+                f"path_shape={baseline.get('path_shape_hist')}",
+                "",
+                "Cortar: touch STOP en este directorio.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--cases",
-        default=str(Path(__file__).resolve().parent / "admin_explore_battery_cases.json"),
+        default=str(Path(__file__).resolve().parent / "admin_vibecode_100.json"),
     )
     ap.add_argument("--out", required=True)
     ap.add_argument("--api", default="http://192.168.64.1:8080/v1")
@@ -230,9 +176,8 @@ def main() -> None:
 
     ledger = battery_out / "ledger.jsonl"
     rows: list[dict] = []
-    # Resume prior scores if present
+    done_ids: set[str] = set()
     prev_board = battery_out / "SCOREBOARD.json"
-    done_ids = set()
     if prev_board.is_file():
         try:
             prev = json.loads(prev_board.read_text(encoding="utf-8"))
@@ -244,6 +189,12 @@ def main() -> None:
             pass
 
     (battery_out / "STARTED").write_text(utc_now() + "\n", encoding="utf-8")
+    (battery_out / "README_STOP.txt").write_text(
+        "Para cortar la batería sin matar el caso en curso:\n"
+        f"  touch {battery_out}/STOP\n"
+        "El siguiente caso no arranca. Reanuda borrando STOP (los DONE se saltan).\n",
+        encoding="utf-8",
+    )
     print(f"BATTERY start n={len(cases)} out={battery_out}", flush=True)
 
     for i, case in enumerate(cases):
@@ -258,7 +209,6 @@ def main() -> None:
             print(f"STOP file present; halt before {cid}", flush=True)
             break
 
-        # Wait for API if briefly down
         for _ in range(30):
             if api_ok(args.api):
                 break
@@ -325,22 +275,27 @@ def main() -> None:
             except Exception as e:  # noqa: BLE001
                 err = err or f"summary_json:{e}"
 
-        row = score_case(case, summary, err)
+        row = score_case(case, summary, err, case_dir=case_dir)
         row["wall_sec_measured"] = round(time.time() - t0, 1)
         rows.append(row)
         ledger.open("a", encoding="utf-8").write(json.dumps(row, ensure_ascii=False) + "\n")
         done_mark.write_text(utc_now() + "\n" + json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
         write_scoreboard(battery_out, cases, rows)
+        sc = row.get("scores") or {}
         print(
-            f"done {cid} ok={row['ok']} exit={row.get('exit_do')} "
+            f"done {cid} term={row.get('terminal_code')} process={sc.get('process_ok')} "
+            f"honest={sc.get('honest_ok')} lie={sc.get('lie')} "
             f"explores={row.get('n_explore')} flags={row.get('flags')} "
             f"wall={row.get('wall_sec_measured')}",
             flush=True,
         )
 
-    (battery_out / "DONE").write_text(utc_now() + "\n", encoding="utf-8")
     write_scoreboard(battery_out, cases, rows)
-    print(f"BATTERY DONE scoreboard={battery_out / 'SCOREBOARD.md'}", flush=True)
+    if not (battery_out / "STOP").is_file():
+        (battery_out / "DONE").write_text(utc_now() + "\n", encoding="utf-8")
+        print(f"BATTERY DONE scoreboard={battery_out / 'SCOREBOARD.md'}", flush=True)
+    else:
+        print(f"BATTERY HALTED (STOP) scoreboard={battery_out / 'SCOREBOARD.md'}", flush=True)
 
 
 if __name__ == "__main__":

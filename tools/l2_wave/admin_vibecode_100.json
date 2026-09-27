@@ -1,0 +1,1479 @@
+{
+  "name": "admin_vibecode_100",
+  "diet": "probe_admin_pilot + verify/refute; end-to-end SESSION/TRACE metrics",
+  "why": "Baseline vibecode: variedad de prompts de usuario real (fácil→trampa→críptico). Cortable con STOP.",
+  "harness": "tools/l2_wave/probe_admin_pilot.py",
+  "metrics": "tools/l2_wave/admin_session_metrics.py",
+  "n": 100,
+  "cases": [
+    {
+      "id": "001_locate_easy",
+      "prompt": "dónde está definida la struct AdminState",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "AdminState",
+          "l2_admin.hpp"
+        ]
+      }
+    },
+    {
+      "id": "002_locate_easy",
+      "prompt": "dónde se define DiagnosticSeverity",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "DiagnosticSeverity"
+        ]
+      }
+    },
+    {
+      "id": "003_locate_easy",
+      "prompt": "busca la función restore_workspace_session",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "restore_workspace"
+        ]
+      }
+    },
+    {
+      "id": "004_locate_easy",
+      "prompt": "en qué archivo está MakeConsolePanel",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "MakeConsolePanel",
+          "console_panel"
+        ]
+      }
+    },
+    {
+      "id": "005_locate_easy",
+      "prompt": "dónde se declara el enum ConsolePanelTabs",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "ConsolePanelTabs"
+        ]
+      }
+    },
+    {
+      "id": "006_locate_easy",
+      "prompt": "find struct LayoutState",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "LayoutState"
+        ]
+      }
+    },
+    {
+      "id": "007_locate_easy",
+      "prompt": "dónde está el settings modal",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "settings_modal"
+        ]
+      }
+    },
+    {
+      "id": "008_locate_easy",
+      "prompt": "localiza ShellSession",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "ShellSession"
+        ]
+      }
+    },
+    {
+      "id": "009_locate_easy",
+      "prompt": "dónde se define ai.admin_enabled",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "admin_enabled"
+        ]
+      }
+    },
+    {
+      "id": "010_locate_easy",
+      "prompt": "archivo de i18n strings en inglés",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "strings_en"
+        ]
+      }
+    },
+    {
+      "id": "011_locate_easy",
+      "prompt": "dónde está el callback de git status",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "git"
+        ]
+      }
+    },
+    {
+      "id": "012_locate_easy",
+      "prompt": "busca compile_commands o clangd config",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "clangd",
+          "compile_commands"
+        ]
+      }
+    },
+    {
+      "id": "013_locate_easy",
+      "prompt": "dónde se parsea admin_v1",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "admin_v1",
+          "parse"
+        ]
+      }
+    },
+    {
+      "id": "014_locate_easy",
+      "prompt": "localiza el harness wave-explore",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "wave-explore",
+          "l2_harness"
+        ]
+      }
+    },
+    {
+      "id": "015_locate_easy",
+      "prompt": "dónde se escribe notebook.md del admin",
+      "intent": "locate",
+      "kind": "locate",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "notebook"
+        ]
+      }
+    },
+    {
+      "id": "016_mechanism",
+      "prompt": "al reabrir un workspace, ¿dónde se restauran tabs, paneles y cursor? quiero el mecanismo",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "restore_workspace",
+          "save_state"
+        ]
+      }
+    },
+    {
+      "id": "017_mechanism",
+      "prompt": "cómo se decide abrir una pestaña nueva de la consola inferior",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "build_console_panel",
+          "console_panel"
+        ]
+      }
+    },
+    {
+      "id": "018_mechanism",
+      "prompt": "cómo fluye un diagnóstico LSP hasta el underline del editor",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "diagnostics",
+          "squiggle",
+          "editor_panel"
+        ]
+      }
+    },
+    {
+      "id": "019_mechanism",
+      "prompt": "qué pasa cuando el usuario pulsa cancel en el panel AI",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "cancel",
+          "admin"
+        ]
+      }
+    },
+    {
+      "id": "020_mechanism",
+      "prompt": "cómo se aplica un hunk de edición al workspace",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "apply_hunk",
+          "edit"
+        ]
+      }
+    },
+    {
+      "id": "021_mechanism",
+      "prompt": "mecanismo de spawn explore lite: grep+read+cerrar",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "explore",
+          "admin_run_explore"
+        ]
+      }
+    },
+    {
+      "id": "022_mechanism",
+      "prompt": "cómo el verificador adversarial bloquea cerrar/editar",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "admin_run_verify",
+          "refuta"
+        ]
+      }
+    },
+    {
+      "id": "023_mechanism",
+      "prompt": "dónde se captura la UI (active_path, cursor) para el admin",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "ui",
+          "active_path"
+        ]
+      }
+    },
+    {
+      "id": "024_mechanism",
+      "prompt": "cómo se serializa el state.json del admin entre turnos",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "state.json",
+          "admin_save"
+        ]
+      }
+    },
+    {
+      "id": "025_mechanism",
+      "prompt": "flujo completo: piloto pide editar → confirmar_editar → spawn edit",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "confirmar_editar",
+          "edit"
+        ]
+      }
+    },
+    {
+      "id": "026_mechanism",
+      "prompt": "cómo se filtra shell para no salir del WORKSPACE_ROOT",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "shell",
+          "workspace"
+        ]
+      }
+    },
+    {
+      "id": "027_mechanism",
+      "prompt": "qué une build errors de consola con líneas del editor (si existe)",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "diagnostics",
+          "console"
+        ]
+      }
+    },
+    {
+      "id": "028_mechanism",
+      "prompt": "cómo el hijo explore omite re-leer el mismo path",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "omitido",
+          "explore"
+        ]
+      }
+    },
+    {
+      "id": "029_mechanism",
+      "prompt": "dónde se decide el think level / temperature del admin",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "temperature",
+          "max_tokens"
+        ]
+      }
+    },
+    {
+      "id": "030_mechanism",
+      "prompt": "cómo se limpia l2_admin al arrancar la app",
+      "intent": "mechanism",
+      "kind": "mechanism",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "symbols_any": [
+          "l2_admin",
+          "limpi"
+        ]
+      }
+    },
+    {
+      "id": "031_deseo",
+      "prompt": "quiero que los errores de compilación de la consola inferior se marquen con línea roja en el gutter del editor",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "ya está en el código",
+          "funcionalidad solicitada ya"
+        ]
+      }
+    },
+    {
+      "id": "032_deseo",
+      "prompt": "los squiggles LSP ya están; quiero además una barrita en el gutter por cada error de clangd",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "ya está en el código",
+          "funcionalidad solicitada ya"
+        ]
+      }
+    },
+    {
+      "id": "033_deseo",
+      "prompt": "añade un botón en la consola para copiar el último error de build",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "034_deseo",
+      "prompt": "haz que al guardar se formatee solo el archivo activo con clang-format",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "035_deseo",
+      "prompt": "quiero breadcrumbs encima del editor con el símbolo bajo el cursor",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "036_deseo",
+      "prompt": "implementa dark/light toggle en settings y que persista",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "037_deseo",
+      "prompt": "quiero que el panel AI muestre tokens/s en vivo mientras genera",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "038_deseo",
+      "prompt": "añade atajo para duplicar la línea actual como en VSCode",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "039_deseo",
+      "prompt": "que los tabs del editor muestren un punto sucio si hay cambios sin guardar",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "040_deseo",
+      "prompt": "quiero minimap a la derecha del editor",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "041_deseo",
+      "prompt": "haz que la búsqueda en archivos respete .gitignore siempre",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "042_deseo",
+      "prompt": "quiero multi-cursor con Alt+Click",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "043_deseo",
+      "prompt": "añade soporte para abrir carpetas remotas por SSH",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "044_deseo",
+      "prompt": "que los diagnostics se agrupen por archivo en un panel Problems",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "045_deseo",
+      "prompt": "quiero que compile automáticamente al guardar C++",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "046_deseo",
+      "prompt": "añade chat con historial persistente entre reinicios de la app",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "047_deseo",
+      "prompt": "quiero drag-and-drop para reordenar pestañas de consola",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "048_deseo",
+      "prompt": "haz un modo zen que oculte sidebar y status bar",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "049_deseo",
+      "prompt": "quiero sugerencias de rename de símbolos vía clangd",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "050_deseo",
+      "prompt": "añade exportar el notebook del admin a markdown descargable",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "051_trap",
+      "prompt": "los errores de la build ya se ven en consola; eso significa que el gutter rojo ya está, ¿no? confirme dónde",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "confused",
+      "style": "confused",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "052_trap",
+      "prompt": "el LSP underline y el gutter son lo mismo ¿verdad? dime el símbolo único",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "confused",
+      "style": "confused",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "053_trap",
+      "prompt": "ConsolePanelTabs crea las pestañas nuevas dinámicamente cuando abro un terminal, ¿dónde?",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "054_trap",
+      "prompt": "selected_tab es lo que instancia un panel nuevo de consola, localízalo",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "055_trap",
+      "prompt": "diagnostics_for_editor_line ya pinta la línea roja del margen, ¿en qué función?",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "056_trap",
+      "prompt": "el admin_v1 es lo mismo que wave-explore sense, ¿dónde está el entrypoint único?",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "confused",
+      "style": "confused",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "057_trap",
+      "prompt": "restore_workspace guarda el cursor píxel a píxel como VSCode, ¿cierto? enséñame",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "058_trap",
+      "prompt": "el verificador absuelve el cierre cuando llega al tope, ¿dónde está ese OK?",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "059_trap",
+      "prompt": "MakeEditorPixelGrid ya dibuja barras de error clangd, confirma el path",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "060_trap",
+      "prompt": "el notebook del admin es el atlas M* de wave, ¿mismo archivo?",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "confused",
+      "style": "confused",
+      "trap": "false_friend",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "son lo mismo",
+          "es lo mismo",
+          "ya implementada"
+        ]
+      }
+    },
+    {
+      "id": "061_multipolo",
+      "prompt": "Necesito dos cosas: (1) errores de consola de build en el margen del editor y (2) que el indicador sea línea roja vertical, no un carácter. ¿Existe o hay que hacerlo?",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "multipolo",
+      "style": "multipolo",
+      "trap": "false_friend",
+      "gold": {
+        "expect_atomize_or_multi_explore": true,
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "062_multipolo",
+      "prompt": "Quiero a la vez: persistir layout al cerrar Y un comando para resetear al default. Dónde tocar.",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "multipolo",
+      "style": "multipolo",
+      "trap": "false_friend",
+      "gold": {
+        "expect_atomize_or_multi_explore": true,
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "063_multipolo",
+      "prompt": "Explícame y prepara edición: (a) dónde se crean tabs de consola (b) cómo cambiar el color del tab activo.",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "multipolo",
+      "style": "multipolo",
+      "trap": "false_friend",
+      "gold": {
+        "expect_atomize_or_multi_explore": true,
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "064_multipolo",
+      "prompt": "Busca si existe gutter de diagnostics y además si hay parser de output de make; resume ambos polos.",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "multipolo",
+      "style": "multipolo",
+      "trap": "false_friend",
+      "gold": {
+        "expect_atomize_or_multi_explore": true,
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "065_multipolo",
+      "prompt": "1) localiza AdminState 2) di si se puede serializar a redis — necesito ambas respuestas.",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "multipolo",
+      "style": "multipolo",
+      "trap": "false_friend",
+      "gold": {
+        "expect_atomize_or_multi_explore": true,
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "066_multipolo",
+      "prompt": "Por un lado el hot reload de settings y por otro el theme switch: mecanismos y si ya están.",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "multipolo",
+      "style": "multipolo",
+      "trap": "false_friend",
+      "gold": {
+        "expect_atomize_or_multi_explore": true,
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "067_multipolo",
+      "prompt": "Quiero grep en el repo Y búsqueda web desde el admin; ¿ambos spawn tipos existen?",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "multipolo",
+      "style": "multipolo",
+      "trap": "false_friend",
+      "gold": {
+        "expect_atomize_or_multi_explore": true,
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "068_multipolo",
+      "prompt": "Cuéntame el flujo explore→verify→confirm y además dónde se podría saltar el verify en casos fáciles.",
+      "intent": "deseo",
+      "kind": "deseo",
+      "difficulty": "muy_alta",
+      "user_skill": "multipolo",
+      "style": "multipolo",
+      "trap": "false_friend",
+      "gold": {
+        "expect_atomize_or_multi_explore": true,
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "069_cryptic",
+      "prompt": "lo del margen rojo de los fallos esos de abajo, ¿ya está o lo monto yo?",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "070_cryptic",
+      "prompt": "el bicho de ayer del panel de abajo cuando cambia de pestaña",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "071_cryptic",
+      "prompt": "ese save state raro que no me deja el cursor donde estaba",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "072_cryptic",
+      "prompt": "wire the AI tab so it doesn't eat my explores",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "073_cryptic",
+      "prompt": "arreglar lo de clangd que no marca bien",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "074_cryptic",
+      "prompt": "el soft wrap vs gutter pelean, mira eso",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "075_cryptic",
+      "prompt": "cuando mato el shell zombie sigue el tab",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "076_cryptic",
+      "prompt": "el JSON del piloto a veces se rompe, blindarlo",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "077_cryptic",
+      "prompt": "quiero menos vueltas del checker ese adversarial",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "078_cryptic",
+      "prompt": "el bonus post-verify +1 explore, ¿sigue vivo?",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {}
+    },
+    {
+      "id": "079_wrong",
+      "prompt": "lanza sense16 round 99 desde el chat AI normal",
+      "intent": "wrong_model",
+      "kind": "wrong_model",
+      "difficulty": "media",
+      "user_skill": "wrong_model",
+      "style": "wrong_model",
+      "trap": "wrong_layer",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "080_wrong",
+      "prompt": "usa el oráculo L0 embeds para encontrar AdminState sin explore",
+      "intent": "wrong_model",
+      "kind": "wrong_model",
+      "difficulty": "media",
+      "user_skill": "wrong_model",
+      "style": "wrong_model",
+      "trap": "wrong_layer",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "081_wrong",
+      "prompt": "el piloto debe leer el código él mismo con Read tool de Cursor",
+      "intent": "wrong_model",
+      "kind": "wrong_model",
+      "difficulty": "media",
+      "user_skill": "wrong_model",
+      "style": "wrong_model",
+      "trap": "wrong_layer",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "082_wrong",
+      "prompt": "pon grammar GBNF ya en el prompt system del usuario",
+      "intent": "wrong_model",
+      "kind": "wrong_model",
+      "difficulty": "media",
+      "user_skill": "confused",
+      "style": "confused",
+      "trap": "wrong_layer",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "083_wrong",
+      "prompt": "ejecuta cmake --build desde spawn explore",
+      "intent": "wrong_model",
+      "kind": "wrong_model",
+      "difficulty": "media",
+      "user_skill": "confused",
+      "style": "confused",
+      "trap": "wrong_layer",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "084_wrong",
+      "prompt": "cierra con veredicto sostiene sin notebook",
+      "intent": "wrong_model",
+      "kind": "wrong_model",
+      "difficulty": "media",
+      "user_skill": "confused",
+      "style": "confused",
+      "trap": "wrong_layer",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "085_wrong",
+      "prompt": "salta el verificador porque yo confirmo que está bien",
+      "intent": "wrong_model",
+      "kind": "wrong_model",
+      "difficulty": "media",
+      "user_skill": "confused",
+      "style": "confused",
+      "trap": "wrong_layer",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "086_wrong",
+      "prompt": "mezcla wave control_v1 con admin_v1 en la misma respuesta",
+      "intent": "wrong_model",
+      "kind": "wrong_model",
+      "difficulty": "media",
+      "user_skill": "wrong_model",
+      "style": "wrong_model",
+      "trap": "wrong_layer",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "087_hole",
+      "prompt": "dónde está el módulo de sincronización blockchain del workspace",
+      "intent": "hole",
+      "kind": "hole",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "088_hole",
+      "prompt": "localiza el cliente Kubernetes Ballistics para el cursor",
+      "intent": "hole",
+      "kind": "hole",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "089_hole",
+      "prompt": "dónde se implementa el pager de Slack embebido",
+      "intent": "hole",
+      "kind": "hole",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "090_hole",
+      "prompt": "busca la integración con Notion databases en src/",
+      "intent": "hole",
+      "kind": "hole",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "091_hole",
+      "prompt": "dónde está el driver CUDA del terminal emulator",
+      "intent": "hole",
+      "kind": "hole",
+      "difficulty": "baja",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "092_edit",
+      "prompt": "cámbiale el texto del botón Cancel del panel AI a Cancelar",
+      "intent": "edit",
+      "kind": "edit",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_exit": [
+          "confirmar_editar",
+          "editar",
+          "confirmar_cerrar",
+          "ask_user"
+        ]
+      }
+    },
+    {
+      "id": "093_edit",
+      "prompt": "refactoriza el nombre visual de la pestaña Terminal a Shell",
+      "intent": "edit",
+      "kind": "edit",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_exit": [
+          "confirmar_editar",
+          "editar",
+          "confirmar_cerrar",
+          "ask_user"
+        ]
+      }
+    },
+    {
+      "id": "094_edit",
+      "prompt": "añade un comentario TODO en AdminState documentando verify_passes",
+      "intent": "edit",
+      "kind": "edit",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_exit": [
+          "confirmar_editar",
+          "editar",
+          "confirmar_cerrar",
+          "ask_user"
+        ]
+      }
+    },
+    {
+      "id": "095_edit",
+      "prompt": "pon un log cuando omit_gate se dispare por tope de verify",
+      "intent": "edit",
+      "kind": "edit",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_exit": [
+          "confirmar_editar",
+          "editar",
+          "confirmar_cerrar",
+          "ask_user"
+        ]
+      }
+    },
+    {
+      "id": "096_edit",
+      "prompt": "extrae la constante mágica del max explore a un named constexpr si no lo está",
+      "intent": "edit",
+      "kind": "edit",
+      "difficulty": "media",
+      "user_skill": "claro",
+      "style": "claro",
+      "trap": "none",
+      "gold": {
+        "expect_exit": [
+          "confirmar_editar",
+          "editar",
+          "confirmar_cerrar",
+          "ask_user"
+        ]
+      }
+    },
+    {
+      "id": "097_vague",
+      "prompt": "arregla lo de ayer",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "098_vague",
+      "prompt": "el bug del editor",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "099_vague",
+      "prompt": "hazlo más rápido",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "100_vague",
+      "prompt": "no sé, mira qué está mal en la consola",
+      "intent": "vague",
+      "kind": "vague",
+      "difficulty": "alta",
+      "user_skill": "cryptic",
+      "style": "cryptic",
+      "trap": "none",
+      "gold": {
+        "prefer_ask_user": true
+      }
+    }
+  ]
+}

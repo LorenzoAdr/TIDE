@@ -3531,9 +3531,25 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
     out.ok = true;
     out.veredicto = "dudoso";
     out.blocks = false;
-    out.why = "tope de verificadores; se omite el gate (cierre permitido)";
-    out.report =
-        "## Informe del VERIFICADOR\nomitido: tope global\nwhy: " + out.why + "\n";
+    out.why = "tope de verificadores; se omite el gate (NO absuelve el juicio anterior)";
+    {
+      std::ostringstream rep;
+      rep << "## Informe del VERIFICADOR\n"
+             "omitido: tope global — NO absuelve\n"
+             "why: "
+          << out.why << "\n";
+      if (!st->last_verify_verdict.empty()) {
+        rep << "último_juicio_real: " << st->last_verify_verdict << "\n";
+      }
+      if (!st->last_verify_why.empty()) {
+        rep << "último_why: " << st->last_verify_why << "\n";
+      }
+      if (st->last_verify_verdict == "refuta" || st->last_verify_verdict == "dudoso") {
+        rep << "PROHIBIDO tratar este omit como OK. Si cierras, declara en falta qué del "
+               "pedido aún no está demostrado (no uses falta=nada).\n";
+      }
+      out.report = rep.str();
+    }
     return out;
   }
 
@@ -4306,8 +4322,24 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
     if (!skip_verify && (ola.do_kind == AdminDo::Editar || ola.do_kind == AdminDo::Cerrar) &&
         (!st->notebook.empty() || !st->jobs.empty()) && !st->awaiting_edit_confirm) {
       if (st->verify_passes >= kAdminMaxVerifyPasses) {
-        ui_note(opts,
-                "→ Tope de comprobaciones: dejo pasar el cierre sin nuevo veredicto");
+        {
+          std::ostringstream note;
+          note << "→ Tope de comprobaciones: se omite el gate (NO absuelve";
+          if (!st->last_verify_verdict.empty()) {
+            note << "; último juicio=" << st->last_verify_verdict;
+          }
+          note << ")";
+          ui_note(opts, note.str());
+        }
+        if (st->last_verify_verdict == "refuta" || st->last_verify_verdict == "dudoso") {
+          std::ostringstream warn;
+          warn << "## Verificador omitido (tope) — NO absuelve\n"
+                  "último juicio real: "
+               << st->last_verify_verdict << "\nwhy: " << st->last_verify_why
+               << "\nSi cierras ahora, nombra en falta qué del pedido aún no está "
+                  "demostrado (prohibido falta=nada mientras quede ese hueco).\n";
+          st->last_error = warn.str();
+        }
         st->verify_reject_pending = false;
       } else {
         AdminVerifyResult vr =

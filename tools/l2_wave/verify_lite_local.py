@@ -687,6 +687,18 @@ def run_verifier(
                         if ref.get("why")
                         else out["why"]
                     )
+                    # Coherencia: no dejar marcas "cubierto" vivas tras tumbar.
+                    cob = out.get("cobertura") or []
+                    demoted = 0
+                    for c in cob:
+                        if not isinstance(c, dict):
+                            continue
+                        if str(c.get("estado") or "").lower() == "cubierto":
+                            c["estado"] = "cuestionado"
+                            c["anulado_por"] = "refutador"
+                            demoted += 1
+                    if demoted:
+                        out["cobertura_demoted"] = demoted
                 elif rv == "sostiene":
                     out["veredicto_refutador"] = "sostiene"
         return out
@@ -1045,7 +1057,8 @@ def format_pilot_verify_report(report: dict, exam: dict | None = None) -> str:
     exam = exam or {}
     elems = {str(e.get("id")): e for e in (exam.get("elementos") or []) if isinstance(e, dict)}
     cobertura = report.get("cobertura") or []
-    verd = str(report.get("veredicto") or "dudoso")
+    verd = str(report.get("veredicto") or "dudoso").lower()
+    blocked = verd in ("refuta", "dudoso")
     arco = report.get("arco") if isinstance(report.get("arco"), dict) else {}
     ataques = report.get("ataques") or []
     why = str(report.get("why") or "")[:900]
@@ -1057,6 +1070,11 @@ def format_pilot_verify_report(report: dict, exam: dict | None = None) -> str:
         "",
         "### Cobertura del examen",
     ]
+    if blocked:
+        lines.append(
+            "(Nota: veredicto final=refuta/dudoso — las marcas «cubierto» de la 1ª pasada "
+            "NO cuentan como cubiertas; trátalas como cuestionadas hasta rebatir el ataque.)"
+        )
     huecos: list[dict] = []
     if cobertura:
         for c in cobertura:
@@ -1065,9 +1083,20 @@ def format_pilot_verify_report(report: dict, exam: dict | None = None) -> str:
             cid = str(c.get("id") or "")
             estado = str(c.get("estado") or "").lower()
             que = str((elems.get(cid) or {}).get("que") or "")
-            mark = {"cubierto": "✓", "hueco": "✗", "no_inspeccionado": "?"}.get(estado, "·")
-            lines.append(f"- [{cid}] {mark} {estado}" + (f" — {que}" if que else ""))
-            if estado in ("hueco", "no_inspeccionado", "falta"):
+            # Coherencia UI: nunca ✓ si el veredicto final tumba el arco.
+            display = estado
+            if blocked and estado == "cubierto":
+                display = "cuestionado"
+                estado = "cuestionado"
+            mark = {
+                "cubierto": "✓",
+                "hueco": "✗",
+                "no_inspeccionado": "?",
+                "cuestionado": "✗",
+                "falta": "✗",
+            }.get(display, "·")
+            lines.append(f"- [{cid}] {mark} {display}" + (f" — {que}" if que else ""))
+            if estado in ("hueco", "no_inspeccionado", "falta", "cuestionado"):
                 huecos.append({"id": cid, "que": que or cid, "estado": estado})
     else:
         lines.append("(sin cobertura estructurada)")
