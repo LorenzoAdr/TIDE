@@ -279,12 +279,27 @@ inválido desaparecen (P1), probablemente no haga falta `N=6` — volver a
 `N=4` o menos, midiendo en vez de adivinando.
 
 ### P7 — Reducir el doble mantenimiento C++/Python
-*Retorno: proceso. Riesgo: bajo.*
+*Retorno: proceso. Riesgo: bajo. Implementado (versión mínima).*
 
-Como mínimo, un test de CI que corra las mismas *cases* de batería contra el
-harness Python y (si es viable) contra un modo scripted del C++, para que
-una divergencia falle explícitamente en vez de descubrirse por un commit de
-"matches C++ admin verify" a posteriori.
+El repo no tiene CTest ni un workflow de CI que corra tests (solo
+`.github/workflows/release-appimage.yml`), así que en vez de inventar
+infraestructura nueva se implementó la versión mínima útil:
+`tools/l2_wave/check_admin_constants_parity.py` — chequeo estático
+(regex sobre el código fuente, sin build ni import) que compara las
+constantes compartidas entre `l2_admin.hpp`/`.cpp` y el harness Python
+(`kAdminMaxVerifyPasses`, `kAdminVerifyMaxSteps`, `kAdminMaxExplores`,
+el set `_FALTA_NADA`/`kNada`) y falla con exit 1 listando la divergencia
+si algo no coincide, en vez de descubrirse por un commit de "matches C++
+admin verify" a posteriori (como pasó con `confirmar_cerrar`).
+
+```bash
+python3 tools/l2_wave/check_admin_constants_parity.py
+```
+
+Correrlo antes de cada canario/batería es el hábito recomendado — no
+está automatizado en un workflow porque no hay uno en el repo, pero es
+barato (sin dependencias, milisegundos) y detecta exactamente el tipo de
+drift que motivó la sección 0bis.
 
 ## 3. Orden de ataque
 
