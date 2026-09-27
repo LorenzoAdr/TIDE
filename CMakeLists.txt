@@ -1162,6 +1162,7 @@ add_executable(l2_admin_test
   src/ai/l2_admin.cpp
   src/ai/action_json.cpp
   src/ai/search_replace.cpp
+  src/ai/l2_grammar.cpp
 )
 target_include_directories(l2_admin_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src

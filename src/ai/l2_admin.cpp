@@ -12,6 +12,7 @@
 #include <sstream>
 
 #include "ai/action_json.hpp"
+#include "ai/l2_grammar.hpp"
 #include "ai/search_replace.hpp"
 
 namespace tuide {
@@ -1522,6 +1523,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     req.system_prompt = sys;
     req.user_prompt = conversation;
     req.phase = "admin_explore";
+    req.grammar_file = l2_grammar::resolve_for_phase(workspace_root, req.phase);
     req.max_tokens = opts.settings.max_tokens > 0 ? opts.settings.max_tokens : 700;
     req.n_ctx = opts.settings.n_ctx_remote > 0 ? opts.settings.n_ctx_remote : opts.settings.n_ctx;
     req.temperature = 0.1f;
@@ -3707,6 +3709,7 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
       rreq.system_prompt = refute_sys;
       rreq.user_prompt = ru.str();
       rreq.phase = "admin_verify_refute";
+      rreq.grammar_file = l2_grammar::resolve_for_phase(opts.workspace_root, rreq.phase);
       rreq.max_tokens = opts.settings.max_tokens > 0 ? opts.settings.max_tokens : 600;
       rreq.n_ctx =
           opts.settings.n_ctx_remote > 0 ? opts.settings.n_ctx_remote : opts.settings.n_ctx;
@@ -3784,6 +3787,7 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
     req.system_prompt = sys;
     req.user_prompt = conversation_user;
     req.phase = "admin_verify";
+    req.grammar_file = l2_grammar::resolve_for_phase(workspace_root, req.phase);
     req.max_tokens = opts.settings.max_tokens > 0 ? opts.settings.max_tokens : 700;
     req.n_ctx = opts.settings.n_ctx_remote > 0 ? opts.settings.n_ctx_remote : opts.settings.n_ctx;
     req.temperature = 0.1f;
@@ -4328,6 +4332,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
     req.system_prompt = sys;
     req.user_prompt = user;
     req.phase = "admin";
+    req.grammar_file = l2_grammar::resolve_for_phase(opts.workspace_root, req.phase);
     req.max_tokens = opts.settings.max_tokens > 0 ? opts.settings.max_tokens : 1024;
     req.n_ctx = opts.settings.n_ctx_remote > 0 ? opts.settings.n_ctx_remote : opts.settings.n_ctx;
     req.temperature = opts.settings.temperature;

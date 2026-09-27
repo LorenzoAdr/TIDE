@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ai/l2_admin.hpp"
+#include "ai/l2_grammar.hpp"
 
 namespace fs = std::filesystem;
 
@@ -73,6 +74,29 @@ int main() {
     const auto ola = admin_parse(
         R"({"action":"admin_v1","do":"cerrar","why":"basta","reply":"hola"})");
     expect(ola.ok && ola.do_kind == AdminDo::Cerrar, "parse cerrar");
+  }
+  {
+    // P1: grammar_file solo se resuelve con ADMIN_JSON_GRAMMAR activo, y solo
+    // para las 4 fases admin_v1 (admin/admin_explore/admin_verify/admin_verify_refute).
+    // root: detecta repo root sea cual sea el cwd del binario (build/ o raíz).
+    const std::string root =
+        fs::exists("tools/l2_battery/grammars/l2_json.gbnf") ? "." : "..";
+    unsetenv("L2_FEAT_ADMIN_JSON_GRAMMAR");
+    expect(tuide::l2_grammar::resolve_for_phase(root, "admin").empty(),
+           "admin grammar off by default");
+    setenv("L2_FEAT_ADMIN_JSON_GRAMMAR", "1", 1);
+    const std::string g_admin = tuide::l2_grammar::resolve_for_phase(root, "admin");
+    expect(!g_admin.empty() && g_admin.find("l2_json.gbnf") != std::string::npos,
+           "admin grammar resolves to l2_json.gbnf when on");
+    expect(!tuide::l2_grammar::resolve_for_phase(root, "admin_explore").empty(),
+           "admin_explore grammar resolves");
+    expect(!tuide::l2_grammar::resolve_for_phase(root, "admin_verify").empty(),
+           "admin_verify grammar resolves");
+    expect(!tuide::l2_grammar::resolve_for_phase(root, "admin_verify_refute").empty(),
+           "admin_verify_refute grammar resolves");
+    expect(tuide::l2_grammar::resolve_for_phase(root, "unrelated_phase").empty(),
+           "unrelated phase stays unconstrained");
+    unsetenv("L2_FEAT_ADMIN_JSON_GRAMMAR");
   }
   {
     // Modelo confunde action/do: pone el gesto en action.
