@@ -470,7 +470,12 @@ def notebook_md(jobs: list[dict], *, compact: bool = True) -> str:
     parts = []
     for j in jobs:
         falta = j.get("falta") if j.get("falta") is not None else j.get("no_visto")
-        why_lim = 220 if compact else 900
+        # Bug real detectado en vivo (2026-09-27): why_lim=220 en modo compact
+        # cortaba la conclusión del explorador a mitad de frase antes de que
+        # el piloto la viera -- el ahorro de payload para "muchos jobs" ya lo
+        # dan los topes de simbolos/paths de abajo, no hacía falta estrangular
+        # el "why" tanto. 900 en ambos modos (compact solo compacta listas).
+        why_lim = 900
         evid = j.get("evidencia") or []
         evid_s = "; ".join(str(x)[:80] for x in evid[:2]) if evid else "-"
         syms = j.get("simbolos") or []
