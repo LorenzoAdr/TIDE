@@ -3594,7 +3594,56 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
     out.ok = true;
     out.veredicto = "sostiene";
     out.why = "sin evidencia; se omite verificador";
+    out.shortcut = true;
     return out;
+  }
+
+  auto is_miss = [](const std::string& v) {
+    const std::string x = ascii_lower(trim_copy(v));
+    return x == "no_encontrado" || x == "parcial" || x == "no_hay" || x == "no_concluyente" ||
+           x == "no";
+  };
+
+  // P2bis (docs/plans/l2-admin-verify-round-reduction.md, sección 6): rutas
+  // deterministas basadas en datos de la batería vibecode-100 — no gastan
+  // llamada LLM ni cuentan contra kAdminMaxVerifyPasses (out.shortcut=true).
+  {
+    std::vector<const AdminJob*> miss_now;
+    for (const auto& j : st->jobs) {
+      if (is_miss(j.veredicto)) {
+        miss_now.push_back(&j);
+      }
+    }
+    // (1) 1 solo job, veredicto "encontrado" con evidencia path:línea → en la
+    // muestra de la batería esto fue sostiene 7/7 (0 flips del refutador).
+    // Saltar el gate adversarial completo entero.
+    if (miss_now.empty() && st->jobs.size() == 1 &&
+        ascii_lower(trim_copy(st->jobs.front().veredicto)) == "encontrado" &&
+        !st->jobs.front().evidencia.empty()) {
+      out.ok = true;
+      out.veredicto = "sostiene";
+      out.why = "1 job encontrado con evidencia ancla; gate determinista (P2bis)";
+      out.shortcut = true;
+      return out;
+    }
+    // (2) Cualquier job no_encontrado/parcial → en la muestra esto refutó/dudó
+    // ≥80% de las veces con el LLM; bloquear gratis en vez de gastar la llamada.
+    if (!miss_now.empty()) {
+      std::ostringstream misses;
+      for (const auto* j : miss_now) {
+        misses << "job" << j->id << "=" << j->veredicto << "; ";
+      }
+      out.ok = true;
+      out.veredicto = "dudoso";
+      out.blocks = true;
+      out.shortcut = true;
+      out.why = "hueco tipado sin resolver (" + misses.str() + "); gate determinista (P2bis)";
+      out.report = "## Informe del VERIFICADOR (determinista, sin LLM)\nveredicto=dudoso\nwhy: " +
+                   out.why +
+                   "\nSalida bloqueada — vuelves al menú del piloto. Decide: spawn explore / "
+                   "seguir_explorando (el hueco arriba), o ask_user.\n";
+      return out;
+    }
   }
   // Tope: se OMITE el gate (ni absuelve ni bloquea). Si blocks=true aquí, el piloto
   // nunca puede cerrar — bug de producto (sesión atrapada en dudoso eterno).
@@ -3626,12 +3675,11 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
 
   const auto paths = admin_verify_readable_paths(*st);
 
-  auto is_miss = [](const std::string& v) {
-    const std::string x = ascii_lower(trim_copy(v));
-    return x == "no_encontrado" || x == "parcial" || x == "no_hay" || x == "no_concluyente" ||
-           x == "no";
-  };
-
+  // is_miss ya declarado arriba (P2bis); miss_jobs queda siempre vacío aquí
+  // (si hubiera algún miss, ya se bloqueó determinista sin llegar a este punto).
+  // Se conserva el cálculo por si algún día un veredicto de miss no cubierto
+  // por P2bis llega hasta aquí — la contra-pregunta sigue siendo la red de
+  // seguridad correcta en ese caso.
   std::ostringstream misses_ss;
   std::vector<std::pair<int, std::string>> miss_jobs;
   for (const auto& j : st->jobs) {
@@ -4472,7 +4520,11 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       } else {
         AdminVerifyResult vr =
             admin_run_verify(st, brain, ola.why, opts.workspace_root, opts);
-        ++st->verify_passes;
+        // P2bis: los shortcuts deterministas no gastan llamada LLM — no
+        // deben consumir el presupuesto de kAdminMaxVerifyPasses.
+        if (!vr.shortcut) {
+          ++st->verify_passes;
+        }
         st->last_verify_verdict = vr.veredicto;
         st->last_verify_why = vr.why;
         {

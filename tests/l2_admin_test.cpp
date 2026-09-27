@@ -23,6 +23,8 @@ using tuide::AdminScriptedBrain;
 using tuide::AdminSpawn;
 using tuide::AdminSpawnTipo;
 using tuide::AdminState;
+using tuide::AdminVerifyResult;
+using tuide::admin_run_verify;
 using tuide::admin_apply;
 using tuide::admin_begin_consulta_budgets;
 using tuide::admin_clip_output;
@@ -430,6 +432,73 @@ int main() {
     const auto vpaths = admin_verify_readable_paths(vs);
     expect(std::find(vpaths.begin(), vpaths.end(), "src/ui/console_panel.cpp") != vpaths.end(),
            "verify paths desde evidencia");
+  }
+  {
+    // P2bis: 1 job "encontrado" con evidencia → sostiene determinista, sin
+    // llamar al brain (script vacío: si lo llamara, propose() fallaría).
+    AdminState fast_st;
+    fast_st.consulta = "dónde está AdminState";
+    AdminJob j;
+    j.id = 1;
+    j.tipo = "explore";
+    j.veredicto = "encontrado";
+    j.summary = "AdminState en l2_admin.hpp";
+    j.evidencia.push_back("src/ai/l2_admin.hpp:136");
+    fast_st.jobs.push_back(j);
+    AdminScriptedBrain empty_brain({});
+    AdminLoopOpts opts;
+    const AdminVerifyResult vr =
+        admin_run_verify(&fast_st, empty_brain, "why", "", opts);
+    expect(vr.ok && vr.shortcut && vr.veredicto == "sostiene" && !vr.blocks,
+           "P2bis: 1 job encontrado -> sostiene determinista");
+    expect(fast_st.verify_passes == 0, "P2bis: shortcut no toca verify_passes");
+  }
+  {
+    // P2bis: cualquier job no_encontrado/parcial → dudoso determinista, sin LLM.
+    AdminState miss_st;
+    miss_st.consulta = "dónde está X";
+    AdminJob j1;
+    j1.id = 1;
+    j1.tipo = "explore";
+    j1.veredicto = "encontrado";
+    j1.evidencia.push_back("a.cpp:1");
+    AdminJob j2;
+    j2.id = 2;
+    j2.tipo = "explore";
+    j2.veredicto = "parcial";
+    miss_st.jobs.push_back(j1);
+    miss_st.jobs.push_back(j2);
+    AdminScriptedBrain empty_brain2({});
+    AdminLoopOpts opts2;
+    const AdminVerifyResult vr2 =
+        admin_run_verify(&miss_st, empty_brain2, "why", "", opts2);
+    expect(vr2.ok && vr2.shortcut && vr2.veredicto == "dudoso" && vr2.blocks,
+           "P2bis: job con miss -> dudoso determinista bloqueante");
+    expect(vr2.why.find("job2=parcial") != std::string::npos, "P2bis: cita el job con miss");
+  }
+  {
+    // Control: 2 jobs, ambos "encontrado", sin miss -> NO es shortcut (debe
+    // seguir usando el gate LLM completo; aquí solo comprobamos que no cae
+    // en ninguna de las dos rutas deterministas de arriba).
+    AdminState two_st;
+    two_st.consulta = "arco A->B";
+    AdminJob j1;
+    j1.id = 1;
+    j1.veredicto = "encontrado";
+    j1.evidencia.push_back("a.cpp:1");
+    AdminJob j2;
+    j2.id = 2;
+    j2.veredicto = "encontrado";
+    j2.evidencia.push_back("b.cpp:1");
+    two_st.jobs.push_back(j1);
+    two_st.jobs.push_back(j2);
+    AdminScriptedBrain fail_brain({});
+    AdminLoopOpts opts3;
+    const AdminVerifyResult vr3 =
+        admin_run_verify(&two_st, fail_brain, "why", "", opts3);
+    // El brain vacío falla al primer propose(); si P2bis NO hizo shortcut,
+    // el gate cae al camino LLM y hereda ese fallo (dudoso/blocks, sin shortcut).
+    expect(!vr3.shortcut, "control: 2 jobs sin miss no es shortcut de P2bis");
   }
   {
     AdminState empty;

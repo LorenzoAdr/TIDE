@@ -545,6 +545,45 @@ def run_exit_verify(
     """
     if not jobs:
         return None, "", exam
+    # P2bis (docs/plans/l2-admin-verify-round-reduction.md, sección 6):
+    # rutas deterministas basadas en datos de la batería vibecode-100 — no
+    # gastan llamada LLM ni cuentan contra max_verify. Mirror de
+    # admin_run_verify en l2_admin.cpp.
+    misses = [
+        j
+        for j in jobs
+        if (j.get("veredicto") or "").strip().lower()
+        in ("no_encontrado", "parcial", "no_hay", "no_concluyente", "no")
+    ]
+    if not misses and len(jobs) == 1 and (
+        (jobs[0].get("veredicto") or "").strip().lower() == "encontrado"
+    ) and jobs[0].get("evidencia"):
+        return {
+            "veredicto": "sostiene",
+            "ataques": [],
+            "arco": {"de": "", "a": ""},
+            "why": "1 job encontrado con evidencia ancla; gate determinista (P2bis)",
+            "shortcut": True,
+        }, "", exam
+    if misses:
+        miss_desc = "; ".join(
+            f"job{j.get('id')}={j.get('veredicto')}" for j in misses
+        )
+        why = f"hueco tipado sin resolver ({miss_desc}); gate determinista (P2bis)"
+        return (
+            {
+                "veredicto": "dudoso",
+                "ataques": [],
+                "arco": {"de": "", "a": ""},
+                "why": why,
+                "shortcut": True,
+            },
+            "## Informe del VERIFICADOR (determinista, sin LLM)\nveredicto=dudoso\nwhy: "
+            + why
+            + "\nSalida bloqueada — vuelves al menú del piloto. Decide: spawn explore / "
+            "seguir_explorando (el hueco arriba), o ask_user.\n",
+            exam,
+        )
     if verify_count >= max_verify:
         # Mirror C++ admin_run_verify: never absuelve as sostiene on cap.
         # Empty block msg = omit gate (cierre permitido sin afirmar el arco).
@@ -860,9 +899,12 @@ def main() -> None:
                     exam=verify_exam,
                 )
                 if report is not None:
-                    verify_count += 1
+                    # P2bis: los shortcuts deterministas no gastan LLM ni cuentan
+                    # contra max_verify (mirror del gate en admin_run_verify).
+                    if not report.get("shortcut"):
+                        verify_count += 1
+                        tracer.bump("verify")
                     verify_reports.append({"trigger": "editar", **report})
-                    tracer.bump("verify")
                     if report.get("refute_pass") or report.get("refute"):
                         tracer.bump("refute")
                 if block:
@@ -940,9 +982,12 @@ def main() -> None:
                     exam=verify_exam,
                 )
                 if report is not None:
-                    verify_count += 1
+                    # P2bis: los shortcuts deterministas no gastan LLM ni cuentan
+                    # contra max_verify (mirror del gate en admin_run_verify).
+                    if not report.get("shortcut"):
+                        verify_count += 1
+                        tracer.bump("verify")
                     verify_reports.append({"trigger": "cerrar", **report})
-                    tracer.bump("verify")
                     if report.get("refute_pass") or report.get("refute"):
                         tracer.bump("refute")
                 if block:

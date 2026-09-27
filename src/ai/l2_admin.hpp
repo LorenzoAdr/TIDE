@@ -169,6 +169,11 @@ struct AdminVerifyResult {
   std::string why;
   std::string report;  // texto para last_error / piloto
   int steps = 0;
+  // P2bis (docs/plans/l2-admin-verify-round-reduction.md): true cuando el
+  // veredicto es determinista (sin notebook, 1 job "encontrado" limpio, o
+  // bloqueo por miss tipado) — no gastó ninguna llamada LLM. El runtime no
+  // debe cargarlo contra kAdminMaxVerifyPasses.
+  bool shortcut = false;
 };
 
 struct AdminJobResult {
