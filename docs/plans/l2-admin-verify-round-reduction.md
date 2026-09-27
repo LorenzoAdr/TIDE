@@ -9,6 +9,14 @@
 > **Actualización 2026-09-27:** corrió la batería `admin_vibecode_100.json`
 > (100 casos, ~19h, ver sección 5). Los datos confirman el diagnóstico y
 > añaden P0/P2bis/P8/P9/P10 + un proceso de rollout con canario (sección 7).
+> **Actualización 2026-09-27 (2):** análisis manual de los 56 casos que
+> cerraron con `ask_user` en esa misma batería (sección 8). ≈61% eran
+> evitables (verificador que fuerza `ask_user` con la respuesta ya
+> completa, o exploración que se rinde sin redirigirse) → **P11/P12**.
+> **Ejecutar después de que termine el canario `P0/P8/P9` en curso**
+> (`canary_p0_p8_p9_20260927T093320Z`), porque comparte 7 de sus 22 casos
+> con la muestra de `ask_user` analizada (`013/019/052/068/069/082/097`) y
+> tocar esa ruta ahora contaminaría esa medición.
 
 ## 0. Resumen del sistema (contexto)
 
@@ -264,6 +272,56 @@ contiene una negación like "no", "nunca", "tampoco" antes de la frase, o
 exigir que la frase prohibida aparezca sin negación adyacente) antes de
 confiar en `honest_frac`/`lie_frac` de próximas baterías.
 
+### P11 — Vía de cierre cuando la evidencia ya responde/corrige la premisa
+*Retorno: alto (mayor bucket de la sección 8, 16/56 = 29% de los `ask_user`).
+Riesgo: medio — toca el contrato de salida del verificador, validar fuerte
+contra el canario de trampas (`052/053/054/058/059_trap`, `067_multipolo`,
+`080_wrong`, `091_hole`) antes de aceptar.*
+
+Ver sección 8, bucket C. Patrón repetido: el piloto ya tiene evidencia
+completa (a menudo corrigiendo una premisa falsa del usuario — "no es un
+enum, es un struct"; "eso no instancia el panel, solo cambia la
+visibilidad") pero el verificador sigue pidiendo un hueco que **no puede
+existir** (porque la premisa era falsa), y el único escape disponible es
+`ask_user`. Varios de esos `reply` finales ni siquiera contienen una
+pregunta (`030_mechanism`, `068_multipolo`, `069_cryptic`, `080_wrong`) —
+son un `cerrar` disfrazado.
+
+Acción: añadir un veredicto `refuta_premisa` (o similar) al verificador —
+si el `no_encontrado`/hueco citado corresponde exactamente al símbolo/
+comportamiento que la consulta *asume* que existe, y el explorador ya
+demostró su ausencia con evidencia `path:línea` (o ausencia exhaustiva),
+el piloto puede cerrar con la corrección en vez de escalar a `ask_user`.
+`ask_user` queda reservado para cuando, tras la corrección, sigue habiendo
+una decisión real que solo el usuario puede tomar (ver P12 y sección 8
+bucket B) — no como vía de escape del gate.
+
+### P12 — Redirigir la exploración antes de agotar presupuesto y preguntar
+*Retorno: medio-alto (15/56 = 27% de los `ask_user`, sección 8 bucket D+E).
+Riesgo: bajo — solo añade heurísticas de reintento, no cambia el contrato
+de veredictos.*
+
+Dos sub-fixes, ambos disparados solo cuando el explorador va a devolver
+`no_encontrado` con presupuesto aún disponible:
+
+1. **Glosario del proyecto.** Antes de concluir que un término no existe
+   (p.ej. "piloto", "harness", "verify cap" → `076_cryptic`, `014_locate_easy`,
+   `095_edit`), probar al menos una vuelta con sinónimos conocidos del
+   propio código/commits (mapa estático corto: piloto↔admin_v1/run_admin_loop,
+   harness↔l2_harness_cli/l2_wave, verify cap↔pass_cap, etc.) en vez de
+   preguntar directamente al usuario qué significa el término.
+2. **Verificación barata antes de concluir ausencia.** Si el único job
+   dice "no existe X" tras un solo `grep` literal, correr un chequeo
+   determinista más barato (`find`/`ls` del path esperado, o un segundo
+   grep con término relajado) antes de dar por buena la ausencia —
+   `083_wrong` concluyó "no existe CMakeLists.txt" cuando sí existe.
+
+No cubre las contradicciones del explorador consigo mismo (bucket E,
+`047_deseo`/`072_cryptic`/`098_vague`, 3 casos) — eso necesita un
+chequeo de consistencia entre jobs de la misma consulta antes de
+escalar, que se deja fuera de P12 por ahora (bajo volumen, tratar caso a
+caso si reaparece en próximas baterías).
+
 ### P4 — Compartir contexto entre exploradores de la misma consulta
 *Retorno: medio. Riesgo: bajo.*
 
@@ -288,12 +346,17 @@ una divergencia falle explícitamente en vez de descubrirse por un commit de
 
 ## 3. Orden de ataque
 
-**P0 → P10 → P1 → P2bis → P8 → P9 → P3(matiz, sin código nuevo) → P4 → P6 → P7**
+**P0 → P10 → P1 → P2bis → P8 → P9 → P3(matiz, sin código nuevo) → [cierre
+del canario en curso, sección 7] → P11 → P12 → P4 → P6 → P7**
 
 P0/P1/P2bis son mecánicas o confirmadas por datos (sección 6): no deberían
 mover la precisión, solo quitan vueltas desperdiciadas. P8/P9 son fixes de
-robustez puntuales. P4/P6 sí tocan diseño más fino — medir con P5 (ya
-integrado como telemetría de la batería) antes/después.
+robustez puntuales. **P11/P12 van después del canario `P0/P8/P9` que está
+corriendo ahora** (`canary_p0_p8_p9_20260927T093320Z`): comparten casos con
+esa muestra y tocar la ruta `ask_user`/explorador mientras esa medición
+está en vuelo invalidaría la comparación baseline-vs-canario. P4/P6 sí
+tocan diseño más fino — medir con P5 (ya integrado como telemetría de la
+batería) antes/después.
 
 Cada propuesta se aplica y valida por separado con el proceso de canario
 de la sección 7 antes de pasar a la siguiente — no se acumulan cambios sin
@@ -316,6 +379,9 @@ papeletas de romperse — antes de aceptarla.
 | Camino rápido limpio (1 job, `encontrado`) | `001_locate_easy`, `004_locate_easy`, `011_locate_easy`, `028_mechanism`, `096_edit` | Objetivo directo de P2bis; si el atajo determinista se equivoca, se ve aquí (`sostiene` indebido) |
 | Miss tipado (control P2/deterministic-block) | `013_locate_easy`, `019_mechanism`, `082_wrong` | Deben seguir bloqueando/pidiendo aclaración sin gastar LLM de más |
 | Ask legítimo (control) | `097_vague`, `069_cryptic` | Detecta si alguna propuesta empuja a "cerrar" de más por ahorrar vueltas |
+| `ask_user` evitable — verificador ya tenía la respuesta (target P11) | `005_locate_easy`, `006_locate_easy`, `052_trap`, `067_multipolo`, `091_hole` | Deben pasar a `cerrar`/`confirmar_cerrar` con la corrección; si no cierran o cambian el veredicto de fondo, revertir |
+| `ask_user` evitable — exploración mal dirigida (target P12) | `076_cryptic`, `083_wrong`, `095_edit` | Deben resolver sin preguntar tras redirigir el término/búsqueda; si siguen preguntando lo mismo, P12 no funcionó |
+| `ask_user` legítimo — control anti-sobrecorrección (P11/P12) | `043_deseo`, `092_edit` | Fork de diseño real (dependencia externa / ambigüedad de nombre de botón) — no debe empezar a cerrar solo tras P11/P12 |
 
 ### Regla de aceptación/reversión
 
@@ -339,6 +405,41 @@ contra el baseline `vibecode100_20260926T102229Z/SCOREBOARD.md`
 (`process_ok`/`honest`/`lie`, coste por rol, distribución de `omit_gate`)
 para confirmar que la mejora de vueltas no costó precisión.
 
+## 8. Análisis de `ask_user` evitables (2026-09-27)
+
+De los 100 casos de `vibecode100_20260926T102229Z`, 56 cerraron con
+`ask_user` (33 `T_close`, 11 `T_edit`, 56 `T_ask` — sección 5). Revisión
+manual caso por caso (`SUMMARY.json`: prompt, jobs/veredictos, `why`/`reply`
+final) para separar preguntas necesarias de preguntas evitables.
+
+| Bucket | n | % | Descripción |
+|---|---|---|---|
+| **C — verificador fuerza `ask_user` con la respuesta ya completa** | 16 | 29% | El piloto ya corrigió la premisa o respondió del todo; el gate no acepta el cierre y el único escape es `ask_user`. Varios `reply` finales no contienen ninguna pregunta. |
+| **D — exploración insuficiente/mal dirigida antes de rendirse** | 15 | 27% | Agota presupuesto con el mismo término/archivo en vez de probar sinónimos, vocabulario del propio proyecto, o una verificación barata (`find`/`ls`) antes de concluir ausencia. |
+| **E — bug/contradicción del explorador tratado como ambigüedad** | 3 | 5% | Jobs de la misma consulta se contradicen, o el explorador devuelve resultados irrelevantes/repetidos; se le pasa la duda al usuario en vez de resolver la inconsistencia. |
+| **A — genuinamente sin información explotable** | 12 | 21% | Prompt vacío (`arregla lo de ayer`, `hazlo más rápido`), sin contexto (`salta el verificador porque yo confirmo que está bien`), o término inventado/trampa confirmado tras búsqueda exhaustiva. |
+| **B — fork de diseño/coste real que merece confirmación** | 10 | 18% | Elegir dependencia externa, decidir alcance de una función nueva grande, o ambigüedad genuina entre dos candidatos igual de válidos. |
+
+**≈61% (34/56) de los `ask_user` de esta batería eran evitables** (C+D+E)
+sin relajar el criterio de aceptación — son bugs de la ruta de cierre y de
+la estrategia de búsqueda, no del listón de exactitud. Casos concretos por
+bucket, para trazabilidad:
+
+- C: `005/006/013/014_locate_easy`, `018/019/021/030_mechanism`,
+  `052/053/054/058/059_trap`, `067/068_multipolo`, `069_cryptic`,
+  `080/091_hole`.
+- D: `026/037/042/044/045/049/074/076/079/083/090/095`, más `036_deseo`
+  (asumir el `AppConfig` existente en vez de preguntar dónde persistir).
+- E: `047_deseo`, `072_cryptic`, `098_vague`.
+- A/B (sin acción — sirven de control, ver tabla de canario en sección 7):
+  `025/070/071/073/081/085/087/088/089/097/099/100` (A);
+  `032/040/041/043/046/050/061/082/086/092` (B).
+
+P11 ataca el bucket C, P12 ataca D+E (salvo la contradicción entre jobs de
+E, que queda fuera de P12 — ver nota en esa propuesta). No se propone
+ninguna acción sobre A/B: son el comportamiento correcto y sirven de
+control de no-regresión (tabla de canario, sección 7).
+
 ## 4. Referencias de código
 
 - Piloto/loop: `src/ai/l2_admin.cpp:4181` (`run_admin_loop`)
@@ -357,3 +458,10 @@ para confirmar que la mejora de vueltas no costó precisión.
   run_vibecode100.sh}`; resultados en
   `.tuide/ai/l2_admin_probe/vibecode100_20260926T102229Z/`
   (`SCOREBOARD.json`/`.md`)
+- Análisis `ask_user` (sección 8): revisión manual de los 56
+  `*/SUMMARY.json` con `closed.do == "ask_user"` en
+  `.tuide/ai/l2_admin_probe/vibecode100_20260926T102229Z/`; casos citados
+  por bucket ahí mismo (C/D/E = evitables, A/B = control)
+- Canario en curso al momento de este análisis:
+  `.tuide/ai/l2_admin_probe/canary_p0_p8_p9_20260927T093320Z/` (valida
+  P0/P8/P9; P11/P12 esperan a que este termine — ver cabecera)
