@@ -56,6 +56,16 @@ void TaskRunner::set_tasks(std::vector<AiTaskSpec> tasks) {
   tasks_ = std::move(tasks);
 }
 
+void TaskRunner::set_docker_route(ShellDockerRoute route) {
+  std::lock_guard lock(mu_);
+  docker_route_ = std::move(route);
+}
+
+ShellDockerRoute TaskRunner::docker_route() const {
+  std::lock_guard lock(mu_);
+  return docker_route_;
+}
+
 void TaskRunner::ensure_default_tasks(const std::string& workspace_root) {
   std::lock_guard lock(mu_);
   auto has = [&](const std::string& name) {
@@ -137,14 +147,16 @@ TaskRunnerResult TaskRunner::deny(const std::string& reason) const {
 }
 
 TaskRunnerResult TaskRunner::run(const std::string& name_or_command, const std::string& cwd,
-                                 const LineCallback& on_line) {
+                                 const LineCallback& on_line, int timeout_ms) {
   if (name_or_command.empty()) {
     return deny("comando vacío");
   }
 
   std::string command;
+  ShellDockerRoute docker_route;
   {
     std::lock_guard lock(mu_);
+    docker_route = docker_route_;
     bool found_task = false;
     for (const auto& t : tasks_) {
       if (t.name == name_or_command) {
@@ -193,8 +205,10 @@ TaskRunnerResult TaskRunner::run(const std::string& name_or_command, const std::
   result.started = true;
 
   // Keep cwd in the shell command so we don't need chdir before fork races.
+  // Docker-routed: -w ya posiciona dentro del contenedor — el cwd del host no
+  // existe ahí, así que el "cd" solo aplica cuando corremos en el host.
   std::ostringstream cmd;
-  if (!cwd.empty()) {
+  if (!docker_route.active() && !cwd.empty()) {
     cmd << "cd " << shell_quote(cwd) << " && ";
   }
   cmd << command;
@@ -226,7 +240,47 @@ TaskRunnerResult TaskRunner::run(const std::string& name_or_command, const std::
     if (pipefd[1] != STDOUT_FILENO && pipefd[1] != STDERR_FILENO) {
       close_fd(pipefd[1]);
     }
-    ::execl("/bin/sh", "sh", "-c", cmd.str().c_str(), static_cast<char*>(nullptr));
+    // Nunca conectar stdin al tty real de TIDE: un prompt interactivo (password,
+    // confirmación) se quedaría esperando input que nunca llega por este canal
+    // (o robaría teclas de la UI). Que falle/EOF en vez de colgarse.
+    const int devnull = ::open("/dev/null", O_RDONLY);
+    if (devnull >= 0) {
+      ::dup2(devnull, STDIN_FILENO);
+      if (devnull != STDIN_FILENO) {
+        close_fd(devnull);
+      }
+    }
+    // TIDE puede arrancar con un PATH reducido (launcher gráfico, systemd) y
+    // execvp no encontraría docker/bash (mismo bug ya resuelto una vez en
+    // terminal/shell_session.cpp::bootstrap_shell).
+    {
+      const char* current_path = std::getenv("PATH");
+      const std::string extended_path =
+          std::string(current_path ? current_path : "") +
+          ":/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin";
+      ::setenv("PATH", extended_path.c_str(), 1);
+    }
+    if (docker_route.active()) {
+      std::vector<std::string> args = {"exec", "-i"};
+      if (!docker_route.cwd.empty()) {
+        args.push_back("-w");
+        args.push_back(docker_route.cwd);
+      }
+      args.push_back(docker_route.container);
+      args.push_back("/bin/sh");
+      args.push_back("-c");
+      args.push_back(cmd.str());
+      std::vector<char*> argv;
+      argv.reserve(args.size() + 2);
+      argv.push_back(const_cast<char*>("docker"));
+      for (auto& a : args) {
+        argv.push_back(a.data());
+      }
+      argv.push_back(nullptr);
+      ::execvp("docker", argv.data());
+    } else {
+      ::execl("/bin/sh", "sh", "-c", cmd.str().c_str(), static_cast<char*>(nullptr));
+    }
     ::_exit(127);
   }
 
@@ -245,8 +299,20 @@ TaskRunnerResult TaskRunner::run(const std::string& name_or_command, const std::
   std::array<char, 4096> buffer{};
   std::string pending;
   bool saw_eof = false;
+  bool timed_out = false;
+  const bool has_deadline = timeout_ms > 0;
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(has_deadline ? timeout_ms : 0);
   while (!saw_eof) {
     if (cancel_.load()) {
+      const pid_t live = child_pid_.load();
+      if (live > 0) {
+        ::kill(-live, SIGTERM);
+      }
+      break;
+    }
+    if (has_deadline && std::chrono::steady_clock::now() >= deadline) {
+      timed_out = true;
       const pid_t live = child_pid_.load();
       if (live > 0) {
         ::kill(-live, SIGTERM);
@@ -291,7 +357,7 @@ TaskRunnerResult TaskRunner::run(const std::string& name_or_command, const std::
 
   close_fd(pipefd[0]);
 
-  if (cancel_.load()) {
+  if (cancel_.load() || timed_out) {
     const pid_t live = child_pid_.exchange(-1);
     if (live > 0) {
       ::kill(-live, SIGTERM);
@@ -311,7 +377,10 @@ TaskRunnerResult TaskRunner::run(const std::string& name_or_command, const std::
     }
   }
 
-  if (cancel_.load()) {
+  if (timed_out) {
+    result.exit_code = -1;
+    result.stderr_text = "timeout tras " + std::to_string(timeout_ms / 1000) + "s";
+  } else if (cancel_.load()) {
     result.exit_code = -1;
     result.stderr_text = "cancelado";
   } else if (status < 0) {

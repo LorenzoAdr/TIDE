@@ -34,6 +34,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/ui_wake.hpp"
+#include "util/docker_shell.hpp"
 #include "util/include_tree.hpp"
 #include "util/path_normalize.hpp"
 
@@ -606,6 +607,17 @@ void AiController::sync_task_runner() {
   tasks_.set_tasks(std::move(specs));
   const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
   tasks_.ensure_default_tasks(root);
+  // Si el workspace corre dentro de Docker (resolve_shell_launch_config, la
+  // misma resolución que usa la pestaña de terminal y BuildEnvironmentService),
+  // enrutar ahí lo que lanza el harness de IA — si no, build/test/shell del
+  // agente corren en el host aunque el proyecto viva en el contenedor.
+  ShellDockerRoute route;
+  if (!root.empty() && deps_.config != nullptr) {
+    const ShellLaunchConfig launch = resolve_shell_launch_config(root, *deps_.config);
+    route.container = launch.docker_container;
+    route.cwd = launch.docker_cwd;
+  }
+  tasks_.set_docker_route(std::move(route));
 }
 
 std::vector<std::string> AiController::snapshot_lines() const {
@@ -1184,7 +1196,7 @@ void AiController::run_admin_async(const std::string& message) {
           tasks_.run(s.arg, root, [&](const std::string& line) {
             append(line);
             log << line << '\n';
-          });
+          }, kTaskRunnerBuildTimeoutMs);
       r.ok = tr.allowed && tr.exit_code == 0;
       if (!tr.allowed) {
         r.error = tr.deny_reason;
@@ -1211,7 +1223,7 @@ void AiController::run_admin_async(const std::string& message) {
           tasks_.run(name, root, [&](const std::string& line) {
             append(line);
             log << line << '\n';
-          });
+          }, kTaskRunnerBuildTimeoutMs);
       r.ok = tr.allowed && tr.exit_code == 0;
       if (!tr.allowed) {
         r.error = tr.deny_reason;
@@ -1231,17 +1243,17 @@ void AiController::run_admin_async(const std::string& message) {
       return r;
     };
     ops.run_shell = [this, root](const AdminSpawn& s) {
+      sync_task_runner();  // también refresca la ruta Docker (tasks_.docker_route()).
       if (s.arg == "launch" || s.arg == "compile" || s.arg == "test" ||
           (!s.arg.empty() && s.arg.find(' ') == std::string::npos &&
            tasks_.is_whitelisted(s.arg))) {
         AdminJobResult r;
-        sync_task_runner();
         std::ostringstream log;
         const TaskRunnerResult tr =
             tasks_.run(s.arg, root, [&](const std::string& line) {
               append(line);
               log << line << '\n';
-            });
+            }, kTaskRunnerBuildTimeoutMs);
         r.ok = tr.allowed && tr.exit_code == 0;
         if (!tr.allowed) {
           r.error = tr.deny_reason;
@@ -1257,7 +1269,12 @@ void AiController::run_admin_async(const std::string& message) {
         }
         return r;
       }
-      return admin_run_shell_safe(s.arg, root);
+      AdminShellExecOpts sopts;
+      sopts.cancel = &agent_cancel_;
+      const ShellDockerRoute route = tasks_.docker_route();
+      sopts.docker_container = route.container;
+      sopts.docker_cwd = route.cwd;
+      return admin_run_shell_safe(s.arg, root, sopts);
     };
     ops.run_read = [root](const AdminSpawn& s) {
       // Siempre admin_run_read_file: la tool read_file corta a ~400 líneas y

@@ -44,6 +44,7 @@ inline constexpr int kAdminNotebookMaxItems = 24;
 inline constexpr int kAdminNotebookFactChars = 240;
 inline constexpr int kAdminUiSelectionChars = 400;
 inline constexpr int kAdminReadMaxChars = 3000;
+inline constexpr int kAdminShellDefaultTimeoutMs = 120000;  // 2 min: comando suelto del explorador
 
 enum class AdminDo {
   Invalid,
@@ -277,7 +278,16 @@ std::string admin_clip_output(const std::string& text, int head_chars, int tail_
 // Infer typed paths/facts from shell cmd + raw stdout (ls/find/head/tail/wc/…).
 void admin_shell_enrich_result(const std::string& cmd, const std::string& captured,
                                const std::string& cwd, AdminJobResult* r);
-AdminJobResult admin_run_shell_safe(const std::string& cmd, const std::string& cwd);
+// Docker/cancelación/timeout opcionales; ver util/docker_shell.hpp para cómo se
+// resuelve container/cwd_in_container a partir del workspace.
+struct AdminShellExecOpts {
+  std::atomic<bool>* cancel = nullptr;
+  std::string docker_container;  // vacío = ejecutar en el host
+  std::string docker_cwd;        // -w dentro del contenedor; vacío = WORKDIR de la imagen
+  int timeout_ms = kAdminShellDefaultTimeoutMs;  // <=0 desactiva el auto-kill (solo tests)
+};
+AdminJobResult admin_run_shell_safe(const std::string& cmd, const std::string& cwd,
+                                    const AdminShellExecOpts& opts = {});
 // Built-in FS helpers (CLI / fallback when ops unset). Confinadas a workspace_root.
 bool admin_path_inside_workspace(const std::string& workspace_root, const std::string& path);
 // Resuelve path (relativo o absoluto) bajo root → abs canónico + rel genérico.

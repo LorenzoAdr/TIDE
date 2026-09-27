@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -41,6 +42,7 @@ using tuide::admin_run_read_file;
 using tuide::admin_split_read_args;
 using tuide::admin_run_search_rg;
 using tuide::admin_run_shell_safe;
+using tuide::AdminShellExecOpts;
 using tuide::admin_verify_context_prompt;
 using tuide::admin_verify_readable_paths;
 using tuide::admin_run_web_fetch;
@@ -626,6 +628,31 @@ int main() {
       }
     }
     expect(has_lines && !wc.paths.empty(), "live wc typed fact+path");
+
+    // stdin nunca debe ir al tty real: "cat" sin argumentos leería de stdin
+    // indefinidamente si no estuviera redirigido a /dev/null (colgaría el test).
+    auto cat_stdin = admin_run_shell_safe("cat", root);
+    expect(cat_stdin.ok, "cat sin args no cuelga (stdin=/dev/null)");
+
+    // Cancelación: comprobada antes de leer nada, así que mata el proceso sin
+    // depender de cuánto tarde el comando.
+    {
+      std::atomic<bool> cancel_flag{true};
+      AdminShellExecOpts opts;
+      opts.cancel = &cancel_flag;
+      auto cancelled = admin_run_shell_safe("ls", root, opts);
+      expect(!cancelled.ok && cancelled.error == "cancelado", "shell cancelado no ok");
+    }
+
+    // Timeout: 1ms ya está vencido cuando el loop entra a comprobarlo, sin
+    // depender de una duración real del comando.
+    {
+      AdminShellExecOpts opts;
+      opts.timeout_ms = 1;
+      auto timed_out = admin_run_shell_safe("ls", root, opts);
+      expect(!timed_out.ok && timed_out.error.rfind("timeout", 0) == 0,
+            "shell timeout no ok");
+    }
   }
   {
     AdminState loop_st;

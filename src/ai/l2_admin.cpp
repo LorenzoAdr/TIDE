@@ -3,13 +3,20 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <thread>
+
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "ai/action_json.hpp"
 #include "ai/l2_grammar.hpp"
@@ -2197,7 +2204,8 @@ void admin_shell_enrich_result(const std::string& cmd, const std::string& captur
   add_content_facts(verb.c_str(), argv_paths.empty() ? std::string{} : argv_paths.front());
 }
 
-AdminJobResult admin_run_shell_safe(const std::string& cmd, const std::string& cwd) {
+AdminJobResult admin_run_shell_safe(const std::string& cmd, const std::string& cwd,
+                                    const AdminShellExecOpts& opts) {
   AdminJobResult r;
   if (!admin_shell_cmd_allowed(cmd)) {
     r.error =
@@ -2217,35 +2225,170 @@ AdminJobResult admin_run_shell_safe(const std::string& cmd, const std::string& c
     r.summary = "shell named-task stub arg=" + cmd;
     return r;
   }
+
+  const bool docker = !opts.docker_container.empty();
+  // Docker-routed: -w ya posiciona dentro del contenedor — el cwd del host no
+  // existe ahí (o es otro path), así que el "cd" solo aplica en el host.
   std::string full = cmd;
-  if (!cwd.empty()) {
+  if (!docker && !cwd.empty()) {
     full = "cd " + shell_single_quote(cwd) + " && " + cmd;
   }
-  full += " 2>&1";
-  FILE* pipe = ::popen(full.c_str(), "r");
-  if (pipe == nullptr) {
-    r.error = "popen falló";
+
+  int pipefd[2] = {-1, -1};
+  if (::pipe(pipefd) != 0) {
+    r.error = "pipe falló";
     r.summary = r.error;
     return r;
   }
+  const pid_t pid = ::fork();
+  if (pid < 0) {
+    ::close(pipefd[0]);
+    ::close(pipefd[1]);
+    r.error = "fork falló";
+    r.summary = r.error;
+    return r;
+  }
+  if (pid == 0) {
+    // Grupo propio para poder matar todo el árbol (mismo patrón que
+    // TaskRunner::run / git_command.cpp::run_git).
+    ::setpgid(0, 0);
+    ::close(pipefd[0]);
+    ::dup2(pipefd[1], STDOUT_FILENO);
+    ::dup2(pipefd[1], STDERR_FILENO);
+    if (pipefd[1] != STDOUT_FILENO && pipefd[1] != STDERR_FILENO) {
+      ::close(pipefd[1]);
+    }
+    // Nunca conectar stdin al tty real de TIDE (ver terminal/shell_session.cpp):
+    // un prompt interactivo se queda colgado o roba teclas de la UI en vez de
+    // fallar/EOF limpio.
+    const int devnull = ::open("/dev/null", O_RDONLY);
+    if (devnull >= 0) {
+      ::dup2(devnull, STDIN_FILENO);
+      if (devnull != STDIN_FILENO) {
+        ::close(devnull);
+      }
+    }
+    {
+      const char* current_path = std::getenv("PATH");
+      const std::string extended_path =
+          std::string(current_path ? current_path : "") +
+          ":/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin";
+      ::setenv("PATH", extended_path.c_str(), 1);
+    }
+    if (docker) {
+      std::vector<std::string> args = {"exec", "-i"};
+      if (!opts.docker_cwd.empty()) {
+        args.push_back("-w");
+        args.push_back(opts.docker_cwd);
+      }
+      args.push_back(opts.docker_container);
+      args.push_back("/bin/sh");
+      args.push_back("-c");
+      args.push_back(full);
+      std::vector<char*> argv;
+      argv.reserve(args.size() + 2);
+      argv.push_back(const_cast<char*>("docker"));
+      for (auto& a : args) {
+        argv.push_back(a.data());
+      }
+      argv.push_back(nullptr);
+      ::execvp("docker", argv.data());
+    } else {
+      ::execl("/bin/sh", "sh", "-c", full.c_str(), static_cast<char*>(nullptr));
+    }
+    ::_exit(127);
+  }
+
+  ::close(pipefd[1]);
+  ::setpgid(pid, pid);  // lado padre; ignora la carrera si el hijo ya lo hizo
+  {
+    const int flags = ::fcntl(pipefd[0], F_GETFL, 0);
+    if (flags >= 0) {
+      ::fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+    }
+  }
+
   std::string captured;
-  std::array<char, 512> buf{};
-  while (fgets(buf.data(), static_cast<int>(buf.size()), pipe) != nullptr) {
-    captured += buf.data();
-    if (captured.size() > static_cast<std::size_t>(kAdminSummaryChars) * 4) {
-      captured += "\n…(captura cortada)…\n";
+  std::array<char, 4096> buffer{};
+  bool saw_eof = false;
+  bool was_cancelled = false;
+  bool timed_out = false;
+  bool output_capped = false;
+  const bool has_deadline = opts.timeout_ms > 0;
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(has_deadline ? opts.timeout_ms : 0);
+  const std::size_t raw_cap = static_cast<std::size_t>(kAdminSummaryChars) * 4;
+  while (!saw_eof) {
+    if (opts.cancel != nullptr && opts.cancel->load()) {
+      was_cancelled = true;
+      ::kill(-pid, SIGTERM);
+      break;
+    }
+    if (has_deadline && std::chrono::steady_clock::now() >= deadline) {
+      timed_out = true;
+      ::kill(-pid, SIGTERM);
+      break;
+    }
+    const ssize_t n = ::read(pipefd[0], buffer.data(), buffer.size());
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        continue;
+      }
+      break;
+    }
+    if (n == 0) {
+      saw_eof = true;
+      break;
+    }
+    captured.append(buffer.data(), static_cast<std::size_t>(n));
+    if (captured.size() > raw_cap) {
+      captured += "\n…(captura cortada; comando terminado)…\n";
+      output_capped = true;
+      ::kill(-pid, SIGTERM);
       break;
     }
   }
-  const int code = ::pclose(pipe);
+  ::close(pipefd[0]);
+
+  if (was_cancelled || timed_out || output_capped) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ::kill(-pid, SIGKILL);
+  }
+
+  int status = 0;
+  while (::waitpid(pid, &status, 0) < 0) {
+    if (errno != EINTR) {
+      status = -1;
+      break;
+    }
+  }
+
   bool trunc = false;
   int raw = 0;
   r.log_tail = admin_clip_output(captured, &trunc, &raw);
   r.truncated = trunc;
   r.raw_bytes = raw;
+
+  if (was_cancelled) {
+    r.error = "cancelado";
+    r.summary = r.error;
+    return r;
+  }
+  if (timed_out) {
+    r.error = "timeout tras " + std::to_string(opts.timeout_ms / 1000) + "s";
+    r.summary = r.error;
+    return r;
+  }
+
+  const int code = (status >= 0 && WIFEXITED(status)) ? WEXITSTATUS(status) : -1;
   r.ok = (code == 0);
   std::ostringstream sum;
-  sum << "shell exit=" << code << " bytes=" << raw << (trunc ? " truncated=1" : "");
+  sum << "shell exit=" << code << " bytes=" << raw << (trunc ? " truncated=1" : "")
+      << (output_capped ? " capped=1" : "");
   r.summary = sum.str();
   if (!r.ok) {
     r.error = "exit_code!=0";
@@ -4570,8 +4713,11 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
         };
       }
       if (!ops_cwd.run_shell) {
-        ops_cwd.run_shell = [root = opts.workspace_root](const AdminSpawn& s) {
-          return admin_run_shell_safe(s.arg, root);
+        ops_cwd.run_shell = [root = opts.workspace_root, cancel = opts.cancel](
+                                const AdminSpawn& s) {
+          AdminShellExecOpts sopts;
+          sopts.cancel = cancel;
+          return admin_run_shell_safe(s.arg, root, sopts);
         };
       }
       if (!ops_cwd.run_edit) {
