@@ -964,6 +964,42 @@ std::vector<std::string> admin_notebook_paths(const AdminState& st) {
   return out;
 }
 
+std::string admin_notebook_digest_for_explore(const AdminState& st, int max_items,
+                                              int max_chars) {
+  // P4 (docs/plans/l2-admin-verify-round-reduction.md): resumen corto de lo
+  // que ya cazaron exploradores anteriores de ESTA consulta, para que el
+  // siguiente no re-grep terreno ya cubierto. Solo paths/símbolos (sin
+  // prosa), acotado en items y chars.
+  std::vector<std::string> items;
+  auto push = [&](const std::string& s) {
+    if (s.empty() || static_cast<int>(items.size()) >= max_items) {
+      return;
+    }
+    if (std::find(items.begin(), items.end(), s) == items.end()) {
+      items.push_back(s);
+    }
+  };
+  for (const auto& e : st.notebook) {
+    for (const auto& s : e.simbolos) {
+      push(s);
+    }
+    for (const auto& p : e.paths) {
+      push(p);
+    }
+  }
+  if (items.empty()) {
+    return {};
+  }
+  std::ostringstream out;
+  out << "Ya cazado en esta consulta (no repitas grep de esto, amplía desde aquí):";
+  for (const auto& it : items) {
+    out << " `" << it << "`";
+  }
+  std::string s = out.str();
+  utf8_resize(&s, static_cast<std::size_t>(max_chars));
+  return s;
+}
+
 int admin_count_explore_jobs(const AdminState& st) {
   int n = 0;
   for (const auto& j : st.jobs) {
@@ -4040,6 +4076,16 @@ bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::
     return false;
   }
   st->verify_reject_pending = false;
+
+  // P4: si ya hay evidencia acumulada de esta consulta y este spawn es otro
+  // explore, añade al brief un resumen corto de lo ya cazado (paths/símbolos)
+  // para que el hijo no re-grep terreno cubierto por un explore hermano.
+  if (effective.spawn.tipo == AdminSpawnTipo::Explore && !st->notebook.empty()) {
+    const std::string digest = admin_notebook_digest_for_explore(*st);
+    if (!digest.empty()) {
+      effective.spawn.brief += "\n" + digest;
+    }
+  }
 
   AdminJobResult jr;
   const char* tipo = admin_spawn_tipo_name(effective.spawn.tipo);

@@ -491,6 +491,27 @@ def notebook_md(jobs: list[dict], *, compact: bool = True) -> str:
     return "\n".join(parts) if parts else "(vacío)"
 
 
+def notebook_digest_for_explore(jobs: list[dict], max_items: int = 6, max_chars: int = 260) -> str:
+    """P4 (docs/plans/l2-admin-verify-round-reduction.md): resumen corto de lo
+    ya cazado por exploradores anteriores de esta consulta (paths/símbolos,
+    sin prosa), para que un explore hermano no re-grep terreno cubierto.
+    Mirror de admin_notebook_digest_for_explore en l2_admin.cpp."""
+    items: list[str] = []
+    for j in jobs:
+        for s in (j.get("simbolos") or []):
+            if s and s not in items and len(items) < max_items:
+                items.append(str(s))
+        for p in (j.get("paths") or []):
+            if p and p not in items and len(items) < max_items:
+                items.append(str(p))
+    if not items:
+        return ""
+    digest = "Ya cazado en esta consulta (no repitas grep de esto, amplía desde aquí): " + " ".join(
+        f"`{it}`" for it in items
+    )
+    return digest[:max_chars]
+
+
 def explore_cap(*, max_explore: int, verify_reject_pending: bool, post_verify_bonus: int = 1) -> int:
     """Base explore tope; +bonus while a verify reject is pending (one directed hunt)."""
     if verify_reject_pending and post_verify_bonus > 0:
@@ -1115,6 +1136,9 @@ def main() -> None:
 
             explores += 1
             consulta = brief or arg or args.prompt
+            digest = notebook_digest_for_explore(jobs)
+            if digest:
+                consulta = consulta + "\n" + digest
             print(f"-- explore child consulta={consulta!r}", flush=True)
             child_log: list[str] = []
             job = run_explorer(

@@ -244,6 +244,10 @@ void admin_notebook_append(AdminState* st, const AdminJob& job, const AdminJobRe
 std::string admin_notebook_markdown(const AdminState& st);
 bool admin_notebook_has_path(const AdminState& st, const std::string& path);
 std::vector<std::string> admin_notebook_paths(const AdminState& st);
+// P4: resumen corto (paths/símbolos, sin prosa) de lo ya cazado en esta
+// consulta, para inyectar en el brief de un nuevo explore hermano.
+std::string admin_notebook_digest_for_explore(const AdminState& st, int max_items = 6,
+                                              int max_chars = 260);
 
 // Explores que cuentan para el tope de esta consulta (jobs totales − baseline).
 int admin_count_explore_jobs(const AdminState& st);

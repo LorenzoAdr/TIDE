@@ -34,6 +34,7 @@ using tuide::admin_run_explore_lite;
 using tuide::admin_legal;
 using tuide::admin_legal_dos;
 using tuide::admin_notebook_append;
+using tuide::admin_notebook_digest_for_explore;
 using tuide::admin_notebook_has_path;
 using tuide::admin_notebook_markdown;
 using tuide::admin_parse;
@@ -499,6 +500,49 @@ int main() {
     // El brain vacío falla al primer propose(); si P2bis NO hizo shortcut,
     // el gate cae al camino LLM y hereda ese fallo (dudoso/blocks, sin shortcut).
     expect(!vr3.shortcut, "control: 2 jobs sin miss no es shortcut de P2bis");
+  }
+  {
+    // P4: digest de notebook para el brief del explorador hermano.
+    AdminState digest_st;
+    expect(admin_notebook_digest_for_explore(digest_st).empty(),
+           "P4: notebook vacío -> digest vacío");
+    AdminEvidenceItem nb;
+    nb.job_id = 1;
+    nb.paths = {"src/ai/l2_admin.cpp"};
+    nb.simbolos = {"admin_run_verify"};
+    digest_st.notebook.push_back(nb);
+    const std::string digest = admin_notebook_digest_for_explore(digest_st);
+    expect(digest.find("admin_run_verify") != std::string::npos &&
+               digest.find("src/ai/l2_admin.cpp") != std::string::npos,
+           "P4: digest incluye paths y símbolos ya cazados");
+  }
+  {
+    // P4: admin_apply enriquece el brief del explore con el digest si ya
+    // hay notebook de esta consulta; el hijo (ops.run_explore) lo recibe.
+    AdminState st4;
+    st4.consulta = "sigue investigando";
+    AdminEvidenceItem nb;
+    nb.job_id = 1;
+    nb.paths = {"src/ai/console_panel.cpp"};
+    st4.notebook.push_back(nb);
+    AdminOla ola = admin_parse(
+        R"({"action":"admin_v1","do":"spawn","why":"otro polo","spawn":{"tipo":"explore","brief":"buscar el otro polo"}})");
+    expect(ola.ok, "P4: parse spawn explore");
+    std::string seen_brief;
+    AdminOps ops4;
+    ops4.run_explore = [&](const AdminSpawn& s) {
+      seen_brief = s.brief;
+      AdminJobResult r;
+      r.ok = true;
+      r.veredicto = "encontrado";
+      return r;
+    };
+    std::string err4;
+    expect(admin_apply(&st4, ola, ops4, &err4), "P4: apply spawn explore");
+    expect(seen_brief.find("buscar el otro polo") != std::string::npos,
+           "P4: brief original se conserva");
+    expect(seen_brief.find("src/ai/console_panel.cpp") != std::string::npos,
+           "P4: brief lleva el digest del notebook previo");
   }
   {
     AdminState empty;
