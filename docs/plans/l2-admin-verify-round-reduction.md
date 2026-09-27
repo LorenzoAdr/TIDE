@@ -306,7 +306,19 @@ En vez de aplicar todas las propuestas de golpe y relanzar los 100 casos
 un subconjunto pequeño y fijo de casos "canario" — los más caros o con más
 papeletas de romperse — antes de aceptarla.
 
-### Canario (20 de los 100, `--only` de `run_admin_explore_battery.py`)
+### Canario (reducido a 10 de los 100, `--only` de `run_admin_explore_battery.py`)
+
+**2026-09-27:** el canario de 22 casos tardaba demasiado por vuelta para
+iterar propuesta a propuesta; se recortó a **1 representante por grupo**
+(10 casos): `060_trap` (máx. coste, único con 5 pases), `093_edit`,
+`052_trap`/`056_trap` (trampas de honestidad), `068_multipolo`/`084_wrong`
+(los 2 fallos reales), `001_locate_easy`/`028_mechanism` (camino rápido
+P2bis), `019_mechanism` (miss tipado), `097_vague` (ask legítimo). Si algo
+queda en el límite, se puede reintroducir el resto del grupo afectado sin
+volver a los 22 completos. Tabla original (22) conservada abajo como
+referencia de qué casos hay disponibles por grupo si hace falta ampliar.
+
+### Canario original (22 de los 100, referencia)
 
 | Grupo | Casos | Por qué |
 |---|---|---|
