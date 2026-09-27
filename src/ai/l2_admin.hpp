@@ -160,6 +160,11 @@ struct AdminState {
   std::string edit_cubre;
   std::string edit_falta;
   std::vector<std::string> legal_hint;
+  // Shadow-repo commit refs (edit_snapshot.hpp) — no confundir con git del
+  // usuario. baseline = estado al abrir esta consulta (target de /undo);
+  // last = tras el edit aplicado más reciente. Vacíos si git no disponible.
+  std::string snapshot_baseline_ref;
+  std::string snapshot_last_ref;
 };
 
 struct AdminVerifyResult {

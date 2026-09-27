@@ -677,7 +677,9 @@ nlohmann::json admin_state_to_json(const AdminState& st) {
       {"edit_cubre", st.edit_cubre},
       {"edit_falta", st.edit_falta},
       {"reply", st.reply},
-      {"last_error", st.last_error}};
+      {"last_error", st.last_error},
+      {"snapshot_baseline_ref", st.snapshot_baseline_ref},
+      {"snapshot_last_ref", st.snapshot_last_ref}};
 }
 
 bool admin_state_from_json(const nlohmann::json& j, AdminState* st, std::string* err) {
@@ -705,6 +707,8 @@ bool admin_state_from_json(const nlohmann::json& j, AdminState* st, std::string*
   st->edit_falta = j.value("edit_falta", "");
   st->reply = j.value("reply", "");
   st->last_error = j.value("last_error", "");
+  st->snapshot_baseline_ref = j.value("snapshot_baseline_ref", "");
+  st->snapshot_last_ref = j.value("snapshot_last_ref", "");
   st->jobs.clear();
   st->notebook.clear();
   st->clarifies.clear();

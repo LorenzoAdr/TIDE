@@ -12,6 +12,7 @@
 #include "ai/ai_trace.hpp"
 #include "ai/coding_embed_rerank.hpp"
 #include "ai/edit_journal.hpp"
+#include "ai/edit_snapshot.hpp"
 #include "ai/get_code_of.hpp"
 #include "ai/l2_admin.hpp"
 #include "ai/l2_brain.hpp"
@@ -1023,11 +1024,27 @@ void AiController::run_admin_async(const std::string& message) {
     }
 
     AdminState st;
+    // Shadow-repo baseline (edit_snapshot.hpp): snapshot del árbol al abrir esta
+    // consulta. Target de /undo y del diff que se inyecta si falla un build/test
+    // más adelante. Best-effort: sin git disponible, ambos quedan vacíos y no
+    // bloquean nada — solo se pierde esa red de seguridad.
+    auto mark_snapshot_baseline = [&st, root]() {
+      std::string snap_err;
+      if (!snapshot_ensure_repo(root, &snap_err)) {
+        return;
+      }
+      const SnapshotResult snap = snapshot_track(root, "baseline");
+      if (snap.ok) {
+        st.snapshot_baseline_ref = snap.ref;
+        st.snapshot_last_ref = snap.ref;
+      }
+    };
     if (admin_is_continuable(root)) {
       if (!admin_load_state(root, &st, &err)) {
         append("Admin: no se pudo reabrir sesión — " + err);
         st = AdminState{};
         st.consulta = message;
+        mark_snapshot_baseline();
       } else if (st.clarify) {
         // Respuesta a ask_user.
         append("→ Continúo tras tu respuesta");
@@ -1048,6 +1065,7 @@ void AiController::run_admin_async(const std::string& message) {
           append("→ Tomo tu mensaje como la consulta principal");
           st.consulta = message;
           admin_begin_consulta_budgets(&st);
+          mark_snapshot_baseline();
         }
       } else {
         // Misma ejecución: conserva notebook + episodios. Presupuesto fresco.
@@ -1059,10 +1077,12 @@ void AiController::run_admin_async(const std::string& message) {
         st.reply.clear();
         st.last_error.clear();
         admin_begin_consulta_budgets(&st);
+        mark_snapshot_baseline();
       }
     } else {
       (void)admin_clear_session(root, nullptr);
       st.consulta = message;
+      mark_snapshot_baseline();
     }
 
     AdminSessionUi ui;
@@ -1133,7 +1153,30 @@ void AiController::run_admin_async(const std::string& message) {
       }
       return admin_run_explore_lite(s, *brain, root, eopts, grep);
     };
-    ops.run_build = [this, root](const AdminSpawn& s) {
+    // Sobre un build/test que falla: si hay baseline de snapshot para esta
+    // consulta, adjunta qué tocó la IA desde entonces — el piloto no tiene que
+    // reconstruirlo de memoria para saber qué pudo romper.
+    auto append_snapshot_fail_diff = [&st, root](AdminJobResult* r) {
+      if (st.snapshot_baseline_ref.empty()) {
+        return;
+      }
+      const SnapshotDiffResult diff = snapshot_diff(root, st.snapshot_baseline_ref);
+      if (!diff.ok || diff.changed_paths.empty()) {
+        return;
+      }
+      bool trunc = false;
+      int raw = 0;
+      const std::string clipped = admin_clip_output(diff.diff, 1500, 1500, &trunc, &raw);
+      std::ostringstream extra;
+      extra << "\n\n## Cambios de esta consulta (vs baseline, " << diff.changed_paths.size()
+            << " archivo(s))\n";
+      for (const auto& p : diff.changed_paths) {
+        extra << "- " << p << '\n';
+      }
+      extra << '\n' << clipped;
+      r->log_tail += extra.str();
+    };
+    ops.run_build = [this, root, &append_snapshot_fail_diff](const AdminSpawn& s) {
       AdminJobResult r;
       sync_task_runner();
       std::ostringstream log;
@@ -1153,10 +1196,13 @@ void AiController::run_admin_async(const std::string& message) {
           r.log_tail += tr.stderr_text;
         }
         r.facts.push_back("build:" + s.arg + " exit=" + std::to_string(tr.exit_code));
+        if (tr.exit_code != 0) {
+          append_snapshot_fail_diff(&r);
+        }
       }
       return r;
     };
-    ops.run_test = [this, root](const AdminSpawn& s) {
+    ops.run_test = [this, root, &append_snapshot_fail_diff](const AdminSpawn& s) {
       AdminJobResult r;
       sync_task_runner();
       const std::string name = s.arg.empty() ? "test" : s.arg;
@@ -1178,6 +1224,9 @@ void AiController::run_admin_async(const std::string& message) {
         r.raw_bytes = raw;
         r.summary = "test exit=" + std::to_string(tr.exit_code) + " bytes=" + std::to_string(raw);
         r.facts.push_back("test:" + name);
+        if (tr.exit_code != 0) {
+          append_snapshot_fail_diff(&r);
+        }
       }
       return r;
     };
@@ -1239,7 +1288,17 @@ void AiController::run_admin_async(const std::string& message) {
       return r;
     };
     ops.run_edit = [root, &st](const AdminSpawn& s) {
-      return admin_run_edit_file(s, st, root);
+      AdminJobResult r = admin_run_edit_file(s, st, root);
+      if (r.ok) {
+        // Snapshot tras el edit real (no el propuesto): permite /undo por
+        // consulta y ancla el diff que ve el piloto si el build falla después.
+        const SnapshotResult snap =
+            snapshot_track(root, "job:" + std::to_string(st.jobs.size() + 1));
+        if (snap.ok) {
+          st.snapshot_last_ref = snap.ref;
+        }
+      }
+      return r;
     };
     ops.run_web = [](const AdminSpawn& s) { return admin_run_web_search(s.arg); };
     ops.run_web_fetch = [&st](const AdminSpawn& s) { return admin_run_web_fetch(s.arg, st); };
@@ -2591,6 +2650,44 @@ void AiController::handle_user_input(const std::string& line) {
     }
     if (c == "/new" || c == "/reset") {
       clear_ai_session(true);
+      return;
+    }
+    if (c == "/undo") {
+      const std::string root =
+          deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+      if (root.empty()) {
+        append("Sin workspace abierto.");
+        return;
+      }
+      AdminState st;
+      std::string load_err;
+      if (!admin_load_state(root, &st, &load_err) || st.snapshot_baseline_ref.empty()) {
+        append("Nada que deshacer (sin sesión de IA con snapshot en este workspace).");
+        return;
+      }
+      const SnapshotDiffResult diff = snapshot_diff(root, st.snapshot_baseline_ref);
+      if (!diff.ok) {
+        append("No se pudo calcular qué revertir — " + diff.error);
+        return;
+      }
+      if (diff.changed_paths.empty()) {
+        append("No hay cambios de la IA que revertir en esta consulta.");
+        return;
+      }
+      std::string revert_err;
+      if (!snapshot_revert(root, st.snapshot_baseline_ref, diff.changed_paths, &revert_err)) {
+        append("Undo falló — " + revert_err);
+        return;
+      }
+      std::ostringstream msg;
+      msg << "→ Revertido a como estaba antes de esta consulta (" << diff.changed_paths.size()
+          << " archivo(s)):\n";
+      for (const auto& p : diff.changed_paths) {
+        msg << "  - " << p << '\n';
+      }
+      msg << "\n(Si tienes alguno de estos archivos abierto en un tab, ciérralo y reábrelo para "
+             "ver el contenido revertido — el buffer en memoria no se refresca solo.)";
+      append(msg.str());
       return;
     }
   }
