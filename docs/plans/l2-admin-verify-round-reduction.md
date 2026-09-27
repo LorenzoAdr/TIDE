@@ -13,10 +13,25 @@
 > cerraron con `ask_user` en esa misma batería (sección 8). ≈61% eran
 > evitables (verificador que fuerza `ask_user` con la respuesta ya
 > completa, o exploración que se rinde sin redirigirse) → **P11/P12**.
-> **Ejecutar después de que termine el canario `P0/P8/P9` en curso**
-> (`canary_p0_p8_p9_20260927T093320Z`), porque comparte 7 de sus 22 casos
-> con la muestra de `ask_user` analizada (`013/019/052/068/069/082/097`) y
-> tocar esa ruta ahora contaminaría esa medición.
+> **Actualización 2026-09-27 (3):** el canario `P0/P8/P9/P10` terminó y se
+> aceptó; también corrió y se aceptó un canario separado de `P4/P6`.
+> **Estado de implementación:**
+>
+> | Propuesta | Estado |
+> |---|---|
+> | P0, P1, P2bis, P4, P6, P7, P8, P9, P10 | ✅ implementadas, cada una con su propio canario aceptado (ver sección 7) |
+> | P3 | Matiz sin código nuevo (cubierto por P2bis, ver su sección) |
+> | P5 | Cubierto por la telemetría ya presente en la batería (`llm_calls`, `verify_reports`, etc.) |
+> | **P11, P12** | ⏳ pendientes — siguiente paso: revisar contra los ` ask_user` reales observados en los canarios ya corridos (varios encajan en el bucket C: `052_trap`, `068_multipolo`, `019_mechanism`, `028_mechanism` mostraron el patrón "el piloto ya tenía la respuesta, el gate no deja cerrar") antes de implementar |
+>
+> Cruce real con los canarios ya corridos: de los `ask_user` observados,
+> `052_trap`/`068_multipolo`/`019_mechanism`/`028_mechanism` son bucket C
+> (P11) — el `reply` ya contenía la respuesta/corrección completa (p.ej.
+> `052_trap`: *"He verificado en tres ocasiones que no existe un símbolo
+> único... El sistema de verificación no acepta el cierre"*). `093_edit`
+> es más dudoso (pregunta real sobre si ignorar un hueco pendiente).
+> `060_trap` cerró bien (`T_close`) en la corrida más reciente — sirve de
+> control de que no todo acaba en `ask_user`.
 
 ## 0. Resumen del sistema (contexto)
 
@@ -361,17 +376,24 @@ drift que motivó la sección 0bis.
 
 ## 3. Orden de ataque
 
-**P0 → P10 → P1 → P2bis → P8 → P9 → P3(matiz, sin código nuevo) → [cierre
-del canario en curso, sección 7] → P11 → P12 → P4 → P6 → P7**
+**Ejecutado:** P0 → P10 → P1 → P2bis → P8 → P9 → P3(matiz, sin código
+nuevo) → P4 → P6 → P7 — las 9 con su canario propio aceptado (sección 7).
+**Siguiente:** P11 → P12 → batería completa de 100 (cierre del rollout).
 
-P0/P1/P2bis son mecánicas o confirmadas por datos (sección 6): no deberían
-mover la precisión, solo quitan vueltas desperdiciadas. P8/P9 son fixes de
-robustez puntuales. **P11/P12 van después del canario `P0/P8/P9` que está
-corriendo ahora** (`canary_p0_p8_p9_20260927T093320Z`): comparten casos con
-esa muestra y tocar la ruta `ask_user`/explorador mientras esa medición
-está en vuelo invalidaría la comparación baseline-vs-canario. P4/P6 sí
-tocan diseño más fino — medir con P5 (ya integrado como telemetría de la
-batería) antes/después.
+P0/P1/P2bis fueron mecánicas o confirmadas por datos (sección 6): no
+movieron la precisión, solo quitaron vueltas desperdiciadas — confirmado
+por los canarios. P8/P9 fueron fixes de robustez puntuales, también
+confirmados. P4/P6 se validaron con un canario propio tras P0/P8/P9/P10;
+la variación de terminal (`close`/`ask`/`edit`) observada en algunos casos
+difíciles entre canarios sucesivos parece varianza del modelo (temperatura
+no nula, casos de dificultad `alta`/`muy_alta`) y no un efecto de P4/P6:
+en las tres tandas medidas, siempre `process_ok`/`honest_ok`=true y sin
+flags nuevos.
+
+**P11/P12 quedan para después** de todo lo anterior porque comparten
+casos con la muestra de `ask_user` analizada y tocar esa ruta mientras las
+demás mediciones estaban en vuelo habría contaminado la comparación
+baseline-vs-canario de cada una. Con esas 9 ya cerradas, no hay ese riesgo.
 
 Cada propuesta se aplica y valida por separado con el proceso de canario
 de la sección 7 antes de pasar a la siguiente — no se acumulan cambios sin
@@ -396,7 +418,7 @@ queda en el límite, se puede reintroducir el resto del grupo afectado sin
 volver a los 22 completos. Tabla original (22) conservada abajo como
 referencia de qué casos hay disponibles por grupo si hace falta ampliar.
 
-### Canario original (22 de los 100, referencia)
+### Canario original (referencia — 22 de las propuestas P0–P10, + 12 más añadidas para P11/P12)
 
 | Grupo | Casos | Por qué |
 |---|---|---|
