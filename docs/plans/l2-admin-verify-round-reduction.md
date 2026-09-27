@@ -379,8 +379,8 @@ papeletas de romperse — antes de aceptarla.
 | Camino rápido limpio (1 job, `encontrado`) | `001_locate_easy`, `004_locate_easy`, `011_locate_easy`, `028_mechanism`, `096_edit` | Objetivo directo de P2bis; si el atajo determinista se equivoca, se ve aquí (`sostiene` indebido) |
 | Miss tipado (control P2/deterministic-block) | `013_locate_easy`, `019_mechanism`, `082_wrong` | Deben seguir bloqueando/pidiendo aclaración sin gastar LLM de más |
 | Ask legítimo (control) | `097_vague`, `069_cryptic` | Detecta si alguna propuesta empuja a "cerrar" de más por ahorrar vueltas |
-| `ask_user` evitable — verificador ya tenía la respuesta (target P11) | `005_locate_easy`, `006_locate_easy`, `052_trap`, `067_multipolo`, `091_hole` | Deben pasar a `cerrar`/`confirmar_cerrar` con la corrección; si no cierran o cambian el veredicto de fondo, revertir |
-| `ask_user` evitable — exploración mal dirigida (target P12) | `076_cryptic`, `083_wrong`, `095_edit` | Deben resolver sin preguntar tras redirigir el término/búsqueda; si siguen preguntando lo mismo, P12 no funcionó |
+| `ask_user` evitable — verificador ya tenía la respuesta (target P11) | `005_locate_easy`, `006_locate_easy`, `030_mechanism`, `052_trap`, `067_multipolo`, `091_hole` | Deben pasar a `cerrar`/`confirmar_cerrar` con la corrección; si no cierran o cambian el veredicto de fondo, revertir. `030_mechanism` es el caso más claro: su `reply` final ya es una afirmación completa sin ninguna pregunta |
+| `ask_user` evitable — exploración mal dirigida (target P12) | `037_deseo`, `076_cryptic`, `083_wrong`, `095_edit` | Deben resolver sin preguntar tras redirigir el término/búsqueda; si siguen preguntando lo mismo, P12 no funcionó. `037_deseo` representa a `deseo`, el tipo que más pesa en este bucket (7/15) y que no estaba cubierto |
 | `ask_user` legítimo — control anti-sobrecorrección (P11/P12) | `043_deseo`, `092_edit` | Fork de diseño real (dependencia externa / ambigüedad de nombre de botón) — no debe empezar a cerrar solo tras P11/P12 |
 
 ### Regla de aceptación/reversión
