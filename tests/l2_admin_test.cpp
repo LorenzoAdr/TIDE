@@ -631,6 +631,28 @@ int main() {
     fs::remove_all(root, ec);
   }
   {
+    // P14: veredicto fuera de contrato ("no_concluyente" no es uno de los 3
+    // valores del contrato del explorador) fuerza un reintento en vez de
+    // absorberse en silencio.
+    AdminSpawn p14sp;
+    p14sp.tipo = AdminSpawnTipo::Explore;
+    p14sp.brief = "busca algo genérico";
+    AdminLoopOpts p14opts;
+    AdminJobResult empty_hit14;
+    empty_hit14.ok = true;
+    empty_hit14.summary = "(0 hits)";
+    tuide::AdminGrepFn stub_grep14 = [&](const std::string&) { return empty_hit14; };
+    AdminScriptedBrain p14_brain({
+        R"({"do":"grep","pattern":"algo","why":"buscar"})",
+        R"({"do":"cerrar","veredicto":"no_concluyente","simbolos":[],"evidencia":[],"falta":["x"],"why":"dudoso"})",
+        R"({"do":"cerrar","veredicto":"parcial","simbolos":[],"evidencia":[],"falta":["x"],"why":"reemitido correctamente"})",
+    });
+    const auto p14_res =
+        admin_run_explore_lite(p14sp, p14_brain, ".", p14opts, stub_grep14);
+    expect(p14_res.ok && p14_res.veredicto == "parcial",
+           "P14: veredicto fuera de contrato fuerza reemisión, no se absuelve en silencio");
+  }
+  {
     AdminState empty;
     empty.consulta = "x";
     AdminOla ola = admin_parse(

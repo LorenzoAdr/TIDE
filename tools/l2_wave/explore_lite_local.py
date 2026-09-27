@@ -914,11 +914,28 @@ def run_explorer(
             vmap = {
                 "hay": "encontrado",
                 "no_hay": "no_encontrado",
-                "no_concluyente": "parcial",
                 "encontrado": "encontrado",
                 "no_encontrado": "no_encontrado",
                 "parcial": "parcial",
             }
+            # P14 (docs/plans/l2-admin-verify-round-reduction.md): un veredicto
+            # fuera del contrato (p.ej. "no_concluyente", que el propio prompt
+            # del explorador nunca ofrece como opción) fuerza un reintento en
+            # vez de absorberse en silencio como "parcial" -- salvo última
+            # ola, donde sí hace falta un valor para no perder el turno.
+            if raw_v not in vmap and step < max_steps - 1:
+                messages.append({"role": "assistant", "content": raw})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": follow_up(
+                            f'veredicto inválido ("{raw_v}"). Usa exactamente '
+                            "encontrado|no_encontrado|parcial. Reemite cerrar.",
+                            step,
+                        ),
+                    }
+                )
+                continue
             verd = vmap.get(raw_v, "parcial")
             # falta obligatorio (alias no_visto). Key must be present.
             if "falta" not in ola and "no_visto" not in ola:

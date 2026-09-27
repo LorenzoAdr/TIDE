@@ -1637,6 +1637,20 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     if (do_kind == "cerrar") {
       std::string verd = ascii_lower(trim_copy(json_str(j, "veredicto")));
       if (verd != "encontrado" && verd != "no_encontrado" && verd != "parcial") {
+        // P14 (docs/plans/l2-admin-verify-round-reduction.md): en vez de
+        // absorber en silencio cualquier valor fuera de contrato como
+        // "no_concluyente" (6/317 jobs de la batería lo hacían), fuerza un
+        // reintento salvo en la última ola (donde sí hace falta un valor
+        // para no perder el turno). Alternativa más barata y de menor
+        // riesgo que una gramática GBNF con alternancia completa
+        // grep|read|cerrar (el contrato de grep/read cambia más a menudo).
+        if (!last) {
+          const std::string bad = verd;
+          conversation += "\n\n## Usuario\nveredicto inválido (\"" + bad +
+                          "\"). Usa exactamente encontrado|no_encontrado|parcial. "
+                          "Reemite cerrar.\n";
+          continue;
+        }
         verd = "no_concluyente";
       }
       // P13: si cierra con un miss sin haber leído un path que la propia
