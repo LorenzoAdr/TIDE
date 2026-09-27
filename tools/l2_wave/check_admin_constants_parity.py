@@ -37,7 +37,7 @@ def py_kwarg_default(fn_label: str, kwarg: str, text: str) -> int:
     return int(m.group(1))
 
 
-def py_call_kwarg_near(text: str, anchor: str, kwarg: str, window: int = 4000) -> int:
+def py_call_kwarg_near(text: str, anchor: str, kwarg: str, window: int = 8000) -> int:
     idx = text.find(anchor)
     if idx == -1:
         raise SystemExit(f"parity: no encontré el ancla {anchor!r}")

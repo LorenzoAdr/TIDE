@@ -588,7 +588,17 @@ def run_exit_verify(
             "why": "1 job encontrado con evidencia ancla; gate determinista (P2bis)",
             "shortcut": True,
         }, "", exam
-    if misses:
+    # P11 (docs/plans/l2-admin-verify-round-reduction.md): si TODOS los miss
+    # están sin evidenciar (ni simbolos ni paths -- grep vacío, nunca leído),
+    # seguimos bloqueando gratis. Si algún miss ya trae evidencia real (una
+    # ausencia DEMOSTRADA, no un grep vacío), no lo bloqueamos aquí -- puede
+    # ser la respuesta completa que corrige la premisa del usuario. Cae al
+    # verificador LLM de siempre (mismo rigor, solo que ya no se le niega la
+    # oportunidad de juzgarlo). Visto en vivo en 026_mechanism/047_deseo.
+    misses_unevidenced = [
+        j for j in misses if not (j.get("simbolos") or j.get("paths"))
+    ]
+    if misses and len(misses_unevidenced) == len(misses):
         miss_desc = "; ".join(
             f"job{j.get('id')}={j.get('veredicto')}" for j in misses
         )

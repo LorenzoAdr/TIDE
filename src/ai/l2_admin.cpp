@@ -3932,23 +3932,43 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
       out.shortcut = true;
       return out;
     }
-    // (2) Cualquier job no_encontrado/parcial → en la muestra esto refutó/dudó
-    // ≥80% de las veces con el LLM; bloquear gratis en vez de gastar la llamada.
+    // (2) Cualquier job no_encontrado/parcial SIN evidencia real (grep vacío,
+    // nunca leído) → en la muestra esto refutó/dudó ≥80% de las veces con el
+    // LLM; bloquear gratis en vez de gastar la llamada.
+    // P11 (docs/plans/l2-admin-verify-round-reduction.md): si TODOS los miss
+    // están sin evidenciar, seguimos bloqueando gratis. Pero si algún miss ya
+    // trae evidencia real (path:línea / símbolos — una ausencia DEMOSTRADA,
+    // no un grep vacío), NO lo bloqueamos aquí: eso puede ser la respuesta
+    // completa que corrige la premisa del usuario ("no existe tal filtrado",
+    // con la prueba de por qué). Dejamos que decida el verificador LLM
+    // adversarial de siempre — mismo rigor, solo que ya no se le niega la
+    // oportunidad de juzgarlo. Visto en vivo en 026_mechanism/047_deseo:
+    // el piloto ya tenía la respuesta, P2bis bloqueaba antes de que el LLM
+    // pudiera opinar.
     if (!miss_now.empty()) {
-      std::ostringstream misses;
-      for (const auto* j : miss_now) {
-        misses << "job" << j->id << "=" << j->veredicto << "; ";
+      const bool all_unevidenced = std::all_of(
+          miss_now.begin(), miss_now.end(), [](const AdminJob* j) {
+            return j->evidencia.empty() && j->simbolos.empty();
+          });
+      if (all_unevidenced) {
+        std::ostringstream misses;
+        for (const auto* j : miss_now) {
+          misses << "job" << j->id << "=" << j->veredicto << "; ";
+        }
+        out.ok = true;
+        out.veredicto = "dudoso";
+        out.blocks = true;
+        out.shortcut = true;
+        out.why = "hueco tipado sin resolver (" + misses.str() + "); gate determinista (P2bis)";
+        out.report =
+            "## Informe del VERIFICADOR (determinista, sin LLM)\nveredicto=dudoso\nwhy: " +
+            out.why +
+            "\nSalida bloqueada — vuelves al menú del piloto. Decide: spawn explore / "
+            "seguir_explorando (el hueco arriba), o ask_user.\n";
+        return out;
       }
-      out.ok = true;
-      out.veredicto = "dudoso";
-      out.blocks = true;
-      out.shortcut = true;
-      out.why = "hueco tipado sin resolver (" + misses.str() + "); gate determinista (P2bis)";
-      out.report = "## Informe del VERIFICADOR (determinista, sin LLM)\nveredicto=dudoso\nwhy: " +
-                   out.why +
-                   "\nSalida bloqueada — vuelves al menú del piloto. Decide: spawn explore / "
-                   "seguir_explorando (el hueco arriba), o ask_user.\n";
-      return out;
+      // Al menos un miss viene con evidencia: cae al verificador LLM completo
+      // más abajo (sin shortcut), con el mismo rigor adversarial de siempre.
     }
   }
   // Tope: se OMITE el gate (ni absuelve ni bloquea). Si blocks=true aquí, el piloto
@@ -4001,6 +4021,13 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
       "veredictos tipados, evidencia path:línea y hechos cortos del notebook. "
       "Refuta si no demuestran el arco A→B del pedido (co-ocurrencia ≠ puente). "
       "Un no_encontrado/parcial no se borra porque otro job encontró otra cosa. "
+      "EXCEPCIÓN (P11): un no_encontrado/parcial CON evidencia real (path:línea, "
+      "símbolos — no un grep vacío) puede ser la respuesta completa si demuestra "
+      "una ausencia que corrige la premisa de la consulta (p.ej. \"no existe tal "
+      "filtrado\", con la prueba de por qué). Ahí sí puedes sostener citando esa "
+      "evidencia — pero solo si responde lo que se pregunta, no cualquier ausencia "
+      "de paso. Sigue refutando si la ausencia no está demostrada (grep sin hits, "
+      "sin leer nada) o no corrige nada del pedido. "
       "Tools: entre|read|cerrar. read solo paths anclados. Al cerrar: "
       "{\"do\":\"cerrar\",\"veredicto\":\"sostiene|refuta|dudoso\",\"ataques\":[],"
       "\"arco\":{\"de\":\"\",\"a\":\"\"},\"why\":\"…\"}";

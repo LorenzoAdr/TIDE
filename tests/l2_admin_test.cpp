@@ -509,6 +509,59 @@ int main() {
     expect(!vr3.shortcut, "control: 2 jobs sin miss no es shortcut de P2bis");
   }
   {
+    // P11: un miss (no_encontrado/parcial) CON evidencia real (path:línea +
+    // símbolos, no un grep vacío) no debe auto-bloquearse: cae al verificador
+    // LLM completo, que puede sostener si esa ausencia demostrada responde a
+    // la consulta. Visto en vivo en 026_mechanism/047_deseo: el piloto ya
+    // tenía la respuesta y P2bis bloqueaba antes de que el LLM opinara.
+    AdminState evidenced_st;
+    evidenced_st.consulta = "existe filtrado de X hacia Y";
+    AdminJob j1;
+    j1.id = 1;
+    j1.veredicto = "encontrado";
+    j1.evidencia.push_back("a.cpp:10");
+    AdminJob j2;
+    j2.id = 2;
+    j2.veredicto = "no_encontrado";
+    // Ausencia DEMOSTRADA: hay evidencia de por qué no está, no un grep vacío.
+    j2.evidencia.push_back("b.cpp:20:no hay llamada a filtro aquí");
+    j2.simbolos.push_back("b.cpp:funcion_relevante");
+    evidenced_st.jobs.push_back(j1);
+    evidenced_st.jobs.push_back(j2);
+    AdminScriptedBrain sostiene_brain({
+        R"({"do":"cerrar","veredicto":"sostiene","why":"la ausencia demostrada en job2 responde la consulta"})",
+        // El miss tipado (job2) dispara la contra-pregunta B existente
+        // aunque el veredicto sea sostiene; el modelo confirma reemitiendo.
+        R"({"do":"cerrar","veredicto":"sostiene","why":"confirmo: job2 es una ausencia demostrada, no un hueco pendiente"})",
+    });
+    AdminLoopOpts opts_p11;
+    const AdminVerifyResult vr_p11 =
+        admin_run_verify(&evidenced_st, sostiene_brain, "why", "", opts_p11);
+    expect(!vr_p11.shortcut, "P11: miss evidenciado no es shortcut de P2bis (llega al LLM)");
+    expect(vr_p11.ok && vr_p11.veredicto == "sostiene" && !vr_p11.blocks,
+           "P11: el verificador LLM puede sostener sobre una ausencia demostrada");
+
+    // Regresión: mismo caso pero el miss NO trae evidencia -> sigue siendo
+    // shortcut bloqueante como antes de P11 (no se afloja el caso general).
+    AdminState unevidenced_st;
+    unevidenced_st.consulta = "existe filtrado de X hacia Y";
+    AdminJob j1b;
+    j1b.id = 1;
+    j1b.veredicto = "encontrado";
+    j1b.evidencia.push_back("a.cpp:10");
+    AdminJob j2b;
+    j2b.id = 2;
+    j2b.veredicto = "no_encontrado";
+    unevidenced_st.jobs.push_back(j1b);
+    unevidenced_st.jobs.push_back(j2b);
+    AdminScriptedBrain fail_brain_p11({});
+    AdminLoopOpts opts_p11b;
+    const AdminVerifyResult vr_p11b =
+        admin_run_verify(&unevidenced_st, fail_brain_p11, "why", "", opts_p11b);
+    expect(vr_p11b.ok && vr_p11b.shortcut && vr_p11b.blocks && vr_p11b.veredicto == "dudoso",
+           "P11 regresión: miss SIN evidencia sigue bloqueando gratis como antes");
+  }
+  {
     // P6: turnos con JSON inválido no deben gastar el presupuesto `budget`
     // (kAdminVerifyMaxSteps). Guion: más basura que kAdminVerifyMaxSteps,
     // seguida de un cerrar válido — si P6 no funcionara, se agotaría el

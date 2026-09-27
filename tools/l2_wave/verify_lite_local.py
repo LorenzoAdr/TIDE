@@ -25,7 +25,10 @@ Te dan la consulta del usuario y una lista de ANCLAS (símbolos/paths con snippe
 Tu misión es REFUTAR o hallar que esas anclas NO demuestran el arco de la consulta
 (sobre todo A→B: que un símbolo/mecanismo implique otro). Co-ocurrencia léxica ≠ puente.
 Si solo co-ocurren o el puente no está en las anclas: veredicto=refuta o dudoso.
-Si las anclas demuestran el arco del pedido: sostiene.
+Si las anclas demuestran el arco del pedido: sostiene. EXCEPCIÓN (P11): una
+ausencia DEMOSTRADA (evidencia path:línea de por qué no está, no un grep vacío)
+también cuenta como demostrar el arco si responde/corrige la premisa de la
+consulta -- no vale para cualquier ausencia de paso.
 Si no puedes decidir con las tools: dudoso. Máximo N olas. Al cerrar:
 {"do":"cerrar","veredicto":"sostiene|refuta|dudoso","ataques":["…"],
  "arco":{"de":"…","a":"…"},"why":"…"}
@@ -77,7 +80,11 @@ Te dan: (1) EXAMEN de cobertura (elementos/arcos que hay que poder explicar),
 (2) ANCLAS del explorador (símbolos+snippets).
 Califica el examen contra las anclas. Co-ocurrencia ≠ puente.
 Si algún elemento/arco del examen no está demostrado por anclas: refuta o dudoso.
-PROHIBIDO sostener si queda algún hueco del examen sin cubrir.
+PROHIBIDO sostener si queda algún hueco del examen sin cubrir -- EXCEPCIÓN (P11):
+un hueco puede marcarse cubierto si está DEMOSTRADO como ausencia real (evidencia
+path:línea de por qué no está, no un grep vacío) y esa ausencia responde/corrige
+la premisa de la consulta. No vale para cualquier ausencia de paso, solo la que
+contesta lo que se pregunta.
 Máximo N olas. Al cerrar:
 {"do":"cerrar","veredicto":"sostiene|refuta|dudoso",
  "cobertura":[{"id":"e1","estado":"cubierto|hueco|no_inspeccionado"},…],
