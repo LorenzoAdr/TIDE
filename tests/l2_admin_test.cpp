@@ -61,6 +61,7 @@ using tuide::admin_user_prompt;
 using tuide::kAdminMaxExplores;
 using tuide::kAdminMaxProposes;
 using tuide::kAdminMaxSpawns;
+using tuide::kAdminVerifyMaxSteps;
 using tuide::run_admin_loop;
 
 static int failures = 0;
@@ -500,6 +501,36 @@ int main() {
     // El brain vacío falla al primer propose(); si P2bis NO hizo shortcut,
     // el gate cae al camino LLM y hereda ese fallo (dudoso/blocks, sin shortcut).
     expect(!vr3.shortcut, "control: 2 jobs sin miss no es shortcut de P2bis");
+  }
+  {
+    // P6: turnos con JSON inválido no deben gastar el presupuesto `budget`
+    // (kAdminVerifyMaxSteps). Guion: más basura que kAdminVerifyMaxSteps,
+    // seguida de un cerrar válido — si P6 no funcionara, se agotaría el
+    // tope ("tope de pasos sin cerrar") antes de llegar al cerrar real.
+    AdminState budget_st;
+    budget_st.consulta = "arco A->B";
+    AdminJob bj1;
+    bj1.id = 1;
+    bj1.veredicto = "encontrado";
+    bj1.evidencia.push_back("a.cpp:1");
+    AdminJob bj2;
+    bj2.id = 2;
+    bj2.veredicto = "encontrado";
+    bj2.evidencia.push_back("b.cpp:1");
+    budget_st.jobs.push_back(bj1);
+    budget_st.jobs.push_back(bj2);
+    std::vector<std::string> script;
+    for (int i = 0; i < kAdminVerifyMaxSteps + 2; ++i) {
+      script.push_back("esto no es JSON, es basura de un modelo confundido");
+    }
+    script.push_back(
+        R"({"do":"cerrar","veredicto":"sostiene","why":"tras la basura, cierro bien"})");
+    AdminScriptedBrain budget_brain(script);
+    AdminLoopOpts opts5;
+    const AdminVerifyResult vr5 =
+        admin_run_verify(&budget_st, budget_brain, "why", "", opts5);
+    expect(vr5.ok && vr5.veredicto == "sostiene" && !vr5.blocks,
+           "P6: JSON inválido no agota el presupuesto; llega al cerrar real");
   }
   {
     // P4: digest de notebook para el brief del explorador hermano.

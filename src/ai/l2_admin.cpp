@@ -3859,7 +3859,15 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
 
   ui_note(opts, "→ Verificando la explicación…");
 
-  for (int step = 0; step < budget; ++step) {
+  // P6 (docs/plans/l2-admin-verify-round-reduction.md): `step` (cuenta contra
+  // `budget`) solo avanza en turnos productivos (JSON válido + do reconocido).
+  // JSON inválido y `do` no reconocido reintentan gratis, acotados por
+  // `hard_cap` para no colgarse con un modelo que nunca coopera.
+  int step = 0;
+  int total_calls = 0;
+  const int hard_cap = budget * 3;
+  while (step < budget && total_calls < hard_cap) {
+    ++total_calls;
     const bool last_wave = (step >= budget - 1);
     if (last_wave) {
       conversation_user +=
@@ -3897,10 +3905,15 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
       conversation_user +=
           "\n\n## Asistente\n" + raw.substr(0, 800) +
           "\n\n## Usuario\nJSON inválido. Emite entre|read|cerrar.\n";
-      continue;
+      continue;  // no consume step: ruido de formato, no trabajo real
     }
     const std::string do_kind = ascii_lower(trim_copy(json_str(j, "do")));
     ++out.steps;
+    const bool do_reconocido =
+        do_kind == "cerrar" || do_kind == "entre" || do_kind == "read";
+    if (do_reconocido) {
+      ++step;
+    }
     if (do_kind == "cerrar") {
       std::string verd = ascii_lower(trim_copy(json_str(j, "veredicto")));
       if (verd != "sostiene" && verd != "refuta" && verd != "dudoso") {

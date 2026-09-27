@@ -641,7 +641,7 @@ def run_verifier(
             },
             "why": why[:800],
             "raw": ola,
-            "steps": step + 1,
+            "steps": step,  # step ya es 1-indexado (P6)
             "cobertura": cobertura,
             "variant": variant,
             "downgraded": verd_final != verd,
@@ -702,7 +702,14 @@ def run_verifier(
                 elif rv == "sostiene":
                     out["veredicto_refutador"] = "sostiene"
         return out
-    for step in range(budget):
+    # P6 (docs/plans/l2-admin-verify-round-reduction.md): JSON inválido no
+    # debe gastar `budget` (mirror del fix en admin_run_verify, l2_admin.cpp).
+    # Acotado por hard_cap para no colgarse con un modelo que nunca coopera.
+    step = 0
+    total_calls = 0
+    hard_cap = budget * 3
+    while step < budget and total_calls < hard_cap:
+        total_calls += 1
         last_wave = step >= budget - 1
         if last_wave:
             # Soft pressure: remind before the model speaks on the final wave.
@@ -734,10 +741,11 @@ def run_verifier(
                     "content": f"JSON inválido ({e}). Solo un objeto: entre|inbody|read|cerrar.",
                 }
             )
-            continue
+            continue  # no consume step: ruido de formato, no trabajo real
 
+        step += 1
         do = str(ola.get("do") or "").strip().lower()
-        last["steps"] = step + 1
+        last["steps"] = step
         last["raw"] = ola
 
         if do == "cerrar":
@@ -957,7 +965,7 @@ def run_verifier(
             entres += 1
             result = tool_entre(str(ola.get("from") or ""), str(ola.get("to") or ""), root)
             messages.append({"role": "assistant", "content": raw})
-            remain = max_steps - step - 1
+            remain = max_steps - step  # step ya es 1-indexado (P6)
             tip = (
                 "\n\nQueda 1 ola: después DEBES cerrar."
                 if remain <= 1
@@ -989,7 +997,7 @@ def run_verifier(
             inbodies += 1
             result = tool_inbody(path.split(":")[0], str(ola.get("pattern") or ""), root)
             messages.append({"role": "assistant", "content": raw})
-            remain = max_steps - step - 1
+            remain = max_steps - step  # step ya es 1-indexado (P6)
             tip = (
                 "\n\nQueda 1 ola: después DEBES cerrar."
                 if remain <= 1
@@ -1022,7 +1030,7 @@ def run_verifier(
             off = int(ola.get("offset") or 1)
             result = tool_read(path.split(":")[0], off, 40, root, allowed=allowed or None)
             messages.append({"role": "assistant", "content": raw})
-            remain = max_steps - step - 1
+            remain = max_steps - step  # step ya es 1-indexado (P6)
             tip = (
                 "\n\nQueda 1 ola: después DEBES cerrar."
                 if remain <= 1
