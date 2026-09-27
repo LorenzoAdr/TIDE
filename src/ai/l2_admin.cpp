@@ -3827,8 +3827,13 @@ std::string admin_verify_context_prompt(const AdminState& st) {
       if (n_ev > 0) {
         verdicts << "\n";
       }
-      // read/search: el summary es metadato; el contenido útil está en log_tail.
-      if (!j.log_tail.empty() && (tipo == "read" || tipo == "search")) {
+      // Solo "explore" está obligado a resumir en veredicto/evidencia tipada
+      // (hijo grep+read). El resto de spawns (read/search/git/shell/build/
+      // test/diagnostics/web/…) vuelcan su resultado real en log_tail y no
+      // tienen por qué rellenar esos campos — sin este extracto el
+      // verificador los ve como "sin evidencia" aunque el job haya
+      // respondido bien (p.ej. un git_status con la lista de cambios).
+      if (!j.log_tail.empty() && tipo != "explore") {
         std::string tail = j.log_tail;
         utf8_resize(&tail, static_cast<std::size_t>(kAdminVerifyLogTailChars));
         verdicts << "  extracto:\n" << tail << "\n";

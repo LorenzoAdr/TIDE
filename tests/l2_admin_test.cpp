@@ -437,6 +437,22 @@ int main() {
       expect(rb.find("build_console_panel_view") != std::string::npos,
              "verify ctx incluye extracto log_tail de read");
     }
+    {
+      // Bug: un spawn "git" nunca rellena veredicto/evidencia (solo log_tail),
+      // así que el verificador lo veía como "sin evidencia" aunque el job
+      // hubiera respondido bien (p.ej. git_status con la lista de cambios).
+      AdminState git_st;
+      git_st.consulta = "dime que cambios tengo en el repositorio";
+      AdminJob gj;
+      gj.id = 3;
+      gj.tipo = "git";
+      gj.summary = "git git_status";
+      gj.log_tail = "Estado del repo: staged=33 modified=0 untracked=33\n";
+      git_st.jobs.push_back(gj);
+      const std::string gb = admin_verify_context_prompt(git_st);
+      expect(gb.find("staged=33 modified=0 untracked=33") != std::string::npos,
+             "verify ctx incluye extracto log_tail de git");
+    }
     const auto vpaths = admin_verify_readable_paths(vs);
     expect(std::find(vpaths.begin(), vpaths.end(), "src/ui/console_panel.cpp") != vpaths.end(),
            "verify paths desde evidencia");
