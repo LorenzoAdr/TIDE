@@ -23,6 +23,8 @@
 > | P3 | Matiz sin código nuevo (cubierto por P2bis, ver su sección) |
 > | P5 | Cubierto por la telemetría ya presente en la batería (`llm_calls`, `verify_reports`, etc.) |
 > | **P11, P12** | ⏳ pendientes — siguiente paso: revisar contra los ` ask_user` reales observados en los canarios ya corridos (varios encajan en el bucket C: `052_trap`, `068_multipolo`, `019_mechanism`, `028_mechanism` mostraron el patrón "el piloto ya tenía la respuesta, el gate no deja cerrar") antes de implementar |
+> | **P13, P14** | ✅ implementadas (código + tests unitarios en C++ y Python) — **sin canario todavía, a petición explícita** (evitar bloquear la máquina con una tirada antes de decidir el resto) |
+> | **P15** | Resultó ya cubierto por P4 — no hizo falta código nuevo (ver su sección) |
 >
 > Cruce real con los canarios ya corridos: de los `ask_user` observados,
 > `052_trap`/`068_multipolo`/`019_mechanism`/`028_mechanism` son bucket C
@@ -32,6 +34,14 @@
 > es más dudoso (pregunta real sobre si ignorar un hueco pendiente).
 > `060_trap` cerró bien (`T_close`) en la corrida más reciente — sirve de
 > control de que no todo acaba en `ask_user`.
+> **Actualización 2026-09-27 (4):** minería manual de los 317
+> `explore_job*.json` de la batería (foco en el explorador, no el
+> verificador) → **P13/P14/P15** (sección de propuestas). P13 encontró un
+> bug real y reproducible (`047_deseo`: afirmó que `console_panel.cpp` no
+> existe, siendo falso). Implementadas P13/P14; P15 resultó innecesaria.
+> **Pendiente explícitamente sin lanzar:** canario de P13/P14 y la batería
+> reducida de 8-10h (sección 7bis) — el usuario pidió implementar primero
+> y decidir el lanzamiento después.
 
 ## 0. Resumen del sistema (contexto)
 
@@ -337,6 +347,57 @@ chequeo de consistencia entre jobs de la misma consulta antes de
 escalar, que se deja fuera de P12 por ahora (bajo volumen, tratar caso a
 caso si reaparece en próximas baterías).
 
+### P13 — Chequeo determinista de existencia de archivo antes de aceptar un miss
+*Retorno: alto. Riesgo: bajo — determinista, no LLM extra. Implementado.*
+
+Minado manual de los 317 `explore_job*.json` de la batería: en `047_deseo`
+(job 3) el explorador cerró afirmando *"El archivo consultado
+'console_panel.cpp' no existe"* — **falso** (4111 líneas, existe). Nunca lo
+leyó, solo no apareció en un grep. Mismo patrón que `083_wrong` (P12
+sub-fix 2), pero implementado como chequeo **determinista en el runtime**
+en vez de depender de que el modelo decida comprobar:
+`admin_run_explore_lite` extrae paths mencionados literalmente en la
+consulta, precomputa `fs::exists()` para cada uno (sin coste LLM) antes de
+arrancar el loop; si el explorador cierra con `no_encontrado`/`parcial`
+sin haber leído un path mencionado que sí existe, el runtime inyecta una
+ola de corrección en vez de aceptar el cierre (tope 1 corrección por
+explore, no se dispara en la última ola). Portado también a
+`explore_lite_local.py`. Tests directos (C++ + Python, con `chat()`/brain
+simulados) que reproducen exactamente el escenario de `047_deseo`.
+
+### P14 — Forzar reemisión ante un veredicto fuera de contrato
+*Retorno: medio. Riesgo: bajo. Implementado (alcance reducido, ver nota).*
+
+Hallazgo: 6/317 jobs cerraron con `veredicto="no_concluyente"`, un valor
+que el propio contrato del explorador (`encontrado|no_encontrado|parcial`)
+nunca ofrece — y que el runtime absorbía en silencio (distinto además
+entre C++ y Python: C++ lo colapsaba a `no_concluyente`, Python lo mapeaba
+a `parcial`; ya alineados).
+
+**Nota de alcance:** la propuesta original planteaba una gramática GBNF
+que restringiera `veredicto` a esos 3 valores exactos, extendiendo el
+trabajo de P1. Se descartó por riesgo/coste: el contrato del explorador es
+una unión de 3 formas (`grep`/`read`/`cerrar`) con campos que cambian con
+cierta frecuencia; una gramática de alternancia completa para eso duplica
+mantenimiento (justo lo que P7 quiere reducir) para un problema de bajo
+volumen (1.9%) que el runtime ya sobrevive con seguridad. Implementado en
+su lugar como un reintento determinista (mismo patrón que P13): si
+`veredicto` no es uno de los 3 valores válidos, el runtime pide reemisión
+una vez (salvo última ola). Portado a ambos lados; tests directos.
+
+### P15 — Compartir contexto entre exploradores de turnos distintos del mismo hilo
+*Retorno: n/a. Riesgo: n/a. **Ya cubierto por P4 — no hace falta código nuevo.***
+
+Al revisar la implementación de P4 para extenderla a follow-ups, se
+confirmó que `st.notebook` **no se limpia** entre consultas del mismo hilo
+continuable (`admin_begin_consulta_budgets` solo resetea presupuestos/
+flags, nunca `notebook`/`jobs` — eso solo lo limpia Reset/`/new`). El
+digest de P4 (`admin_notebook_digest_for_explore`) lee `st.notebook`
+directamente, sin distinguir "de esta consulta" vs "de un episodio ya
+cerrado" — así que un explorador en un follow-up **ya** ve lo que se cazó
+en turnos anteriores del mismo hilo, sin cambio adicional. El propio test
+de P4 ya lo cubre implícitamente (no depende de límites de episodio).
+
 ### P4 — Compartir contexto entre exploradores de la misma consulta
 *Retorno: medio. Riesgo: bajo.*
 
@@ -453,6 +514,45 @@ completa de 100 (`admin_vibecode_100.json`) y comparar el agregado final
 contra el baseline `vibecode100_20260926T102229Z/SCOREBOARD.md`
 (`process_ok`/`honest`/`lie`, coste por rol, distribución de `omit_gate`)
 para confirmar que la mejora de vueltas no costó precisión.
+
+### Batería reducida (8-10h) — propuesta, sin lanzar
+
+Los 100 casos completos tardan ~19h y bloquean la máquina; antes de la
+foto final conviene un intermedio más rápido (objetivo 8-10h) que priorice
+señal sobre cobertura bruta. Metodología: puntuar cada uno de los 100
+casos del baseline (`trap != none` +4, tiene `weak_flags` en el baseline
++4, está en el bucket C/D/E de la sección 8 +3, ya estaba en el canario de
+10 +2, dificultad `muy_alta`/`alta` +2/+1, forma cara `loop_confirm`/
+`omit_then_confirm` +1), ordenar por puntuación, y meter casos hasta llenar
+un presupuesto de 9h calculado con los `wall_sec` **del baseline original**
+(cota superior conservadora — con P0-P14 ya aceptados el tiempo real
+debería ser igual o menor). Después se añadió un piso mínimo de casos
+triviales/control (`baja`, `locate`, `hole`, `edit`) para no perder la red
+de seguridad de "¿sigue funcionando lo fácil?".
+
+**Resultado: 55 de los 100, ~9.4h estimadas (cota superior, antes de
+P13/P14):**
+
+```
+001_locate_easy,002_locate_easy,004_locate_easy,014_locate_easy,015_locate_easy,
+018_mechanism,019_mechanism,026_mechanism,031_deseo,032_deseo,036_deseo,037_deseo,
+042_deseo,044_deseo,045_deseo,047_deseo,049_deseo,051_trap,052_trap,053_trap,
+054_trap,055_trap,056_trap,057_trap,058_trap,059_trap,060_trap,061_multipolo,
+062_multipolo,063_multipolo,064_multipolo,065_multipolo,066_multipolo,067_multipolo,
+068_multipolo,069_cryptic,072_cryptic,074_cryptic,076_cryptic,079_wrong,080_wrong,
+081_wrong,082_wrong,083_wrong,084_wrong,085_wrong,086_wrong,087_hole,088_hole,
+089_hole,095_edit,096_edit,097_vague,098_vague,099_vague
+```
+
+Cubre: las 28 trampas completas, los 18 `muy_alta` + 17 `alta`, los 8
+`multipolo`, los targets de P11/P12, el canario de 10 ya vetado, y un piso
+de 8 `baja`/5 `locate`/3 `hole`/2 `edit`. Se caen 45, sobre todo
+`locate_easy`/`mechanism` de dificultad baja que ya salieron perfectos y
+baratos en la corrida original.
+
+**Sin lanzar todavía** — pendiente de decisión explícita (usar vía
+`--only` de `run_admin_explore_battery.py` con esa lista, reutilizando
+`admin_vibecode_100.json`; no hace falta un fichero de casos nuevo).
 
 ## 8. Análisis de `ask_user` evitables (2026-09-27)
 
