@@ -555,9 +555,11 @@ def run_exit_verify(
         if (j.get("veredicto") or "").strip().lower()
         in ("no_encontrado", "parcial", "no_hay", "no_concluyente", "no")
     ]
+    # Este harness no guarda un campo "evidencia" plano en el job (va dentro
+    # de summary_head); simbolos/paths son la ancla equivalente disponible.
     if not misses and len(jobs) == 1 and (
         (jobs[0].get("veredicto") or "").strip().lower() == "encontrado"
-    ) and jobs[0].get("evidencia"):
+    ) and (jobs[0].get("simbolos") or jobs[0].get("paths")):
         return {
             "veredicto": "sostiene",
             "ataques": [],
