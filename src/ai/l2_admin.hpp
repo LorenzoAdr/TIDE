@@ -166,6 +166,11 @@ struct AdminState {
   // last = tras el edit aplicado más reciente. Vacíos si git no disponible.
   std::string snapshot_baseline_ref;
   std::string snapshot_last_ref;
+  // Confirmación de shell pendiente (gate=Ask). clarify=true a la vez; el
+  // controller debe interpretar la siguiente línea del usuario como sí/no a
+  // esto, NO como respuesta a un ask_user del piloto.
+  bool awaiting_shell_confirm = false;
+  std::string pending_shell_cmd;
 };
 
 struct AdminVerifyResult {
@@ -192,6 +197,10 @@ struct AdminJobResult {
   std::vector<std::string> facts;
   std::string log_tail;
   std::string error;
+  // shell: el comando no está en el allowlist duro (Ask, no Deny) — el runtime
+  // debe pausar y preguntarle al usuario real en vez de rechazar sin más.
+  // No es un fallo (ok queda false, pero no es "exit_code!=0").
+  bool needs_user_confirm = false;
   bool truncated = false;
   int raw_bytes = 0;
 };
@@ -270,7 +279,17 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
                                       const std::string& workspace_root,
                                       const AdminLoopOpts& opts,
                                       AdminGrepFn grep_fn = {});
+// Allow = corre sin fricción; Ask = el runtime debe pausar y preguntarle al
+// usuario real (no un rechazo definitivo); Deny = bloqueo duro, nunca negociable
+// (metacaracteres/pipes fuera de forma/fuera del workspace) — ni aun con
+// aprobación humana, porque el usuario no puede auditar de un vistazo qué hace
+// de verdad un `$(...)`/`` ` `` o una redirección.
+enum class AdminShellGate { Allow, Ask, Deny };
+AdminShellGate admin_shell_cmd_gate(const std::string& cmd, std::string* reason = nullptr);
 bool admin_shell_cmd_allowed(const std::string& cmd);
+// "sí"/"yes"/"vale"/"dale"/… (y variantes con puntuación) → true; cualquier otra
+// cosa (incluye "no" y silencio) → false. Usado para la confirmación de shell.
+bool admin_parse_confirm_yes(const std::string& reply);
 std::string admin_clip_output(const std::string& text, bool* truncated, int* raw_bytes);
 // Clip con presupuestos explícitos (p.ej. read de archivos grandes: más head+tail).
 std::string admin_clip_output(const std::string& text, int head_chars, int tail_chars,
@@ -285,6 +304,10 @@ struct AdminShellExecOpts {
   std::string docker_container;  // vacío = ejecutar en el host
   std::string docker_cwd;        // -w dentro del contenedor; vacío = WORKDIR de la imagen
   int timeout_ms = kAdminShellDefaultTimeoutMs;  // <=0 desactiva el auto-kill (solo tests)
+  // true = un humano ya aprobó este comando exacto (admin_apply pausó con
+  // needs_user_confirm y el usuario respondió que sí) — salta el tier "Ask"
+  // del gate. El tier "Deny" (metacaracteres/perímetro) sigue siendo duro.
+  bool user_approved = false;
 };
 AdminJobResult admin_run_shell_safe(const std::string& cmd, const std::string& cwd,
                                     const AdminShellExecOpts& opts = {});
@@ -328,6 +351,12 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
                                    const std::string& workspace_root, const AdminLoopOpts& opts);
 
 bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::string* err);
+// Construye el AdminJob desde jr (summary/veredicto/log_tail recortado), lo
+// añade al notebook y a st->jobs, e incrementa st->spawns. Usado por
+// admin_apply para spawns normales y por el resume de confirm de shell
+// (ai_controller.cpp) para que un comando aprobado por el usuario deje
+// exactamente el mismo rastro que uno auto-aprobado.
+void admin_append_job(AdminState* st, AdminSpawnTipo tipo, const AdminJobResult& jr);
 
 std::string admin_system_prompt();
 // workspace_root: proyecto abierto (perímetro FS). Vacío solo en tests sin cwd.

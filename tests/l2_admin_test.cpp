@@ -55,6 +55,10 @@ using tuide::admin_path_inside_workspace;
 using tuide::admin_resolve_in_workspace;
 using tuide::admin_save_state;
 using tuide::admin_shell_cmd_allowed;
+using tuide::admin_shell_cmd_gate;
+using tuide::AdminShellGate;
+using tuide::admin_parse_confirm_yes;
+using tuide::admin_append_job;
 using tuide::admin_shell_enrich_result;
 using tuide::admin_shell_stays_in_workspace;
 using tuide::admin_url_fetch_allowed;
@@ -652,6 +656,56 @@ int main() {
       auto timed_out = admin_run_shell_safe("ls", root, opts);
       expect(!timed_out.ok && timed_out.error.rfind("timeout", 0) == 0,
             "shell timeout no ok");
+    }
+
+    // Gate: metacaracteres/pipe-shape siguen siendo Deny duro (ni preguntando);
+    // un verbo fuera del allowlist corto es Ask, no Deny — el runtime debe
+    // pausar y preguntarle al usuario en vez de rechazar sin más.
+    expect(admin_shell_cmd_gate("ls -la") == AdminShellGate::Allow, "gate: ls Allow");
+    expect(admin_shell_cmd_gate("rm -rf /tmp/x") == AdminShellGate::Ask, "gate: rm Ask");
+    expect(admin_shell_cmd_gate("find . | grep secret") == AdminShellGate::Deny,
+          "gate: pipe no head/tail sigue Deny");
+    expect(admin_shell_cmd_gate("ls `whoami`") == AdminShellGate::Deny,
+          "gate: backtick sigue Deny");
+    expect(admin_shell_cmd_gate("ls; rm -rf /") == AdminShellGate::Deny,
+          "gate: ';' sigue Deny");
+
+    expect(admin_parse_confirm_yes("sí"), "confirm: si");
+    expect(admin_parse_confirm_yes("Dale, adelante"), "confirm: dale con coma");
+    expect(admin_parse_confirm_yes("ok."), "confirm: ok con punto");
+    expect(!admin_parse_confirm_yes("no"), "confirm: no");
+    expect(!admin_parse_confirm_yes("no gracias"), "confirm: no gracias");
+    expect(!admin_parse_confirm_yes(""), "confirm: vacío");
+
+    // Flujo completo de confirmación: sin aprobar no toca disco; aprobado, sí.
+    {
+      const fs::path tmp = fs::path(root) / "l2_admin_test_confirm_tmp.txt";
+      std::ofstream(tmp) << "borrar\n";
+      expect(fs::exists(tmp), "tmp file creado");
+
+      const std::string cmd = "rm " + tmp.filename().string();
+      auto pending = admin_run_shell_safe(cmd, root);
+      expect(pending.needs_user_confirm && !pending.ok,
+            "rm sin aprobar → needs_user_confirm");
+      expect(fs::exists(tmp), "rm sin aprobar no toca el archivo");
+
+      AdminShellExecOpts approved;
+      approved.user_approved = true;
+      auto ran = admin_run_shell_safe(cmd, root, approved);
+      expect(ran.ok && !ran.needs_user_confirm, "rm aprobado → ok");
+      expect(!fs::exists(tmp), "rm aprobado sí borra el archivo");
+    }
+
+    // admin_append_job dado un needs_user_confirm=false sintético (como hace
+    // ai_controller.cpp tras una denegación humana) deja rastro normal.
+    {
+      AdminState st2;
+      AdminJobResult denied;
+      denied.error = "usuario denegó ejecutar este comando";
+      denied.summary = denied.error;
+      admin_append_job(&st2, AdminSpawnTipo::Shell, denied);
+      expect(st2.jobs.size() == 1 && !st2.jobs.front().ok, "append_job denegado deja job ok=false");
+      expect(st2.spawns == 1, "append_job cuenta como spawn");
     }
   }
   {

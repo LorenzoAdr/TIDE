@@ -686,7 +686,9 @@ nlohmann::json admin_state_to_json(const AdminState& st) {
       {"reply", st.reply},
       {"last_error", st.last_error},
       {"snapshot_baseline_ref", st.snapshot_baseline_ref},
-      {"snapshot_last_ref", st.snapshot_last_ref}};
+      {"snapshot_last_ref", st.snapshot_last_ref},
+      {"awaiting_shell_confirm", st.awaiting_shell_confirm},
+      {"pending_shell_cmd", st.pending_shell_cmd}};
 }
 
 bool admin_state_from_json(const nlohmann::json& j, AdminState* st, std::string* err) {
@@ -716,6 +718,8 @@ bool admin_state_from_json(const nlohmann::json& j, AdminState* st, std::string*
   st->last_error = j.value("last_error", "");
   st->snapshot_baseline_ref = j.value("snapshot_baseline_ref", "");
   st->snapshot_last_ref = j.value("snapshot_last_ref", "");
+  st->awaiting_shell_confirm = j.value("awaiting_shell_confirm", false);
+  st->pending_shell_cmd = j.value("pending_shell_cmd", "");
   st->jobs.clear();
   st->notebook.clear();
   st->clarifies.clear();
@@ -999,6 +1003,8 @@ void admin_begin_consulta_budgets(AdminState* st) {
   st->verify_reject_pending = false;
   st->awaiting_edit_confirm = false;
   st->awaiting_close_confirm = false;
+  st->awaiting_shell_confirm = false;
+  st->pending_shell_cmd.clear();
   st->edit_confirmed = false;
   st->edit_cubre.clear();
   st->edit_falta.clear();
@@ -1805,39 +1811,47 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
   return r;
 }
 
-bool admin_shell_cmd_allowed(const std::string& cmd) {
+AdminShellGate admin_shell_cmd_gate(const std::string& cmd, std::string* reason) {
+  auto deny = [&](const char* why) {
+    if (reason) {
+      *reason = why;
+    }
+    return AdminShellGate::Deny;
+  };
   const std::string c = trim_copy(cmd);
   if (c.empty() || c.size() > 500) {
-    return false;
+    return deny("comando vacío o demasiado largo");
   }
   if (c == "launch" || c == "compile" || c == "test") {
-    return true;
+    return AdminShellGate::Allow;
   }
   // Pipe seguro opcional: "<allowlisted> … | head -N" / "| tail -N" (solo truncar).
   std::string primary = c;
   const auto pipe = c.find('|');
   if (pipe != std::string::npos) {
     if (c.find('|', pipe + 1) != std::string::npos) {
-      return false;
+      return deny("más de un pipe");
     }
     primary = trim_copy(c.substr(0, pipe));
     const std::string rest = ascii_lower(trim_copy(c.substr(pipe + 1)));
     const bool headish = rest.rfind("head", 0) == 0;
     const bool tailish = rest.rfind("tail", 0) == 0;
     if (!headish && !tailish) {
-      return false;
+      return deny("pipe a algo que no es head/tail");
     }
     for (char ch : rest) {
       if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == ' ' || ch == '-')) {
-        return false;
+        return deny("pipe con caracteres no permitidos");
       }
     }
   }
   // Meta: '&' solo (background) prohibido; '&&' permitido (se valida cada tramo abajo).
+  // Éstos y el perímetro del workspace son los únicos bloqueos que ni siquiera
+  // una confirmación humana puede saltarse (ver AdminShellGate::Deny).
   static const char* kMeta[] = {"`", "$(", "${", ">", "<", ";", "\n", "\r"};
   for (const char* m : kMeta) {
     if (primary.find(m) != std::string::npos) {
-      return false;
+      return deny("metacaracter de shell no permitido");
     }
   }
   for (std::size_t i = 0; i < primary.size(); ++i) {
@@ -1848,11 +1862,11 @@ bool admin_shell_cmd_allowed(const std::string& cmd) {
       ++i;
       continue;
     }
-    return false;
+    return deny("'&' en segundo plano no permitido");
   }
   // '|' fuera del caso head/tail ya filtrado arriba.
   if (pipe == std::string::npos && c.find('|') != std::string::npos) {
-    return false;
+    return deny("pipe fuera del caso permitido");
   }
   static const char* kBan[] = {"sudo", " rm", "rm ", "\trm", "mv ", "chmod", "chown",
                                "curl", "wget", "ssh ", "scp ", "dd ", "mkfs"};
@@ -1889,21 +1903,49 @@ bool admin_shell_cmd_allowed(const std::string& cmd) {
     }
     return false;
   };
-  // Cadena "cmd1 && cmd2 && …": cada verbo allowlisted.
+  // Cadena "cmd1 && cmd2 && …": cada verbo allowlisted, si no → Ask (no Deny):
+  // un verbo fuera de la lista corta (o un "rm"/"curl"/… como argumento de uno
+  // permitido) no es necesariamente peligroso, pero el runtime no puede
+  // asegurarlo solo — que decida un humano en vez de bloquear a ciegas.
   std::size_t start = 0;
   while (start <= primary.size()) {
     const auto amp = primary.find("&&", start);
     const std::string seg =
         amp == std::string::npos ? primary.substr(start) : primary.substr(start, amp - start);
     if (!segment_ok(seg)) {
-      return false;
+      if (reason) {
+        *reason = "verbo/comando fuera de la lista de auto-aprobados";
+      }
+      return AdminShellGate::Ask;
     }
     if (amp == std::string::npos) {
       break;
     }
     start = amp + 2;
   }
-  return true;
+  return AdminShellGate::Allow;
+}
+
+bool admin_shell_cmd_allowed(const std::string& cmd) {
+  return admin_shell_cmd_gate(cmd, nullptr) == AdminShellGate::Allow;
+}
+
+bool admin_parse_confirm_yes(const std::string& reply) {
+  std::string low = ascii_lower(trim_copy(reply));
+  while (!low.empty() && (low.back() == '.' || low.back() == '!' || low.back() == '?')) {
+    low.pop_back();
+  }
+  static const char* kYes[] = {"si",     "sí",       "yes",      "y",         "ok",
+                               "vale",   "dale",     "adelante", "permitido", "permite",
+                               "permitelo", "autorizo", "hazlo",  "confirmo",  "ejecuta",
+                               "ejecutalo", "ejecútalo", "correcto", "afirmativo"};
+  for (const char* w : kYes) {
+    if (low == w || low.rfind(std::string(w) + " ", 0) == 0 ||
+        low.rfind(std::string(w) + ",", 0) == 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 std::string admin_clip_output(const std::string& text, bool* truncated, int* raw_bytes) {
@@ -2207,11 +2249,18 @@ void admin_shell_enrich_result(const std::string& cmd, const std::string& captur
 AdminJobResult admin_run_shell_safe(const std::string& cmd, const std::string& cwd,
                                     const AdminShellExecOpts& opts) {
   AdminJobResult r;
-  if (!admin_shell_cmd_allowed(cmd)) {
+  std::string gate_reason;
+  const AdminShellGate gate = admin_shell_cmd_gate(cmd, &gate_reason);
+  if (gate == AdminShellGate::Deny) {
     r.error =
-        "shell denegado (allowlist: ls/find/rg/…; un solo '| head -N'|'| tail -N' OK; "
-        "sin ;>&` — para código usa search/explore, no asumas .ts/.js)";
+        "shell denegado (" + gate_reason +
+        "; sin ;>&` — para código usa search/explore, no asumas .ts/.js)";
     r.summary = r.error;
+    return r;
+  }
+  if (gate == AdminShellGate::Ask && !opts.user_approved) {
+    r.needs_user_confirm = true;
+    r.summary = "shell pendiente de confirmación humana (" + gate_reason + ")";
     return r;
   }
   std::string perimeter_err;
@@ -4224,6 +4273,29 @@ bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::
       jr = run_or(ops.run_shell, [&] {
         return admin_run_shell_safe(effective.spawn.arg, "");
       });
+      if (jr.needs_user_confirm) {
+        // Pausa el lazo como ask_user, pero es el runtime quien pregunta, no
+        // el piloto: la siguiente línea del usuario es sí/no a ESTO, no una
+        // respuesta libre que reabra la investigación.
+        st->awaiting_shell_confirm = true;
+        st->pending_shell_cmd = effective.spawn.arg;
+        st->done = false;
+        st->clarify = true;
+        st->awaiting_edit_confirm = false;
+        st->awaiting_close_confirm = false;
+        st->verify_reject_pending = false;
+        {
+          std::ostringstream q;
+          q << "El agente quiere ejecutar en la terminal: `" << effective.spawn.arg << "`";
+          if (!effective.why.empty()) {
+            q << " (razón: " << effective.why << ")";
+          }
+          q << " — ¿lo permito? (responde sí/no)";
+          st->pending_question = q.str();
+        }
+        st->last_error.clear();
+        return true;
+      }
       break;
     case AdminSpawnTipo::Search:
       jr = run_or(ops.run_search, [&] { return admin_run_search_rg(effective.spawn.arg, ""); });
@@ -4261,9 +4333,17 @@ bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::
   }
   (void)tipo;
 
+  admin_append_job(st, effective.spawn.tipo, jr);
+  return true;
+}
+
+void admin_append_job(AdminState* st, AdminSpawnTipo tipo, const AdminJobResult& jr) {
+  if (st == nullptr) {
+    return;
+  }
   AdminJob job;
   job.id = static_cast<int>(st->jobs.size()) + 1;
-  job.tipo = admin_spawn_tipo_name(effective.spawn.tipo);
+  job.tipo = admin_spawn_tipo_name(tipo);
   job.ok = jr.ok;
   job.summary = jr.summary.empty() ? jr.error : jr.summary;
   utf8_resize(&job.summary, static_cast<std::size_t>(kAdminSummaryChars));
@@ -4294,7 +4374,6 @@ bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::
   st->jobs.push_back(std::move(job));
   ++st->spawns;
   st->last_error.clear();
-  return true;
 }
 
 std::string admin_system_prompt() {

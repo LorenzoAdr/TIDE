@@ -1057,6 +1057,36 @@ void AiController::run_admin_async(const std::string& message) {
         st = AdminState{};
         st.consulta = message;
         mark_snapshot_baseline();
+      } else if (st.clarify && st.awaiting_shell_confirm) {
+        // Confirmación de shell (gate=Ask): la pregunta la hizo el runtime, no
+        // el piloto — la siguiente línea es sí/no a ESTE comando concreto, no
+        // una respuesta libre que reabra la investigación.
+        const bool approved = admin_parse_confirm_yes(message);
+        const std::string pending_cmd = st.pending_shell_cmd;
+        AdminJobResult jr;
+        if (approved) {
+          sync_task_runner();  // refresca la ruta Docker antes de ejecutar.
+          AdminShellExecOpts sopts;
+          sopts.cancel = &agent_cancel_;
+          sopts.user_approved = true;
+          const ShellDockerRoute route = tasks_.docker_route();
+          sopts.docker_container = route.container;
+          sopts.docker_cwd = route.cwd;
+          jr = admin_run_shell_safe(pending_cmd, root, sopts);
+          append("→ Comando autorizado, ejecutando: " + pending_cmd);
+        } else {
+          jr.error = "usuario denegó ejecutar este comando";
+          jr.summary = jr.error;
+          append("→ Comando denegado; sigo con lo que ya tengo");
+        }
+        admin_append_job(&st, AdminSpawnTipo::Shell, jr);
+        st.awaiting_shell_confirm = false;
+        st.pending_shell_cmd.clear();
+        st.clarify = false;
+        st.pending_question.clear();
+        st.done = false;
+        st.reply.clear();
+        st.last_error.clear();
       } else if (st.clarify) {
         // Respuesta a ask_user.
         append("→ Continúo tras tu respuesta");
