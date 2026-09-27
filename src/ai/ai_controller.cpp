@@ -12,6 +12,7 @@
 #include "ai/ai_trace.hpp"
 #include "ai/coding_embed_rerank.hpp"
 #include "ai/edit_journal.hpp"
+#include "ai/edit_snapshot.hpp"
 #include "ai/get_code_of.hpp"
 #include "ai/l2_admin.hpp"
 #include "ai/l2_brain.hpp"
@@ -33,6 +34,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/ui_wake.hpp"
+#include "util/docker_shell.hpp"
 #include "util/include_tree.hpp"
 #include "util/path_normalize.hpp"
 
@@ -605,6 +607,17 @@ void AiController::sync_task_runner() {
   tasks_.set_tasks(std::move(specs));
   const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
   tasks_.ensure_default_tasks(root);
+  // Si el workspace corre dentro de Docker (resolve_shell_launch_config, la
+  // misma resolución que usa la pestaña de terminal y BuildEnvironmentService),
+  // enrutar ahí lo que lanza el harness de IA — si no, build/test/shell del
+  // agente corren en el host aunque el proyecto viva en el contenedor.
+  ShellDockerRoute route;
+  if (!root.empty() && deps_.config != nullptr) {
+    const ShellLaunchConfig launch = resolve_shell_launch_config(root, *deps_.config);
+    route.container = launch.docker_container;
+    route.cwd = launch.docker_cwd;
+  }
+  tasks_.set_docker_route(std::move(route));
 }
 
 std::vector<std::string> AiController::snapshot_lines() const {
@@ -1023,11 +1036,57 @@ void AiController::run_admin_async(const std::string& message) {
     }
 
     AdminState st;
+    // Shadow-repo baseline (edit_snapshot.hpp): snapshot del árbol al abrir esta
+    // consulta. Target de /undo y del diff que se inyecta si falla un build/test
+    // más adelante. Best-effort: sin git disponible, ambos quedan vacíos y no
+    // bloquean nada — solo se pierde esa red de seguridad.
+    auto mark_snapshot_baseline = [&st, root]() {
+      std::string snap_err;
+      if (!snapshot_ensure_repo(root, &snap_err)) {
+        return;
+      }
+      const SnapshotResult snap = snapshot_track(root, "baseline");
+      if (snap.ok) {
+        st.snapshot_baseline_ref = snap.ref;
+        st.snapshot_last_ref = snap.ref;
+      }
+    };
     if (admin_is_continuable(root)) {
       if (!admin_load_state(root, &st, &err)) {
         append("Admin: no se pudo reabrir sesión — " + err);
         st = AdminState{};
         st.consulta = message;
+        mark_snapshot_baseline();
+      } else if (st.clarify && st.awaiting_shell_confirm) {
+        // Confirmación de shell (gate=Ask): la pregunta la hizo el runtime, no
+        // el piloto — la siguiente línea es sí/no a ESTE comando concreto, no
+        // una respuesta libre que reabra la investigación.
+        const bool approved = admin_parse_confirm_yes(message);
+        const std::string pending_cmd = st.pending_shell_cmd;
+        AdminJobResult jr;
+        if (approved) {
+          sync_task_runner();  // refresca la ruta Docker antes de ejecutar.
+          AdminShellExecOpts sopts;
+          sopts.cancel = &agent_cancel_;
+          sopts.user_approved = true;
+          const ShellDockerRoute route = tasks_.docker_route();
+          sopts.docker_container = route.container;
+          sopts.docker_cwd = route.cwd;
+          jr = admin_run_shell_safe(pending_cmd, root, sopts);
+          append("→ Comando autorizado, ejecutando: " + pending_cmd);
+        } else {
+          jr.error = "usuario denegó ejecutar este comando";
+          jr.summary = jr.error;
+          append("→ Comando denegado; sigo con lo que ya tengo");
+        }
+        admin_append_job(&st, AdminSpawnTipo::Shell, jr);
+        st.awaiting_shell_confirm = false;
+        st.pending_shell_cmd.clear();
+        st.clarify = false;
+        st.pending_question.clear();
+        st.done = false;
+        st.reply.clear();
+        st.last_error.clear();
       } else if (st.clarify) {
         // Respuesta a ask_user.
         append("→ Continúo tras tu respuesta");
@@ -1048,6 +1107,7 @@ void AiController::run_admin_async(const std::string& message) {
           append("→ Tomo tu mensaje como la consulta principal");
           st.consulta = message;
           admin_begin_consulta_budgets(&st);
+          mark_snapshot_baseline();
         }
       } else {
         // Misma ejecución: conserva notebook + episodios. Presupuesto fresco.
@@ -1059,10 +1119,12 @@ void AiController::run_admin_async(const std::string& message) {
         st.reply.clear();
         st.last_error.clear();
         admin_begin_consulta_budgets(&st);
+        mark_snapshot_baseline();
       }
     } else {
       (void)admin_clear_session(root, nullptr);
       st.consulta = message;
+      mark_snapshot_baseline();
     }
 
     AdminSessionUi ui;
@@ -1133,7 +1195,30 @@ void AiController::run_admin_async(const std::string& message) {
       }
       return admin_run_explore_lite(s, *brain, root, eopts, grep);
     };
-    ops.run_build = [this, root](const AdminSpawn& s) {
+    // Sobre un build/test que falla: si hay baseline de snapshot para esta
+    // consulta, adjunta qué tocó la IA desde entonces — el piloto no tiene que
+    // reconstruirlo de memoria para saber qué pudo romper.
+    auto append_snapshot_fail_diff = [&st, root](AdminJobResult* r) {
+      if (st.snapshot_baseline_ref.empty()) {
+        return;
+      }
+      const SnapshotDiffResult diff = snapshot_diff(root, st.snapshot_baseline_ref);
+      if (!diff.ok || diff.changed_paths.empty()) {
+        return;
+      }
+      bool trunc = false;
+      int raw = 0;
+      const std::string clipped = admin_clip_output(diff.diff, 1500, 1500, &trunc, &raw);
+      std::ostringstream extra;
+      extra << "\n\n## Cambios de esta consulta (vs baseline, " << diff.changed_paths.size()
+            << " archivo(s))\n";
+      for (const auto& p : diff.changed_paths) {
+        extra << "- " << p << '\n';
+      }
+      extra << '\n' << clipped;
+      r->log_tail += extra.str();
+    };
+    ops.run_build = [this, root, &append_snapshot_fail_diff](const AdminSpawn& s) {
       AdminJobResult r;
       sync_task_runner();
       std::ostringstream log;
@@ -1141,7 +1226,7 @@ void AiController::run_admin_async(const std::string& message) {
           tasks_.run(s.arg, root, [&](const std::string& line) {
             append(line);
             log << line << '\n';
-          });
+          }, kTaskRunnerBuildTimeoutMs);
       r.ok = tr.allowed && tr.exit_code == 0;
       if (!tr.allowed) {
         r.error = tr.deny_reason;
@@ -1153,10 +1238,13 @@ void AiController::run_admin_async(const std::string& message) {
           r.log_tail += tr.stderr_text;
         }
         r.facts.push_back("build:" + s.arg + " exit=" + std::to_string(tr.exit_code));
+        if (tr.exit_code != 0) {
+          append_snapshot_fail_diff(&r);
+        }
       }
       return r;
     };
-    ops.run_test = [this, root](const AdminSpawn& s) {
+    ops.run_test = [this, root, &append_snapshot_fail_diff](const AdminSpawn& s) {
       AdminJobResult r;
       sync_task_runner();
       const std::string name = s.arg.empty() ? "test" : s.arg;
@@ -1165,7 +1253,7 @@ void AiController::run_admin_async(const std::string& message) {
           tasks_.run(name, root, [&](const std::string& line) {
             append(line);
             log << line << '\n';
-          });
+          }, kTaskRunnerBuildTimeoutMs);
       r.ok = tr.allowed && tr.exit_code == 0;
       if (!tr.allowed) {
         r.error = tr.deny_reason;
@@ -1178,21 +1266,24 @@ void AiController::run_admin_async(const std::string& message) {
         r.raw_bytes = raw;
         r.summary = "test exit=" + std::to_string(tr.exit_code) + " bytes=" + std::to_string(raw);
         r.facts.push_back("test:" + name);
+        if (tr.exit_code != 0) {
+          append_snapshot_fail_diff(&r);
+        }
       }
       return r;
     };
     ops.run_shell = [this, root](const AdminSpawn& s) {
+      sync_task_runner();  // también refresca la ruta Docker (tasks_.docker_route()).
       if (s.arg == "launch" || s.arg == "compile" || s.arg == "test" ||
           (!s.arg.empty() && s.arg.find(' ') == std::string::npos &&
            tasks_.is_whitelisted(s.arg))) {
         AdminJobResult r;
-        sync_task_runner();
         std::ostringstream log;
         const TaskRunnerResult tr =
             tasks_.run(s.arg, root, [&](const std::string& line) {
               append(line);
               log << line << '\n';
-            });
+            }, kTaskRunnerBuildTimeoutMs);
         r.ok = tr.allowed && tr.exit_code == 0;
         if (!tr.allowed) {
           r.error = tr.deny_reason;
@@ -1208,7 +1299,12 @@ void AiController::run_admin_async(const std::string& message) {
         }
         return r;
       }
-      return admin_run_shell_safe(s.arg, root);
+      AdminShellExecOpts sopts;
+      sopts.cancel = &agent_cancel_;
+      const ShellDockerRoute route = tasks_.docker_route();
+      sopts.docker_container = route.container;
+      sopts.docker_cwd = route.cwd;
+      return admin_run_shell_safe(s.arg, root, sopts);
     };
     ops.run_read = [root](const AdminSpawn& s) {
       // Siempre admin_run_read_file: la tool read_file corta a ~400 líneas y
@@ -1239,7 +1335,17 @@ void AiController::run_admin_async(const std::string& message) {
       return r;
     };
     ops.run_edit = [root, &st](const AdminSpawn& s) {
-      return admin_run_edit_file(s, st, root);
+      AdminJobResult r = admin_run_edit_file(s, st, root);
+      if (r.ok) {
+        // Snapshot tras el edit real (no el propuesto): permite /undo por
+        // consulta y ancla el diff que ve el piloto si el build falla después.
+        const SnapshotResult snap =
+            snapshot_track(root, "job:" + std::to_string(st.jobs.size() + 1));
+        if (snap.ok) {
+          st.snapshot_last_ref = snap.ref;
+        }
+      }
+      return r;
     };
     ops.run_web = [](const AdminSpawn& s) { return admin_run_web_search(s.arg); };
     ops.run_web_fetch = [&st](const AdminSpawn& s) { return admin_run_web_fetch(s.arg, st); };
@@ -2591,6 +2697,44 @@ void AiController::handle_user_input(const std::string& line) {
     }
     if (c == "/new" || c == "/reset") {
       clear_ai_session(true);
+      return;
+    }
+    if (c == "/undo") {
+      const std::string root =
+          deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+      if (root.empty()) {
+        append("Sin workspace abierto.");
+        return;
+      }
+      AdminState st;
+      std::string load_err;
+      if (!admin_load_state(root, &st, &load_err) || st.snapshot_baseline_ref.empty()) {
+        append("Nada que deshacer (sin sesión de IA con snapshot en este workspace).");
+        return;
+      }
+      const SnapshotDiffResult diff = snapshot_diff(root, st.snapshot_baseline_ref);
+      if (!diff.ok) {
+        append("No se pudo calcular qué revertir — " + diff.error);
+        return;
+      }
+      if (diff.changed_paths.empty()) {
+        append("No hay cambios de la IA que revertir en esta consulta.");
+        return;
+      }
+      std::string revert_err;
+      if (!snapshot_revert(root, st.snapshot_baseline_ref, diff.changed_paths, &revert_err)) {
+        append("Undo falló — " + revert_err);
+        return;
+      }
+      std::ostringstream msg;
+      msg << "→ Revertido a como estaba antes de esta consulta (" << diff.changed_paths.size()
+          << " archivo(s)):\n";
+      for (const auto& p : diff.changed_paths) {
+        msg << "  - " << p << '\n';
+      }
+      msg << "\n(Si tienes alguno de estos archivos abierto en un tab, ciérralo y reábrelo para "
+             "ver el contenido revertido — el buffer en memoria no se refresca solo.)";
+      append(msg.str());
       return;
     }
   }

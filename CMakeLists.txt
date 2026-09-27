@@ -388,6 +388,7 @@ add_executable(tuide
   src/ai/l2_grammar.cpp
   src/ai/level2_debrief.cpp
   src/ai/l2_admin.cpp
+  src/ai/edit_snapshot.cpp
   src/ai/ai_controller.cpp
   src/terminal/shell_session.cpp
   src/terminal/app_session.cpp
@@ -1139,6 +1140,20 @@ target_include_directories(search_replace_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(edit_snapshot_test
+  tests/edit_snapshot_test.cpp
+  src/ai/edit_snapshot.cpp
+  src/git/git_command.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(edit_snapshot_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
 add_executable(l2_think_test
   tests/l2_think_test.cpp
 )
@@ -1634,6 +1649,7 @@ set(TUIDE_TEST_TARGETS
   l2_admin_test
   l2_catalog_test
   search_replace_test
+  edit_snapshot_test
   llama_backend_test
   llama_host_comm_test
   repo_map_test
