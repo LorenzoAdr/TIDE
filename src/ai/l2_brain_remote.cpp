@@ -49,6 +49,11 @@ std::string resolve_api_key(const AiLevel2Settings& cfg) {
       return env;
     }
   }
+  if (const char* env = std::getenv("DEEPSEEK_API_KEY")) {
+    if (env[0] != '\0') {
+      return env;
+    }
+  }
   if (const char* env = std::getenv("OPENAI_API_KEY")) {
     if (env[0] != '\0') {
       return env;
