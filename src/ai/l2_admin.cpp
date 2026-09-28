@@ -1083,7 +1083,7 @@ AdminOla admin_parse(const std::string& raw) {
     out.error = std::string("JSON admin inválido: ") + e.what();
     return out;
   }
-  std::string action = trim_copy(j.value("action", ""));
+  std::string action = trim_copy(json_str(j, "action"));
   std::string d = ascii_lower(trim_copy(json_str(j, "do")));
   // Heal frecuente: el modelo pone el gesto en "action" y omite admin_v1/do.
   // p.ej. {"action":"ask_user","why":"…","reply":"…"} → do=ask_user.
@@ -1166,8 +1166,8 @@ AdminOla admin_parse(const std::string& raw) {
     out.spawn.brief = trim_copy(json_str(sp, "brief"));
     utf8_resize(&out.spawn.brief, static_cast<std::size_t>(kAdminBriefMax));
     out.spawn.arg = trim_copy(json_str(sp, "arg"));
-    out.spawn.search = sp.value("search", "");
-    out.spawn.replace = sp.value("replace", "");
+    out.spawn.search = json_str(sp, "search");
+    out.spawn.replace = json_str(sp, "replace");
     if (out.spawn.tipo == AdminSpawnTipo::Build || out.spawn.tipo == AdminSpawnTipo::Git ||
         out.spawn.tipo == AdminSpawnTipo::Shell || out.spawn.tipo == AdminSpawnTipo::Search ||
         out.spawn.tipo == AdminSpawnTipo::Read || out.spawn.tipo == AdminSpawnTipo::Test ||
