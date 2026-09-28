@@ -36,6 +36,10 @@ def api_ok(api: str) -> bool:
             health = base + "/health"
         with urllib.request.urlopen(health, timeout=5) as resp:
             return resp.status == 200
+    except urllib.error.HTTPError:
+        # Remote APIs (DeepSeek, etc.) don't expose /health but did answer,
+        # which proves the host is up.
+        return True
     except Exception:  # noqa: BLE001
         return False
 
