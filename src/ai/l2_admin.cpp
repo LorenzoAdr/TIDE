@@ -4719,17 +4719,24 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
     out << "{\"action\":\"admin_v1\",\"do\":\"ask_user\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
   }
 
-  if (!st.awaiting_edit_confirm && !st.awaiting_close_confirm && st.edit_confirmed &&
-      !admin_has_edit_job(st)) {
-    out << "## Edición confirmada, pendiente de aplicar\n"
-           "Ya hiciste confirmar_editar (cubre/falta declarados). Eso SOLO confirma el plan — "
-           "el archivo todavía NO cambió en disco. Repetir `editar` o `confirmar_editar` no "
-           "avanza nada; el siguiente turno DEBE ser `do=\"spawn\"` con `spawn.tipo=\"edit\"` "
-           "(arg=path ya visto en el notebook, search=texto EXACTO a reemplazar, "
-           "replace=texto nuevo) para aplicarlo de verdad.\n"
-           "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
+  if (!st.awaiting_edit_confirm && !st.awaiting_close_confirm && st.edit_confirmed) {
+    const bool has_edit = admin_has_edit_job(st);
+    out << "## Edición confirmada\n"
+           "confirmar_editar SOLO declara el plan — no toca archivos. Repetir `editar` o "
+           "`confirmar_editar` no aplica nada y no hace falta: `spawn` con `spawn.tipo=\"edit\"` "
+           "ya es legal ahora mismo, sin re-confirmar.\n"
+        << (has_edit
+                ? "Ya se aplicó al menos un edit. Si el plan confirmado cubre MÁS de un archivo "
+                  "(p.ej. dos idiomas), spawnea `edit` OTRA VEZ por cada archivo que falte — no "
+                  "repitas editar/confirmar_editar entre archivo y archivo. Si ya aplicaste TODOS "
+                  "los archivos del plan, ve directo a `cerrar`.\n"
+                : "El siguiente turno DEBE ser `do=\"spawn\"` con `spawn.tipo=\"edit\"` (arg=path "
+                  "ya visto en el notebook, search=texto EXACTO a reemplazar, replace=texto nuevo) "
+                  "para aplicarlo de verdad.\n")
+        << "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
            "\"spawn\":{\"tipo\":\"edit\",\"arg\":\"path del notebook\","
-           "\"search\":\"texto exacto a reemplazar\",\"replace\":\"texto nuevo\"}}\n\n";
+           "\"search\":\"texto exacto a reemplazar\",\"replace\":\"texto nuevo\"}}\n"
+           "{\"action\":\"admin_v1\",\"do\":\"cerrar\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
   }
 
   out << "## Sesion UI\n";
