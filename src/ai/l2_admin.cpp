@@ -1057,6 +1057,23 @@ void admin_begin_consulta_budgets(AdminState* st) {
   st->explore_jobs_baseline = admin_count_explore_jobs(*st);
 }
 
+// Reanudar tras ask_user es parte normal de LA MISMA tarea, no abuso de
+// presupuesto — pero a diferencia de admin_begin_consulta_budgets() NO toca
+// los flags de flujo (awaiting_edit_confirm/awaiting_close_confirm/
+// edit_confirmed/...), porque una ask_user puede dispararse a mitad de una
+// edición ya confirmada y perder esos flags forzaría re-confirmar de cero.
+// Solo se refrescan los contadores numéricos, que sí pueden agotarse durante
+// el explore/verify previo al ask_user y estrangular el turno que retoma.
+void admin_refresh_propose_budget(AdminState* st) {
+  if (st == nullptr) {
+    return;
+  }
+  st->proposes = 0;
+  st->spawns = 0;
+  st->verify_passes = 0;
+  st->explore_jobs_baseline = admin_count_explore_jobs(*st);
+}
+
 AdminOla admin_parse(const std::string& raw) {
   AdminOla out;
   std::string blob = extract_action_json(raw);

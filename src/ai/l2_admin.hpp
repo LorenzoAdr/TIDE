@@ -269,6 +269,9 @@ int admin_count_explore_jobs(const AdminState& st);
 int admin_explores_used_this_consulta(const AdminState& st);
 // Marca el baseline = explores actuales (presupuesto fresco; conserva jobs/notebook).
 void admin_begin_consulta_budgets(AdminState* st);
+// Como arriba pero sin tocar flags de flujo (awaiting_edit_confirm/edit_confirmed/...);
+// para reanudar tras ask_user sin perder una edición ya confirmada a mitad de camino.
+void admin_refresh_propose_budget(AdminState* st);
 
 AdminOla admin_parse(const std::string& raw);
 bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, int max_spawns,

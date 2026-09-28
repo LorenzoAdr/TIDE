@@ -1100,12 +1100,21 @@ void AiController::run_admin_async(const std::string& message) {
         st.done = false;
         st.reply.clear();
         st.last_error.clear();
+        // Responder una ask_user es continuar LA MISMA tarea, no abuso de
+        // presupuesto: si el explore/verify previo ya gastó casi todo
+        // proposes/spawns, retomar sin refrescarlos aborta casi al toque con
+        // "tope de proposes con turnos ilegales". No toca awaiting_edit_confirm/
+        // edit_confirmed — una edición ya confirmada a mitad de camino no debe
+        // perderse solo por haber pasado por un ask_user.
+        admin_refresh_propose_budget(&st);
         // Si el usuario aporta la tarea real (p.ej. tras un saludo ask_user),
         // promueve la respuesta a consulta — si no, el piloto se queda con "hola"
         // y vuelve a preguntar el contexto (VS Code, etc.).
         if (message.size() > st.consulta.size() + 8) {
           append("→ Tomo tu mensaje como la consulta principal");
           st.consulta = message;
+          // Esto sí es una tarea nueva de verdad: además de los contadores,
+          // resetea awaiting_edit_confirm/edit_confirmed/etc. y re-baselinea.
           admin_begin_consulta_budgets(&st);
           mark_snapshot_baseline();
         }
