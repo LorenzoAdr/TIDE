@@ -486,12 +486,13 @@ def main() -> None:
     t0 = time.time()
 
     for turn_i in range(args.max_turns):
-        raw = chat(api, model, msgs, max_tokens=500)
+        raw = chat(api, model, msgs, max_tokens=700)
         print(f"-- turn {turn_i} [{stage}] --\n{raw[:400]}", flush=True)
         turns.append({"turn": turn_i, "stage": stage, "raw": raw})
         try:
             act = extract_json(raw)
         except ValueError as e:
+            print(f"-- JSON INVALIDO (no cuenta contra el presupuesto de reintentos): {e}", flush=True)
             msgs.append({"role": "assistant", "content": raw})
             msgs.append({"role": "user", "content": f"JSON inválido: {e}. Reemití el JSON solo."})
             continue
@@ -534,6 +535,7 @@ def main() -> None:
 
         if stage == "emit":
             if do != "spawn" or not isinstance(act.get("spawn"), dict):
+                print(f"-- EMIT FAIL: do={do!r} sin spawn dict (consume presupuesto)", flush=True)
                 msgs.append({"role": "user", "content": 'Emití {"do":"spawn","spawn":{"tipo":"edit",...}}.'})
                 attempts_left -= 1
                 if attempts_left <= 0:
@@ -542,6 +544,7 @@ def main() -> None:
                 continue
             spawn = act["spawn"]
             if (spawn.get("tipo") or "").strip().lower() != "edit":
+                print(f"-- EMIT FAIL: spawn.tipo={spawn.get('tipo')!r} != edit (consume presupuesto)", flush=True)
                 msgs.append({"role": "user", "content": "spawn.tipo debe ser \"edit\"."})
                 attempts_left -= 1
                 if attempts_left <= 0:
