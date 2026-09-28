@@ -4782,6 +4782,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
     ui_note(opts, "→ Sigo con la evidencia ya reunida…");
   }
   int explore_cap_rejects = 0;
+  int falta_nada_reject_streak = 0;
   while (!st->done && !st->clarify && !cancelled(opts)) {
     const std::string sys = admin_system_prompt();
     const std::string user = admin_user_prompt(*st, max_p, max_s, opts.workspace_root);
@@ -4866,6 +4867,19 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       } else {
         explore_cap_rejects = 0;
       }
+      // Resonancia verificador↔LLM: el gate de P0/P8 (falta_is_nada tras
+      // veredicto adverso) rechaza, el modelo reintenta con el mismo
+      // falta="nada" en vez de nombrar el hueco, y el rechazo se repite
+      // palabra por palabra hasta agotar el tope de proposes sin darle nada
+      // al usuario. Si el mismo rechazo se repite, no seguimos esperando a
+      // que el modelo se corrija solo: cortamos y preguntamos al usuario.
+      const bool is_falta_nada_reject =
+          lerr.find("falta no puede ser \"nada\"") != std::string::npos;
+      if (is_falta_nada_reject) {
+        ++falta_nada_reject_streak;
+      } else {
+        falta_nada_reject_streak = 0;
+      }
       st->last_error = lerr;
       if (explore_cap_rejects >= 2) {
         st->last_error =
@@ -4888,6 +4902,37 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       if (explore_cap_rejects >= 2) {
         ui_note(opts, "→ Sin más exploradores en esta consulta: cierra o busca/lee con lo ya hallado.");
       }
+      if (falta_nada_reject_streak >= 2) {
+        st->done = false;
+        st->clarify = true;
+        st->awaiting_edit_confirm = false;
+        st->awaiting_close_confirm = false;
+        st->verify_reject_pending = false;
+        std::ostringstream q;
+        q << "No pude cerrar con seguridad: el verificador objetó la última "
+             "respuesta";
+        if (!st->last_verify_why.empty()) {
+          std::string why = st->last_verify_why;
+          utf8_resize(&why, 320);
+          q << " (" << why << ")";
+        }
+        q << ", y no logré precisar qué falta por demostrar tras varios "
+             "intentos. ";
+        if (!ola.reply.empty()) {
+          std::string reply = ola.reply;
+          utf8_resize(&reply, 600);
+          q << "Última respuesta candidata: " << reply << " ";
+        }
+        q << "¿Sigo investigando ese punto o te vale esta respuesta igual?";
+        st->pending_question = q.str();
+        st->reply = st->pending_question;
+        st->last_error.clear();
+        ui_note(opts, "→ Verificador y modelo en bucle: paso la decisión al usuario.");
+        if (!opts.workspace_root.empty()) {
+          admin_save_state(opts.workspace_root, *st, nullptr);
+        }
+        break;
+      }
       if (!opts.workspace_root.empty()) {
         admin_save_state(opts.workspace_root, *st, nullptr);
       }
@@ -4898,6 +4943,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       continue;
     }
     explore_cap_rejects = 0;
+    falta_nada_reject_streak = 0;
     ++st->proposes;
 
     // Verificador adversarial antes de aceptar editar/cerrar (si hay notebook).

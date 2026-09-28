@@ -988,6 +988,34 @@ int main() {
     expect(st.episodes[0].reply.find("gutter") != std::string::npos, "episode reply");
   }
   {
+    // Regresión "resonancia verificador↔LLM": tras un veredicto adverso del
+    // verificador (refuta/dudoso), el gate de falta_is_nada prohíbe cerrar
+    // con falta="nada". Visto en vivo: el modelo ignora el PROHIBIDO del
+    // prompt y reenvía el mismo confirmar_cerrar con falta="nada" turno tras
+    // turno; antes de este fix el bucle repetía el mismo rechazo palabra por
+    // palabra hasta agotar el tope de proposes y fallar en seco sin darle
+    // nada al usuario. Ahora, al repetirse el mismo rechazo, el runtime debe
+    // cortar y pasar la decisión a ask_user en vez de agotar el presupuesto.
+    AdminState st;
+    st.consulta = "¿esa info llega en la tarea de debounce?";
+    st.awaiting_close_confirm = true;
+    st.last_verify_verdict = "refuta";
+    st.last_verify_why = "el verificador sostiene que no hay debounce en la recepción";
+    AdminScriptedBrain brain({
+        R"({"action":"admin_v1","do":"confirmar_cerrar","why":"creo que basta","cubre":"tiempos de debounce","falta":"nada","reply":"Sí, la info llega tras el debounce."})",
+        R"({"action":"admin_v1","do":"confirmar_cerrar","why":"insisto, ya está cubierto","cubre":"tiempos de debounce","falta":"nada","reply":"Sí, la info llega tras el debounce."})",
+        R"({"action":"admin_v1","do":"confirmar_cerrar","why":"insisto otra vez","cubre":"tiempos de debounce","falta":"nada","reply":"Sí, la info llega tras el debounce."})",
+    });
+    AdminOps ops;
+    AdminLoopOpts opts;
+    const auto res = run_admin_loop(&st, brain, ops, opts);
+    expect(res.ok && res.clarify, "resonance loop: escalates to ask_user instead of failing");
+    expect(!st.done && st.clarify, "resonance loop: session paused, not closed");
+    expect(res.error.empty(), "resonance loop: no silent 'tope de proposes' failure");
+    expect(!st.pending_question.empty(), "resonance loop: pending_question set for the user");
+    expect(st.proposes < kAdminMaxProposes, "resonance loop: doesn't have to exhaust the propose budget");
+  }
+  {
     // A+B: tras cerrar, sesión continuable; save/load conserva episodios; prompt los muestra.
     const fs::path root = fs::temp_directory_path() / "tuide_l2_admin_episodes";
     std::error_code ec;
