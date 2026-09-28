@@ -1026,6 +1026,15 @@ int admin_count_explore_jobs(const AdminState& st) {
   return n;
 }
 
+bool admin_has_edit_job(const AdminState& st) {
+  for (const auto& j : st.jobs) {
+    if (j.tipo == "edit") {
+      return true;
+    }
+  }
+  return false;
+}
+
 int admin_explores_used_this_consulta(const AdminState& st) {
   return std::max(0, admin_count_explore_jobs(st) - st.explore_jobs_baseline);
 }
@@ -4708,6 +4717,19 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
     }
     out << "{\"action\":\"admin_v1\",\"do\":\"editar\",\"why\":\"…\"}\n";
     out << "{\"action\":\"admin_v1\",\"do\":\"ask_user\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
+  }
+
+  if (!st.awaiting_edit_confirm && !st.awaiting_close_confirm && st.edit_confirmed &&
+      !admin_has_edit_job(st)) {
+    out << "## Edición confirmada, pendiente de aplicar\n"
+           "Ya hiciste confirmar_editar (cubre/falta declarados). Eso SOLO confirma el plan — "
+           "el archivo todavía NO cambió en disco. Repetir `editar` o `confirmar_editar` no "
+           "avanza nada; el siguiente turno DEBE ser `do=\"spawn\"` con `spawn.tipo=\"edit\"` "
+           "(arg=path ya visto en el notebook, search=texto EXACTO a reemplazar, "
+           "replace=texto nuevo) para aplicarlo de verdad.\n"
+           "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
+           "\"spawn\":{\"tipo\":\"edit\",\"arg\":\"path del notebook\","
+           "\"search\":\"texto exacto a reemplazar\",\"replace\":\"texto nuevo\"}}\n\n";
   }
 
   out << "## Sesion UI\n";
