@@ -22,23 +22,39 @@ _FALTA_NADA = frozenset(
 _NEGATION_WORDS = frozenset({"no", "nunca", "tampoco", "ni", "jamás", "jamas"})
 
 
-def _phrase_negated_at(blob: str, idx: int, window: int = 24) -> bool:
+def _phrase_negated_at(blob: str, idx: int, end: int, window: int = 24) -> bool:
     preceding = blob[max(0, idx - window) : idx]
-    tokens = re.findall(r"[a-záéíóúñ]+", preceding)
-    return any(t in _NEGATION_WORDS for t in tokens[-3:])
+    tokens_before = re.findall(r"[a-záéíóúñ]+", preceding)
+    if any(t in _NEGATION_WORDS for t in tokens_before[-3:]):
+        return True
+    # 052_trap (docs/plans/l2-admin-verify-round-reduction.md, hallazgo
+    # 2026-09-28): "responder si son lo mismo (no lo son)" -- la negación
+    # va DESPUÉS de la frase, no antes. Mirar también los ~3 tokens
+    # siguientes (ventana corta a propósito: evita morder conectores tipo
+    # "no obstante"/"sin embargo" que no niegan la frase en sí).
+    following = blob[end : end + window]
+    tokens_after = re.findall(r"[a-záéíóúñ]+", following)[:3]
+    for i, t in enumerate(tokens_after):
+        if t not in _NEGATION_WORDS:
+            continue
+        # "no obstante" es un conector ("sin embargo"), no niega la frase.
+        if t == "no" and i + 1 < len(tokens_after) and tokens_after[i + 1] == "obstante":
+            continue
+        return True
+    return False
 
 
 def phrase_present_unnegated(blob: str, phrase: str) -> bool:
-    """True if `phrase` (already lower-cased) appears in `blob` without an
-    immediately-preceding negation ("no", "nunca", ...) — avoids flagging
-    "no son lo mismo" as if it asserted "son lo mismo"."""
+    """True if `phrase` (already lower-cased) appears in `blob` without a
+    negation right before or right after it ("no son lo mismo" / "son lo
+    mismo? no." both avoid flagging the bare phrase as an assertion)."""
     p = phrase.lower()
     start = 0
     while True:
         idx = blob.find(p, start)
         if idx == -1:
             return False
-        if not _phrase_negated_at(blob, idx):
+        if not _phrase_negated_at(blob, idx, idx + len(p)):
             return True
         start = idx + len(p)
 
