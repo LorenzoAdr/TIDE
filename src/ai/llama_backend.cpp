@@ -467,7 +467,8 @@ bool parse_llama_chat_completion(const std::string& body, std::string* content, 
     return false;
   } catch (const std::exception& ex) {
     if (error) {
-      *error = std::string("parse chat completions: ") + ex.what();
+      const std::string snippet = body.substr(0, 300);
+      *error = std::string("parse chat completions: ") + ex.what() + " | body=" + snippet;
     }
     return false;
   }
