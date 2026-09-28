@@ -3887,7 +3887,8 @@ std::string admin_verify_context_prompt(const AdminState& st) {
 }
 
 AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::string& thesis,
-                                   const std::string& workspace_root, const AdminLoopOpts& opts) {
+                                   const std::string& workspace_root, const AdminLoopOpts& opts,
+                                   bool is_edit_trigger) {
   AdminVerifyResult out;
   if (st == nullptr) {
     out.veredicto = "dudoso";
@@ -4016,21 +4017,43 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
   }
 
   (void)thesis;  // sin narrativa del piloto; solo consulta + hechos tipados
-  const std::string sys =
-      "Eres VERIFICADOR. No explores features nuevas. Te dan la consulta, ANCLAS, "
-      "veredictos tipados, evidencia path:línea y hechos cortos del notebook. "
-      "Refuta si no demuestran el arco A→B del pedido (co-ocurrencia ≠ puente). "
-      "Un no_encontrado/parcial no se borra porque otro job encontró otra cosa. "
-      "EXCEPCIÓN (P11): un no_encontrado/parcial CON evidencia real (path:línea, "
-      "símbolos — no un grep vacío) puede ser la respuesta completa si demuestra "
-      "una ausencia que corrige la premisa de la consulta (p.ej. \"no existe tal "
-      "filtrado\", con la prueba de por qué). Ahí sí puedes sostener citando esa "
-      "evidencia — pero solo si responde lo que se pregunta, no cualquier ausencia "
-      "de paso. Sigue refutando si la ausencia no está demostrada (grep sin hits, "
-      "sin leer nada) o no corrige nada del pedido. "
-      "Tools: entre|read|cerrar. read solo paths anclados. Al cerrar: "
-      "{\"do\":\"cerrar\",\"veredicto\":\"sostiene|refuta|dudoso\",\"ataques\":[],"
-      "\"arco\":{\"de\":\"\",\"a\":\"\"},\"why\":\"…\"}";
+  std::ostringstream sys_oss;
+  sys_oss
+      << "Eres VERIFICADOR. No explores features nuevas. Te dan la consulta, ANCLAS, "
+      << "veredictos tipados, evidencia path:línea y hechos cortos del notebook. "
+      << "Refuta si no demuestran el arco A→B del pedido (co-ocurrencia ≠ puente). "
+      << "Un no_encontrado/parcial no se borra porque otro job encontró otra cosa. "
+      << "EXCEPCIÓN (P11): un no_encontrado/parcial CON evidencia real (path:línea, "
+      << "símbolos — no un grep vacío) puede ser la respuesta completa si demuestra "
+      << "una ausencia que corrige la premisa de la consulta (p.ej. \"no existe tal "
+      << "filtrado\", con la prueba de por qué). Ahí sí puedes sostener citando esa "
+      << "evidencia — pero solo si responde lo que se pregunta, no cualquier ausencia "
+      << "de paso. Sigue refutando si la ausencia no está demostrada (grep sin hits, "
+      << "sin leer nada) o no corrige nada del pedido. "
+      << "EXCEPCIÓN (P11bis, ausencia ARQUITECTÓNICA): si el hueco es una capa/"
+      << "componente que estructuralmente no existe en este repo (p.ej. \"falta el "
+      << "lado servidor\" en un repo que solo tiene el cliente; \"falta la GUI\" en "
+      << "una app CLI), y el resto del pedido sí está cubierto con evidencia real, "
+      << "NO exijas código de esa capa ausente — acepta la ausencia estructural como "
+      << "parte de la respuesta (sostiene), no la trates como hueco pendiente. "
+      << "18/19_mechanism (2026-09-28): el verificador exigía ver 'el lado servidor' "
+      << "en un repo que es solo cliente LSP — eso es exactamente lo que esta "
+      << "excepción cubre.";
+  if (is_edit_trigger) {
+    sys_oss
+        << " EXCEPCIÓN (P11bis, trigger=editar): esto valida una EDICIÓN propuesta, "
+        << "no una afirmación sobre el estado actual. \"El código actual no hace X\" "
+        << "NO es motivo de refuta si X es justo el cambio que se va a hacer — eso es "
+        << "la premisa normal de cualquier edit, no un hueco. Verifica en su lugar que "
+        << "hay evidencia real de DÓNDE y CÓMO editar (ubicación exacta, mecanismo, "
+        << "contexto anclado) — refuta solo si falta esa evidencia de ubicación/"
+        << "mecanismo, no si falta que el resultado ya exista.";
+  }
+  sys_oss
+      << " Tools: entre|read|cerrar. read solo paths anclados. Al cerrar: "
+      << "{\"do\":\"cerrar\",\"veredicto\":\"sostiene|refuta|dudoso\",\"ataques\":[],"
+      << "\"arco\":{\"de\":\"\",\"a\":\"\"},\"why\":\"…\"}";
+  const std::string sys = sys_oss.str();
 
   const std::string facts_blob = admin_verify_context_prompt(*st);
 
@@ -4905,7 +4928,8 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
         st->verify_reject_pending = false;
       } else {
         AdminVerifyResult vr =
-            admin_run_verify(st, brain, ola.why, opts.workspace_root, opts);
+            admin_run_verify(st, brain, ola.why, opts.workspace_root, opts,
+                             ola.do_kind == AdminDo::Editar);
         // P2bis: los shortcuts deterministas no gastan llamada LLM — no
         // deben consumir el presupuesto de kAdminMaxVerifyPasses.
         if (!vr.shortcut) {

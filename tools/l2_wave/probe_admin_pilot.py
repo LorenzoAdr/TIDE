@@ -564,6 +564,7 @@ def run_exit_verify(
     verify_count: int,
     max_verify: int = 2,
     exam: dict | None = None,
+    is_edit_trigger: bool = False,
 ) -> tuple[dict | None, str, dict | None]:
     """Run adversarial verifier (exam + anchors). Returns (report, block_msg, exam).
 
@@ -664,6 +665,7 @@ def run_exit_verify(
         show_job_verdicts=True,
         counterask=True,
         refute_pass=True,
+        is_edit_trigger=is_edit_trigger,
     )
     report["exam"] = {
         "elementos": exam.get("elementos"),
@@ -935,6 +937,7 @@ def main() -> None:
                     out=out,
                     verify_count=verify_count,
                     exam=verify_exam,
+                    is_edit_trigger=True,
                 )
                 if report is not None:
                     # P2bis: los shortcuts deterministas no gastan LLM ni cuentan

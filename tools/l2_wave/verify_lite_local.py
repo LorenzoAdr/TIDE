@@ -100,6 +100,26 @@ Tools (UNA por turno):
 
 PROHIBIDO: grep global, inventar paths fuera de anclas."""
 
+# P11bis (docs/plans/l2-admin-verify-round-reduction.md, hallazgo 2026-09-28,
+# 018_mechanism/019_mechanism/042_deseo): dos excepciones que faltaban en la
+# excepción P11 original (ver VERIFY_SYS/VERIFY_SYS_EXAM arriba).
+_P11BIS_ARCH_EXCEPTION = """
+EXCEPCIÓN (P11bis, ausencia ARQUITECTÓNICA): si el hueco es una capa/componente
+que estructuralmente no existe en este repo (p.ej. "falta el lado servidor" en
+un repo que solo tiene el cliente; "falta la GUI" en una app CLI), y el resto
+del pedido sí está cubierto con evidencia real, NO exijas código de esa capa
+ausente -- acepta la ausencia estructural como parte de la respuesta
+(sostiene), no la trates como hueco pendiente."""
+
+_P11BIS_EDIT_EXCEPTION = """
+EXCEPCIÓN (P11bis, trigger=editar): esto valida una EDICIÓN propuesta, no una
+afirmación sobre el estado actual. "El código actual no hace X" NO es motivo
+de refuta si X es justo el cambio que se va a hacer -- esa es la premisa
+normal de cualquier edit, no un hueco. Verifica en su lugar que hay evidencia
+real de DÓNDE y CÓMO editar (ubicación exacta, mecanismo, contexto anclado) --
+refuta solo si falta esa evidencia de ubicación/mecanismo, no si falta que el
+resultado ya exista."""
+
 REFUTE_SYS = """Eres REFUTADOR adversarial. NO explores el repo.
 Te dan: consulta del usuario, examen, cobertura/veredicto de un verificador, y anclas.
 Tu ÚNICA misión: tumbar cada estado=cubierto si confunde un mecanismo VECINO
@@ -525,6 +545,7 @@ def run_verifier(
     refute_pass: bool = False,
     block_sostiene_if_job_miss: bool = False,
     block_sostiene_if_all_covered_with_miss: bool = False,
+    is_edit_trigger: bool = False,
 ) -> dict:
     """Return {veredicto, ataques, arco, why, raw, steps, …}.
 
@@ -563,6 +584,9 @@ def run_verifier(
                 "\nSi el notebook tiene job(s) no_encontrado/parcial sobre un polo del examen, "
                 "ese polo no puede marcarse cubierto solo porque otro job encontró otra cosa."
             )
+        sys += _P11BIS_ARCH_EXCEPTION
+        if is_edit_trigger:
+            sys += _P11BIS_EDIT_EXCEPTION
         user0 = (
             f"## Consulta del usuario\n{consulta}\n\n"
             f"{format_exam(exam)}\n\n"
@@ -573,6 +597,9 @@ def run_verifier(
         )
     else:
         sys = VERIFY_SYS.replace("N olas", f"{max_steps} olas")
+        sys += _P11BIS_ARCH_EXCEPTION
+        if is_edit_trigger:
+            sys += _P11BIS_EDIT_EXCEPTION
         user0 = (
             f"## Consulta del usuario\n{consulta}\n\n"
             + (f"{verdicts_blob}\n\n" if verdicts_blob else "")

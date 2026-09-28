@@ -560,6 +560,19 @@ int main() {
         admin_run_verify(&unevidenced_st, fail_brain_p11, "why", "", opts_p11b);
     expect(vr_p11b.ok && vr_p11b.shortcut && vr_p11b.blocks && vr_p11b.veredicto == "dudoso",
            "P11 regresión: miss SIN evidencia sigue bloqueando gratis como antes");
+
+    // P11bis: is_edit_trigger=true no rompe el flujo (mismo caso evidenciado
+    // de arriba, ahora marcado como editar) -- prueba de humo del nuevo
+    // parámetro, no del contenido del prompt (eso se valida en vivo).
+    AdminScriptedBrain sostiene_brain_edit({
+        R"({"do":"cerrar","veredicto":"sostiene","why":"ubicación y mecanismo del edit confirmados"})",
+        R"({"do":"cerrar","veredicto":"sostiene","why":"confirmo tras la contra-pregunta"})",
+    });
+    AdminLoopOpts opts_p11bis;
+    const AdminVerifyResult vr_p11bis = admin_run_verify(
+        &evidenced_st, sostiene_brain_edit, "why", "", opts_p11bis, /*is_edit_trigger=*/true);
+    expect(!vr_p11bis.shortcut && vr_p11bis.ok && vr_p11bis.veredicto == "sostiene",
+           "P11bis: is_edit_trigger=true no rompe el paso al verificador LLM");
   }
   {
     // P6: turnos con JSON inválido no deben gastar el presupuesto `budget`

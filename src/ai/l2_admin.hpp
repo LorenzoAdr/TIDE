@@ -351,8 +351,12 @@ std::string admin_verify_context_prompt(const AdminState& st);
 std::vector<std::string> admin_verify_readable_paths(const AdminState& st);
 
 // Verificador adversarial (post-explore, pre-aceptar editar/cerrar).
+// is_edit_trigger: true si lo dispara `editar` (P11bis: el verificador debe
+// confirmar dónde/cómo editar, no que el resultado ya exista — "el código
+// actual no hace X" no es motivo de refuta cuando X es el propio edit pedido).
 AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::string& thesis,
-                                   const std::string& workspace_root, const AdminLoopOpts& opts);
+                                   const std::string& workspace_root, const AdminLoopOpts& opts,
+                                   bool is_edit_trigger = false);
 
 bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::string* err);
 // Construye el AdminJob desde jr (summary/veredicto/log_tail recortado), lo
