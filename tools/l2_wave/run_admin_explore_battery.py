@@ -169,6 +169,11 @@ def main() -> None:
     ap.add_argument("--max-turns", type=int, default=16)
     ap.add_argument("--max-explore", type=int, default=4)
     ap.add_argument("--only", default="", help="comma ids to run (debug)")
+    ap.add_argument(
+        "--single-agent",
+        action="store_true",
+        help="P16 experimental: forward --single-agent to probe_admin_pilot.py",
+    )
     args = ap.parse_args()
 
     battery_out = Path(args.out)
@@ -249,6 +254,8 @@ def main() -> None:
             "--max-explore",
             str(args.max_explore),
         ]
+        if args.single_agent:
+            cmd.append("--single-agent")
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         log_path = case_dir / "battery_case.log"

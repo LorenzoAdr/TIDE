@@ -33,7 +33,7 @@ Responde UN JSON:
 Tras un no_hay del hijo, parte polos (otra consulta); no selles el ancla al primer miss.
 Si la evidencia basta: cerrar con why honesto (confirmar, refutar o rendirse)."""
 
-def explorer_system(tools: list[str]) -> str:
+def explorer_system(tools: list[str], max_steps: int = 10) -> str:
     allowed = "/".join(tools + ["cerrar"])
     lines = [
         f"Eres el EXPLORADOR. Tools permitidas: {allowed}. Responde UN JSON por turno:",
@@ -104,8 +104,23 @@ def explorer_system(tools: list[str]) -> str:
         "Si lo leído es otra cosa o solo un vecino: parcial o no_encontrado, y dilo en falta. "
         "Cuando ya puedas citar path:symbol (o ausencia clara), cierra; no agotes olas por costumbre. "
         "PROHIBIDO inventar paths no devueltos por grep/cerca. "
-        "Máximo ~10 olas totales; ~6 greps y ~6 reads; luego cierra."
+        f"Máximo ~{max_steps} olas totales; ~{max(1, max_steps * 6 // 10)} greps y "
+        f"~{max(1, max_steps * 6 // 10)} reads; luego cierra."
     )
+    if max_steps > 10:
+        # P16.1: el brief puede traer varias afirmaciones independientes a
+        # verificar (p.ej. "¿existe X?", "¿existe Y?", "¿existe Z?"), no solo
+        # un camino lineal. Si profundizas (lees a fondo) la primera antes de
+        # tocar las demás, te quedas sin greps para las otras sin haber
+        # confirmado ninguna del todo. Reconocimiento amplio primero.
+        lines.append(
+            "Si TU consulta trae varias afirmaciones/ángulos independientes a "
+            "verificar (no un solo camino lineal A→B→C), haz primero UN grep "
+            "rápido por cada ángulo para saber si hay pistas, y SOLO DESPUÉS "
+            "profundiza con reads en los que sí las tengan — no gastes tu "
+            "presupuesto de grep leyendo a fondo un solo ángulo mientras los "
+            "demás siguen sin explorar."
+        )
     return "\n".join(lines)
 
 
@@ -604,7 +619,7 @@ def run_explorer(
     p13_correction_used = False
     last_grep_key = ""
     messages = [
-        {"role": "system", "content": explorer_system(tools)},
+        {"role": "system", "content": explorer_system(tools, max_steps=max_steps)},
         {
             "role": "user",
             "content": (
