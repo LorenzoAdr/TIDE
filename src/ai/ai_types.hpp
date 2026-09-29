@@ -187,6 +187,23 @@ struct AiLevel2Settings {
   int n_threads = 0;
 };
 
+// Tunables for the single-admin harness (src/ai/l2_admin.*). Defaults mirror the
+// compile-time kAdminMax* constants in l2_admin.hpp — see that file for the
+// safety rationale (fail-closed on verify, budgets renew per consulta).
+struct AiHarnessSettings {
+  int max_proposes = 12;         // piloto: turnos LLM por consulta (kAdminMaxProposes)
+  int max_spawns = 8;            // piloto: spawns totales por consulta (kAdminMaxSpawns)
+  int max_explores = 4;          // explorador: spawns por consulta (kAdminMaxExplores)
+  int explore_max_steps = 6;     // explorador: pasos internos por spawn (kAdminExploreMaxSteps)
+  bool verifier_enabled = true;  // false = editar/cerrar sin pase adversarial (riesgo)
+  int max_verify_passes = 2;     // kAdminMaxVerifyPasses
+  int verify_max_steps = 6;      // kAdminVerifyMaxSteps
+  bool refuter_enabled = true;   // segundo pase adversarial dentro de la verificación
+  bool allow_shell = true;       // permitir spawns AdminSpawnTipo::Shell
+  bool allow_web = true;         // permitir spawns AdminSpawnTipo::Web / WebFetch
+  bool allow_test = true;        // permitir spawns AdminSpawnTipo::Test
+};
+
 struct AiSettings {
   bool enabled = true;
   // Single-admin chat path (replaces L0→L1→L2 hot path). Legacy code stays compiled.
@@ -211,6 +228,7 @@ struct AiSettings {
   bool llama_vulkan_bundle = false;
   AiLevel0Settings level0;
   AiLevel1Settings level1;
+  AiHarnessSettings harness;
 };
 
 }  // namespace tuide

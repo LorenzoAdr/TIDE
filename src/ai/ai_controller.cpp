@@ -1190,6 +1190,7 @@ void AiController::run_admin_async(const std::string& message) {
       AdminLoopOpts eopts;
       eopts.workspace_root = root;
       eopts.settings = settings_.level2;
+      eopts.explore_max_steps = settings_.harness.explore_max_steps;
       eopts.on_line = [this](const std::string& line) { append(line); };
       eopts.cancel = &agent_cancel_;
       AdminGrepFn grep;
@@ -1406,6 +1407,17 @@ void AiController::run_admin_async(const std::string& message) {
     opts.workspace_root = root;
     opts.settings = settings_.level2;
     opts.ui = ui;
+    opts.max_proposes = settings_.harness.max_proposes;
+    opts.max_spawns = settings_.harness.max_spawns;
+    opts.max_explores = settings_.harness.max_explores;
+    opts.explore_max_steps = settings_.harness.explore_max_steps;
+    opts.verifier_enabled = settings_.harness.verifier_enabled;
+    opts.max_verify_passes = settings_.harness.max_verify_passes;
+    opts.verify_max_steps = settings_.harness.verify_max_steps;
+    opts.refuter_enabled = settings_.harness.refuter_enabled;
+    opts.allow_shell = settings_.harness.allow_shell;
+    opts.allow_web = settings_.harness.allow_web;
+    opts.allow_test = settings_.harness.allow_test;
     opts.on_line = [this](const std::string& line) { append(line); };
     opts.cancel = &agent_cancel_;
 

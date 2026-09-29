@@ -34,6 +34,7 @@ enum class SettingsPanel {
   kPathMappings,
   kPathBrowser,
   kUiColors,
+  kAiHarness,
 };
 
 enum class PathBrowserPurpose {
@@ -166,6 +167,23 @@ struct SettingsModalState {
   // -1 = not editing; 4=api_base, 5=api_model, 6=api_key, 7=n_ctx_remote,
   // 8=embed host, 9=embed port
   int ai_editing_field = -1;
+
+  // Configuración → IA → Harness avanzado (kAiHarness): tunables del admin
+  // único (src/ai/l2_admin.*) — ver AiHarnessSettings en ai_types.hpp.
+  std::string draft_harness_max_proposes;
+  std::string draft_harness_max_spawns;
+  std::string draft_harness_max_explores;
+  std::string draft_harness_explore_max_steps;
+  std::string draft_harness_max_verify_passes;
+  std::string draft_harness_verify_max_steps;
+  bool draft_harness_verifier_enabled = true;
+  bool draft_harness_refuter_enabled = true;
+  bool draft_harness_allow_shell = true;
+  bool draft_harness_allow_web = true;
+  bool draft_harness_allow_test = true;
+  int ai_harness_selected = 0;
+  // -1 = not editing; 0..5 = los seis campos numéricos arriba (mismo orden).
+  int ai_harness_editing_field = -1;
 
   // Shortcuts tab (non-Helix keybindings).
   std::vector<KeyBindingOverride> draft_key_overrides;

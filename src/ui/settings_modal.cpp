@@ -74,6 +74,11 @@ int toolpacks_export_row_index();
 bool handle_toolpacks_settings_keys(SettingsModalState* state, Event event);
 bool handle_ai_settings_keys(SettingsModalState* state, Event event);
 SettingsBodyContent build_ai_settings(SettingsModalState* state);
+bool handle_ai_harness_settings_keys(SettingsModalState* state, Event event);
+SettingsBodyContent build_ai_harness_settings(SettingsModalState* state);
+void open_ai_harness_panel(SettingsModalState* state);
+void activate_ai_harness_option(SettingsModalState* state, int index);
+void clamp_ai_harness_selection(SettingsModalState* state);
 bool handle_top_level_tab_keys(SettingsModalState* state, Event event);
 void cycle_draft_l1_model(SettingsModalState* state);
 void cycle_draft_l2_model(SettingsModalState* state);
@@ -988,7 +993,7 @@ void clamp_top_level_selection(SettingsModalState* state) {
       break;
     }
     case SettingsPanel::kAi:
-      state->selected = std::max(0, std::min(state->selected, 9));
+      state->selected = std::max(0, std::min(state->selected, 10));
       break;
     default:
       break;
@@ -1059,6 +1064,22 @@ void open_path_mappings_panel(SettingsModalState* state) {
   }
   state->panel = SettingsPanel::kPathMappings;
   state->mapping_selected = 0;
+}
+
+void open_ai_harness_panel(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->panel = SettingsPanel::kAiHarness;
+  state->ai_harness_selected = 0;
+  state->ai_harness_editing_field = -1;
+}
+
+void clamp_ai_harness_selection(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->ai_harness_selected = std::max(0, std::min(state->ai_harness_selected, 10));
 }
 
 void open_path_browser_panel(SettingsModalState* state, PathBrowserPurpose purpose) {
@@ -1775,6 +1796,11 @@ void activate_settings_click(SettingsModalState* state, int index, int mouse_x) 
         begin_ui_color_edit(state, index);
       }
       break;
+    case SettingsPanel::kAiHarness:
+      state->ai_harness_selected = index;
+      clamp_ai_harness_selection(state);
+      activate_ai_harness_option(state, state->ai_harness_selected);
+      break;
   }
   (void)mouse_x;
 }
@@ -2236,6 +2262,8 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
       return handle_path_browser_keys(state, event);
     case SettingsPanel::kUiColors:
       return handle_ui_colors_keys(state, event);
+    case SettingsPanel::kAiHarness:
+      return handle_ai_harness_settings_keys(state, event);
   }
   return true;
 }
@@ -3076,6 +3104,10 @@ void activate_ai_settings_option(SettingsModalState* state, int index) {
   }
   if (index >= 4 && index <= 9) {
     state->ai_editing_field = index;
+    return;
+  }
+  if (index == 10) {
+    open_ai_harness_panel(state);
   }
 }
 
@@ -3183,6 +3215,14 @@ SettingsBodyContent build_ai_settings(SettingsModalState* state) {
   push_text_field(9, "settings.ai.embed_port", "settings.ai.embed_port.detail",
                   state != nullptr ? state->draft_embed_port : "", false, true);
 
+  {
+    const bool selected = state != nullptr && state->selected == 10;
+    Element title = text(std::string(selected ? "▸ " : "  ") +
+                         i18n::tr("settings.ai.harness_panel")) |
+                    color(selected ? theme::Accent() : theme::Header()) | bold;
+    push_option(10, std::move(title), i18n::tr("settings.ai.harness_panel.detail"));
+  }
+
   if (editing) {
     content.rows.push_back(text(i18n::tr("settings.ai.edit_footer")) | color(theme::Muted()));
   } else {
@@ -3232,12 +3272,207 @@ bool handle_ai_settings_keys(SettingsModalState* state, Event event) {
     return true;
   }
   if (event == Event::ArrowDown || event == Event::Character('j')) {
-    state->selected = std::min(9, state->selected + 1);
+    state->selected = std::min(10, state->selected + 1);
     return true;
   }
   if (event == Event::Return) {
     clamp_top_level_selection(state);
     activate_ai_settings_option(state, state->selected);
+    return true;
+  }
+  return true;
+}
+
+constexpr int kAiHarnessMaxProposes = 0;
+constexpr int kAiHarnessMaxSpawns = 1;
+constexpr int kAiHarnessMaxExplores = 2;
+constexpr int kAiHarnessExploreMaxSteps = 3;
+constexpr int kAiHarnessMaxVerifyPasses = 4;
+constexpr int kAiHarnessVerifyMaxSteps = 5;
+constexpr int kAiHarnessVerifierEnabled = 6;
+constexpr int kAiHarnessRefuterEnabled = 7;
+constexpr int kAiHarnessAllowShell = 8;
+constexpr int kAiHarnessAllowWeb = 9;
+constexpr int kAiHarnessAllowTest = 10;
+constexpr int kAiHarnessRowCount = 11;
+
+std::string* ai_harness_editable_field_value(SettingsModalState* state, int field) {
+  if (state == nullptr) {
+    return nullptr;
+  }
+  switch (field) {
+    case kAiHarnessMaxProposes:
+      return &state->draft_harness_max_proposes;
+    case kAiHarnessMaxSpawns:
+      return &state->draft_harness_max_spawns;
+    case kAiHarnessMaxExplores:
+      return &state->draft_harness_max_explores;
+    case kAiHarnessExploreMaxSteps:
+      return &state->draft_harness_explore_max_steps;
+    case kAiHarnessMaxVerifyPasses:
+      return &state->draft_harness_max_verify_passes;
+    case kAiHarnessVerifyMaxSteps:
+      return &state->draft_harness_verify_max_steps;
+    default:
+      return nullptr;
+  }
+}
+
+void activate_ai_harness_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  switch (index) {
+    case kAiHarnessMaxProposes:
+    case kAiHarnessMaxSpawns:
+    case kAiHarnessMaxExplores:
+    case kAiHarnessExploreMaxSteps:
+    case kAiHarnessMaxVerifyPasses:
+    case kAiHarnessVerifyMaxSteps:
+      state->ai_harness_editing_field = index;
+      break;
+    case kAiHarnessVerifierEnabled:
+      state->draft_harness_verifier_enabled = !state->draft_harness_verifier_enabled;
+      break;
+    case kAiHarnessRefuterEnabled:
+      state->draft_harness_refuter_enabled = !state->draft_harness_refuter_enabled;
+      break;
+    case kAiHarnessAllowShell:
+      state->draft_harness_allow_shell = !state->draft_harness_allow_shell;
+      break;
+    case kAiHarnessAllowWeb:
+      state->draft_harness_allow_web = !state->draft_harness_allow_web;
+      break;
+    case kAiHarnessAllowTest:
+      state->draft_harness_allow_test = !state->draft_harness_allow_test;
+      break;
+    default:
+      break;
+  }
+}
+
+SettingsBodyContent build_ai_harness_settings(SettingsModalState* state) {
+  SettingsBodyContent content;
+  content.rows.push_back(text(i18n::tr("settings.ai.harness.intro")) | color(theme::Muted()));
+  content.rows.push_back(text(""));
+
+  auto push_option = [&](int index, Element title, const std::string& detail) {
+    const bool selected = state != nullptr && state->ai_harness_selected == index;
+    if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
+      title = title | inverted;
+    }
+    add_click_target(&content, index);
+    content.rows.push_back(std::move(title));
+    content.rows.push_back(text("    " + detail) | color(theme::Muted()));
+    content.rows.push_back(text(""));
+  };
+
+  auto push_int_field = [&](int index, const char* label_key, const char* detail_key,
+                            const std::string& value) {
+    const bool selected = state != nullptr && state->ai_harness_selected == index;
+    const bool is_editing = state != nullptr && state->ai_harness_editing_field == index;
+    std::string shown = value.empty() ? std::string("0") : value;
+    if (is_editing) {
+      shown.push_back('_');
+    }
+    Element title =
+        text(std::string(selected ? "▸ " : "  ") + i18n::tr(label_key) + ": " + shown) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
+    push_option(index, std::move(title), i18n::tr(detail_key));
+  };
+
+  auto push_bool_row = [&](int index, const char* label_key, const char* detail_key,
+                           bool checked) {
+    const bool selected = state != nullptr && state->ai_harness_selected == index;
+    Element title = text(checkbox_label(checked, i18n::tr(label_key))) |
+                    color(selected ? theme::Accent() : theme::Header()) | bold;
+    push_option(index, std::move(title), i18n::tr(detail_key));
+  };
+
+  push_int_field(kAiHarnessMaxProposes, "settings.ai.harness.max_proposes",
+                 "settings.ai.harness.max_proposes.detail",
+                 state != nullptr ? state->draft_harness_max_proposes : "");
+  push_int_field(kAiHarnessMaxSpawns, "settings.ai.harness.max_spawns",
+                 "settings.ai.harness.max_spawns.detail",
+                 state != nullptr ? state->draft_harness_max_spawns : "");
+  push_int_field(kAiHarnessMaxExplores, "settings.ai.harness.max_explores",
+                 "settings.ai.harness.max_explores.detail",
+                 state != nullptr ? state->draft_harness_max_explores : "");
+  push_int_field(kAiHarnessExploreMaxSteps, "settings.ai.harness.explore_max_steps",
+                 "settings.ai.harness.explore_max_steps.detail",
+                 state != nullptr ? state->draft_harness_explore_max_steps : "");
+  push_int_field(kAiHarnessMaxVerifyPasses, "settings.ai.harness.max_verify_passes",
+                 "settings.ai.harness.max_verify_passes.detail",
+                 state != nullptr ? state->draft_harness_max_verify_passes : "");
+  push_int_field(kAiHarnessVerifyMaxSteps, "settings.ai.harness.verify_max_steps",
+                 "settings.ai.harness.verify_max_steps.detail",
+                 state != nullptr ? state->draft_harness_verify_max_steps : "");
+  push_bool_row(kAiHarnessVerifierEnabled, "settings.ai.harness.verifier_enabled",
+               "settings.ai.harness.verifier_enabled.detail",
+               state != nullptr && state->draft_harness_verifier_enabled);
+  push_bool_row(kAiHarnessRefuterEnabled, "settings.ai.harness.refuter_enabled",
+               "settings.ai.harness.refuter_enabled.detail",
+               state != nullptr && state->draft_harness_refuter_enabled);
+  push_bool_row(kAiHarnessAllowShell, "settings.ai.harness.allow_shell",
+               "settings.ai.harness.allow_shell.detail",
+               state != nullptr && state->draft_harness_allow_shell);
+  push_bool_row(kAiHarnessAllowWeb, "settings.ai.harness.allow_web",
+               "settings.ai.harness.allow_web.detail",
+               state != nullptr && state->draft_harness_allow_web);
+  push_bool_row(kAiHarnessAllowTest, "settings.ai.harness.allow_test",
+               "settings.ai.harness.allow_test.detail",
+               state != nullptr && state->draft_harness_allow_test);
+
+  const bool editing = state != nullptr && state->ai_harness_editing_field >= 0;
+  if (editing) {
+    content.rows.push_back(text(i18n::tr("settings.ai.edit_footer")) | color(theme::Muted()));
+  } else {
+    content.rows.push_back(text(i18n::tr("settings.ai.harness.hint")) | color(theme::Muted()));
+  }
+  return content;
+}
+
+bool handle_ai_harness_settings_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return false;
+  }
+
+  if (state->ai_harness_editing_field >= 0) {
+    std::string* value = ai_harness_editable_field_value(state, state->ai_harness_editing_field);
+    if (event == Event::Escape || event == Event::Return) {
+      state->ai_harness_editing_field = -1;
+      return true;
+    }
+    if (event == Event::Backspace) {
+      if (value != nullptr && !value->empty()) {
+        value->pop_back();
+      }
+      return true;
+    }
+    if (event.is_character()) {
+      const std::string ch = event.character();
+      if (value != nullptr && ch.size() == 1 && ch[0] >= '0' && ch[0] <= '9' &&
+          value->size() < 4) {
+        value->push_back(ch[0]);
+      }
+      return true;
+    }
+    return true;
+  }
+
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->ai_harness_selected = std::max(0, state->ai_harness_selected - 1);
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    state->ai_harness_selected =
+        std::min(kAiHarnessRowCount - 1, state->ai_harness_selected + 1);
+    return true;
+  }
+  if (event == Event::Return) {
+    clamp_ai_harness_selection(state);
+    activate_ai_harness_option(state, state->ai_harness_selected);
     return true;
   }
   return true;
@@ -3970,6 +4205,31 @@ WorkspaceConfig workspace_config_from_draft(const SettingsModalState& state) {
       workspace.ai.level0.embeddings.server_port = parsed;
     }
   }
+  {
+    auto parse_clamped = [](const std::string& raw, int fallback, int lo, int hi) {
+      int n = fallback;
+      try {
+        if (!raw.empty()) {
+          n = std::stoi(raw);
+        }
+      } catch (...) {
+        n = fallback;
+      }
+      return std::max(lo, std::min(n, hi));
+    };
+    auto& h = workspace.ai.harness;
+    h.max_proposes = parse_clamped(state.draft_harness_max_proposes, 12, 1, 50);
+    h.max_spawns = parse_clamped(state.draft_harness_max_spawns, 8, 1, 50);
+    h.max_explores = parse_clamped(state.draft_harness_max_explores, 4, 0, 20);
+    h.explore_max_steps = parse_clamped(state.draft_harness_explore_max_steps, 6, 1, 20);
+    h.max_verify_passes = parse_clamped(state.draft_harness_max_verify_passes, 2, 0, 10);
+    h.verify_max_steps = parse_clamped(state.draft_harness_verify_max_steps, 6, 1, 20);
+    h.verifier_enabled = state.draft_harness_verifier_enabled;
+    h.refuter_enabled = state.draft_harness_refuter_enabled;
+    h.allow_shell = state.draft_harness_allow_shell;
+    h.allow_web = state.draft_harness_allow_web;
+    h.allow_test = state.draft_harness_allow_test;
+  }
   return workspace;
 }
 
@@ -4053,6 +4313,23 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
                                                ? workspace_config.ai.level0.embeddings.server_port
                                                : 18765);
   state->ai_editing_field = -1;
+  state->draft_harness_max_proposes =
+      std::to_string(workspace_config.ai.harness.max_proposes);
+  state->draft_harness_max_spawns = std::to_string(workspace_config.ai.harness.max_spawns);
+  state->draft_harness_max_explores = std::to_string(workspace_config.ai.harness.max_explores);
+  state->draft_harness_explore_max_steps =
+      std::to_string(workspace_config.ai.harness.explore_max_steps);
+  state->draft_harness_max_verify_passes =
+      std::to_string(workspace_config.ai.harness.max_verify_passes);
+  state->draft_harness_verify_max_steps =
+      std::to_string(workspace_config.ai.harness.verify_max_steps);
+  state->draft_harness_verifier_enabled = workspace_config.ai.harness.verifier_enabled;
+  state->draft_harness_refuter_enabled = workspace_config.ai.harness.refuter_enabled;
+  state->draft_harness_allow_shell = workspace_config.ai.harness.allow_shell;
+  state->draft_harness_allow_web = workspace_config.ai.harness.allow_web;
+  state->draft_harness_allow_test = workspace_config.ai.harness.allow_test;
+  state->ai_harness_selected = 0;
+  state->ai_harness_editing_field = -1;
   state->draft_key_overrides = keybind_registry().overrides();
   state->shortcuts_selected = 0;
   state->shortcuts_recording = false;
@@ -4190,7 +4467,15 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
             state->ai_editing_field = -1;
             return true;
           }
+          if (state->panel == SettingsPanel::kAiHarness &&
+              state->ai_harness_editing_field >= 0) {
+            state->ai_harness_editing_field = -1;
+            return true;
+          }
           switch (state->panel) {
+            case SettingsPanel::kAiHarness:
+              state->panel = SettingsPanel::kAi;
+              return true;
             case SettingsPanel::kPathBrowser:
               state->panel = state->path_browser_purpose == PathBrowserPurpose::kMappingHostPath
                                  ? SettingsPanel::kPathMappings
@@ -4244,6 +4529,7 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         clamp_compile_commands_selection(state);
         clamp_mapping_selection(state);
         clamp_ui_colors_selection(state);
+        clamp_ai_harness_selection(state);
 
         SettingsBodyContent content;
         std::string title = i18n::tr("settings.title");
@@ -4314,6 +4600,11 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
           case SettingsPanel::kUiColors:
             title = i18n::tr("settings.title.ui_colors");
             content = build_ui_colors_panel(state);
+            break;
+          case SettingsPanel::kAiHarness:
+            title = i18n::tr("settings.title.ai_harness");
+            footer = "";
+            content = build_ai_harness_settings(state);
             break;
         }
 

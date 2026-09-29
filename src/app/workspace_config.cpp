@@ -278,6 +278,43 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
       }
     }
   }
+  if (doc.contains("harness") && doc["harness"].is_object()) {
+    const auto& h = doc["harness"];
+    auto& out = settings->harness;
+    if (h.contains("max_proposes") && h["max_proposes"].is_number_integer()) {
+      out.max_proposes = h["max_proposes"].get<int>();
+    }
+    if (h.contains("max_spawns") && h["max_spawns"].is_number_integer()) {
+      out.max_spawns = h["max_spawns"].get<int>();
+    }
+    if (h.contains("max_explores") && h["max_explores"].is_number_integer()) {
+      out.max_explores = h["max_explores"].get<int>();
+    }
+    if (h.contains("explore_max_steps") && h["explore_max_steps"].is_number_integer()) {
+      out.explore_max_steps = h["explore_max_steps"].get<int>();
+    }
+    if (h.contains("verifier_enabled") && h["verifier_enabled"].is_boolean()) {
+      out.verifier_enabled = h["verifier_enabled"].get<bool>();
+    }
+    if (h.contains("max_verify_passes") && h["max_verify_passes"].is_number_integer()) {
+      out.max_verify_passes = h["max_verify_passes"].get<int>();
+    }
+    if (h.contains("verify_max_steps") && h["verify_max_steps"].is_number_integer()) {
+      out.verify_max_steps = h["verify_max_steps"].get<int>();
+    }
+    if (h.contains("refuter_enabled") && h["refuter_enabled"].is_boolean()) {
+      out.refuter_enabled = h["refuter_enabled"].get<bool>();
+    }
+    if (h.contains("allow_shell") && h["allow_shell"].is_boolean()) {
+      out.allow_shell = h["allow_shell"].get<bool>();
+    }
+    if (h.contains("allow_web") && h["allow_web"].is_boolean()) {
+      out.allow_web = h["allow_web"].get<bool>();
+    }
+    if (h.contains("allow_test") && h["allow_test"].is_boolean()) {
+      out.allow_test = h["allow_test"].get<bool>();
+    }
+  }
 }
 
 nlohmann::json serialize_ai_settings(const AiSettings& settings) {
@@ -340,6 +377,18 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
         {"n_ctx", settings.level1.n_ctx},
         {"temperature", settings.level1.temperature},
         {"auto_download", settings.level1.auto_download}}},
+      {"harness",
+       {{"max_proposes", settings.harness.max_proposes},
+        {"max_spawns", settings.harness.max_spawns},
+        {"max_explores", settings.harness.max_explores},
+        {"explore_max_steps", settings.harness.explore_max_steps},
+        {"verifier_enabled", settings.harness.verifier_enabled},
+        {"max_verify_passes", settings.harness.max_verify_passes},
+        {"verify_max_steps", settings.harness.verify_max_steps},
+        {"refuter_enabled", settings.harness.refuter_enabled},
+        {"allow_shell", settings.harness.allow_shell},
+        {"allow_web", settings.harness.allow_web},
+        {"allow_test", settings.harness.allow_test}}},
   };
 }
 
