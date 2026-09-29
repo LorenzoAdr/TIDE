@@ -4128,7 +4128,18 @@ bool workspace_config_eq(const WorkspaceConfig& a, const WorkspaceConfig& b) {
          a.ai.level2.api_key == b.ai.level2.api_key &&
          a.ai.level2.n_ctx_remote == b.ai.level2.n_ctx_remote &&
          a.ai.level0.embeddings.server_host == b.ai.level0.embeddings.server_host &&
-         a.ai.level0.embeddings.server_port == b.ai.level0.embeddings.server_port;
+         a.ai.level0.embeddings.server_port == b.ai.level0.embeddings.server_port &&
+         a.ai.harness.max_proposes == b.ai.harness.max_proposes &&
+         a.ai.harness.max_spawns == b.ai.harness.max_spawns &&
+         a.ai.harness.max_explores == b.ai.harness.max_explores &&
+         a.ai.harness.explore_max_steps == b.ai.harness.explore_max_steps &&
+         a.ai.harness.verifier_enabled == b.ai.harness.verifier_enabled &&
+         a.ai.harness.max_verify_passes == b.ai.harness.max_verify_passes &&
+         a.ai.harness.verify_max_steps == b.ai.harness.verify_max_steps &&
+         a.ai.harness.refuter_enabled == b.ai.harness.refuter_enabled &&
+         a.ai.harness.allow_shell == b.ai.harness.allow_shell &&
+         a.ai.harness.allow_web == b.ai.harness.allow_web &&
+         a.ai.harness.allow_test == b.ai.harness.allow_test;
 }
 
 bool clang_format_eq(const ClangFormatConfig& a, const ClangFormatConfig& b) {
