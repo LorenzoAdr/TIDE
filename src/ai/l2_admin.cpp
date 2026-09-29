@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "ai/action_json.hpp"
+#include "ai/l2_explore_a.hpp"
 #include "ai/l2_grammar.hpp"
 #include "ai/search_replace.hpp"
 
@@ -1396,6 +1397,39 @@ AdminJobResult admin_explore_stub(const AdminSpawn& spawn) {
   return r;
 }
 
+namespace {
+// Adapta los hits de un grep del explorador (AdminJobResult::facts, líneas
+// "path:línea:contenido" tal como las deja admin_collect_search_hits) al
+// formato que espera el constructor de trail (l2_explore_a_trail.cpp) —
+// mismo motor determinista (grep + heurísticas de escalado, sin LLM) que ya
+// usa el explorador legacy de Level2Session para "a_trail_judge".
+std::vector<ATrailSearchHit> admin_trail_hits_from_grep(const AdminJobResult& hit) {
+  std::vector<ATrailSearchHit> hits;
+  for (const auto& raw : hit.facts) {
+    const auto c1 = raw.find(':');
+    if (c1 == std::string::npos || c1 == 0) {
+      continue;
+    }
+    const auto c2 = raw.find(':', c1 + 1);
+    if (c2 == std::string::npos) {
+      continue;
+    }
+    const std::string line_s = raw.substr(c1 + 1, c2 - c1 - 1);
+    if (line_s.empty() ||
+        !std::all_of(line_s.begin(), line_s.end(),
+                     [](unsigned char c) { return std::isdigit(c) != 0; })) {
+      continue;
+    }
+    ATrailSearchHit h;
+    h.path = raw.substr(0, c1);
+    h.line = std::atoi(line_s.c_str());
+    h.preview = raw.substr(c2 + 1);
+    hits.push_back(std::move(h));
+  }
+  return hits;
+}
+}  // namespace
+
 AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
                                       const std::string& workspace_root,
                                       const AdminLoopOpts& opts,
@@ -1432,14 +1466,25 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     }
   }
   bool p13_correction_used = false;
+  const std::string trail_tool_name = opts.allow_causal_trail ? "grep|read|trail|cerrar"
+                                                              : "grep|read|cerrar";
   std::ostringstream sys_oss;
   sys_oss
-      << "Eres el EXPLORADOR del WORKSPACE abierto (C++ u otros). Tools: grep|read|cerrar.\n"
+      << "Eres el EXPLORADOR del WORKSPACE abierto (C++ u otros). Tools: " << trail_tool_name
+      << ".\n"
       << "UN JSON por ola (puedes pedir VARIOS greps o VARIOS reads en la misma ola):\n"
       << "{\"do\":\"grep\",\"patterns\":[\"A\",\"B\"],\"why\":\"…\"}\n"
       << "{\"do\":\"grep\",\"pattern\":\"A\",\"why\":\"…\"}\n"
       << "{\"do\":\"read\",\"paths\":[\"src/a.cpp\",\"src/b.hpp:200-350\"],\"why\":\"…\"}\n"
-      << "{\"do\":\"read\",\"path\":\"src/…:Class::method\",\"why\":\"…\"}\n"
+      << "{\"do\":\"read\",\"path\":\"src/…:Class::method\",\"why\":\"…\"}\n";
+  if (opts.allow_causal_trail) {
+    sys_oss << "{\"do\":\"trail\",\"symbol\":\"NombreFunción\",\"path\":\"src/…(opcional)\","
+              << "\"why\":\"…\"}\n"
+              << "  trail: reconstruye la cadena de llamadas (quién llama a symbol, y quién a "
+              << "ese) vía grep — úsalo para preguntas de flujo/causalidad (\"cómo llega X a "
+              << "Y\", \"quién dispara Z\"), no repite un grep normal.\n";
+  }
+  sys_oss
       << "{\"do\":\"cerrar\",\"veredicto\":\"encontrado|no_encontrado|parcial\","
       << "\"simbolos\":[\"path:symbol\"],\"evidencia\":[\"path:línea\"],"
       << "\"falta\":[],\"why\":\"…\"}\n"
@@ -1499,7 +1544,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       "Empieza por grep (puedes mandar varios patterns a la vez, p.ej. "
       "FileTree|file_tree y indexer).\n"
       "Stack tipico: C++/FTXUI (no busques Qt/QWidget/libvte salvo evidencia).\n"
-      "Elige UNA acción JSON (grep|read|cerrar).\n";
+      "Elige UNA acción JSON (" + trail_tool_name + ").\n";
   int greps = 0;
   int reads = 0;
   std::vector<std::string> seen_paths;
@@ -1678,8 +1723,8 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     try {
       j = nlohmann::json::parse(blob);
     } catch (...) {
-      conversation += "\n\n## Usuario\nJSON inválido. grep|read|cerrar "
-                      "(patterns[]/paths[] permitidos).\n";
+      conversation += "\n\n## Usuario\nJSON inválido. " + trail_tool_name +
+                      " (patterns[]/paths[] permitidos).\n";
       continue;
     }
     const std::string do_kind = ascii_lower(trim_copy(json_str(j, "do")));
@@ -1885,7 +1930,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
         }
         conversation += "\n";
       }
-      conversation += "Siguiente (grep|read|cerrar).\n";
+      conversation += "Siguiente (" + trail_tool_name + ").\n";
       (void)rejected;
       continue;
     }
@@ -1953,14 +1998,54 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       if (ran == 0) {
         conversation +=
             "\n\n## Usuario\nNingún read anclado. Elige paths de la lista vista tras grep.\n" +
-            wave_body.str() + "Siguiente (grep|read|cerrar).\n";
+            wave_body.str() + "Siguiente (" + trail_tool_name + ").\n";
         continue;
       }
-      conversation += "\n\n## Usuario\n" + wave_body.str() + "Siguiente (grep|read|cerrar).\n";
+      conversation += "\n\n## Usuario\n" + wave_body.str() + "Siguiente (" + trail_tool_name +
+                      ").\n";
       continue;
     }
-    conversation += "\n\n## Usuario\ndo inválido. grep|read|cerrar "
-                    "(patterns[] / paths[] OK).\n";
+    if (opts.allow_causal_trail && do_kind == "trail") {
+      const std::string symbol = trim_copy(json_str(j, "symbol"));
+      if (symbol.empty()) {
+        conversation += "\n\n## Usuario\ntrail exige symbol. Reemite.\n";
+        continue;
+      }
+      const std::string path_hint = trim_copy(json_str(j, "path"));
+      auto search_fn = [&](const std::string& sym) -> std::vector<ATrailSearchHit> {
+        if (sym.empty()) {
+          return {};
+        }
+        AdminJobResult hit = grep_fn ? grep_fn(sym) : admin_run_search_rg(sym, workspace_root);
+        return admin_trail_hits_from_grep(hit);
+      };
+      const auto stacks = a_trail_build_full_stacks(workspace_root, symbol, path_hint, search_fn,
+                                                    kATrailMaxStacks, kATrailMaxDepth);
+      const auto branches = a_trail_build_cond_branches(workspace_root, symbol, path_hint, {},
+                                                        search_fn, stacks);
+      if (stacks.empty() && branches.empty()) {
+        conversation += "\n\n## Usuario\ntrail sin resultados para `" + symbol +
+                        "` (sin llamadas encontradas por grep). Prueba grep normal primero o "
+                        "cambia el symbol.\n";
+        continue;
+      }
+      for (const auto& s : stacks) {
+        for (const auto& h : s.hops) {
+          if (!h.path.empty() && !admin_path_is_noise(h.path) &&
+              std::find(seen_paths.begin(), seen_paths.end(), h.path) == seen_paths.end()) {
+            seen_paths.push_back(h.path);
+          }
+        }
+      }
+      const std::string md = a_trail_causal_flow_markdown(stacks, branches);
+      ui_note(opts, "  · trail `" + symbol + "` → " + std::to_string(stacks.size()) +
+                        " cadena(s) de llamada");
+      conversation += "\n\n## Usuario\n## trail `" + symbol + "`\n" + md + "Siguiente (" +
+                      trail_tool_name + ").\n";
+      continue;
+    }
+    conversation += "\n\n## Usuario\ndo inválido. " + trail_tool_name +
+                    " (patterns[] / paths[] OK).\n";
   }
   r.ok = true;
   r.veredicto = "no_concluyente";

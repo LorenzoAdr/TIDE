@@ -1178,6 +1178,10 @@ add_executable(l2_admin_test
   src/ai/action_json.cpp
   src/ai/search_replace.cpp
   src/ai/l2_grammar.cpp
+  src/ai/l2_explore_a.cpp
+  tests/l2_explore_a_trail_stub.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
 )
 target_include_directories(l2_admin_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src

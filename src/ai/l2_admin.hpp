@@ -251,6 +251,8 @@ struct AdminLoopOpts {
   // cadena de sub-preguntas conectadas — ver admin_system_prompt() y el gate P2bis en
   // admin_run_verify (docs/plans/l2-admin-verify-round-reduction.md sección 9, P16).
   bool explorer_cumulative_mode = false;
+  // Herramienta "trail" del explorador (call-stack determinista vía grep, sin LLM extra).
+  bool allow_causal_trail = true;
   std::function<void(const std::string&)> on_line;
   std::atomic<bool>* cancel = nullptr;
 };

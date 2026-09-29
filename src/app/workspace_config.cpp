@@ -317,6 +317,9 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
     if (h.contains("explorer_cumulative_mode") && h["explorer_cumulative_mode"].is_boolean()) {
       out.explorer_cumulative_mode = h["explorer_cumulative_mode"].get<bool>();
     }
+    if (h.contains("allow_causal_trail") && h["allow_causal_trail"].is_boolean()) {
+      out.allow_causal_trail = h["allow_causal_trail"].get<bool>();
+    }
   }
 }
 
@@ -392,7 +395,8 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
         {"allow_shell", settings.harness.allow_shell},
         {"allow_web", settings.harness.allow_web},
         {"allow_test", settings.harness.allow_test},
-        {"explorer_cumulative_mode", settings.harness.explorer_cumulative_mode}}},
+        {"explorer_cumulative_mode", settings.harness.explorer_cumulative_mode},
+        {"allow_causal_trail", settings.harness.allow_causal_trail}}},
   };
 }
 

@@ -332,6 +332,11 @@ const StringTable& english_strings() {
        "sequential chains, but merging independent angles risks a diluted verdict — when on, "
        "the deterministic 'single job found' shortcut is disabled so the full adversarial "
        "verifier always runs."},
+      {"settings.ai.harness.allow_causal_trail", "Causal-flow trail"},
+      {"settings.ai.harness.allow_causal_trail.detail",
+       "Lets the explorer trace a call chain (who calls this, and who calls that) via grep — "
+       "no extra LLM calls, deterministic. Useful for \"how does X reach Y\" questions. Read-"
+       "only, adds structured evidence on top of grep/read."},
       {"settings.ai.harness.hint",
        "↑↓ select · Enter edit/toggle · numbers only for counters · Esc back to AI"},
       {"settings.toolpacks.lang.cpp", "C / C++"},

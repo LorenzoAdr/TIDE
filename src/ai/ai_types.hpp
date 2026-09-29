@@ -209,6 +209,12 @@ struct AiHarnessSettings {
   // independientes en un job puede disparar el atajo P2bis y saltarse el verificador —
   // por eso, cuando está activo, ese atajo concreto se desactiva (ver admin_run_verify).
   bool explorer_cumulative_mode = false;
+  // Herramienta "trail" del explorador: reconstruye la cadena de llamadas (call-stack)
+  // hacia un símbolo vía grep + heurísticas (sin LLM extra — reusa src/ai/l2_explore_a_trail.cpp,
+  // el mismo motor determinista del explorador legacy de Level2Session). Default true: es
+  // solo lectura, determinista, y estrictamente añade evidencia estructurada al grep/read
+  // habituales, sin el riesgo de shell/web.
+  bool allow_causal_trail = true;
 };
 
 struct AiSettings {

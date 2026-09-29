@@ -336,6 +336,11 @@ const StringTable& spanish_strings() {
        "experimento P16: gana en cadenas secuenciales, pero fusionar ángulos independientes "
        "arriesga un veredicto diluido — al activarlo, se desactiva el atajo determinista "
        "de '1 job encontrado' para que siempre corra el verificador adversarial completo."},
+      {"settings.ai.harness.allow_causal_trail", "Trail de flujo causal"},
+      {"settings.ai.harness.allow_causal_trail.detail",
+       "Deja que el explorador trace una cadena de llamadas (quién llama a esto, y quién a "
+       "eso) vía grep — sin llamadas LLM extra, determinista. Útil para preguntas de \"cómo "
+       "llega X a Y\". Solo lectura, añade evidencia estructurada encima de grep/read."},
       {"settings.ai.harness.hint",
        "↑↓ selecciona · Enter edita/alterna · solo números en contadores · Esc vuelve a IA"},
       {"settings.toolpacks.lang.cpp", "C / C++"},
