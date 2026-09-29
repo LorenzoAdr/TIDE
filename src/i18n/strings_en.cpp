@@ -337,6 +337,20 @@ const StringTable& english_strings() {
        "Lets the explorer trace a call chain (who calls this, and who calls that) via grep — "
        "no extra LLM calls, deterministic. Useful for \"how does X reach Y\" questions. Read-"
        "only, adds structured evidence on top of grep/read."},
+      {"settings.ai.harness.allow_dataflow_trace", "Dataflow trace"},
+      {"settings.ai.harness.allow_dataflow_trace.detail",
+       "Lets the explorer trace where a variable/field is declared, written and read via grep "
+       "— trail's sibling for state instead of calls. No extra LLM calls, deterministic. "
+       "Useful for \"who changes X\" questions."},
+      {"settings.ai.harness.allow_headers_of", "Headers-of lookup"},
+      {"settings.ai.harness.allow_headers_of.detail",
+       "Lets the explorer list the headers/includes a file pulls in — a plain filesystem "
+       "lookup, no LLM. Useful for mapping dependencies before editing."},
+      {"settings.ai.harness.allow_repo_map", "Repo map overview"},
+      {"settings.ai.harness.allow_repo_map.detail",
+       "Lets the explorer pull a PageRank-ranked overview of relevant symbols/files instead of "
+       "grepping blind in an unfamiliar area. No LLM, uses the same symbol index the editor "
+       "already builds."},
       {"settings.ai.harness.hint",
        "↑↓ select · Enter edit/toggle · numbers only for counters · Esc back to AI"},
       {"settings.toolpacks.lang.cpp", "C / C++"},

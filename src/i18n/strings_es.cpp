@@ -341,6 +341,20 @@ const StringTable& spanish_strings() {
        "Deja que el explorador trace una cadena de llamadas (quién llama a esto, y quién a "
        "eso) vía grep — sin llamadas LLM extra, determinista. Útil para preguntas de \"cómo "
        "llega X a Y\". Solo lectura, añade evidencia estructurada encima de grep/read."},
+      {"settings.ai.harness.allow_dataflow_trace", "Trail de flujo de datos"},
+      {"settings.ai.harness.allow_dataflow_trace.detail",
+       "Deja que el explorador trace dónde se declara, escribe y lee una variable o campo vía "
+       "grep — el hermano de trail para estado en vez de llamadas. Sin LLM extra, "
+       "determinista. Útil para preguntas de \"quién cambia X\"."},
+      {"settings.ai.harness.allow_headers_of", "Consulta de headers"},
+      {"settings.ai.harness.allow_headers_of.detail",
+       "Deja que el explorador liste los headers/includes que usa un archivo — consulta de "
+       "sistema de archivos pura, sin LLM. Útil para mapear dependencias antes de editar."},
+      {"settings.ai.harness.allow_repo_map", "Vista general del repo"},
+      {"settings.ai.harness.allow_repo_map.detail",
+       "Deja que el explorador pida una vista rankeada por PageRank de símbolos/archivos "
+       "relevantes en vez de grepear a ciegas en un área nueva. Sin LLM, usa el mismo índice "
+       "de símbolos que ya construye el editor."},
       {"settings.ai.harness.hint",
        "↑↓ selecciona · Enter edita/alterna · solo números en contadores · Esc vuelve a IA"},
       {"settings.toolpacks.lang.cpp", "C / C++"},

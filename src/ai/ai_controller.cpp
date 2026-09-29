@@ -1197,6 +1197,9 @@ void AiController::run_admin_async(const std::string& message) {
       eopts.settings = settings_.level2;
       eopts.explore_max_steps = settings_.harness.explore_max_steps;
       eopts.allow_causal_trail = settings_.harness.allow_causal_trail;
+      eopts.allow_dataflow_trace = settings_.harness.allow_dataflow_trace;
+      eopts.allow_headers_of = settings_.harness.allow_headers_of;
+      eopts.allow_repo_map = settings_.harness.allow_repo_map;
       eopts.on_line = [this](const std::string& line) { append(line); };
       eopts.cancel = &agent_cancel_;
       AdminGrepFn grep;
@@ -1209,7 +1212,26 @@ void AiController::run_admin_async(const std::string& message) {
           return search_op(sp);
         };
       }
-      return admin_run_explore_lite(s, *brain, root, eopts, grep);
+      AdminToolFn tool_fn = [this](const std::string& name, const std::string& arg) {
+        ensure_tools();
+        AdminJobResult r;
+        if (!tools_.has(name)) {
+          r.ok = false;
+          r.summary = "tool no disponible: " + name;
+          return r;
+        }
+        const AiToolResult tr = tools_.invoke(name, arg);
+        r.ok = tr.ok;
+        bool trunc = false;
+        int raw = 0;
+        r.log_tail = admin_clip_output(tr.text, &trunc, &raw);
+        r.truncated = trunc;
+        r.raw_bytes = raw;
+        r.summary = tr.ok ? tr.text.substr(0, std::min<std::size_t>(tr.text.size(), 2000))
+                          : tr.text;
+        return r;
+      };
+      return admin_run_explore_lite(s, *brain, root, eopts, grep, tool_fn);
     };
     // Sobre un build/test que falla: si hay baseline de snapshot para esta
     // consulta, adjunta qué tocó la IA desde entonces — el piloto no tiene que

@@ -1433,7 +1433,7 @@ std::vector<ATrailSearchHit> admin_trail_hits_from_grep(const AdminJobResult& hi
 AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
                                       const std::string& workspace_root,
                                       const AdminLoopOpts& opts,
-                                      AdminGrepFn grep_fn) {
+                                      AdminGrepFn grep_fn, AdminToolFn tool_fn) {
   AdminJobResult r;
   const std::string consulta =
       !spawn.brief.empty() ? spawn.brief : (!spawn.arg.empty() ? spawn.arg : std::string("explore"));
@@ -1466,11 +1466,30 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     }
   }
   bool p13_correction_used = false;
-  const std::string trail_tool_name = opts.allow_causal_trail ? "grep|read|trail|cerrar"
-                                                              : "grep|read|cerrar";
+  std::vector<std::string> tool_names = {"grep", "read"};
+  if (opts.allow_causal_trail) {
+    tool_names.push_back("trail");
+  }
+  if (opts.allow_dataflow_trace) {
+    tool_names.push_back("dataflow");
+  }
+  if (opts.allow_headers_of && tool_fn) {
+    tool_names.push_back("headers_of");
+  }
+  if (opts.allow_repo_map && tool_fn) {
+    tool_names.push_back("repo_map");
+  }
+  tool_names.push_back("cerrar");
+  std::string tool_menu;
+  for (std::size_t i = 0; i < tool_names.size(); ++i) {
+    if (i) {
+      tool_menu += "|";
+    }
+    tool_menu += tool_names[i];
+  }
   std::ostringstream sys_oss;
   sys_oss
-      << "Eres el EXPLORADOR del WORKSPACE abierto (C++ u otros). Tools: " << trail_tool_name
+      << "Eres el EXPLORADOR del WORKSPACE abierto (C++ u otros). Tools: " << tool_menu
       << ".\n"
       << "UN JSON por ola (puedes pedir VARIOS greps o VARIOS reads en la misma ola):\n"
       << "{\"do\":\"grep\",\"patterns\":[\"A\",\"B\"],\"why\":\"…\"}\n"
@@ -1483,6 +1502,22 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
               << "  trail: reconstruye la cadena de llamadas (quién llama a symbol, y quién a "
               << "ese) vía grep — úsalo para preguntas de flujo/causalidad (\"cómo llega X a "
               << "Y\", \"quién dispara Z\"), no repite un grep normal.\n";
+  }
+  if (opts.allow_dataflow_trace) {
+    sys_oss << "{\"do\":\"dataflow\",\"name\":\"variable_o_campo\",\"path\":\"src/…(opcional)\","
+              << "\"why\":\"…\"}\n"
+              << "  dataflow: dónde se declara/escribe/lee una variable o campo, vía grep — "
+              << "úsalo para preguntas de estado (\"quién cambia X\", \"dónde se inicializa "
+              << "Y\"), no para llamadas (eso es trail).\n";
+  }
+  if (opts.allow_headers_of && tool_fn) {
+    sys_oss << "{\"do\":\"headers_of\",\"path\":\"src/a.cpp\",\"why\":\"…\"}\n"
+              << "  headers_of: qué headers/includes usa un archivo — mapea dependencias.\n";
+  }
+  if (opts.allow_repo_map && tool_fn) {
+    sys_oss << "{\"do\":\"repo_map\",\"query\":\"tema (opcional)\",\"why\":\"…\"}\n"
+              << "  repo_map: vista rankeada (PageRank) de símbolos/archivos relevantes — "
+              << "úsalo para orientarte ANTES de grepear a ciegas en un área nueva.\n";
   }
   sys_oss
       << "{\"do\":\"cerrar\",\"veredicto\":\"encontrado|no_encontrado|parcial\","
@@ -1544,11 +1579,21 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       "Empieza por grep (puedes mandar varios patterns a la vez, p.ej. "
       "FileTree|file_tree y indexer).\n"
       "Stack tipico: C++/FTXUI (no busques Qt/QWidget/libvte salvo evidencia).\n"
-      "Elige UNA acción JSON (" + trail_tool_name + ").\n";
+      "Elige UNA acción JSON (" + tool_menu + ").\n";
   int greps = 0;
   int reads = 0;
   std::vector<std::string> seen_paths;
   std::vector<std::string> read_paths;
+
+  // Compartido por trail y dataflow: ambos escalan una cadena de grep sobre el
+  // mismo motor determinista (l2_explore_a_trail.cpp / l2_explore_a_dataflow.cpp).
+  auto search_fn = [&](const std::string& sym) -> std::vector<ATrailSearchHit> {
+    if (sym.empty()) {
+      return {};
+    }
+    AdminJobResult hit = grep_fn ? grep_fn(sym) : admin_run_search_rg(sym, workspace_root);
+    return admin_trail_hits_from_grep(hit);
+  };
 
   auto pattern_pathological = [](const std::string& p) {
     if (p.empty() || p.size() > 120) {
@@ -1723,7 +1768,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     try {
       j = nlohmann::json::parse(blob);
     } catch (...) {
-      conversation += "\n\n## Usuario\nJSON inválido. " + trail_tool_name +
+      conversation += "\n\n## Usuario\nJSON inválido. " + tool_menu +
                       " (patterns[]/paths[] permitidos).\n";
       continue;
     }
@@ -1930,7 +1975,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
         }
         conversation += "\n";
       }
-      conversation += "Siguiente (" + trail_tool_name + ").\n";
+      conversation += "Siguiente (" + tool_menu + ").\n";
       (void)rejected;
       continue;
     }
@@ -1998,10 +2043,10 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       if (ran == 0) {
         conversation +=
             "\n\n## Usuario\nNingún read anclado. Elige paths de la lista vista tras grep.\n" +
-            wave_body.str() + "Siguiente (" + trail_tool_name + ").\n";
+            wave_body.str() + "Siguiente (" + tool_menu + ").\n";
         continue;
       }
-      conversation += "\n\n## Usuario\n" + wave_body.str() + "Siguiente (" + trail_tool_name +
+      conversation += "\n\n## Usuario\n" + wave_body.str() + "Siguiente (" + tool_menu +
                       ").\n";
       continue;
     }
@@ -2012,13 +2057,6 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
         continue;
       }
       const std::string path_hint = trim_copy(json_str(j, "path"));
-      auto search_fn = [&](const std::string& sym) -> std::vector<ATrailSearchHit> {
-        if (sym.empty()) {
-          return {};
-        }
-        AdminJobResult hit = grep_fn ? grep_fn(sym) : admin_run_search_rg(sym, workspace_root);
-        return admin_trail_hits_from_grep(hit);
-      };
       const auto stacks = a_trail_build_full_stacks(workspace_root, symbol, path_hint, search_fn,
                                                     kATrailMaxStacks, kATrailMaxDepth);
       const auto branches = a_trail_build_cond_branches(workspace_root, symbol, path_hint, {},
@@ -2041,10 +2079,64 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       ui_note(opts, "  · trail `" + symbol + "` → " + std::to_string(stacks.size()) +
                         " cadena(s) de llamada");
       conversation += "\n\n## Usuario\n## trail `" + symbol + "`\n" + md + "Siguiente (" +
-                      trail_tool_name + ").\n";
+                      tool_menu + ").\n";
       continue;
     }
-    conversation += "\n\n## Usuario\ndo inválido. " + trail_tool_name +
+    if (opts.allow_dataflow_trace && do_kind == "dataflow") {
+      const std::string name = trim_copy(json_str(j, "name"));
+      if (name.empty()) {
+        conversation += "\n\n## Usuario\ndataflow exige name. Reemite.\n";
+        continue;
+      }
+      const std::string path_hint = trim_copy(json_str(j, "path"));
+      const auto report = a_dataflow_build_with_search(workspace_root, name, path_hint, search_fn);
+      const int n_sites = static_cast<int>(report.decls.size() + report.writes.size() +
+                                           report.reads.size());
+      if (n_sites == 0) {
+        conversation += "\n\n## Usuario\ndataflow sin resultados para `" + name +
+                        "` (sin sitios encontrados por grep). Prueba grep normal primero o "
+                        "cambia el name.\n";
+        continue;
+      }
+      for (const auto* sites : {&report.decls, &report.writes, &report.reads}) {
+        for (const auto& s : *sites) {
+          if (!s.path.empty() && !admin_path_is_noise(s.path) &&
+              std::find(seen_paths.begin(), seen_paths.end(), s.path) == seen_paths.end()) {
+            seen_paths.push_back(s.path);
+          }
+        }
+      }
+      const std::string md = a_dataflow_markdown(report);
+      ui_note(opts, "  · dataflow `" + name + "` → " + std::to_string(n_sites) + " sitio(s)");
+      conversation += "\n\n## Usuario\n## dataflow `" + name + "`\n" + md + "Siguiente (" +
+                      tool_menu + ").\n";
+      continue;
+    }
+    if (opts.allow_headers_of && tool_fn && do_kind == "headers_of") {
+      const std::string path = trim_copy(json_str(j, "path"));
+      if (path.empty()) {
+        conversation += "\n\n## Usuario\nheaders_of exige path. Reemite.\n";
+        continue;
+      }
+      const AdminJobResult hit = tool_fn("headers_of", path);
+      const std::string body =
+          hit.ok ? (hit.summary.empty() ? hit.log_tail : hit.summary) : ("error: " + hit.summary);
+      ui_note(opts, "  · headers_of `" + path + "`");
+      conversation += "\n\n## Usuario\n## headers_of `" + path + "`\n" + body + "\nSiguiente (" +
+                      tool_menu + ").\n";
+      continue;
+    }
+    if (opts.allow_repo_map && tool_fn && do_kind == "repo_map") {
+      const std::string query = trim_copy(json_str(j, "query"));
+      const AdminJobResult hit = tool_fn("repo_map", query);
+      const std::string body =
+          hit.ok ? (hit.summary.empty() ? hit.log_tail : hit.summary) : ("error: " + hit.summary);
+      ui_note(opts, "  · repo_map" + (query.empty() ? std::string() : (" `" + query + "`")));
+      conversation +=
+          "\n\n## Usuario\n## repo_map\n" + body + "\nSiguiente (" + tool_menu + ").\n";
+      continue;
+    }
+    conversation += "\n\n## Usuario\ndo inválido. " + tool_menu +
                     " (patterns[] / paths[] OK).\n";
   }
   r.ok = true;

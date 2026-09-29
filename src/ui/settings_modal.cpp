@@ -3223,7 +3223,10 @@ constexpr int kAiHarnessAllowWeb = 9;
 constexpr int kAiHarnessAllowTest = 10;
 constexpr int kAiHarnessExplorerCumulative = 11;
 constexpr int kAiHarnessAllowCausalTrail = 12;
-constexpr int kAiHarnessRowCount = 13;
+constexpr int kAiHarnessAllowDataflowTrace = 13;
+constexpr int kAiHarnessAllowHeadersOf = 14;
+constexpr int kAiHarnessAllowRepoMap = 15;
+constexpr int kAiHarnessRowCount = 16;
 
 std::string* ai_harness_editable_field_value(SettingsModalState* state, int field) {
   if (state == nullptr) {
@@ -3281,6 +3284,15 @@ void activate_ai_harness_option(SettingsModalState* state, int index) {
       break;
     case kAiHarnessAllowCausalTrail:
       state->draft_harness_allow_causal_trail = !state->draft_harness_allow_causal_trail;
+      break;
+    case kAiHarnessAllowDataflowTrace:
+      state->draft_harness_allow_dataflow_trace = !state->draft_harness_allow_dataflow_trace;
+      break;
+    case kAiHarnessAllowHeadersOf:
+      state->draft_harness_allow_headers_of = !state->draft_harness_allow_headers_of;
+      break;
+    case kAiHarnessAllowRepoMap:
+      state->draft_harness_allow_repo_map = !state->draft_harness_allow_repo_map;
       break;
     default:
       break;
@@ -3365,6 +3377,15 @@ SettingsBodyContent build_ai_harness_settings(SettingsModalState* state) {
   push_bool_row(kAiHarnessAllowCausalTrail, "settings.ai.harness.allow_causal_trail",
                "settings.ai.harness.allow_causal_trail.detail",
                state != nullptr && state->draft_harness_allow_causal_trail);
+  push_bool_row(kAiHarnessAllowDataflowTrace, "settings.ai.harness.allow_dataflow_trace",
+               "settings.ai.harness.allow_dataflow_trace.detail",
+               state != nullptr && state->draft_harness_allow_dataflow_trace);
+  push_bool_row(kAiHarnessAllowHeadersOf, "settings.ai.harness.allow_headers_of",
+               "settings.ai.harness.allow_headers_of.detail",
+               state != nullptr && state->draft_harness_allow_headers_of);
+  push_bool_row(kAiHarnessAllowRepoMap, "settings.ai.harness.allow_repo_map",
+               "settings.ai.harness.allow_repo_map.detail",
+               state != nullptr && state->draft_harness_allow_repo_map);
 
   const bool editing = state != nullptr && state->ai_harness_editing_field >= 0;
   if (editing) {
@@ -4084,7 +4105,10 @@ bool workspace_config_eq(const WorkspaceConfig& a, const WorkspaceConfig& b) {
          a.ai.harness.allow_web == b.ai.harness.allow_web &&
          a.ai.harness.allow_test == b.ai.harness.allow_test &&
          a.ai.harness.explorer_cumulative_mode == b.ai.harness.explorer_cumulative_mode &&
-         a.ai.harness.allow_causal_trail == b.ai.harness.allow_causal_trail;
+         a.ai.harness.allow_causal_trail == b.ai.harness.allow_causal_trail &&
+         a.ai.harness.allow_dataflow_trace == b.ai.harness.allow_dataflow_trace &&
+         a.ai.harness.allow_headers_of == b.ai.harness.allow_headers_of &&
+         a.ai.harness.allow_repo_map == b.ai.harness.allow_repo_map;
 }
 
 bool clang_format_eq(const ClangFormatConfig& a, const ClangFormatConfig& b) {
@@ -4188,6 +4212,9 @@ WorkspaceConfig workspace_config_from_draft(const SettingsModalState& state) {
     h.allow_test = state.draft_harness_allow_test;
     h.explorer_cumulative_mode = state.draft_harness_explorer_cumulative_mode;
     h.allow_causal_trail = state.draft_harness_allow_causal_trail;
+    h.allow_dataflow_trace = state.draft_harness_allow_dataflow_trace;
+    h.allow_headers_of = state.draft_harness_allow_headers_of;
+    h.allow_repo_map = state.draft_harness_allow_repo_map;
   }
   return workspace;
 }
@@ -4291,6 +4318,9 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_harness_explorer_cumulative_mode =
       workspace_config.ai.harness.explorer_cumulative_mode;
   state->draft_harness_allow_causal_trail = workspace_config.ai.harness.allow_causal_trail;
+  state->draft_harness_allow_dataflow_trace = workspace_config.ai.harness.allow_dataflow_trace;
+  state->draft_harness_allow_headers_of = workspace_config.ai.harness.allow_headers_of;
+  state->draft_harness_allow_repo_map = workspace_config.ai.harness.allow_repo_map;
   state->ai_harness_selected = 0;
   state->ai_harness_editing_field = -1;
   state->draft_key_overrides = keybind_registry().overrides();

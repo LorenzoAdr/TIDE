@@ -215,6 +215,16 @@ struct AiHarnessSettings {
   // solo lectura, determinista, y estrictamente añade evidencia estructurada al grep/read
   // habituales, sin el riesgo de shell/web.
   bool allow_causal_trail = true;
+  // Herramienta "dataflow" del explorador: dónde se declara/escribe/lee una variable o campo,
+  // vía grep + heurísticas (sin LSP, sin LLM extra — reusa src/ai/l2_explore_a_dataflow.cpp,
+  // el hermano de "trail" para estado en vez de llamadas). Default true, mismo motivo que trail.
+  bool allow_dataflow_trace = true;
+  // Herramienta "headers_of": includes/headers de un archivo (FS puro, ya registrada en el
+  // ToolRegistry compartido — src/ai/tool_registry.cpp). Default true.
+  bool allow_headers_of = true;
+  // Herramienta "repo_map": vista del repo rankeada por PageRank vía SymbolWorkspaceIndexer
+  // (ya registrada en el ToolRegistry compartido). Default true.
+  bool allow_repo_map = true;
 };
 
 struct AiSettings {

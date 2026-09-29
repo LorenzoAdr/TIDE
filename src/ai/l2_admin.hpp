@@ -242,6 +242,12 @@ struct AdminLoopOpts {
   bool explorer_cumulative_mode = false;
   // Herramienta "trail" del explorador (call-stack determinista vía grep, sin LLM extra).
   bool allow_causal_trail = true;
+  // Herramienta "dataflow" (decl/write/read de una variable, mismo motor que trail).
+  bool allow_dataflow_trace = true;
+  // Herramienta "headers_of" (includes de un archivo, vía ToolRegistry compartido).
+  bool allow_headers_of = true;
+  // Herramienta "repo_map" (vista rankeada PageRank, vía ToolRegistry compartido).
+  bool allow_repo_map = true;
   std::function<void(const std::string&)> on_line;
   std::atomic<bool>* cancel = nullptr;
 };
@@ -302,11 +308,16 @@ std::vector<std::string> admin_legal_dos(const AdminState& st, int max_proposes,
 AdminJobResult admin_explore_stub(const AdminSpawn& spawn);
 // Grep del explore: por defecto admin_run_search_rg; el controller puede pasar ToolRegistry.
 using AdminGrepFn = std::function<AdminJobResult(const std::string& pattern)>;
+// Invoca una tool nombrada del ToolRegistry compartido (headers_of, repo_map, ...) — el
+// controller pasa un adaptador sobre tools_.invoke(name, arg); sin él, esas acciones se
+// tratan como no disponibles (igual que allow_headers_of/allow_repo_map=false).
+using AdminToolFn = std::function<AdminJobResult(const std::string& tool_name,
+                                                  const std::string& arg)>;
 // Hijo lite: grep+read vía brain (mismo contrato que tools/l2_wave/explore_lite_local).
 AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
                                       const std::string& workspace_root,
                                       const AdminLoopOpts& opts,
-                                      AdminGrepFn grep_fn = {});
+                                      AdminGrepFn grep_fn = {}, AdminToolFn tool_fn = {});
 // Allow = corre sin fricción; Ask = el runtime debe pausar y preguntarle al
 // usuario real (no un rechazo definitivo); Deny = bloqueo duro, nunca negociable
 // (metacaracteres/pipes fuera de forma/fuera del workspace) — ni aun con
