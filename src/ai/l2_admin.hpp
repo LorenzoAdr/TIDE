@@ -225,6 +225,17 @@ struct AdminLoopOpts {
   AdminSessionUi ui;
   int max_proposes = kAdminMaxProposes;
   int max_spawns = kAdminMaxSpawns;
+  int max_explores = kAdminMaxExplores;
+  int explore_max_steps = kAdminExploreMaxSteps;
+  bool verifier_enabled = true;
+  int max_verify_passes = kAdminMaxVerifyPasses;
+  int verify_max_steps = kAdminVerifyMaxSteps;
+  // Segundo pase adversarial dentro de admin_run_verify (solo si el primero sostiene).
+  // Comparte presupuesto con verifier_enabled; false lo salta sin gastar el pase.
+  bool refuter_enabled = true;
+  bool allow_shell = true;
+  bool allow_web = true;
+  bool allow_test = true;
   std::function<void(const std::string&)> on_line;
   std::atomic<bool>* cancel = nullptr;
 };
@@ -274,8 +285,12 @@ void admin_begin_consulta_budgets(AdminState* st);
 void admin_refresh_propose_budget(AdminState* st);
 
 AdminOla admin_parse(const std::string& raw);
+// max_explores/allow_*: capacidades tuneables (ver AdminLoopOpts); los valores por
+// defecto reproducen el comportamiento previo a su introducción (sin restricciones
+// extra más allá de kAdminMaxExplores).
 bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, int max_spawns,
-                 std::string* err);
+                 std::string* err, int max_explores = kAdminMaxExplores, bool allow_shell = true,
+                 bool allow_web = true, bool allow_test = true);
 std::vector<std::string> admin_legal_dos(const AdminState& st, int max_proposes, int max_spawns);
 
 AdminJobResult admin_explore_stub(const AdminSpawn& spawn);
@@ -372,7 +387,8 @@ void admin_append_job(AdminState* st, AdminSpawnTipo tipo, const AdminJobResult&
 std::string admin_system_prompt();
 // workspace_root: proyecto abierto (perímetro FS). Vacío solo en tests sin cwd.
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
-                              const std::string& workspace_root = {});
+                              const std::string& workspace_root = {},
+                              int max_explores = kAdminMaxExplores);
 
 AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& ops,
                                const AdminLoopOpts& opts);

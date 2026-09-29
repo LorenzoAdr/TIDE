@@ -1277,7 +1277,8 @@ std::vector<std::string> admin_legal_dos(const AdminState& st, int max_proposes,
 }
 
 bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, int max_spawns,
-                 std::string* err) {
+                 std::string* err, int max_explores, bool allow_shell, bool allow_web,
+                 bool allow_test) {
   if (!ola.ok) {
     if (err) {
       *err = ola.error.empty() ? "ola inválida" : ola.error;
@@ -1299,12 +1300,32 @@ bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, in
     return false;
   }
   if (ola.do_kind == AdminDo::Spawn && ola.spawn.tipo == AdminSpawnTipo::Explore) {
-    if (admin_explores_used_this_consulta(st) >= kAdminMaxExplores) {
+    if (admin_explores_used_this_consulta(st) >= max_explores) {
       if (err) {
         *err = "tope de explore; cierra, ask_user, o usa search/read/edit";
       }
       return false;
     }
+  }
+  if (ola.do_kind == AdminDo::Spawn && ola.spawn.tipo == AdminSpawnTipo::Shell && !allow_shell) {
+    if (err) {
+      *err = "shell deshabilitado en la configuración del harness";
+    }
+    return false;
+  }
+  if (ola.do_kind == AdminDo::Spawn &&
+      (ola.spawn.tipo == AdminSpawnTipo::Web || ola.spawn.tipo == AdminSpawnTipo::WebFetch) &&
+      !allow_web) {
+    if (err) {
+      *err = "acceso web deshabilitado en la configuración del harness";
+    }
+    return false;
+  }
+  if (ola.do_kind == AdminDo::Spawn && ola.spawn.tipo == AdminSpawnTipo::Test && !allow_test) {
+    if (err) {
+      *err = "test deshabilitado en la configuración del harness";
+    }
+    return false;
   }
   if (ola.do_kind == AdminDo::Spawn && ola.spawn.tipo == AdminSpawnTipo::Edit) {
     if (!st.edit_confirmed) {
@@ -1321,7 +1342,7 @@ bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, in
     }
   }
   if (ola.do_kind == AdminDo::SeguirExplorando) {
-    if (admin_explores_used_this_consulta(st) >= kAdminMaxExplores) {
+    if (admin_explores_used_this_consulta(st) >= max_explores) {
       if (err) {
         *err = "tope de explore; confirma edición, cierra o ask_user";
       }
@@ -1614,7 +1635,9 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
 
   ui_note(opts, "→ Explorador: " + consulta);
 
-  for (int step = 0; step < kAdminExploreMaxSteps; ++step) {
+  const int explore_max_steps =
+      opts.explore_max_steps > 0 ? opts.explore_max_steps : kAdminExploreMaxSteps;
+  for (int step = 0; step < explore_max_steps; ++step) {
     if (opts.cancel != nullptr && opts.cancel->load()) {
       r.ok = false;
       r.error = "cancel";
@@ -1622,7 +1645,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       r.summary = "explore cancelado";
       return r;
     }
-    const bool last = (step >= kAdminExploreMaxSteps - 1);
+    const bool last = (step >= explore_max_steps - 1);
     if (last) {
       conversation +=
           "\n\n## Usuario\nÚLTIMA OLA — cierra YA con do=cerrar, veredicto, simbolos, "
@@ -4000,7 +4023,9 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
   }
   // Tope: se OMITE el gate (ni absuelve ni bloquea). Si blocks=true aquí, el piloto
   // nunca puede cerrar — bug de producto (sesión atrapada en dudoso eterno).
-  if (st->verify_passes >= kAdminMaxVerifyPasses) {
+  const int max_verify_passes =
+      opts.max_verify_passes > 0 ? opts.max_verify_passes : kAdminMaxVerifyPasses;
+  if (st->verify_passes >= max_verify_passes) {
     out.ok = true;
     out.veredicto = "dudoso";
     out.blocks = false;
@@ -4086,7 +4111,9 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
   std::ostringstream user;
   user << "## Consulta del usuario\n" << st->consulta << "\n\n";
   user << facts_blob << "\n";
-  user << "N=" << kAdminVerifyMaxSteps
+  const int verify_max_steps =
+      opts.verify_max_steps > 0 ? opts.verify_max_steps : kAdminVerifyMaxSteps;
+  user << "N=" << verify_max_steps
        << ". Ataca si estas anclas/evidencia demuestran el arco de la consulta; "
           "si solo co-ocurren, refuta/dudoso. Elige UNA acción JSON "
           "(entre|read|cerrar).\n";
@@ -4095,7 +4122,7 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
   int entres = 0;
   int reads = 0;
   bool counterask_used = false;
-  const int budget = kAdminVerifyMaxSteps + (miss_jobs.empty() ? 0 : 1);
+  const int budget = verify_max_steps + (miss_jobs.empty() ? 0 : 1);
 
   auto path_ok = [&](const std::string& p) {
     if (p.empty()) {
@@ -4117,7 +4144,9 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
     out.blocks = (verd == "refuta" || verd == "dudoso");
 
     // F: pase refutador LLM si aún sostiene (sin rewrite heurístico de dominio).
-    if (verd == "sostiene") {
+    // refuter_enabled=false: se salta este segundo pase sin gastar presupuesto extra
+    // (comparte kAdminMaxVerifyPasses con el primer pase del verificador).
+    if (verd == "sostiene" && opts.refuter_enabled) {
       ui_note(opts, "  · pasada adversaria: ¿confunde con un mecanismo vecino?");
       const std::string refute_sys =
           "Eres REFUTADOR adversarial. NO explores el repo. Te dan consulta, "
@@ -4646,7 +4675,7 @@ Un spawn por turno.)";
 }
 
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
-                              const std::string& workspace_root) {
+                              const std::string& workspace_root, int max_explores) {
   std::ostringstream out;
   if (!workspace_root.empty()) {
     out << "## WORKSPACE_ROOT (perímetro FS — único árbol accesible)\n`" << workspace_root
@@ -4675,9 +4704,9 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
   // Sin pistas runtime: el piloto elige el gesto (mismo criterio que explorer bruto).
   out << "## Presupuesto\nproposes=" << st.proposes << "/" << max_proposes
       << " spawns=" << st.spawns << "/" << max_spawns
-      << " explores=" << admin_explores_used_this_consulta(st) << "/" << kAdminMaxExplores;
+      << " explores=" << admin_explores_used_this_consulta(st) << "/" << max_explores;
   const bool explore_agotado =
-      admin_explores_used_this_consulta(st) >= kAdminMaxExplores;
+      admin_explores_used_this_consulta(st) >= max_explores;
   if (explore_agotado) {
     out << " AGOTADO";
   }
@@ -4821,6 +4850,9 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
   }
   const int max_p = opts.max_proposes > 0 ? opts.max_proposes : kAdminMaxProposes;
   const int max_s = opts.max_spawns > 0 ? opts.max_spawns : kAdminMaxSpawns;
+  const int max_ex = opts.max_explores > 0 ? opts.max_explores : kAdminMaxExplores;
+  const int max_verify_passes =
+      opts.max_verify_passes > 0 ? opts.max_verify_passes : kAdminMaxVerifyPasses;
 
   if (st->notebook.empty() && st->jobs.empty() && st->episodes.empty()) {
     ui_note(opts, "→ Investigando tu consulta…");
@@ -4830,7 +4862,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
   int explore_cap_rejects = 0;
   while (!st->done && !st->clarify && !cancelled(opts)) {
     const std::string sys = admin_system_prompt();
-    const std::string user = admin_user_prompt(*st, max_p, max_s, opts.workspace_root);
+    const std::string user = admin_user_prompt(*st, max_p, max_s, opts.workspace_root, max_ex);
     L2BrainRequest req;
     req.system_prompt = sys;
     req.user_prompt = user;
@@ -4873,7 +4905,8 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
 
     AdminOla ola = admin_parse(br.text.empty() ? br.raw : br.text);
     std::string lerr;
-    bool legal_ok = admin_legal(*st, ola, max_p, max_s, &lerr);
+    bool legal_ok = admin_legal(*st, ola, max_p, max_s, &lerr, max_ex, opts.allow_shell,
+                                opts.allow_web, opts.allow_test);
     // Cupo explore agotado: degradar explore → search (rompe el bucle de rechazos).
     if (!legal_ok && lerr.find("tope de explore") != std::string::npos &&
         (ola.do_kind == AdminDo::Spawn || ola.do_kind == AdminDo::SeguirExplorando) &&
@@ -4897,7 +4930,8 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       deg.ok = true;
       deg.error.clear();
       std::string lerr2;
-      if (q.size() >= 3 && admin_legal(*st, deg, max_p, max_s, &lerr2)) {
+      if (q.size() >= 3 && admin_legal(*st, deg, max_p, max_s, &lerr2, max_ex, opts.allow_shell,
+                                       opts.allow_web, opts.allow_test)) {
         ola = std::move(deg);
         legal_ok = true;
         lerr.clear();
@@ -4947,12 +4981,14 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
     ++st->proposes;
 
     // Verificador adversarial antes de aceptar editar/cerrar (si hay notebook).
-    // Saltar con brain scripted (baterías/unit) — no consumir el guion.
-    const bool skip_verify = (brain.name() == "scripted");
+    // Saltar con brain scripted (baterías/unit) — no consumir el guion. También se
+    // salta si opts.verifier_enabled=false (settings del harness) — sin red de
+    // seguridad: editar/cerrar se aceptan directo.
+    const bool skip_verify = (brain.name() == "scripted") || !opts.verifier_enabled;
     if (!skip_verify && (ola.do_kind == AdminDo::Editar || ola.do_kind == AdminDo::Cerrar) &&
         (!st->notebook.empty() || !st->jobs.empty()) && !st->awaiting_edit_confirm &&
         !st->awaiting_close_confirm) {
-      if (st->verify_passes >= kAdminMaxVerifyPasses) {
+      if (st->verify_passes >= max_verify_passes) {
         {
           std::ostringstream note;
           note << "→ Tope de comprobaciones: se omite el gate (NO absuelve";
