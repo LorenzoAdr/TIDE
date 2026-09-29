@@ -154,18 +154,21 @@ struct SettingsModalState {
   WorkspaceConfig workspace_baseline;
   ClangFormatConfig clang_format_baseline;
   bool show_all_workspace_files_baseline = false;
+  // Master switch (piloto único vs. legacy L0→L1→L2) — fila 0 del panel kAi.
+  bool draft_admin_enabled = true;
+  // L1/L0/workflow siguen en AiSettings para el escape hatch legacy (admin_enabled=false),
+  // pero ya no tienen fila propia en el panel — se conservan tal cual al editar otros campos.
   std::string draft_l1_model_id;
   std::string draft_l2_model_id;
-  std::string draft_level2_mode;  // dry_run | local | remote
-  std::string draft_level2_workflow;  // agent | ask | plan | git
+  std::string draft_level2_mode;  // local | remote (dry_run/harness = legacy, sin efecto)
+  std::string draft_level2_workflow;  // agent | ask | plan | git (legacy, sin fila propia)
   std::string draft_l2_api_base;
   std::string draft_l2_api_model;
   std::string draft_l2_api_key;
   std::string draft_l2_n_ctx_remote;
   std::string draft_embed_host;
   std::string draft_embed_port;
-  // -1 = not editing; 4=api_base, 5=api_model, 6=api_key, 7=n_ctx_remote,
-  // 8=embed host, 9=embed port
+  // -1 = not editing; 3=api_base, 4=api_model, 5=api_key, 6=n_ctx_remote
   int ai_editing_field = -1;
 
   // Configuración → IA → Harness avanzado (kAiHarness): tunables del admin

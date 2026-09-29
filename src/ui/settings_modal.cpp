@@ -993,7 +993,7 @@ void clamp_top_level_selection(SettingsModalState* state) {
       break;
     }
     case SettingsPanel::kAi:
-      state->selected = std::max(0, std::min(state->selected, 10));
+      state->selected = std::max(0, std::min(state->selected, 7));
       break;
     default:
       break;
@@ -2959,20 +2959,6 @@ ModelStore ai_settings_store(const SettingsModalState* state) {
   return ModelStore(cache);
 }
 
-std::vector<AiModelInfo> cycle_candidates_l1(const SettingsModalState* state) {
-  ModelStore store = ai_settings_store(state);
-  std::vector<AiModelInfo> installed;
-  for (const AiModelInfo& info : l1_model_catalog()) {
-    if (store.has_model(info)) {
-      installed.push_back(info);
-    }
-  }
-  if (!installed.empty()) {
-    return installed;
-  }
-  return std::vector<AiModelInfo>(l1_model_catalog().begin(), l1_model_catalog().end());
-}
-
 std::vector<AiModelInfo> cycle_candidates_l2(const SettingsModalState* state) {
   ModelStore store = ai_settings_store(state);
   std::vector<AiModelInfo> installed;
@@ -2994,23 +2980,6 @@ std::string ai_model_option_label(const AiModelInfo& info, bool installed, const
   return i18n::tr_fmt("settings.icon_mode.checked", {name + " · " + status, text});
 }
 
-void cycle_draft_l1_model(SettingsModalState* state) {
-  if (state == nullptr) {
-    return;
-  }
-  const auto candidates = cycle_candidates_l1(state);
-  if (candidates.empty()) {
-    return;
-  }
-  for (std::size_t i = 0; i < candidates.size(); ++i) {
-    if (candidates[i].id == state->draft_l1_model_id) {
-      state->draft_l1_model_id = candidates[(i + 1) % candidates.size()].id;
-      return;
-    }
-  }
-  state->draft_l1_model_id = candidates.front().id;
-}
-
 void cycle_draft_l2_model(SettingsModalState* state) {
   if (state == nullptr) {
     return;
@@ -3028,26 +2997,14 @@ void cycle_draft_l2_model(SettingsModalState* state) {
   state->draft_l2_model_id = candidates.front().id;
 }
 
+// Solo local/remote son estados reales bajo admin_v1 (dry_run/harness eran del
+// Level2Session legacy y no seleccionan ningún backend hoy — ver docs/ai/l2-admin.md).
+// Desde cualquier otro valor guardado (config antiguo), el primer toggle cae en local.
 void cycle_draft_level2_mode(SettingsModalState* state) {
   if (state == nullptr) {
     return;
   }
-  const std::string& mode = state->draft_level2_mode;
-  if (mode == "local") {
-    state->draft_level2_mode = "remote";
-  } else if (mode == "remote") {
-    state->draft_level2_mode = "dry_run";
-  } else {
-    state->draft_level2_mode = "local";
-  }
-}
-
-void cycle_draft_level2_workflow(SettingsModalState* state) {
-  if (state == nullptr) {
-    return;
-  }
-  state->draft_level2_workflow = ai_workflow_kind_name(
-      cycle_ai_workflow_kind(parse_ai_workflow_kind(state->draft_level2_workflow)));
+  state->draft_level2_mode = (state->draft_level2_mode == "local") ? "remote" : "local";
 }
 
 std::string level2_mode_label(const std::string& mode) {
@@ -3057,7 +3014,7 @@ std::string level2_mode_label(const std::string& mode) {
   if (mode == "remote") {
     return i18n::tr("settings.ai.l2_mode.remote");
   }
-  return i18n::tr("settings.ai.l2_mode.dry_run");
+  return i18n::tr("settings.ai.l2_mode.unset");
 }
 
 std::string* ai_editable_field_value(SettingsModalState* state, int field) {
@@ -3065,18 +3022,14 @@ std::string* ai_editable_field_value(SettingsModalState* state, int field) {
     return nullptr;
   }
   switch (field) {
-    case 4:
+    case 3:
       return &state->draft_l2_api_base;
-    case 5:
+    case 4:
       return &state->draft_l2_api_model;
-    case 6:
+    case 5:
       return &state->draft_l2_api_key;
-    case 7:
+    case 6:
       return &state->draft_l2_n_ctx_remote;
-    case 8:
-      return &state->draft_embed_host;
-    case 9:
-      return &state->draft_embed_port;
     default:
       return nullptr;
   }
@@ -3087,7 +3040,7 @@ void activate_ai_settings_option(SettingsModalState* state, int index) {
     return;
   }
   if (index == 0) {
-    cycle_draft_l1_model(state);
+    state->draft_admin_enabled = !state->draft_admin_enabled;
     return;
   }
   if (index == 1) {
@@ -3098,15 +3051,11 @@ void activate_ai_settings_option(SettingsModalState* state, int index) {
     cycle_draft_level2_mode(state);
     return;
   }
-  if (index == 3) {
-    cycle_draft_level2_workflow(state);
-    return;
-  }
-  if (index >= 4 && index <= 9) {
+  if (index >= 3 && index <= 6) {
     state->ai_editing_field = index;
     return;
   }
-  if (index == 10) {
+  if (index == 7) {
     open_ai_harness_panel(state);
   }
 }
@@ -3119,11 +3068,8 @@ SettingsBodyContent build_ai_settings(SettingsModalState* state) {
   content.rows.push_back(text(""));
 
   ModelStore store = ai_settings_store(state);
-  const AiModelInfo l1 = find_l1_model(state != nullptr ? state->draft_l1_model_id : "")
-                             .value_or(default_l1_model());
   const AiModelInfo l2 = find_l2_model(state != nullptr ? state->draft_l2_model_id : "")
                              .value_or(default_l2_model());
-  const bool l1_installed = store.has_model(l1);
   const bool l2_installed = store.has_l2_model(l2);
   const bool remote = state != nullptr && state->draft_level2_mode == "remote";
   const bool editing = state != nullptr && state->ai_editing_field >= 0;
@@ -3142,12 +3088,10 @@ SettingsBodyContent build_ai_settings(SettingsModalState* state) {
 
   {
     const bool selected = state != nullptr && state->selected == 0;
-    Element title =
-        text(std::string(selected ? "▸ " : "  ") +
-             ai_model_option_label(l1, l1_installed, i18n::tr("settings.ai.l1_model"))) |
-        color(selected ? theme::Accent() : theme::Header()) | bold;
-    push_option(0, std::move(title),
-                i18n::tr("settings.ai.l1_model.detail") + "  (" + l1.id + ")");
+    const bool checked = state != nullptr && state->draft_admin_enabled;
+    Element title = text(checkbox_label(checked, i18n::tr("settings.ai.admin_enabled"))) |
+                    color(selected ? theme::Accent() : theme::Header()) | bold;
+    push_option(0, std::move(title), i18n::tr("settings.ai.admin_enabled.detail"));
   }
   {
     const bool selected = state != nullptr && state->selected == 1;
@@ -3160,26 +3104,13 @@ SettingsBodyContent build_ai_settings(SettingsModalState* state) {
   }
   {
     const bool selected = state != nullptr && state->selected == 2;
-    const std::string mode = state != nullptr ? state->draft_level2_mode : "dry_run";
+    const std::string mode = state != nullptr ? state->draft_level2_mode : "local";
     Element title =
         text(std::string(selected ? "▸ " : "  ") +
              i18n::tr_fmt("settings.icon_mode.checked",
                          {level2_mode_label(mode), i18n::tr("settings.ai.l2_mode")})) |
         color(selected ? theme::Accent() : theme::Header()) | bold;
     push_option(2, std::move(title), i18n::tr("settings.ai.l2_mode.detail"));
-  }
-  {
-    const bool selected = state != nullptr && state->selected == 3;
-    const std::string wf = state != nullptr && !state->draft_level2_workflow.empty()
-                               ? state->draft_level2_workflow
-                               : "agent";
-    const std::string wf_label = i18n::tr(std::string("console.ai.workflow.") + wf);
-    Element title =
-        text(std::string(selected ? "▸ " : "  ") +
-             i18n::tr_fmt("settings.icon_mode.checked",
-                         {wf_label, i18n::tr("settings.ai.l2_workflow")})) |
-        color(selected ? theme::Accent() : theme::Header()) | bold;
-    push_option(3, std::move(title), i18n::tr("settings.ai.l2_workflow.detail"));
   }
 
   auto push_text_field = [&](int index, const char* label_key, const char* detail_key,
@@ -3202,25 +3133,21 @@ SettingsBodyContent build_ai_settings(SettingsModalState* state) {
     push_option(index, std::move(title), i18n::tr(detail_key));
   };
 
-  push_text_field(4, "settings.ai.api_base", "settings.ai.api_base.detail",
+  push_text_field(3, "settings.ai.api_base", "settings.ai.api_base.detail",
                   state != nullptr ? state->draft_l2_api_base : "", false, remote);
-  push_text_field(5, "settings.ai.api_model", "settings.ai.api_model.detail",
+  push_text_field(4, "settings.ai.api_model", "settings.ai.api_model.detail",
                   state != nullptr ? state->draft_l2_api_model : "", false, remote);
-  push_text_field(6, "settings.ai.api_key", "settings.ai.api_key.detail",
+  push_text_field(5, "settings.ai.api_key", "settings.ai.api_key.detail",
                   state != nullptr ? state->draft_l2_api_key : "", true, remote);
-  push_text_field(7, "settings.ai.n_ctx_remote", "settings.ai.n_ctx_remote.detail",
+  push_text_field(6, "settings.ai.n_ctx_remote", "settings.ai.n_ctx_remote.detail",
                   state != nullptr ? state->draft_l2_n_ctx_remote : "", false, remote);
-  push_text_field(8, "settings.ai.embed_host", "settings.ai.embed_host.detail",
-                  state != nullptr ? state->draft_embed_host : "", false, true);
-  push_text_field(9, "settings.ai.embed_port", "settings.ai.embed_port.detail",
-                  state != nullptr ? state->draft_embed_port : "", false, true);
 
   {
-    const bool selected = state != nullptr && state->selected == 10;
+    const bool selected = state != nullptr && state->selected == 7;
     Element title = text(std::string(selected ? "▸ " : "  ") +
                          i18n::tr("settings.ai.harness_panel")) |
                     color(selected ? theme::Accent() : theme::Header()) | bold;
-    push_option(10, std::move(title), i18n::tr("settings.ai.harness_panel.detail"));
+    push_option(7, std::move(title), i18n::tr("settings.ai.harness_panel.detail"));
   }
 
   if (editing) {
@@ -3272,7 +3199,7 @@ bool handle_ai_settings_keys(SettingsModalState* state, Event event) {
     return true;
   }
   if (event == Event::ArrowDown || event == Event::Character('j')) {
-    state->selected = std::min(10, state->selected + 1);
+    state->selected = std::min(7, state->selected + 1);
     return true;
   }
   if (event == Event::Return) {
@@ -4107,7 +4034,8 @@ bool workspace_config_eq(const WorkspaceConfig& a, const WorkspaceConfig& b) {
          a.clangd_background_index == b.clangd_background_index && a.theme == b.theme &&
          a.ui_colors_preset == b.ui_colors_preset && ui_colors_eq(a.ui_colors, b.ui_colors) &&
          compile_commands_eq(a.compile_commands, b.compile_commands) &&
-         a.ai.enabled == b.ai.enabled && a.ai.command_whitelist == b.ai.command_whitelist &&
+         a.ai.enabled == b.ai.enabled && a.ai.admin_enabled == b.ai.admin_enabled &&
+         a.ai.command_whitelist == b.ai.command_whitelist &&
          a.ai.tasks == b.ai.tasks && a.ai.level2_mode == b.ai.level2_mode &&
          a.ai.level2_workflow == b.ai.level2_workflow &&
          a.ai.level2_git_log_n == b.ai.level2_git_log_n &&
@@ -4163,6 +4091,7 @@ WorkspaceConfig workspace_config_from_draft(const SettingsModalState& state) {
   workspace.ui_colors = state.draft_ui_colors;
   workspace.build_environments = state.workspace_baseline.build_environments;
   workspace.ai = state.workspace_baseline.ai;
+  workspace.ai.admin_enabled = state.draft_admin_enabled;
   workspace.ai.level1.model_id =
       state.draft_l1_model_id.empty() ? default_l1_model().id : state.draft_l1_model_id;
   workspace.ai.level2.model_id =
@@ -4299,6 +4228,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->workspace_root = workspace_root;
   state->has_workspace = !workspace_root.empty();
   state->workspace_baseline = workspace_config;
+  state->draft_admin_enabled = workspace_config.ai.admin_enabled;
   state->draft_l1_model_id = workspace_config.ai.level1.model_id.empty()
                                  ? default_l1_model().id
                                  : workspace_config.ai.level1.model_id;
