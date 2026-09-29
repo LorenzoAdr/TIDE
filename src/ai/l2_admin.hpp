@@ -13,8 +13,14 @@ namespace tuide {
 
 inline constexpr int kAdminMaxEpisodes = 6;
 inline constexpr int kAdminEpisodeReplyChars = 4000;
-inline constexpr int kAdminMaxProposes = 12;
+inline constexpr int kAdminMaxProposes = 18;
 inline constexpr int kAdminMaxSpawns = 8;
+// Turnos CONSECUTIVOS donde el modelo no manda un JSON admin_v1 parseable
+// (sin objeto JSON, why/cubre/falta vacíos, etc.) que se toleran SIN gastar
+// presupuesto de `proposes` — es un tropiezo de formato, no una decisión de
+// verdad equivocada. Al superar este margen, el turno sí cuenta como
+// propose normal (evita loop infinito si el modelo nunca manda JSON válido).
+inline constexpr int kAdminMaxFormatRejectStreak = 3;
 inline constexpr int kAdminMaxExplores = 4;
 inline constexpr int kAdminMaxVerifyPasses = 2;
 inline constexpr int kAdminVerifyMaxSteps = 6;
@@ -141,6 +147,11 @@ struct AdminState {
   AdminSessionUi ui;
   int proposes = 0;
   int spawns = 0;
+  // Turnos consecutivos rechazados por FORMATO (sin JSON parseable, campos
+  // obligatorios vacíos) — no cuenta contra `proposes` hasta
+  // kAdminMaxFormatRejectStreak. Se resetea en cualquier turno aceptado o
+  // rechazado por motivo semántico (do ilegal en este estado, etc.).
+  int format_reject_streak = 0;
   // Explores en `jobs` anteriores a esta consulta (no cuentan para kAdminMaxExplores).
   // Al abrir un follow-up con evidencia, se fija al nº actual de explores.
   int explore_jobs_baseline = 0;

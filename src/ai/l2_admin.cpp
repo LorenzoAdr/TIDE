@@ -4906,7 +4906,20 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       }
     }
     if (!legal_ok) {
-      ++st->proposes;
+      // Fallo de FORMATO (sin JSON parseable, campos obligatorios vacíos) es
+      // un tropiezo, no una decisión de verdad equivocada — dale un margen
+      // aparte del presupuesto real de proposes, para que un solo turno
+      // degenerado (p.ej. el modelo escribiendo razonamiento en prosa en vez
+      // de JSON) no tumbe una sesión que iba bien encaminada.
+      const bool format_failure = !ola.ok;
+      const bool within_format_grace =
+          format_failure && st->format_reject_streak < kAdminMaxFormatRejectStreak;
+      if (within_format_grace) {
+        ++st->format_reject_streak;
+      } else {
+        st->format_reject_streak = 0;
+        ++st->proposes;
+      }
       if (lerr.find("tope de explore") != std::string::npos) {
         ++explore_cap_rejects;
       } else {
@@ -4919,6 +4932,11 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
             "search|read (sin explore). " +
             lerr;
       }
+      if (within_format_grace) {
+        st->last_error = "responde SOLO el JSON admin_v1 (nada de prosa/razonamiento fuera "
+                          "de él; why/cubre/falta no pueden quedar vacíos). " +
+                          st->last_error;
+      }
       if (!ola.raw_json.empty()) {
         std::string clip = ola.raw_json;
         utf8_resize(&clip, 240);
@@ -4930,7 +4948,8 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
           st->last_error += " | visto: " + clip;
         }
       }
-      ui_note(opts, "→ " + humanize_admin_reject(lerr));
+      ui_note(opts, "→ " + humanize_admin_reject(lerr) +
+                        (within_format_grace ? " (formato, no cuenta contra el presupuesto)" : ""));
       if (explore_cap_rejects >= 2) {
         ui_note(opts, "→ Sin más exploradores en esta consulta: cierra o busca/lee con lo ya hallado.");
       }
@@ -4944,6 +4963,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       continue;
     }
     explore_cap_rejects = 0;
+    st->format_reject_streak = 0;
     ++st->proposes;
 
     // Verificador adversarial antes de aceptar editar/cerrar (si hay notebook).
