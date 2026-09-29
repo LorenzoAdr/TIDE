@@ -1196,6 +1196,7 @@ void AiController::run_admin_async(const std::string& message) {
       eopts.workspace_root = root;
       eopts.settings = settings_.level2;
       eopts.explore_max_steps = settings_.harness.explore_max_steps;
+      eopts.allow_causal_trail = settings_.harness.allow_causal_trail;
       eopts.on_line = [this](const std::string& line) { append(line); };
       eopts.cancel = &agent_cancel_;
       AdminGrepFn grep;

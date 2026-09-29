@@ -185,6 +185,7 @@ struct SettingsModalState {
   bool draft_harness_allow_web = true;
   bool draft_harness_allow_test = true;
   bool draft_harness_explorer_cumulative_mode = false;
+  bool draft_harness_allow_causal_trail = true;
   int ai_harness_selected = 0;
   // -1 = not editing; 0..5 = los seis campos numéricos arriba (mismo orden).
   int ai_harness_editing_field = -1;
