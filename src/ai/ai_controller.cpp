@@ -978,6 +978,11 @@ void AiController::run_admin_async(const std::string& message) {
 
   std::lock_guard lock(agent_mu_);
   agent_thread_ = std::thread([this, message] {
+    // Recoge cambios de Settings → IA (incl. harness) hechos entre consultas —
+    // a diferencia del camino L1 (ensure_backend_ready), este loop nunca
+    // refrescaba settings_ tras el arranque, así que un toggle en el modal
+    // (p.ej. desactivar el verificador) no surtía efecto hasta reiniciar.
+    refresh_settings();
     const std::string root =
         deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
     if (root.empty()) {
