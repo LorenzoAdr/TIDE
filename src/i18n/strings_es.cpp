@@ -329,6 +329,13 @@ const StringTable& spanish_strings() {
       {"settings.ai.harness.allow_test", "Permitir spawns de test"},
       {"settings.ai.harness.allow_test.detail",
        "Deja que el piloto ejecute el target de test del proyecto."},
+      {"settings.ai.harness.explorer_cumulative", "Explorador acumulativo"},
+      {"settings.ai.harness.explorer_cumulative.detail",
+       "Desactivado (default) = un explore por fenómeno, cada uno independiente. Activado = "
+       "un solo explore puede cubrir una cadena de sub-preguntas CONECTADAS. Probado como "
+       "experimento P16: gana en cadenas secuenciales, pero fusionar ángulos independientes "
+       "arriesga un veredicto diluido — al activarlo, se desactiva el atajo determinista "
+       "de '1 job encontrado' para que siempre corra el verificador adversarial completo."},
       {"settings.ai.harness.hint",
        "↑↓ selecciona · Enter edita/alterna · solo números en contadores · Esc vuelve a IA"},
       {"settings.toolpacks.lang.cpp", "C / C++"},
