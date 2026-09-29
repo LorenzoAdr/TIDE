@@ -320,6 +320,15 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
     if (h.contains("allow_causal_trail") && h["allow_causal_trail"].is_boolean()) {
       out.allow_causal_trail = h["allow_causal_trail"].get<bool>();
     }
+    if (h.contains("allow_dataflow_trace") && h["allow_dataflow_trace"].is_boolean()) {
+      out.allow_dataflow_trace = h["allow_dataflow_trace"].get<bool>();
+    }
+    if (h.contains("allow_headers_of") && h["allow_headers_of"].is_boolean()) {
+      out.allow_headers_of = h["allow_headers_of"].get<bool>();
+    }
+    if (h.contains("allow_repo_map") && h["allow_repo_map"].is_boolean()) {
+      out.allow_repo_map = h["allow_repo_map"].get<bool>();
+    }
   }
 }
 
@@ -396,7 +405,10 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
         {"allow_web", settings.harness.allow_web},
         {"allow_test", settings.harness.allow_test},
         {"explorer_cumulative_mode", settings.harness.explorer_cumulative_mode},
-        {"allow_causal_trail", settings.harness.allow_causal_trail}}},
+        {"allow_causal_trail", settings.harness.allow_causal_trail},
+        {"allow_dataflow_trace", settings.harness.allow_dataflow_trace},
+        {"allow_headers_of", settings.harness.allow_headers_of},
+        {"allow_repo_map", settings.harness.allow_repo_map}}},
   };
 }
 
