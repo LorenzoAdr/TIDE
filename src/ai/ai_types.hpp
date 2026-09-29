@@ -202,6 +202,13 @@ struct AiHarnessSettings {
   bool allow_shell = true;       // permitir spawns AdminSpawnTipo::Shell
   bool allow_web = true;         // permitir spawns AdminSpawnTipo::Web / WebFetch
   bool allow_test = true;        // permitir spawns AdminSpawnTipo::Test
+  // false (default) = un explore por fenómeno/polo, cada uno independiente (comportamiento
+  // actual). true = un solo explorador puede cubrir una cadena de sub-preguntas CONECTADAS
+  // en un mismo brief. Probado como experimento P16 (docs/plans/l2-admin-verify-round-
+  // reduction.md sección 9): gana en cadenas secuenciales, pero diluir varios ángulos
+  // independientes en un job puede disparar el atajo P2bis y saltarse el verificador —
+  // por eso, cuando está activo, ese atajo concreto se desactiva (ver admin_run_verify).
+  bool explorer_cumulative_mode = false;
 };
 
 struct AiSettings {

@@ -247,6 +247,10 @@ struct AdminLoopOpts {
   bool allow_shell = true;
   bool allow_web = true;
   bool allow_test = true;
+  // false = un explore por polo (default). true = un solo explorador puede cubrir una
+  // cadena de sub-preguntas conectadas — ver admin_system_prompt() y el gate P2bis en
+  // admin_run_verify (docs/plans/l2-admin-verify-round-reduction.md sección 9, P16).
+  bool explorer_cumulative_mode = false;
   std::function<void(const std::string&)> on_line;
   std::atomic<bool>* cancel = nullptr;
 };
@@ -395,7 +399,8 @@ bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::
 // exactamente el mismo rastro que uno auto-aprobado.
 void admin_append_job(AdminState* st, AdminSpawnTipo tipo, const AdminJobResult& jr);
 
-std::string admin_system_prompt();
+// cumulative_explorer: ver AdminLoopOpts::explorer_cumulative_mode.
+std::string admin_system_prompt(bool cumulative_explorer = false);
 // workspace_root: proyecto abierto (perímetro FS). Vacío solo en tests sin cwd.
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
                               const std::string& workspace_root = {},

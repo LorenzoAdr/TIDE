@@ -3221,7 +3221,8 @@ constexpr int kAiHarnessRefuterEnabled = 7;
 constexpr int kAiHarnessAllowShell = 8;
 constexpr int kAiHarnessAllowWeb = 9;
 constexpr int kAiHarnessAllowTest = 10;
-constexpr int kAiHarnessRowCount = 11;
+constexpr int kAiHarnessExplorerCumulative = 11;
+constexpr int kAiHarnessRowCount = 12;
 
 std::string* ai_harness_editable_field_value(SettingsModalState* state, int field) {
   if (state == nullptr) {
@@ -3272,6 +3273,10 @@ void activate_ai_harness_option(SettingsModalState* state, int index) {
       break;
     case kAiHarnessAllowTest:
       state->draft_harness_allow_test = !state->draft_harness_allow_test;
+      break;
+    case kAiHarnessExplorerCumulative:
+      state->draft_harness_explorer_cumulative_mode =
+          !state->draft_harness_explorer_cumulative_mode;
       break;
     default:
       break;
@@ -3350,6 +3355,9 @@ SettingsBodyContent build_ai_harness_settings(SettingsModalState* state) {
   push_bool_row(kAiHarnessAllowTest, "settings.ai.harness.allow_test",
                "settings.ai.harness.allow_test.detail",
                state != nullptr && state->draft_harness_allow_test);
+  push_bool_row(kAiHarnessExplorerCumulative, "settings.ai.harness.explorer_cumulative",
+               "settings.ai.harness.explorer_cumulative.detail",
+               state != nullptr && state->draft_harness_explorer_cumulative_mode);
 
   const bool editing = state != nullptr && state->ai_harness_editing_field >= 0;
   if (editing) {
@@ -4067,7 +4075,8 @@ bool workspace_config_eq(const WorkspaceConfig& a, const WorkspaceConfig& b) {
          a.ai.harness.refuter_enabled == b.ai.harness.refuter_enabled &&
          a.ai.harness.allow_shell == b.ai.harness.allow_shell &&
          a.ai.harness.allow_web == b.ai.harness.allow_web &&
-         a.ai.harness.allow_test == b.ai.harness.allow_test;
+         a.ai.harness.allow_test == b.ai.harness.allow_test &&
+         a.ai.harness.explorer_cumulative_mode == b.ai.harness.explorer_cumulative_mode;
 }
 
 bool clang_format_eq(const ClangFormatConfig& a, const ClangFormatConfig& b) {
@@ -4169,6 +4178,7 @@ WorkspaceConfig workspace_config_from_draft(const SettingsModalState& state) {
     h.allow_shell = state.draft_harness_allow_shell;
     h.allow_web = state.draft_harness_allow_web;
     h.allow_test = state.draft_harness_allow_test;
+    h.explorer_cumulative_mode = state.draft_harness_explorer_cumulative_mode;
   }
   return workspace;
 }
@@ -4269,6 +4279,8 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_harness_allow_shell = workspace_config.ai.harness.allow_shell;
   state->draft_harness_allow_web = workspace_config.ai.harness.allow_web;
   state->draft_harness_allow_test = workspace_config.ai.harness.allow_test;
+  state->draft_harness_explorer_cumulative_mode =
+      workspace_config.ai.harness.explorer_cumulative_mode;
   state->ai_harness_selected = 0;
   state->ai_harness_editing_field = -1;
   state->draft_key_overrides = keybind_registry().overrides();

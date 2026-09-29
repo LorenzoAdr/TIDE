@@ -1423,6 +1423,7 @@ void AiController::run_admin_async(const std::string& message) {
     opts.allow_shell = settings_.harness.allow_shell;
     opts.allow_web = settings_.harness.allow_web;
     opts.allow_test = settings_.harness.allow_test;
+    opts.explorer_cumulative_mode = settings_.harness.explorer_cumulative_mode;
     opts.on_line = [this](const std::string& line) { append(line); };
     opts.cancel = &agent_cancel_;
 

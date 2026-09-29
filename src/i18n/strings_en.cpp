@@ -325,6 +325,13 @@ const StringTable& english_strings() {
        "Let the pilot search the web and fetch URLs (web / web_fetch spawns)."},
       {"settings.ai.harness.allow_test", "Allow test spawns"},
       {"settings.ai.harness.allow_test.detail", "Let the pilot run the project's test target."},
+      {"settings.ai.harness.explorer_cumulative", "Cumulative explorer"},
+      {"settings.ai.harness.explorer_cumulative.detail",
+       "Off (default) = one explore per phenomenon, each independent. On = a single explore "
+       "may cover a chain of CONNECTED sub-questions. Tested as experiment P16: wins on "
+       "sequential chains, but merging independent angles risks a diluted verdict — when on, "
+       "the deterministic 'single job found' shortcut is disabled so the full adversarial "
+       "verifier always runs."},
       {"settings.ai.harness.hint",
        "↑↓ select · Enter edit/toggle · numbers only for counters · Esc back to AI"},
       {"settings.toolpacks.lang.cpp", "C / C++"},

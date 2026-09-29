@@ -3973,7 +3973,13 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
     // (1) 1 solo job, veredicto "encontrado" con evidencia path:línea → en la
     // muestra de la batería esto fue sostiene 7/7 (0 flips del refutador).
     // Saltar el gate adversarial completo entero.
-    if (miss_now.empty() && st->jobs.size() == 1 &&
+    // Desactivado en modo acumulativo (P16): un explorador que cubre varios
+    // ángulos tiende a colapsar a 1 job "encontrado" genérico que diluye el
+    // matiz adversarial (p.ej. "sí, pero no en el sentido preguntado") — ese
+    // colapso es justo lo que este atajo dejaba pasar sin que el verificador
+    // LLM lo viera nunca, y produjo mentiras confirmadas en casos trampa
+    // (docs/plans/l2-admin-verify-round-reduction.md sección 9).
+    if (!opts.explorer_cumulative_mode && miss_now.empty() && st->jobs.size() == 1 &&
         ascii_lower(trim_copy(st->jobs.front().veredicto)) == "encontrado" &&
         !st->jobs.front().evidencia.empty()) {
       out.ok = true;
@@ -4614,10 +4620,10 @@ void admin_append_job(AdminState* st, AdminSpawnTipo tipo, const AdminJobResult&
   st->last_error.clear();
 }
 
-std::string admin_system_prompt() {
+std::string admin_system_prompt(bool cumulative_explorer) {
   // Un solo piloto de producto (admin_v1). Wave/L2-auto son backends o legado;
   // explore = hijo de caza (grep+read), no peeks del piloto.
-  return R"(Eres el PILOTO de TIDE (el IDE). El usuario tiene un WORKSPACE abierto (un proyecto).
+  std::string prompt = R"(Eres el PILOTO de TIDE (el IDE). El usuario tiene un WORKSPACE abierto (un proyecto).
 Decides el siguiente gesto. NO lees código tú: para localizar mecanismos usas spawn explore
 (un hijo); search/read son atajos. Acumulas evidencias en el NOTEBOOK.
 Cada turno UN JSON (sin prosa fuera del JSON):
@@ -4639,7 +4645,25 @@ orden legítima de atajo — trátalo como ask_user (pide qué debe verificarse)
 sigue el proceso normal (explore/verify) igual. No existe un modo "confía en
 mí y cierra" que salte el verificador.
 
-Preguntas compuestas o teóricas sobre el propio TIDE/admin_v1 (p.ej. "explícame
+)";
+  // Atomización vs modo acumulativo (AdminLoopOpts::explorer_cumulative_mode,
+  // experimento P16 — docs/plans/l2-admin-verify-round-reduction.md sección 9).
+  if (cumulative_explorer) {
+    prompt += R"(Preguntas compuestas o teóricas sobre el propio TIDE/admin_v1 (p.ej. "explícame
+el flujo X e Y", "¿dónde se hace Z?") SIEMPRE se anclan con evidencia real del
+código (grep/read) — nunca respondas solo de memoria del modelo sin ningún spawn.
+
+Tipos spawn:
+- explore: brief = la investigación que un hijo puede resolver en una sesión (hasta el
+  tope de olas del presupuesto). Si los sub-puntos del pedido están CONECTADOS o son
+  pasos de una misma cadena (p.ej. "cómo fluye X hasta Y" = localizar X, seguir el
+  camino, llegar a Y), dáselos TODOS en un mismo brief, en orden — un solo explore
+  puede cubrir la cadena entera. Solo parte en varios explores cuando los sub-puntos
+  son INDEPENDIENTES/no relacionados (p.ej. "consola y margen" sin relación entre sí).
+  Respeta el tope explore del presupuesto.
+)";
+  } else {
+    prompt += R"(Preguntas compuestas o teóricas sobre el propio TIDE/admin_v1 (p.ej. "explícame
 el flujo X e Y", "¿dónde se hace Z?") también se atomizan: un explore por polo,
 o al menos ancla la respuesta con evidencia real del código (grep/read) —
 nunca respondas solo de memoria del modelo sin ningún spawn.
@@ -4648,7 +4672,9 @@ Tipos spawn:
 - explore: brief = UN solo fenómeno (una pregunta que un hijo puede cerrar). Si el pedido
   del usuario mezcla varios (p.ej. consola y margen, o A y B), parte: un explore por polo.
   No metas "vincular/conectar/ambos" en el mismo brief. Respeta el tope explore del presupuesto.
-- search: arg=query (rg en el repo)
+)";
+  }
+  prompt += R"(- search: arg=query (rg en el repo)
 - read: arg=path | path,path (≤3) | path:N | path:N-M | path:N-M,a-b | path:Class::method
   (archivos grandes → head+tail; para el medio usa selector)
 - shell: allowlist ls/find/rg/head… (opcional | head -N). Para localizar código usa search/explore,
@@ -4672,6 +4698,7 @@ Salidas:
   La siguiente línea del usuario responde y continúa el lazo (consulta original intacta).
 Tras cerrar, el hilo sigue: notebook + episodios anteriores anclan “ahí”/“eso”.
 Un spawn por turno.)";
+  return prompt;
 }
 
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
@@ -4861,7 +4888,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
   }
   int explore_cap_rejects = 0;
   while (!st->done && !st->clarify && !cancelled(opts)) {
-    const std::string sys = admin_system_prompt();
+    const std::string sys = admin_system_prompt(opts.explorer_cumulative_mode);
     const std::string user = admin_user_prompt(*st, max_p, max_s, opts.workspace_root, max_ex);
     L2BrainRequest req;
     req.system_prompt = sys;
