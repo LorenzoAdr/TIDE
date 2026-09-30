@@ -1575,9 +1575,40 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       conversation += "\n";
     }
   }
+  // Enrutado explícito por tipo de pregunta — sin esto, el modelo tiende a obedecer
+  // literalmente "empieza por grep" y nunca llega a usar trail/dataflow/repo_map
+  // aunque estén habilitados en Harness avanzado (visto en producción: tools
+  // configuradas y ofrecidas en el prompt, pero jamás elegidas).
+  {
+    std::vector<std::string> routing;
+    if (opts.allow_repo_map && tool_fn) {
+      routing.push_back(
+          "si no sabes por dónde empezar en un área nueva, repo_map primero");
+    }
+    if (opts.allow_causal_trail) {
+      routing.push_back(
+          "si preguntan \"cómo llega X a Y\" / \"quién llama a Z\" / flujo de "
+          "ejecución, trail directamente (no grep primero)");
+    }
+    if (opts.allow_dataflow_trace) {
+      routing.push_back(
+          "si preguntan \"quién cambia/lee/inicializa la variable X\", dataflow "
+          "directamente (no grep primero)");
+    }
+    if (opts.allow_headers_of && tool_fn) {
+      routing.push_back("si preguntan qué incluye/depende un archivo, headers_of");
+    }
+    routing.push_back(
+        "para cualquier otra cosa (localizar texto/identificadores), grep");
+    conversation += "Elige tu primera acción según la pregunta: ";
+    for (std::size_t i = 0; i < routing.size(); ++i) {
+      conversation += routing[i];
+      conversation += (i + 1 < routing.size()) ? "; " : ".\n";
+    }
+  }
   conversation +=
-      "Empieza por grep (puedes mandar varios patterns a la vez, p.ej. "
-      "FileTree|file_tree y indexer).\n"
+      "grep: puedes mandar varios patterns a la vez, p.ej. FileTree|file_tree y "
+      "indexer.\n"
       "Stack tipico: C++/FTXUI (no busques Qt/QWidget/libvte salvo evidencia).\n"
       "Elige UNA acción JSON (" + tool_menu + ").\n";
   int greps = 0;
