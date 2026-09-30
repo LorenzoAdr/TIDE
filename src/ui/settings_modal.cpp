@@ -1075,11 +1075,20 @@ void open_ai_harness_panel(SettingsModalState* state) {
   state->ai_harness_editing_field = -1;
 }
 
+// Filas del panel Harness avanzado (kAiHarness) — mantener en sync con el bloque
+// kAiHarness* más abajo (build_ai_harness_settings) cada vez que se añade una fila,
+// o la navegación se queda atascada antes de llegar a las filas nuevas (bug visto
+// en producción: este valor quedó en 10 desde que el panel tenía 11 filas, y
+// clamp_ai_harness_selection se llama en cada render — así que ninguna fila más
+// allá de allow_test era alcanzable pese a que ArrowDown sí incrementaba el índice).
+constexpr int kAiHarnessRowCount = 16;
+
 void clamp_ai_harness_selection(SettingsModalState* state) {
   if (state == nullptr) {
     return;
   }
-  state->ai_harness_selected = std::max(0, std::min(state->ai_harness_selected, 10));
+  state->ai_harness_selected =
+      std::max(0, std::min(state->ai_harness_selected, kAiHarnessRowCount - 1));
 }
 
 void open_path_browser_panel(SettingsModalState* state, PathBrowserPurpose purpose) {
@@ -3226,7 +3235,11 @@ constexpr int kAiHarnessAllowCausalTrail = 12;
 constexpr int kAiHarnessAllowDataflowTrace = 13;
 constexpr int kAiHarnessAllowHeadersOf = 14;
 constexpr int kAiHarnessAllowRepoMap = 15;
-constexpr int kAiHarnessRowCount = 16;
+// kAiHarnessRowCount está declarado antes (junto a clamp_ai_harness_selection) —
+// se necesita ahí antes de este punto en el archivo.
+static_assert(kAiHarnessRowCount == kAiHarnessAllowRepoMap + 1,
+              "kAiHarnessRowCount (declarado junto a clamp_ai_harness_selection) "
+              "desincronizado con el último índice de fila");
 
 std::string* ai_harness_editable_field_value(SettingsModalState* state, int field) {
   if (state == nullptr) {
