@@ -1754,7 +1754,10 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     return false;
   };
 
-  ui_note(opts, "→ Explorador: " + consulta);
+  // Declara explícitamente el menú de tools activo en ESTE turno — diagnóstico
+  // directo en consola de si un toggle de Harness avanzado llegó de verdad al
+  // explorador, sin tener que ir a .tuide/ai/trace.ndjson.
+  ui_note(opts, "→ Explorador (" + tool_menu + "): " + consulta);
 
   const int explore_max_steps =
       opts.explore_max_steps > 0 ? opts.explore_max_steps : kAdminExploreMaxSteps;
