@@ -351,6 +351,20 @@ const StringTable& english_strings() {
        "Lets the explorer pull a PageRank-ranked overview of relevant symbols/files instead of "
        "grepping blind in an unfamiliar area. No LLM, uses the same symbol index the editor "
        "already builds."},
+      {"settings.ai.harness.max_grep_per_wave", "Grep patterns per wave"},
+      {"settings.ai.harness.max_grep_per_wave.detail",
+       "How many grep patterns the explorer may request in a single turn. Default 3."},
+      {"settings.ai.harness.max_read_per_wave", "Read targets per wave"},
+      {"settings.ai.harness.max_read_per_wave.detail",
+       "How many files/ranges the explorer may read in a single turn. Default 2."},
+      {"settings.ai.harness.max_grep_total", "Grep patterns per explore (total)"},
+      {"settings.ai.harness.max_grep_total.detail",
+       "Total grep patterns across all waves of one explore spawn. Raising the per-wave limit "
+       "alone does nothing once this total is hit — raise both together. Default 4."},
+      {"settings.ai.harness.max_read_total", "Read targets per explore (total)"},
+      {"settings.ai.harness.max_read_total.detail",
+       "Total reads across all waves of one explore spawn. Raise alongside the per-wave limit "
+       "for it to matter. Default 3."},
       {"settings.ai.harness.hint",
        "↑↓ select · Enter edit/toggle · numbers only for counters · Esc back to AI"},
       {"settings.toolpacks.lang.cpp", "C / C++"},

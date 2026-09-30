@@ -1487,6 +1487,12 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     }
     tool_menu += tool_names[i];
   }
+  const int grep_per_wave =
+      opts.max_grep_per_wave > 0 ? opts.max_grep_per_wave : kAdminExploreMaxGrepPerWave;
+  const int read_per_wave =
+      opts.max_read_per_wave > 0 ? opts.max_read_per_wave : kAdminExploreMaxReadPerWave;
+  const int grep_total = opts.max_grep_total > 0 ? opts.max_grep_total : kAdminExploreMaxGrep;
+  const int read_total = opts.max_read_total > 0 ? opts.max_read_total : kAdminExploreMaxRead;
   std::ostringstream sys_oss;
   sys_oss
       << "Eres el EXPLORADOR del WORKSPACE abierto (C++ u otros). Tools: " << tool_menu
@@ -1523,12 +1529,11 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       << "{\"do\":\"cerrar\",\"veredicto\":\"encontrado|no_encontrado|parcial\","
       << "\"simbolos\":[\"path:symbol\"],\"evidencia\":[\"path:línea\"],"
       << "\"falta\":[],\"why\":\"…\"}\n"
-      << "Límites por ola: ≤" << kAdminExploreMaxGrepPerWave << " greps, ≤"
-      << kAdminExploreMaxReadPerWave
+      << "Límites por ola: ≤" << grep_per_wave << " greps, ≤" << read_per_wave
       << " reads. Reads SOLO de paths ya vistos en greps de ESTE explore "
       << "(no inventes paths). Preferí path:N-M / path:N-M,a-b / path:Class::method "
-      << "tras el head; no re-leas el mismo path sin selector. Totales: ≤"
-      << kAdminExploreMaxGrep << " greps / ≤" << kAdminExploreMaxRead << " reads.\n"
+      << "tras el head; no re-leas el mismo path sin selector. Totales: ≤" << grep_total
+      << " greps / ≤" << read_total << " reads.\n"
       << "Solo paths bajo WORKSPACE_ROOT. Caza identificadores reales (FileTree, "
       << "file_tree_panel, MakeFileTreePanel, workspace_indexer, …). Ignora .tuide/ y build/.\n"
       << "pattern: literal (≤80 chars) o trozos unidos con .* (hueco en la misma línea); "
@@ -1673,8 +1678,8 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     if (out.empty()) {
       push(json_str(jobj, "pattern"));
     }
-    if (static_cast<int>(out.size()) > kAdminExploreMaxGrepPerWave) {
-      out.resize(static_cast<std::size_t>(kAdminExploreMaxGrepPerWave));
+    if (static_cast<int>(out.size()) > grep_per_wave) {
+      out.resize(static_cast<std::size_t>(grep_per_wave));
     }
     return out;
   };
@@ -1702,8 +1707,8 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     if (out.empty()) {
       push(json_str(jobj, "path"));
     }
-    if (static_cast<int>(out.size()) > kAdminExploreMaxReadPerWave) {
-      out.resize(static_cast<std::size_t>(kAdminExploreMaxReadPerWave));
+    if (static_cast<int>(out.size()) > read_per_wave) {
+      out.resize(static_cast<std::size_t>(read_per_wave));
     }
     return out;
   };
@@ -1922,7 +1927,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       continue;
     }
     if (do_kind == "grep") {
-      if (greps >= kAdminExploreMaxGrep) {
+      if (greps >= grep_total) {
         conversation += "\n\n## Usuario\nTope grep. Cierra o read.\n";
         continue;
       }
@@ -1931,7 +1936,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
         conversation += "\n\n## Usuario\ngrep exige pattern o patterns[]. Reemite.\n";
         continue;
       }
-      const int room = kAdminExploreMaxGrep - greps;
+      const int room = grep_total - greps;
       if (static_cast<int>(patterns.size()) > room) {
         patterns.resize(static_cast<std::size_t>(room));
       }
@@ -2014,7 +2019,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
       continue;
     }
     if (do_kind == "read") {
-      if (reads >= kAdminExploreMaxRead) {
+      if (reads >= read_total) {
         conversation += "\n\n## Usuario\nTope read. Cierra.\n";
         continue;
       }
@@ -2029,7 +2034,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
         conversation += "\n\n## Usuario\nread exige path o paths[]. Reemite.\n";
         continue;
       }
-      const int room = kAdminExploreMaxRead - reads;
+      const int room = read_total - reads;
       if (static_cast<int>(targets.size()) > room) {
         targets.resize(static_cast<std::size_t>(room));
       }

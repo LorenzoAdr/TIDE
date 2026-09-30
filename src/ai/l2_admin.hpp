@@ -259,6 +259,12 @@ struct AdminLoopOpts {
   bool allow_headers_of = true;
   // Herramienta "repo_map" (vista rankeada PageRank, vía ToolRegistry compartido).
   bool allow_repo_map = true;
+  // Greps/reads del explorador por ola y en total — kAdminExploreMax*PerWave /
+  // kAdminExploreMax{Grep,Read}. <=0 en cualquiera de los cuatro cae al default.
+  int max_grep_per_wave = kAdminExploreMaxGrepPerWave;
+  int max_read_per_wave = kAdminExploreMaxReadPerWave;
+  int max_grep_total = kAdminExploreMaxGrep;
+  int max_read_total = kAdminExploreMaxRead;
   std::function<void(const std::string&)> on_line;
   std::atomic<bool>* cancel = nullptr;
 };
