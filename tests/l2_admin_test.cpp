@@ -64,6 +64,8 @@ using tuide::admin_shell_enrich_result;
 using tuide::admin_shell_stays_in_workspace;
 using tuide::admin_url_fetch_allowed;
 using tuide::admin_user_prompt;
+using tuide::AdminGrepFn;
+using tuide::AdminToolFn;
 using tuide::kAdminMaxExplores;
 using tuide::kAdminMaxProposes;
 using tuide::kAdminMaxSpawns;
@@ -287,6 +289,106 @@ int main() {
       });
       const auto er2 = admin_run_explore_lite(esp, bad_read, root.string(), eopts);
       expect(er2.ok, "explore sobrevivió read no anclado");
+
+      // Reportado en producción: "tools nuevas habilitadas en Settings pero el
+      // explorador nunca las usa". Verifica que do=trail/dataflow/headers_of/
+      // repo_map se DESPACHAN de verdad (no caen en "do inválido" silencioso)
+      // cuando el explorador los pide — independiente de si un LLM concreto
+      // decide pedirlos. grep_fn/tool_fn instrumentados detectan si el código
+      // realmente llegó a invocar el motor subyacente.
+      {
+        bool grep_invoked = false;
+        AdminGrepFn grep_probe = [&](const std::string& pattern) {
+          grep_invoked = true;
+          return admin_run_search_rg(pattern, root.string());
+        };
+
+        // trail: pide la cadena de llamadas a un símbolo real del repo.
+        {
+          grep_invoked = false;
+          AdminScriptedBrain trail_brain({
+              R"({"do":"trail","symbol":"MakeFileTreePanel","why":"quien llama"})",
+          });
+          AdminLoopOpts topts;
+          topts.workspace_root = root.string();
+          topts.allow_causal_trail = true;
+          (void)admin_run_explore_lite(esp, trail_brain, root.string(), topts, grep_probe);
+          expect(grep_invoked, "do=trail invoca el motor de trail (no 'do inválido')");
+        }
+
+        // dataflow: pide decl/write/read de un nombre real del repo.
+        {
+          grep_invoked = false;
+          AdminScriptedBrain dataflow_brain({
+              R"({"do":"dataflow","name":"kAdminMaxExplores","why":"quien la usa"})",
+          });
+          AdminLoopOpts dopts;
+          dopts.workspace_root = root.string();
+          dopts.allow_dataflow_trace = true;
+          (void)admin_run_explore_lite(esp, dataflow_brain, root.string(), dopts, grep_probe);
+          expect(grep_invoked, "do=dataflow invoca el motor de dataflow (no 'do inválido')");
+        }
+
+        // headers_of: debe llegar a tool_fn("headers_of", path).
+        {
+          bool tool_invoked = false;
+          std::string tool_name_seen;
+          AdminToolFn tool_probe = [&](const std::string& name, const std::string&) {
+            tool_invoked = true;
+            tool_name_seen = name;
+            AdminJobResult r;
+            r.ok = true;
+            r.summary = "stub";
+            return r;
+          };
+          AdminScriptedBrain headers_brain({
+              R"({"do":"headers_of","path":"src/ui/file_tree_panel.cpp","why":"deps"})",
+          });
+          AdminLoopOpts hopts;
+          hopts.workspace_root = root.string();
+          hopts.allow_headers_of = true;
+          (void)admin_run_explore_lite(esp, headers_brain, root.string(), hopts, {}, tool_probe);
+          expect(tool_invoked && tool_name_seen == "headers_of",
+                 "do=headers_of invoca tool_fn (no 'do inválido')");
+        }
+
+        // repo_map: debe llegar a tool_fn("repo_map", query).
+        {
+          bool tool_invoked = false;
+          std::string tool_name_seen;
+          AdminToolFn tool_probe = [&](const std::string& name, const std::string&) {
+            tool_invoked = true;
+            tool_name_seen = name;
+            AdminJobResult r;
+            r.ok = true;
+            r.summary = "stub";
+            return r;
+          };
+          AdminScriptedBrain repo_map_brain({
+              R"({"do":"repo_map","query":"file tree","why":"orientarme"})",
+          });
+          AdminLoopOpts ropts;
+          ropts.workspace_root = root.string();
+          ropts.allow_repo_map = true;
+          (void)admin_run_explore_lite(esp, repo_map_brain, root.string(), ropts, {}, tool_probe);
+          expect(tool_invoked && tool_name_seen == "repo_map",
+                 "do=repo_map invoca tool_fn (no 'do inválido')");
+        }
+
+        // Gate: si allow_X=false, el do correspondiente NO debe despacharse
+        // aunque el modelo lo pida (cae a "do inválido", grep_fn nunca se toca).
+        {
+          grep_invoked = false;
+          AdminScriptedBrain trail_brain_off({
+              R"({"do":"trail","symbol":"MakeFileTreePanel","why":"quien llama"})",
+          });
+          AdminLoopOpts off_opts;
+          off_opts.workspace_root = root.string();
+          off_opts.allow_causal_trail = false;
+          (void)admin_run_explore_lite(esp, trail_brain_off, root.string(), off_opts, grep_probe);
+          expect(!grep_invoked, "allow_causal_trail=false bloquea do=trail de verdad");
+        }
+      }
     }
   }
   {
