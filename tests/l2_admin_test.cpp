@@ -388,6 +388,49 @@ int main() {
           (void)admin_run_explore_lite(esp, trail_brain_off, root.string(), off_opts, grep_probe);
           expect(!grep_invoked, "allow_causal_trail=false bloquea do=trail de verdad");
         }
+
+        // La línea de apertura en consola ("→ Explorador (...)") debe reflejar
+        // de verdad qué tools llegaron activas este turno — diagnóstico directo
+        // para el usuario sin tener que ir al trace.ndjson.
+        {
+          std::vector<std::string> lines_on;
+          AdminScriptedBrain brain_on({
+              R"({"do":"cerrar","veredicto":"no_encontrado","simbolos":[],"evidencia":[],"falta":[],"why":"x"})",
+          });
+          AdminLoopOpts on_opts;
+          on_opts.workspace_root = root.string();
+          on_opts.allow_causal_trail = true;
+          on_opts.allow_dataflow_trace = true;
+          on_opts.allow_headers_of = true;
+          on_opts.allow_repo_map = true;
+          on_opts.on_line = [&](const std::string& line) { lines_on.push_back(line); };
+          AdminToolFn tool_probe_on = [](const std::string&, const std::string&) {
+            return AdminJobResult{};
+          };
+          (void)admin_run_explore_lite(esp, brain_on, root.string(), on_opts, grep_probe,
+                                       tool_probe_on);
+          expect(!lines_on.empty() && lines_on.front().find("trail") != std::string::npos &&
+                     lines_on.front().find("dataflow") != std::string::npos &&
+                     lines_on.front().find("headers_of") != std::string::npos &&
+                     lines_on.front().find("repo_map") != std::string::npos,
+                 "línea de apertura del explorador lista las 4 tools cuando están activas");
+
+          std::vector<std::string> lines_off;
+          AdminScriptedBrain brain_off({
+              R"({"do":"cerrar","veredicto":"no_encontrado","simbolos":[],"evidencia":[],"falta":[],"why":"x"})",
+          });
+          AdminLoopOpts all_off_opts;
+          all_off_opts.workspace_root = root.string();
+          all_off_opts.allow_causal_trail = false;
+          all_off_opts.allow_dataflow_trace = false;
+          all_off_opts.allow_headers_of = false;
+          all_off_opts.allow_repo_map = false;
+          all_off_opts.on_line = [&](const std::string& line) { lines_off.push_back(line); };
+          (void)admin_run_explore_lite(esp, brain_off, root.string(), all_off_opts, grep_probe);
+          expect(!lines_off.empty() && lines_off.front().find("trail") == std::string::npos &&
+                     lines_off.front().find("dataflow") == std::string::npos,
+                 "línea de apertura del explorador NO lista tools desactivadas");
+        }
       }
     }
   }
