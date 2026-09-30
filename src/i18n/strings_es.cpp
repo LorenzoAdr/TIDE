@@ -355,6 +355,21 @@ const StringTable& spanish_strings() {
        "Deja que el explorador pida una vista rankeada por PageRank de símbolos/archivos "
        "relevantes en vez de grepear a ciegas en un área nueva. Sin LLM, usa el mismo índice "
        "de símbolos que ya construye el editor."},
+      {"settings.ai.harness.max_grep_per_wave", "Patterns de grep por ola"},
+      {"settings.ai.harness.max_grep_per_wave.detail",
+       "Cuántos patterns de grep puede pedir el explorador en un solo turno. Default 3."},
+      {"settings.ai.harness.max_read_per_wave", "Lecturas por ola"},
+      {"settings.ai.harness.max_read_per_wave.detail",
+       "Cuántos archivos/rangos puede leer el explorador en un solo turno. Default 2."},
+      {"settings.ai.harness.max_grep_total", "Patterns de grep por explore (total)"},
+      {"settings.ai.harness.max_grep_total.detail",
+       "Total de patterns de grep en todas las olas de un mismo spawn de explore. Subir solo "
+       "el límite por ola no hace nada si ya topas con este total — sube los dos juntos. "
+       "Default 4."},
+      {"settings.ai.harness.max_read_total", "Lecturas por explore (total)"},
+      {"settings.ai.harness.max_read_total.detail",
+       "Total de lecturas en todas las olas de un mismo spawn de explore. Súbelo junto al "
+       "límite por ola para que tenga efecto. Default 3."},
       {"settings.ai.harness.hint",
        "↑↓ selecciona · Enter edita/alterna · solo números en contadores · Esc vuelve a IA"},
       {"settings.toolpacks.lang.cpp", "C / C++"},

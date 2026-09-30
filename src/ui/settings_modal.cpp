@@ -1081,7 +1081,7 @@ void open_ai_harness_panel(SettingsModalState* state) {
 // en producción: este valor quedó en 10 desde que el panel tenía 11 filas, y
 // clamp_ai_harness_selection se llama en cada render — así que ninguna fila más
 // allá de allow_test era alcanzable pese a que ArrowDown sí incrementaba el índice).
-constexpr int kAiHarnessRowCount = 16;
+constexpr int kAiHarnessRowCount = 20;
 
 void clamp_ai_harness_selection(SettingsModalState* state) {
   if (state == nullptr) {
@@ -3235,9 +3235,13 @@ constexpr int kAiHarnessAllowCausalTrail = 12;
 constexpr int kAiHarnessAllowDataflowTrace = 13;
 constexpr int kAiHarnessAllowHeadersOf = 14;
 constexpr int kAiHarnessAllowRepoMap = 15;
+constexpr int kAiHarnessMaxGrepPerWave = 16;
+constexpr int kAiHarnessMaxReadPerWave = 17;
+constexpr int kAiHarnessMaxGrepTotal = 18;
+constexpr int kAiHarnessMaxReadTotal = 19;
 // kAiHarnessRowCount está declarado antes (junto a clamp_ai_harness_selection) —
 // se necesita ahí antes de este punto en el archivo.
-static_assert(kAiHarnessRowCount == kAiHarnessAllowRepoMap + 1,
+static_assert(kAiHarnessRowCount == kAiHarnessMaxReadTotal + 1,
               "kAiHarnessRowCount (declarado junto a clamp_ai_harness_selection) "
               "desincronizado con el último índice de fila");
 
@@ -3258,6 +3262,14 @@ std::string* ai_harness_editable_field_value(SettingsModalState* state, int fiel
       return &state->draft_harness_max_verify_passes;
     case kAiHarnessVerifyMaxSteps:
       return &state->draft_harness_verify_max_steps;
+    case kAiHarnessMaxGrepPerWave:
+      return &state->draft_harness_max_grep_per_wave;
+    case kAiHarnessMaxReadPerWave:
+      return &state->draft_harness_max_read_per_wave;
+    case kAiHarnessMaxGrepTotal:
+      return &state->draft_harness_max_grep_total;
+    case kAiHarnessMaxReadTotal:
+      return &state->draft_harness_max_read_total;
     default:
       return nullptr;
   }
@@ -3274,6 +3286,10 @@ void activate_ai_harness_option(SettingsModalState* state, int index) {
     case kAiHarnessExploreMaxSteps:
     case kAiHarnessMaxVerifyPasses:
     case kAiHarnessVerifyMaxSteps:
+    case kAiHarnessMaxGrepPerWave:
+    case kAiHarnessMaxReadPerWave:
+    case kAiHarnessMaxGrepTotal:
+    case kAiHarnessMaxReadTotal:
       state->ai_harness_editing_field = index;
       break;
     case kAiHarnessVerifierEnabled:
@@ -3399,6 +3415,18 @@ SettingsBodyContent build_ai_harness_settings(SettingsModalState* state) {
   push_bool_row(kAiHarnessAllowRepoMap, "settings.ai.harness.allow_repo_map",
                "settings.ai.harness.allow_repo_map.detail",
                state != nullptr && state->draft_harness_allow_repo_map);
+  push_int_field(kAiHarnessMaxGrepPerWave, "settings.ai.harness.max_grep_per_wave",
+                 "settings.ai.harness.max_grep_per_wave.detail",
+                 state != nullptr ? state->draft_harness_max_grep_per_wave : "");
+  push_int_field(kAiHarnessMaxReadPerWave, "settings.ai.harness.max_read_per_wave",
+                 "settings.ai.harness.max_read_per_wave.detail",
+                 state != nullptr ? state->draft_harness_max_read_per_wave : "");
+  push_int_field(kAiHarnessMaxGrepTotal, "settings.ai.harness.max_grep_total",
+                 "settings.ai.harness.max_grep_total.detail",
+                 state != nullptr ? state->draft_harness_max_grep_total : "");
+  push_int_field(kAiHarnessMaxReadTotal, "settings.ai.harness.max_read_total",
+                 "settings.ai.harness.max_read_total.detail",
+                 state != nullptr ? state->draft_harness_max_read_total : "");
 
   const bool editing = state != nullptr && state->ai_harness_editing_field >= 0;
   if (editing) {
@@ -4121,7 +4149,11 @@ bool workspace_config_eq(const WorkspaceConfig& a, const WorkspaceConfig& b) {
          a.ai.harness.allow_causal_trail == b.ai.harness.allow_causal_trail &&
          a.ai.harness.allow_dataflow_trace == b.ai.harness.allow_dataflow_trace &&
          a.ai.harness.allow_headers_of == b.ai.harness.allow_headers_of &&
-         a.ai.harness.allow_repo_map == b.ai.harness.allow_repo_map;
+         a.ai.harness.allow_repo_map == b.ai.harness.allow_repo_map &&
+         a.ai.harness.max_grep_per_wave == b.ai.harness.max_grep_per_wave &&
+         a.ai.harness.max_read_per_wave == b.ai.harness.max_read_per_wave &&
+         a.ai.harness.max_grep_total == b.ai.harness.max_grep_total &&
+         a.ai.harness.max_read_total == b.ai.harness.max_read_total;
 }
 
 bool clang_format_eq(const ClangFormatConfig& a, const ClangFormatConfig& b) {
@@ -4228,6 +4260,10 @@ WorkspaceConfig workspace_config_from_draft(const SettingsModalState& state) {
     h.allow_dataflow_trace = state.draft_harness_allow_dataflow_trace;
     h.allow_headers_of = state.draft_harness_allow_headers_of;
     h.allow_repo_map = state.draft_harness_allow_repo_map;
+    h.max_grep_per_wave = parse_clamped(state.draft_harness_max_grep_per_wave, 3, 1, 20);
+    h.max_read_per_wave = parse_clamped(state.draft_harness_max_read_per_wave, 2, 1, 20);
+    h.max_grep_total = parse_clamped(state.draft_harness_max_grep_total, 4, 1, 50);
+    h.max_read_total = parse_clamped(state.draft_harness_max_read_total, 3, 1, 50);
   }
   return workspace;
 }
@@ -4334,6 +4370,14 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_harness_allow_dataflow_trace = workspace_config.ai.harness.allow_dataflow_trace;
   state->draft_harness_allow_headers_of = workspace_config.ai.harness.allow_headers_of;
   state->draft_harness_allow_repo_map = workspace_config.ai.harness.allow_repo_map;
+  state->draft_harness_max_grep_per_wave =
+      std::to_string(workspace_config.ai.harness.max_grep_per_wave);
+  state->draft_harness_max_read_per_wave =
+      std::to_string(workspace_config.ai.harness.max_read_per_wave);
+  state->draft_harness_max_grep_total =
+      std::to_string(workspace_config.ai.harness.max_grep_total);
+  state->draft_harness_max_read_total =
+      std::to_string(workspace_config.ai.harness.max_read_total);
   state->ai_harness_selected = 0;
   state->ai_harness_editing_field = -1;
   state->draft_key_overrides = keybind_registry().overrides();

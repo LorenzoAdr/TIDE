@@ -431,6 +431,58 @@ int main() {
                      lines_off.front().find("dataflow") == std::string::npos,
                  "línea de apertura del explorador NO lista tools desactivadas");
         }
+
+        // max_grep_per_wave / max_grep_total: confirma que el ajuste realmente
+        // cambia cuántos patterns se ejecutan, no solo el texto del prompt.
+        {
+          int grep_calls = 0;
+          AdminGrepFn grep_counter = [&](const std::string& pattern) {
+            ++grep_calls;
+            return admin_run_search_rg(pattern, root.string());
+          };
+          const char* kFivePatternsGrep =
+              R"({"do":"grep","patterns":["MakeFileTreePanel","FileTreeNode","FileTree",)"
+              R"("file_tree_panel","indexer"],"why":"batch"})";
+          const char* kCerrarNoEncontrado =
+              R"({"do":"cerrar","veredicto":"no_encontrado","simbolos":[],"evidencia":[],)"
+              R"("falta":[],"why":"x"})";
+
+          // Default (3 por ola, 4 en total): 5 patterns pedidos → recortados a 3.
+          {
+            grep_calls = 0;
+            AdminScriptedBrain brain({kFivePatternsGrep, kCerrarNoEncontrado});
+            AdminLoopOpts dopts;
+            dopts.workspace_root = root.string();
+            (void)admin_run_explore_lite(esp, brain, root.string(), dopts, grep_counter);
+            expect(grep_calls == 3, "default max_grep_per_wave=3 recorta 5 patterns a 3");
+          }
+
+          // Subir per-wave Y total a 5: los 5 patterns deben ejecutarse.
+          {
+            grep_calls = 0;
+            AdminScriptedBrain brain({kFivePatternsGrep, kCerrarNoEncontrado});
+            AdminLoopOpts uopts;
+            uopts.workspace_root = root.string();
+            uopts.max_grep_per_wave = 5;
+            uopts.max_grep_total = 5;
+            (void)admin_run_explore_lite(esp, brain, root.string(), uopts, grep_counter);
+            expect(grep_calls == 5,
+                   "max_grep_per_wave=5 + max_grep_total=5 permite los 5 patterns");
+          }
+
+          // Subir SOLO per-wave sin el total: sigue acotado por el total (4) —
+          // el detail de Settings advierte justo esto.
+          {
+            grep_calls = 0;
+            AdminScriptedBrain brain({kFivePatternsGrep, kCerrarNoEncontrado});
+            AdminLoopOpts popts;
+            popts.workspace_root = root.string();
+            popts.max_grep_per_wave = 5;
+            (void)admin_run_explore_lite(esp, brain, root.string(), popts, grep_counter);
+            expect(grep_calls == 4,
+                   "max_grep_per_wave solo, sin subir max_grep_total, queda acotado al total");
+          }
+        }
       }
     }
   }

@@ -1200,6 +1200,10 @@ void AiController::run_admin_async(const std::string& message) {
       eopts.allow_dataflow_trace = settings_.harness.allow_dataflow_trace;
       eopts.allow_headers_of = settings_.harness.allow_headers_of;
       eopts.allow_repo_map = settings_.harness.allow_repo_map;
+      eopts.max_grep_per_wave = settings_.harness.max_grep_per_wave;
+      eopts.max_read_per_wave = settings_.harness.max_read_per_wave;
+      eopts.max_grep_total = settings_.harness.max_grep_total;
+      eopts.max_read_total = settings_.harness.max_read_total;
       eopts.on_line = [this](const std::string& line) { append(line); };
       eopts.cancel = &agent_cancel_;
       AdminGrepFn grep;

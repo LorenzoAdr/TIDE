@@ -189,8 +189,13 @@ struct SettingsModalState {
   bool draft_harness_allow_dataflow_trace = true;
   bool draft_harness_allow_headers_of = true;
   bool draft_harness_allow_repo_map = true;
+  std::string draft_harness_max_grep_per_wave;
+  std::string draft_harness_max_read_per_wave;
+  std::string draft_harness_max_grep_total;
+  std::string draft_harness_max_read_total;
   int ai_harness_selected = 0;
-  // -1 = not editing; 0..5 = los seis campos numéricos arriba (mismo orden).
+  // -1 = not editing; ver los índices kAiHarness* en settings_modal.cpp para
+  // qué filas son numéricas (editables) vs. checkbox.
   int ai_harness_editing_field = -1;
 
   // Shortcuts tab (non-Helix keybindings).

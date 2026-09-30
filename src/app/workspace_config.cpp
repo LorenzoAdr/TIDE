@@ -329,6 +329,18 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
     if (h.contains("allow_repo_map") && h["allow_repo_map"].is_boolean()) {
       out.allow_repo_map = h["allow_repo_map"].get<bool>();
     }
+    if (h.contains("max_grep_per_wave") && h["max_grep_per_wave"].is_number_integer()) {
+      out.max_grep_per_wave = h["max_grep_per_wave"].get<int>();
+    }
+    if (h.contains("max_read_per_wave") && h["max_read_per_wave"].is_number_integer()) {
+      out.max_read_per_wave = h["max_read_per_wave"].get<int>();
+    }
+    if (h.contains("max_grep_total") && h["max_grep_total"].is_number_integer()) {
+      out.max_grep_total = h["max_grep_total"].get<int>();
+    }
+    if (h.contains("max_read_total") && h["max_read_total"].is_number_integer()) {
+      out.max_read_total = h["max_read_total"].get<int>();
+    }
   }
 }
 
@@ -408,7 +420,11 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
         {"allow_causal_trail", settings.harness.allow_causal_trail},
         {"allow_dataflow_trace", settings.harness.allow_dataflow_trace},
         {"allow_headers_of", settings.harness.allow_headers_of},
-        {"allow_repo_map", settings.harness.allow_repo_map}}},
+        {"allow_repo_map", settings.harness.allow_repo_map},
+        {"max_grep_per_wave", settings.harness.max_grep_per_wave},
+        {"max_read_per_wave", settings.harness.max_read_per_wave},
+        {"max_grep_total", settings.harness.max_grep_total},
+        {"max_read_total", settings.harness.max_read_total}}},
   };
 }
 

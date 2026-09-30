@@ -225,6 +225,15 @@ struct AiHarnessSettings {
   // Herramienta "repo_map": vista del repo rankeada por PageRank vía SymbolWorkspaceIndexer
   // (ya registrada en el ToolRegistry compartido). Default true.
   bool allow_repo_map = true;
+  // Cuántos patterns de grep / paths de read puede pedir el explorador EN UNA
+  // SOLA ola (un turno LLM) — kAdminExploreMaxGrepPerWave/MaxReadPerWave.
+  int max_grep_per_wave = 3;
+  int max_read_per_wave = 2;
+  // Tope ACUMULADO de greps/reads en todo el explore (varias olas) —
+  // kAdminExploreMaxGrep/MaxRead. Si este total es bajo, subir el límite por
+  // ola no sirve de mucho: sube ambos a la vez si quieres más margen real.
+  int max_grep_total = 4;
+  int max_read_total = 3;
 };
 
 struct AiSettings {
