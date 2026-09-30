@@ -1179,14 +1179,30 @@ add_executable(l2_admin_test
   src/ai/search_replace.cpp
   src/ai/l2_grammar.cpp
   src/ai/l2_explore_a.cpp
-  tests/l2_explore_a_trail_stub.cpp
+  # Trail real (no el stub): el binario tuide de producción enlaza la
+  # implementación real (con tree-sitter) para do=trail del explorador — usar
+  # el stub aquí habría dejado una regresión de despacho sin cobertura (el
+  # stub ignora el callback de búsqueda y siempre devuelve vacío).
+  src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_effect_summary.cpp
   src/ai/l2_problem_frame.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(l2_admin_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
 )
+target_link_libraries(l2_admin_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
 
 add_executable(l2_catalog_test
   tests/l2_catalog_test.cpp
