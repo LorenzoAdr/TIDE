@@ -686,10 +686,10 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
                   replace_input, path_input, include_input, exclude_input, query_option,
                   activate_field, forward_input_event](Event event) {
     if (event == Event::Custom) {
+      // Only poll for completion. Do NOT re-wake while runner.running(): that
+      // creates a Custom→wake→Custom storm that starves input until rg finishes.
+      // BusyStrip animates ProjectSearch via its own ANSI ticker (no UI_WAKE).
       poll_search_results(state.get(), layout_state);
-      if (state->runner.running() && layout_state != nullptr) {
-        wake_console_panel(layout_state);
-      }
     }
     if (event == Event::Custom && sidebar != nullptr && sidebar->pending_search_setup) {
       state->query = sidebar->pending_search_query;
