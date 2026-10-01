@@ -25,22 +25,31 @@ class WorkspaceSearchRunner {
 
   void set_wake_callback(std::function<void()> callback);
   void start(WorkspaceSearchOptions opts);
+  void start_replace(WorkspaceSearchOptions opts, std::string replacement);
   void cancel();
   bool running() const;
 
   // Devuelve true si hay resultados nuevos o cambió el estado (cancelado / terminado).
   bool poll(std::vector<WorkspaceSearchResult>* results, bool* cancelled, int* files_scanned,
             bool* used_rg = nullptr);
+  // Devuelve true cuando un replace async terminó (o fue cancelado).
+  bool poll_replace(WorkspaceReplaceResult* result, bool* cancelled);
 
  private:
+  enum class JobKind { Search, Replace };
+
   struct Job {
     uint64_t generation = 0;
+    JobKind kind = JobKind::Search;
     WorkspaceSearchOptions opts;
+    std::string replacement;
   };
 
   void stop_worker();
   void worker_main();
   void run_job(uint64_t generation, WorkspaceSearchOptions opts);
+  void run_replace_job(uint64_t generation, WorkspaceSearchOptions opts,
+                       const std::string& replacement);
   void search_inprocess(uint64_t generation, const WorkspaceSearchOptions& opts,
                         const std::vector<std::string>& files,
                         std::vector<WorkspaceSearchResult>* results, int* files_scanned,
@@ -54,6 +63,8 @@ class WorkspaceSearchRunner {
   std::function<void()> wake_callback_;
 
   std::vector<WorkspaceSearchResult> results_;
+  WorkspaceReplaceResult replace_result_;
+  bool replace_ready_ = false;
   int files_scanned_ = 0;
   bool cancelled_ = false;
   bool finished_ = false;

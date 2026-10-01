@@ -1,5 +1,6 @@
 #include "ui/editor_panel.hpp"
 #include "editor/visual_highlight.hpp"
+#include "ui/busy_strip.hpp"
 #include "ui/ui_wake_policy.hpp"
 #include "ai/edit_journal.hpp"
 
@@ -3672,6 +3673,43 @@ bool try_go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
     return false;
   }
   flash_symbol_at_cursor(workspace, layout_state, panel_state, line, col, visible_lines);
+
+  if (symbols->navigation_uses_async_fetch() && layout_state != nullptr) {
+    const uint64_t request_id = ++layout_state->lsp_interactive_request_id;
+    const NavigationRequestKind kind =
+        declaration ? NavigationRequestKind::Declaration : NavigationRequestKind::Definition;
+    layout_state->lsp_interactive_ready_handler =
+        [workspace, layout_state, request_id, declaration, visible_lines](ISymbolProvider* provider) {
+          if (provider == nullptr) {
+            return;
+          }
+          auto polled = provider->poll_navigation(request_id);
+          if (!polled) {
+            return;
+          }
+          layout_state->lsp_interactive_ready_handler = nullptr;
+          clear_busy_if(layout_state, BusyActivity::LspNavigate);
+          if (!polled->loc.valid) {
+            if (workspace != nullptr) {
+              workspace->status_message = declaration ? i18n::tr("status.no_declaration")
+                                                      : i18n::tr("status.no_definition");
+            }
+            return;
+          }
+          apply_editor_navigation(layout_state, polled->loc, [&](const SourceLocation& target) {
+            navigate_to_location(workspace, layout_state, target, visible_lines);
+          });
+        };
+    if (!symbols->request_navigation(params, kind, request_id)) {
+      layout_state->lsp_interactive_ready_handler = nullptr;
+      workspace->status_message =
+          declaration ? i18n::tr("status.no_declaration") : i18n::tr("status.no_definition");
+      return false;
+    }
+    set_busy_spinner(layout_state, BusyActivity::LspNavigate);
+    return true;
+  }
+
   SourceLocation loc = resolve_symbol_navigation(*symbols, params, declaration);
   if (!loc.valid) {
     workspace->status_message =

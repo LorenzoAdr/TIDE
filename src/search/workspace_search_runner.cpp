@@ -121,12 +121,37 @@ void WorkspaceSearchRunner::start(WorkspaceSearchOptions opts) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     results_.clear();
+    replace_result_ = {};
+    replace_ready_ = false;
     files_scanned_ = 0;
     cancelled_ = false;
     finished_ = false;
     used_rg_ = false;
     ready_generation_ = 0;
-    pending_job_ = Job{gen, std::move(opts)};
+    pending_job_ = Job{gen, JobKind::Search, std::move(opts), {}};
+    running_ = true;
+  }
+  cv_.notify_one();
+}
+
+void WorkspaceSearchRunner::start_replace(WorkspaceSearchOptions opts, std::string replacement) {
+  const pid_t pid = child_pid_.load();
+  if (pid > 0) {
+    kill(pid, SIGTERM);
+  }
+  const uint64_t gen = generation_.fetch_add(1) + 1;
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    results_.clear();
+    replace_result_ = {};
+    replace_ready_ = false;
+    files_scanned_ = 0;
+    cancelled_ = false;
+    finished_ = false;
+    used_rg_ = false;
+    ready_generation_ = 0;
+    pending_job_ = Job{gen, JobKind::Replace, std::move(opts), std::move(replacement)};
     running_ = true;
   }
   cv_.notify_one();
@@ -166,6 +191,21 @@ bool WorkspaceSearchRunner::poll(std::vector<WorkspaceSearchResult>* results, bo
     *used_rg = used_rg_;
   }
   ready_generation_ = 0;
+  return true;
+}
+
+bool WorkspaceSearchRunner::poll_replace(WorkspaceReplaceResult* result, bool* cancelled) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!replace_ready_) {
+    return false;
+  }
+  if (result != nullptr) {
+    *result = replace_result_;
+  }
+  if (cancelled != nullptr) {
+    *cancelled = cancelled_;
+  }
+  replace_ready_ = false;
   return true;
 }
 
@@ -253,6 +293,44 @@ void WorkspaceSearchRunner::run_job(uint64_t generation, WorkspaceSearchOptions 
   notify_wake();
 }
 
+void WorkspaceSearchRunner::run_replace_job(uint64_t generation, WorkspaceSearchOptions opts,
+                                            const std::string& replacement) {
+  TUIDE_MON_SCOPE("idx", "workspace_replace");
+  WorkspaceReplaceResult result;
+  bool cancelled = false;
+
+  if (cancel_requested_.load() || generation_.load() != generation) {
+    cancelled = true;
+  } else {
+    if (workspace_search_files(opts).empty() && !opts.workspace_root.empty()) {
+      opts.files = scan_workspace_files(opts.workspace_root);
+    }
+    if (!(cancel_requested_.load() || generation_.load() != generation)) {
+      result = replace_in_workspace(opts, replacement);
+    } else {
+      cancelled = true;
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (generation_.load() != generation) {
+      if (!pending_job_.has_value()) {
+        running_ = false;
+      }
+    } else {
+      replace_result_ = result;
+      replace_ready_ = true;
+      cancelled_ = cancelled;
+      finished_ = true;
+      if (!pending_job_.has_value()) {
+        running_ = false;
+      }
+    }
+  }
+  notify_wake();
+}
+
 void WorkspaceSearchRunner::worker_main() {
   set_current_thread_name("ws-search");
 
@@ -277,7 +355,11 @@ void WorkspaceSearchRunner::worker_main() {
     }
 
     cancel_requested_ = false;
-    run_job(job.generation, std::move(job.opts));
+    if (job.kind == JobKind::Replace) {
+      run_replace_job(job.generation, std::move(job.opts), job.replacement);
+    } else {
+      run_job(job.generation, std::move(job.opts));
+    }
   }
 }
 
