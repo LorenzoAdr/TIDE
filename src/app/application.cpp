@@ -361,6 +361,8 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		}
 		workspace->enqueue_ui_task = [this](WorkspaceModel::UiTask task) {
 			enqueue_ui_task(std::move(task));
+			// Workers post completion via this queue; wake so drain_ui_tasks runs.
+			UI_WAKE(&layout_state_, "app");
 		};
 	};
 	wire_ui_tasks(&workspace_);

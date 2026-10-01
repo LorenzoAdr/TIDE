@@ -1097,6 +1097,7 @@ const StringTable& spanish_strings() {
       {"editor.tabular.no_data_rows", "(sin filas de datos)"},
       {"editor.virtual.readonly_status", "Vista de archivo grande (virtualizado)"},
       {"editor.virtual.indexing", "Indexando archivo grande…"},
+      {"editor.loading", "Cargando archivo…"},
       {"editor.virtual.open_failed", "No se pudo abrir el archivo"},
       {"editor.virtual.loading_lines", "Cargando más líneas…"},
       {"editor.virtual.limited_status", "Archivo grande virtualizado (sin búsqueda/LSP completos)"},

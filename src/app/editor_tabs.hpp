@@ -18,6 +18,14 @@ struct EditorTab {
   bool read_only = false;
   bool large_virtual_view = false;
   bool git_diff_view = false;
+  // True while a background worker is reading the file into this tab.
+  // The buffer holds a placeholder until apply_async_disk_load finishes.
+  bool pending_disk_load = false;
+  uint64_t disk_load_generation = 0;
+  // Caret requested via open_file_at while the async load was still in flight.
+  // Re-applied (with clamping) when lines arrive. -1 means none.
+  int pending_caret_line = -1;
+  int pending_caret_col = 0;
   // File mtime (seconds since epoch) when the buffer was last loaded or saved.
   // Used to detect external edits (formatters, git hooks, etc.).
   std::int64_t disk_mtime_sec = 0;

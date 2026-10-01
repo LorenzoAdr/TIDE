@@ -1092,6 +1092,7 @@ const StringTable& english_strings() {
       {"editor.tabular.no_data_rows", "(no data rows)"},
       {"editor.virtual.readonly_status", "Large file view (virtualized)"},
       {"editor.virtual.indexing", "Indexing large file…"},
+      {"editor.loading", "Loading file…"},
       {"editor.virtual.open_failed", "Could not open file"},
       {"editor.virtual.loading_lines", "Loading more lines…"},
       {"editor.virtual.limited_status", "Large virtualized file (no full search/LSP)"},

@@ -282,6 +282,9 @@ struct EditorPanelState {
   uint64_t guide_tracker_view_token = 0;
   bool document_open_pending = false;
   std::string pending_document_open_path;
+  // Set when path changes while an async disk load is still in flight; cleared
+  // when consume_document_open_notify / load completion arms document_open_pending.
+  bool awaiting_async_open = false;
   bool chord_k_pending = false;
   SnippetSession snippet_session;
   HelixEditorState helix;
@@ -351,6 +354,36 @@ int64_t steady_now_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
+}
+
+// Arms LSP/tree-sitter after an async disk open finishes. Safe to call from
+// tick and render; consume_document_open_notify makes it one-shot.
+bool maybe_finish_async_document_open(WorkspaceModel* workspace, EditorPanelState* panel,
+                                      MainLayoutState* layout_state) {
+  if (workspace == nullptr || panel == nullptr || !workspace->consume_document_open_notify()) {
+    return false;
+  }
+  EditorBuffer& buffer = workspace->buffer;
+  const bool pending_disk_load = workspace->active_tab_pending_disk_load();
+  const bool diff_view = workspace->active_tab_git_diff_view();
+  panel->awaiting_async_open = false;
+  panel->document_open_pending =
+      !diff_view && !workspace->active_tab_read_only() && !buffer.path.empty() &&
+      !workspace->active_tab_large_virtual_view() && !pending_disk_load &&
+      !is_tabular_path(buffer.path);
+  panel->pending_document_open_path = buffer.path;
+  panel->semantic_tokens_enqueue_pending = panel->document_open_pending;
+  panel->viewport_line_render_cache.clear();
+  panel->line_syntax_span_cache.clear();
+  mark_visual_highlight_content_dirty(&panel->visual_highlight, steady_now_ms());
+  if (panel->document_open_pending && is_indexed_source_path(buffer.path)) {
+    tree_sitter_service().prepare_document(buffer.path, editor_buffer_joined_source(buffer));
+  }
+  if (layout_state != nullptr) {
+    UI_WAKE(layout_state, "editor.open.ready");
+    invalidate_editor_view(layout_state);
+  }
+  return true;
 }
 
 constexpr uint64_t kViewportLineHashOffset = 14695981039346656037ULL;
@@ -6443,9 +6476,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->h_scrollbar_dragging = false;
       panel_state->h_scrollbar_layout = {};
       clear_hover_state(&panel_state->hover);
+      const bool pending_disk_load = workspace->active_tab_pending_disk_load();
       panel_state->document_open_pending =
           !diff_view && !read_only_tab && !buffer.path.empty() &&
-          !workspace->active_tab_large_virtual_view();
+          !workspace->active_tab_large_virtual_view() && !pending_disk_load;
+      panel_state->awaiting_async_open = pending_disk_load;
       panel_state->pending_document_open_path = buffer.path;
       panel_state->tabular_layout_path.clear();
       panel_state->tabular_layout_line_count = 0;
@@ -6476,10 +6511,14 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         UI_WAKE(layout_state, "editor.open");
       }
       buffer.scroll = diff_view ? 0 : std::max(0, buffer.primary_line() - 2);
-      if (!diff_view && !read_only_tab && is_indexed_source_path(buffer.path)) {
+      // Defer tree-sitter prepare until the async disk load has real text.
+      if (!diff_view && !read_only_tab && !pending_disk_load &&
+          is_indexed_source_path(buffer.path)) {
         tree_sitter_service().prepare_document(buffer.path, editor_buffer_joined_source(buffer));
       }
     }
+
+    maybe_finish_async_document_open(workspace, panel_state.get(), layout_state);
 
     const bool large_virtual_view = workspace->active_tab_large_virtual_view();
     const bool tabular_view = is_tabular_path(buffer.path);
@@ -6867,6 +6906,24 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           vertical_scrollbar(1, 0, 1, rendered_lines, false, false) |
           reflect(panel_state->scrollbar_box);
       panel_state->scrollbar_layout = compute_scrollbar_layout(1, 0, 1, rendered_lines);
+      panel_state->h_scrollbar_layout = {};
+      return hbox({gutter, separator() | color(theme::AccentDim()), code | flex, scrollbar}) |
+             flex;
+    }
+
+    if (workspace->active_tab_pending_disk_load()) {
+      const Decorator row_bg = bgcolor(theme::CodeBg());
+      Elements gutter_rows = {
+          text(format_line_number(1, 4)) | color(theme::Muted()) | row_bg};
+      Elements code_rows = {
+          text(i18n::tr("editor.loading")) | color(theme::Muted()) | row_bg};
+      Element gutter = vbox(std::move(gutter_rows)) | bgcolor(theme::CodeBg()) |
+                       reflect(panel_state->gutter_box);
+      Element code = vbox(std::move(code_rows)) | flex | bgcolor(theme::CodeBg()) |
+                     reflect(panel_state->code_box);
+      Element scrollbar =
+          vertical_scrollbar(1, 0, 1, 1, false, false) | reflect(panel_state->scrollbar_box);
+      panel_state->scrollbar_layout = compute_scrollbar_layout(1, 0, 1, 1);
       panel_state->h_scrollbar_layout = {};
       return hbox({gutter, separator() | color(theme::AccentDim()), code | flex, scrollbar}) |
              flex;
@@ -7886,6 +7943,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                             panel_state.get());
       }
       workspace->ensure_buffer();
+      maybe_finish_async_document_open(workspace, panel_state.get(), layout_state);
       const bool vh_focused = focus != nullptr && focus->region == panel_focus;
       const bool path_indexed =
           !workspace->buffer.path.empty() && is_indexed_source_path(workspace->buffer.path);
