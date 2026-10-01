@@ -12,6 +12,7 @@
 #include "app/app_settings.hpp"
 #include "editor/bracket_match.hpp"
 #include "editor/editor_folds.hpp"
+#include "editor/editor_text.hpp"
 #include "editor/text_search.hpp"
 #include "parser/tree_sitter_locals.hpp"
 #include "symbols/symbol_provider.hpp"
@@ -125,6 +126,8 @@ struct VisualHighlightJobInputs {
   std::vector<TextMatch> text_matches;
 };
 
+using VisualHighlightInputsBuilder = std::function<VisualHighlightJobInputs()>;
+
 struct VisualHighlightSelectionQuery {
   bool active = false;
   std::string needle;
@@ -132,11 +135,12 @@ struct VisualHighlightSelectionQuery {
   VisualHighlightSelectionKey key;
 };
 
+// Document text is shipped as an O(1) EditorText clone (immutable rope share).
+// Full join / to_vector materialization happens on the vh-compute worker.
 struct VisualHighlightJob {
   uint64_t generation = 0;
   std::string path;
-  std::string source;
-  std::vector<std::string> lines;
+  EditorText lines_snapshot;
   int cursor_line = 0;
   int cursor_col = 0;
   uint64_t doc_revision = 0;
@@ -198,7 +202,7 @@ void mark_visual_highlight_dirty(VisualHighlightPanelState* state, int64_t now_m
 void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                      const VisualHighlightConfig& config, bool editor_focused,
                                      bool indexed_source, bool content_settled, int64_t now_ms,
-                                     const VisualHighlightJobInputs& inputs,
+                                     VisualHighlightInputsBuilder build_inputs,
                                      bool selection_in_progress = false);
 
 bool drain_visual_highlight_results(VisualHighlightPanelState* state, const EditorBuffer& buffer,

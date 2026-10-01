@@ -7919,16 +7919,22 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           maybe_mark_visual_highlight_inputs_dirty(
               &panel_state->visual_highlight, panel_state.get(), code_width, find_state.get(),
               find_state->open, vh_now);
-          const VisualHighlightJobInputs vh_inputs = build_visual_highlight_job_inputs(
-              panel_state.get(), workspace->buffer, code_width, visible, symbols.get(),
-              find_state.get(), workspace->last_buffer_edit_ms, layout_state, find_state->open);
+          // Defer heavy input copies (git HEAD lines, find matches) until a job is
+          // actually dispatched -- avoids O(n) copies on every editor tick.
+          auto build_vh_inputs = [panel = panel_state.get(), workspace, code_width, visible,
+                                  symbols = symbols.get(), find = find_state.get(), layout_state,
+                                  find_open = find_state->open]() {
+            return build_visual_highlight_job_inputs(
+                panel, workspace->buffer, code_width, visible, symbols, find,
+                workspace->last_buffer_edit_ms, layout_state, find_open);
+          };
           const bool selection_in_progress =
               panel_state->mouse_selecting || panel_state->helix.mode == HelixMode::kSelect;
           UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".visual_highlight");
           const bool content_settled = editor_content_settled(*panel_state);
           tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
                                           vh_config, vh_focused, path_indexed, content_settled,
-                                          vh_now, vh_inputs, selection_in_progress);
+                                          vh_now, build_vh_inputs, selection_in_progress);
           bool vh_view_invalidated = false;
           if (drain_visual_highlight_results(&panel_state->visual_highlight, workspace->buffer,
                                              layout_state, vh_focused)) {
@@ -7948,7 +7954,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               !panel_state->visual_highlight.job_inflight && !selection_in_progress) {
             tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
                                             vh_config, vh_focused, path_indexed, content_settled,
-                                            vh_now, vh_inputs, selection_in_progress);
+                                            vh_now, build_vh_inputs, selection_in_progress);
           }
         } else if (apply_visual_highlight_fold_regions(&workspace->buffer,
                                                        &panel_state->visual_highlight, vh_config,
