@@ -435,6 +435,11 @@ bool LspClient::send_lsp_request(const std::string& method, nlohmann::json param
       request_counter_->fetch_add(1, std::memory_order_relaxed);
     }
   }
+  // write_request only enqueues; flush so prior didChange bytes hit the pipe
+  // before we start waiting on the response.
+  if (!transport_.flush_writes(timeout_ms)) {
+    return false;
+  }
   const bool ok = transport_.wait_response(id, timeout_ms, out);
   return ok;
 }
@@ -475,6 +480,13 @@ bool LspClient::send_completion_request(nlohmann::json params, int timeout_ms,
     if (request_counter_ != nullptr) {
       request_counter_->fetch_add(1, std::memory_order_relaxed);
     }
+  }
+
+  if (!transport_.flush_writes(timeout_ms)) {
+    if (inflight_completion_request_id_.load(std::memory_order_acquire) == id) {
+      inflight_completion_request_id_.store(0, std::memory_order_release);
+    }
+    return false;
   }
 
   const bool ok = transport_.wait_response(id, timeout_ms, out);
