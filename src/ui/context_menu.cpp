@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -1010,6 +1009,7 @@ void focus_call_hierarchy(MainLayoutState* layout_state, int line, int col,
   layout_state->right_panel_active_section = 0;
   layout_state->right_sidebar.pending_references = false;
   layout_state->right_sidebar.pending_causal_flow = false;
+  layout_state->right_sidebar.pending_causal_connect = false;
   layout_state->right_sidebar.pending_call_hierarchy = true;
   layout_state->right_sidebar.pending_call_hierarchy_line = line;
   layout_state->right_sidebar.pending_call_hierarchy_col = col;
@@ -1029,6 +1029,7 @@ void focus_references(MainLayoutState* layout_state, int line, int col,
   layout_state->right_panel_active_section = 0;
   layout_state->right_sidebar.pending_call_hierarchy = false;
   layout_state->right_sidebar.pending_causal_flow = false;
+  layout_state->right_sidebar.pending_causal_connect = false;
   layout_state->right_sidebar.pending_references = true;
   layout_state->right_sidebar.pending_references_line = line;
   layout_state->right_sidebar.pending_references_col = col;
@@ -1038,18 +1039,8 @@ void focus_references(MainLayoutState* layout_state, int line, int col,
   wake_console_panel(layout_state);
 }
 
-void focus_causal_flow(MainLayoutState* layout_state, const std::string& symbol) {
-  // #region agent log
-  {
-    std::ofstream dbg("/home/lorenzo/workspace/TIDE/.cursor/debug-ecd160.log", std::ios::app);
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::system_clock::now().time_since_epoch())
-                        .count();
-    dbg << "{\"sessionId\":\"ecd160\",\"hypothesisId\":\"A\",\"location\":\"context_menu.cpp:focus_causal_flow\",\"message\":\"menu action\",\"data\":{\"symbolLen\":"
-        << symbol.size() << ",\"layout\":" << (layout_state != nullptr ? "true" : "false")
-        << "},\"timestamp\":" << ms << "}\n";
-  }
-  // #endregion
+void focus_causal_flow(MainLayoutState* layout_state, const std::string& symbol, bool connect,
+                       int line, const std::string& path) {
   if (layout_state == nullptr || symbol.empty()) {
     return;
   }
@@ -1058,8 +1049,12 @@ void focus_causal_flow(MainLayoutState* layout_state, const std::string& symbol)
   layout_state->right_panel_active_section = 0;
   layout_state->right_sidebar.pending_call_hierarchy = false;
   layout_state->right_sidebar.pending_references = false;
-  layout_state->right_sidebar.pending_causal_flow = true;
-  layout_state->right_sidebar.pending_causal_flow_symbol = symbol;
+  layout_state->right_sidebar.pending_causal_flow = !connect;
+  layout_state->right_sidebar.pending_causal_flow_symbol = connect ? std::string{} : symbol;
+  layout_state->right_sidebar.pending_causal_flow_line = connect ? -1 : line;
+  layout_state->right_sidebar.pending_causal_flow_path = connect ? std::string{} : path;
+  layout_state->right_sidebar.pending_causal_connect = connect;
+  layout_state->right_sidebar.pending_causal_connect_symbol = connect ? symbol : std::string{};
   layout_state->text_input_focus = TextInputFocus::None;
   layout_state->focus_sync_needed = true;
   wake_console_panel(layout_state);
@@ -1546,8 +1541,9 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
-  if (action_id == "causal_flow") {
-    focus_causal_flow(layout_state, state->symbol_name);
+  if (action_id == "causal_flow" || action_id == "causal_connect") {
+    focus_causal_flow(layout_state, state->symbol_name, action_id == "causal_connect",
+                      state->editor_line, state->absolute_path);
     if (focus != nullptr) {
       focus->region = FocusRegion::RightPanel;
     }
@@ -2047,7 +2043,8 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
                                      int sym_start, int sym_end, const std::string& symbol,
                                      const std::string& absolute_path, bool show_call_hierarchy,
                                      bool show_references, const DebugModel* model,
-                                     bool has_selection, bool ai_actions_enabled) {
+                                     bool has_selection, bool ai_actions_enabled,
+                                     MainLayoutState* layout_state) {
   if (state == nullptr || symbol.empty()) {
     return;
   }
@@ -2078,7 +2075,16 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   if (show_references) {
     items.push_back({i18n::tr("context_menu.find_references"), "find_references"});
   }
+  bool causal_connect = false;
+  if (layout_state != nullptr) {
+    const CallHierarchyViewState& flow = layout_state->right_sidebar.call_hierarchy;
+    causal_connect = flow.active && flow.kind == CallHierarchyContentKind::CausalFlow &&
+                     symbol != flow.root_label;
+  }
   items.push_back({i18n::tr("context_menu.causal_flow"), "causal_flow"});
+  if (causal_connect) {
+    items.push_back({i18n::tr("context_menu.causal_connect"), "causal_connect"});
+  }
   items.push_back({i18n::tr("context_menu.rename_symbol"), "rename_symbol"});
   if (show_format) {
     if (has_selection) {

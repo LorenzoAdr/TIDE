@@ -4893,7 +4893,8 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                                         symbol, buffer->path, show_call_hierarchy, show_references,
                                         debug_model, has_selection,
                                         layout_state->app_settings != nullptr &&
-                                            layout_state->app_settings->development_options_enabled);
+                                            layout_state->app_settings->development_options_enabled,
+                                        layout_state);
         context_menu_append_explorer_file_section(
             &layout_state->context_menu, workspace != nullptr ? workspace->root : std::string{},
             is_lsp_trackable_path(buffer->path), true, is_nm_analyzable_path(buffer->path),

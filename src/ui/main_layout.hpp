@@ -87,6 +87,10 @@ struct RightSidebarState {
   std::string pending_references_symbol;
   bool pending_causal_flow = false;
   std::string pending_causal_flow_symbol;
+  int pending_causal_flow_line = -1;
+  std::string pending_causal_flow_path;
+  bool pending_causal_connect = false;
+  std::string pending_causal_connect_symbol;
   CallHierarchyViewState call_hierarchy;
 };
 

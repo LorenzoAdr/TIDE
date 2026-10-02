@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -3438,7 +3437,8 @@ int Application::run() {
 			bool swallow_call_hierarchy_custom = false;
 			if ((layout_state_.right_sidebar.pending_call_hierarchy ||
 			     layout_state_.right_sidebar.pending_references ||
-			     layout_state_.right_sidebar.pending_causal_flow) &&
+			     layout_state_.right_sidebar.pending_causal_flow ||
+			     layout_state_.right_sidebar.pending_causal_connect) &&
 			    layout_state_.call_hierarchy_key_handler) {
 				layout_state_.call_hierarchy_key_handler(event);
 				swallow_call_hierarchy_custom = true;

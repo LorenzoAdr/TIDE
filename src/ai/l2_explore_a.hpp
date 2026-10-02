@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -478,20 +479,29 @@ std::string a_trail_causal_flow_markdown(const std::vector<ATrailStack>& stacks,
 // First judge: stacks XOR cond (never both). Stacks win if nonempty.
 bool a_trail_judge_show_stacks(const ATrail& tr);
 
+// Reuses one tree-sitter parse per file across hops in a single causal build.
+struct ATrailParseCache {
+  struct Impl;
+  std::unique_ptr<Impl> impl;
+  int parses_left = 48;
+  ATrailParseCache();
+  ~ATrailParseCache();
+  ATrailParseCache(const ATrailParseCache&) = delete;
+  ATrailParseCache& operator=(const ATrailParseCache&) = delete;
+};
+
 // Enrich one call-site hop with TS scope chain + control + ±pad snippet.
 // abs_path = absolute file; rel_path for anchors; call_line 1-based.
+// cache: optional; skips a new parse when parses_left is exhausted.
 ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel_path,
-                             int call_line, const std::string& called_symbol);
+                             int call_line, const std::string& called_symbol,
+                             ATrailParseCache* cache = nullptr);
 
 struct ATrailSearchHit {
   std::string path;  // workspace-relative preferred
   int line = 0;      // 1-based
   std::string preview;
 };
-
-// Enrich one call-site hop with TS scope chain + control + ±pad snippet.
-ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel_path,
-                             int call_line, const std::string& called_symbol);
 
 // Direct-caller stacks (1 hop + L0). Prefer a_trail_build_full_stacks with a searcher.
 std::vector<ATrailStack> a_trail_build_stacks(const std::string& workspace_root,
@@ -576,5 +586,44 @@ ADataFlowReport a_dataflow_build_with_search(
 
 std::string a_dataflow_markdown(const ADataFlowReport& r);
 nlohmann::json a_dataflow_to_json(const ADataFlowReport& r);
+
+// --- Causal flow (editor tree: writes + caller stacks) ---------------------------
+// Composes dataflow sites with trail stacks. Not SSA. Writes climb callers;
+// decls and reads stay leaves.
+
+inline constexpr int kACausalFlowMaxWrites = 12;
+inline constexpr int kACausalUpstreamDepth = kATrailMaxDepth;
+inline constexpr int kACausalCallersPerFn = 24;
+inline constexpr int kACausalMaxChains = 48;
+inline constexpr int kACausalDownstreamHops = 2;
+inline constexpr int kACausalCalleesPerHop = 8;
+
+enum class ACausalNodeKind { Root, Write, Decl, Read, Caller, Callee, Guard };
+
+struct ACausalFlowNode {
+  ACausalNodeKind kind = ACausalNodeKind::Root;
+  std::string name;
+  std::string path;  // workspace-relative
+  int line = 0;      // 1-based
+  std::string detail;   // control condition, if any
+  std::string preview;
+  std::vector<ACausalFlowNode> children;
+};
+
+struct ACausalFlowTree {
+  std::string name;
+  ACausalFlowNode root;
+};
+
+// `search` is the same rg callback trail and dataflow already use.
+// Upstream chains run outer caller → … → writing function (every call site, not the
+// AI trail's 3-stack sample). Downstream hangs 2 callee hops under each read.
+// `anchor_line` is 1-based. When that line is a call of `name`, the tree starts at
+// the guarding if/switch and then climbs the values in that condition.
+ACausalFlowTree a_causal_flow_build(
+    const std::string& workspace_root, const std::string& name, const std::string& path_hint,
+    const std::function<std::vector<ATrailSearchHit>(const std::string& symbol)>& search,
+    int max_writes = kACausalFlowMaxWrites, int max_stacks = kATrailMaxStacks,
+    int max_depth = kATrailMaxDepth, int anchor_line = 0);
 
 }  // namespace tuide

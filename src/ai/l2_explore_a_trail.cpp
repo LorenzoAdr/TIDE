@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -319,9 +320,11 @@ bool looks_like_definition_line(const std::string& line, const std::string& symb
   }
   // Typed definition with body on same line: void Foo::bar( … {
   if (t.find('{') != std::string::npos) {
-    static const char* kTypeish[] = {"void ",   "static ",  "inline ", "virtual ", "explicit ",
-                                     "constexpr ", "const ", "unsigned ", "signed ", "auto ",
-                                     "struct ", "class ",  "friend "};
+    static const char* kTypeish[] = {"void ",   "bool ",    "int ",    "char ",   "long ",
+                                     "short ",  "float ",  "double ", "size_t ", "static ",
+                                     "inline ", "virtual ", "explicit ", "constexpr ", "const ",
+                                     "unsigned ", "signed ", "auto ", "struct ", "class ",
+                                     "friend "};
     for (const char* kw : kTypeish) {
       if (before.find(kw) != std::string::npos) {
         return true;
@@ -502,18 +505,79 @@ std::string function_signature_line(TSNode fn_node, const std::string& source,
 
 }  // namespace
 
+struct ATrailParseCache::Impl {
+  struct File {
+    bool done = false;
+    std::string source;
+    std::vector<std::string> lines;
+    std::vector<SymbolInfo> syms;
+    TSTree* tree = nullptr;
+  };
+  std::unordered_map<std::string, File> files;
+  ~Impl() {
+    for (auto& entry : files) {
+      if (entry.second.tree != nullptr) {
+        ts_tree_delete(entry.second.tree);
+      }
+    }
+  }
+};
+
+ATrailParseCache::ATrailParseCache() : impl(std::make_unique<Impl>()) {}
+ATrailParseCache::~ATrailParseCache() = default;
+
 ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel_path,
-                             int call_line, const std::string& called_symbol) {
+                             int call_line, const std::string& called_symbol,
+                             ATrailParseCache* cache) {
   ATrailHop hop;
   hop.path = rel_path.empty() ? abs_path : rel_path;
   hop.call_line = call_line;
-  const std::string source = read_abs_file(abs_path);
+  std::string owned_source;
+  std::vector<std::string> owned_lines;
+  std::vector<SymbolInfo> owned_syms;
+  const std::string* source_ptr = &owned_source;
+  const std::vector<std::string>* lines_ptr = &owned_lines;
+  const std::vector<SymbolInfo>* syms_ptr = &owned_syms;
+  TSTree* tree = nullptr;
+  bool own_tree = false;
+  if (cache != nullptr && cache->impl != nullptr) {
+    ATrailParseCache::Impl::File& slot = cache->impl->files[abs_path];
+    if (!slot.done) {
+      slot.done = true;
+      if (cache->parses_left > 0) {
+        --cache->parses_left;
+        slot.source = read_abs_file(abs_path);
+        slot.lines = split_lines(slot.source);
+        slot.tree = parse_sync(slot.source, abs_path);
+        if (slot.tree != nullptr) {
+          slot.syms = extract_symbols_from_tree(ts_tree_root_node(slot.tree), slot.source, hop.path);
+        }
+      }
+    }
+    source_ptr = &slot.source;
+    lines_ptr = &slot.lines;
+    syms_ptr = &slot.syms;
+    tree = slot.tree;
+  } else {
+    owned_source = read_abs_file(abs_path);
+    owned_lines = split_lines(owned_source);
+    tree = parse_sync(owned_source, abs_path);
+    own_tree = true;
+    if (tree != nullptr) {
+      owned_syms = extract_symbols_from_tree(ts_tree_root_node(tree), owned_source, hop.path);
+    }
+  }
+  const std::string& source = *source_ptr;
+  const std::vector<std::string>& lines = *lines_ptr;
+  const std::vector<SymbolInfo>& syms = *syms_ptr;
   if (source.empty() || call_line <= 0) {
+    if (own_tree && tree != nullptr) {
+      ts_tree_delete(tree);
+    }
     hop.snippet = "(no se pudo leer call site)\n";
     hop.anchor = hop.path + ":" + std::to_string(std::max(1, call_line));
     return hop;
   }
-  const auto lines = split_lines(source);
   const std::string& line_txt =
       (call_line >= 1 && call_line <= static_cast<int>(lines.size()))
           ? lines[static_cast<std::size_t>(call_line - 1)]
@@ -532,12 +596,9 @@ ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel
       !called_symbol.empty() && preview_has_symbol_call(line_txt, called_symbol);
   const bool defish = looks_like_definition_line(line_txt, called_symbol);
 
-  TSTree* tree = parse_sync(source, abs_path);
-  std::vector<SymbolInfo> syms;
   TSNode root{};
   if (tree != nullptr) {
     root = ts_tree_root_node(tree);
-    syms = extract_symbols_from_tree(root, source, hop.path);
   }
 
   std::string outline_scope;
@@ -668,7 +729,7 @@ ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel
       n = ts_node_parent(n);
     }
   }
-  if (tree != nullptr) {
+  if (own_tree && tree != nullptr) {
     ts_tree_delete(tree);
   }
   (void)fn_ast;

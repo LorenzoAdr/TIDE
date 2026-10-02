@@ -128,7 +128,8 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
                                      bool show_references = false,
                                      const DebugModel* model = nullptr,
                                      bool has_selection = false,
-                                     bool ai_actions_enabled = false);
+                                     bool ai_actions_enabled = false,
+                                     MainLayoutState* layout_state = nullptr);
 
 void context_menu_open_debug_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                     const std::string& symbol, const std::string& absolute_path,
