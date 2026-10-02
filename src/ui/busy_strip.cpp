@@ -235,6 +235,14 @@ std::string_view busy_activity_i18n_key(BusyActivity activity) {
       return "busy.find_references";
     case BusyActivity::ProjectSearch:
       return "busy.project_search";
+    case BusyActivity::ProjectReplace:
+      return "busy.project_replace";
+    case BusyActivity::LspFormat:
+      return "busy.lsp_format";
+    case BusyActivity::LspNavigate:
+      return "busy.lsp_navigate";
+    case BusyActivity::LspRename:
+      return "busy.lsp_rename";
     case BusyActivity::GitPush:
       return "busy.git_push";
     case BusyActivity::GitPull:

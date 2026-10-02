@@ -3524,7 +3524,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   auto search_panel =
       MakeSearchPanel(workspace, model, focus, layout_state, indexer, sidebar);
   auto call_hierarchy_panel =
-      MakeCallHierarchyPanel(workspace, focus, layout_state, sidebar, symbols);
+      MakeCallHierarchyPanel(workspace, focus, layout_state, sidebar, symbols, indexer);
   auto git_panel =
       MakeGitPanel(git_service, git_panel_state, layout_state, focus, workspace, &state->git_body_height);
   auto core_analyzer_panel =

@@ -155,6 +155,9 @@ struct SearchPanelState {
   int result_count = 0;
   WorkspaceSearchRunner runner;
   uint64_t search_generation = 0;
+  bool replace_pending = false;
+  bool replace_just_finished = false;
+  std::string replace_reload_path;
 };
 
 namespace {
@@ -497,10 +500,40 @@ void apply_search_results(SearchPanelState* state, std::vector<WorkspaceSearchRe
   }
 }
 
-bool poll_search_results(SearchPanelState* state, MainLayoutState* layout_state) {
+bool poll_search_results(SearchPanelState* state, WorkspaceModel* workspace,
+                         MainLayoutState* layout_state) {
   if (state == nullptr) {
     return false;
   }
+
+  if (state->replace_pending) {
+    WorkspaceReplaceResult result;
+    bool cancelled = false;
+    if (!state->runner.poll_replace(&result, &cancelled)) {
+      return false;
+    }
+    state->replace_pending = false;
+    state->replace_just_finished = !cancelled;
+    clear_busy_if(layout_state, BusyActivity::ProjectReplace);
+    if (cancelled) {
+      state->status = i18n::tr("search.status.cancelled");
+    } else {
+      state->status = i18n::tr_fmt(
+          "search.status.replaced",
+          {std::to_string(result.replacements), std::to_string(result.files_modified)});
+      if (workspace != nullptr && !state->replace_reload_path.empty()) {
+        workspace->open_file(state->replace_reload_path);
+      }
+      // Re-run search to refresh hit list after replace completes.
+      // Caller may chain run_search; done below via status only if query empty.
+    }
+    state->replace_reload_path.clear();
+    if (layout_state != nullptr) {
+      wake_console_panel(layout_state);
+    }
+    return true;
+  }
+
   std::vector<WorkspaceSearchResult> results;
   bool cancelled = false;
   int files_scanned = 0;
@@ -558,23 +591,20 @@ void run_replace_all(SearchPanelState* state, WorkspaceModel* workspace, DebugMo
   }
   state->runner.cancel();
   auto opts = build_options(state, workspace, model, indexer);
-  if (workspace_search_files(opts).empty() && !opts.workspace_root.empty()) {
-    opts.files = scan_workspace_files(opts.workspace_root);
+  if (opts.workspace_root.empty()) {
+    state->status = i18n::tr("search.status.no_workspace");
+    return;
   }
-  const auto result = replace_in_workspace(opts, state->replace);
-  run_search(state, workspace, model, indexer, layout_state);
-  state->status = i18n::tr_fmt("search.status.replaced", {std::to_string(result.replacements), std::to_string(result.files_modified)});
-
+  state->replace_pending = true;
+  state->replace_reload_path.clear();
   if (workspace != nullptr && !workspace->buffer.path.empty()) {
-    namespace fs = std::filesystem;
-    for (const auto& rel : workspace_search_files(opts)) {
-      std::error_code ec;
-      const auto absolute = fs::weakly_canonical(fs::path(opts.workspace_root) / rel, ec);
-      if (!ec && absolute.string() == workspace->buffer.path) {
-        workspace->open_file(workspace->buffer.path);
-        break;
-      }
-    }
+    state->replace_reload_path = workspace->buffer.path;
+  }
+  state->status = i18n::tr("search.status.replacing");
+  state->runner.start_replace(std::move(opts), state->replace);
+  set_busy_spinner(layout_state, BusyActivity::ProjectReplace);
+  if (layout_state != nullptr) {
+    wake_console_panel(layout_state);
   }
 }
 
@@ -686,9 +716,15 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
                   replace_input, path_input, include_input, exclude_input, query_option,
                   activate_field, forward_input_event](Event event) {
     if (event == Event::Custom) {
-      poll_search_results(state.get(), layout_state);
-      if (state->runner.running() && layout_state != nullptr) {
-        wake_console_panel(layout_state);
+      // Only poll for completion. Do NOT re-wake while runner.running(): that
+      // creates a Custom→wake→Custom storm that starves input until rg finishes.
+      // BusyStrip animates ProjectSearch via its own ANSI ticker (no UI_WAKE).
+      if (poll_search_results(state.get(), workspace, layout_state) &&
+          state->replace_just_finished) {
+        state->replace_just_finished = false;
+        if (!state->query.empty()) {
+          run_search(state.get(), workspace, model, indexer, layout_state);
+        }
       }
     }
     if (event == Event::Custom && sidebar != nullptr && sidebar->pending_search_setup) {

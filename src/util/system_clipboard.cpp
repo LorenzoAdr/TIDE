@@ -672,12 +672,23 @@ std::string get_cli_clipboard() {
 
 }  // namespace
 
+std::mutex g_clip_cache_mu;
+std::string g_clip_cache;
+bool g_clip_cache_ready = false;
+std::atomic<bool> g_clip_refresh_inflight{false};
+
 void warm_system_clipboard() {
   ensure_x11();
   ensure_cli_backends();
+  refresh_system_clipboard_cache_async();
 }
 
 bool set_system_clipboard(const std::string& text) {
+  {
+    std::lock_guard<std::mutex> lock(g_clip_cache_mu);
+    g_clip_cache = text;
+    g_clip_cache_ready = true;
+  }
   bool ok = false;
   if (ensure_x11()) {
     ok = x11_set_clipboard(text);
@@ -692,9 +703,52 @@ bool set_system_clipboard(const std::string& text) {
 std::string get_system_clipboard() {
   std::string text;
   if (x11_get_clipboard(&text)) {
+    std::lock_guard<std::mutex> lock(g_clip_cache_mu);
+    g_clip_cache = text;
+    g_clip_cache_ready = true;
     return text;
   }
-  return get_cli_clipboard();
+  text = get_cli_clipboard();
+  {
+    std::lock_guard<std::mutex> lock(g_clip_cache_mu);
+    g_clip_cache = text;
+    g_clip_cache_ready = true;
+  }
+  return text;
+}
+
+void set_system_clipboard_async(const std::string& text) {
+  {
+    std::lock_guard<std::mutex> lock(g_clip_cache_mu);
+    g_clip_cache = text;
+    g_clip_cache_ready = true;
+  }
+  std::thread([text] { set_system_clipboard(text); }).detach();
+}
+
+void refresh_system_clipboard_cache_async() {
+  if (g_clip_refresh_inflight.exchange(true)) {
+    return;
+  }
+  std::thread([] {
+    const std::string text = get_system_clipboard();
+    {
+      std::lock_guard<std::mutex> lock(g_clip_cache_mu);
+      g_clip_cache = text;
+      g_clip_cache_ready = true;
+    }
+    g_clip_refresh_inflight.store(false);
+  }).detach();
+}
+
+std::string peek_system_clipboard_cache() {
+  std::lock_guard<std::mutex> lock(g_clip_cache_mu);
+  return g_clip_cache;
+}
+
+bool system_clipboard_cache_ready() {
+  std::lock_guard<std::mutex> lock(g_clip_cache_mu);
+  return g_clip_cache_ready;
 }
 
 }  // namespace tuide

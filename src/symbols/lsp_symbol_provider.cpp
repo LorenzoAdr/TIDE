@@ -1757,16 +1757,38 @@ void LspSymbolProvider::async_worker_main() {
       job_name << "async.semantic_tokens path=" << job->path;
     } else if (job->kind == AsyncJobKind::Completion) {
       job_name << "async.completion path=" << job->completion_params.path;
-    } else {
+    } else if (job->kind == AsyncJobKind::Hover) {
       job_name << "async.hover path=" << job->hover_params.path;
+    } else if (job->kind == AsyncJobKind::Format) {
+      job_name << "async.format path=" << job->format_params.path;
+    } else if (job->kind == AsyncJobKind::FormatRange) {
+      job_name << "async.format_range path=" << job->format_range_params.path;
+    } else if (job->kind == AsyncJobKind::Navigation) {
+      job_name << "async.navigation path=" << job->navigation_params.path;
+    } else {
+      job_name << "async.rename path=" << job->rename_params.path;
     }
     monitor_log::MonitorScope job_scope("lsp", job_name.str());
 
     // Lazy servers (cmake, rust-analyzer, …) may still be starting when the UI
     // queues a completion. Wait here so we do not drop the first keystrokes.
-    if (job->kind == AsyncJobKind::Completion || job->kind == AsyncJobKind::Hover) {
-      const std::string wait_path =
-          job->kind == AsyncJobKind::Completion ? job->completion_params.path : job->hover_params.path;
+    if (job->kind == AsyncJobKind::Completion || job->kind == AsyncJobKind::Hover ||
+        job->kind == AsyncJobKind::Format || job->kind == AsyncJobKind::FormatRange ||
+        job->kind == AsyncJobKind::Navigation || job->kind == AsyncJobKind::Rename) {
+      std::string wait_path;
+      if (job->kind == AsyncJobKind::Completion) {
+        wait_path = job->completion_params.path;
+      } else if (job->kind == AsyncJobKind::Hover) {
+        wait_path = job->hover_params.path;
+      } else if (job->kind == AsyncJobKind::Format) {
+        wait_path = job->format_params.path;
+      } else if (job->kind == AsyncJobKind::FormatRange) {
+        wait_path = job->format_range_params.path;
+      } else if (job->kind == AsyncJobKind::Navigation) {
+        wait_path = job->navigation_params.path;
+      } else {
+        wait_path = job->rename_params.path;
+      }
       if (!wait_path.empty()) {
         wait_for_client_for_path(wait_path, 8000);
       }
@@ -1805,8 +1827,6 @@ void LspSymbolProvider::async_worker_main() {
           flush_document_sync(job->path);
         }
         const bool fetched = job_lsp->ensure_semantic_tokens(job->path);
-        const bool ready = job_lsp->has_ready_semantic_tokens(job->path);
-        const auto doc = job_lsp->semantic_tokens_for_file(job->path);
         if (fetched) {
           async_results_.push({job->kind, job->path});
           notify_async_job_ready(job->kind);
@@ -1834,7 +1854,7 @@ void LspSymbolProvider::async_worker_main() {
             flush_document_sync(params.path);
           }
           items = job_lsp->completions_at(key, text, params.line, params.character, false,
-                                       &request_id);
+                                          &request_id);
           if (request_id <= 0) {
             stale = true;
           }
@@ -1858,36 +1878,150 @@ void LspSymbolProvider::async_worker_main() {
           async_results_.push({job->kind, job->path});
           notify_async_job_ready(job->kind);
         }
-      } else {
+      } else if (job->kind == AsyncJobKind::Hover) {
         const HoverInfo info = job_lsp->hover(job->hover_params.path, job->hover_params.text,
-                                           job->hover_params.line, job->hover_params.character);
+                                              job->hover_params.line, job->hover_params.character);
         std::lock_guard<std::mutex> lock(mutex_);
         hover_cache_[job->hover_key] = info;
         async_results_.push({job->kind, job->path});
         notify_async_job_ready(job->kind);
+      } else if (job->kind == AsyncJobKind::Format || job->kind == AsyncJobKind::FormatRange) {
+        FormatAsyncResult result;
+        result.request_id = job->request_id;
+        result.is_range = job->kind == AsyncJobKind::FormatRange;
+        result.caret_line = job->format_caret_line;
+        result.caret_col = job->format_caret_col;
+        const std::string& path =
+            result.is_range ? job->format_range_params.path : job->format_params.path;
+        const std::string& text =
+            result.is_range ? job->format_range_params.text : job->format_params.text;
+        result.path = normalize_lsp_path(path);
+        result.original_text = text;
+        if (!text.empty()) {
+          flush_document_sync(path);
+        }
+        if (result.is_range) {
+          result.formatted = job_lsp->format_range(
+              result.path, text, job->format_range_params.start_line,
+              job->format_range_params.start_character, job->format_range_params.end_line,
+              job->format_range_params.end_character);
+        } else {
+          result.formatted = job_lsp->format_document(result.path, text);
+        }
+        result.ok = result.formatted.has_value();
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          format_results_[job->request_id] = std::move(result);
+        }
+        async_results_.push({job->kind, job->path});
+        notify_async_job_ready(job->kind);
+      } else if (job->kind == AsyncJobKind::Navigation) {
+        NavigationAsyncResult result;
+        result.request_id = job->request_id;
+        result.kind = job->navigation_kind;
+        result.params = job->navigation_params;
+        // Resolve on the worker using the same sync helpers (tree-sitter fallback included).
+        if (job->navigation_kind == NavigationRequestKind::Implementation) {
+          result.loc = resolve_implementation_navigation(*this, job->navigation_params);
+        } else {
+          result.loc = resolve_symbol_navigation(
+              *this, job->navigation_params,
+              job->navigation_kind == NavigationRequestKind::Declaration);
+        }
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          navigation_results_[job->request_id] = std::move(result);
+        }
+        async_results_.push({job->kind, job->path});
+        notify_async_job_ready(job->kind);
+      } else if (job->kind == AsyncJobKind::Rename) {
+        RenameAsyncResult result;
+        result.request_id = job->request_id;
+        result.path = normalize_lsp_path(job->rename_params.path);
+        result.line = job->rename_params.line;
+        result.col = job->rename_params.character;
+        const std::string text = job->rename_params.text.empty()
+                                     ? buffer_text_for_path(result.path)
+                                     : job->rename_params.text;
+        if (!text.empty()) {
+          flush_document_sync(job->rename_params.path);
+        }
+        result.edits = job_lsp->rename_symbol(result.path, text, job->rename_params.line,
+                                              job->rename_params.character,
+                                              job->rename_params.new_name);
+        result.ok = !result.edits.empty();
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          rename_results_[job->request_id] = std::move(result);
+        }
+        async_results_.push({job->kind, job->path});
+        notify_async_job_ready(job->kind);
       }
+    } else if (job->kind == AsyncJobKind::Format || job->kind == AsyncJobKind::FormatRange) {
+      FormatAsyncResult result;
+      result.request_id = job->request_id;
+      result.is_range = job->kind == AsyncJobKind::FormatRange;
+      result.path = job->path;
+      result.ok = false;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        format_results_[job->request_id] = std::move(result);
+      }
+      async_results_.push({job->kind, job->path});
+      notify_async_job_ready(job->kind);
+    } else if (job->kind == AsyncJobKind::Navigation) {
+      // No LSP client — still try tree-sitter via the sync helpers.
+      NavigationAsyncResult result;
+      result.request_id = job->request_id;
+      result.kind = job->navigation_kind;
+      result.params = job->navigation_params;
+      if (job->navigation_kind == NavigationRequestKind::Implementation) {
+        result.loc = resolve_implementation_navigation(*this, job->navigation_params);
+      } else {
+        result.loc = resolve_symbol_navigation(
+            *this, job->navigation_params,
+            job->navigation_kind == NavigationRequestKind::Declaration);
+      }
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        navigation_results_[job->request_id] = std::move(result);
+      }
+      async_results_.push({job->kind, job->path});
+      notify_async_job_ready(job->kind);
+    } else if (job->kind == AsyncJobKind::Rename) {
+      RenameAsyncResult result;
+      result.request_id = job->request_id;
+      result.path = job->path;
+      result.ok = false;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        rename_results_[job->request_id] = std::move(result);
+      }
+      async_results_.push({job->kind, job->path});
+      notify_async_job_ready(job->kind);
     }
 
     if (job->kind == AsyncJobKind::DocumentSymbols) {
-      {
-        std::lock_guard<std::mutex> lock(inflight_mutex_);
-        inflight_symbols_.erase(job->path);
-      }
+      std::lock_guard<std::mutex> lock(inflight_mutex_);
+      inflight_symbols_.erase(job->path);
     } else if (job->kind == AsyncJobKind::SemanticTokens) {
-      {
-        std::lock_guard<std::mutex> lock(inflight_mutex_);
-        inflight_semantic_.erase(job->path);
-      }
+      std::lock_guard<std::mutex> lock(inflight_mutex_);
+      inflight_semantic_.erase(job->path);
     } else if (job->kind == AsyncJobKind::Completion) {
-      {
-        std::lock_guard<std::mutex> lock(inflight_mutex_);
-        inflight_completion_.erase(job->completion_key);
-      }
-    } else {
-      {
-        std::lock_guard<std::mutex> lock(inflight_mutex_);
-        inflight_hover_.erase(job->hover_key);
-      }
+      std::lock_guard<std::mutex> lock(inflight_mutex_);
+      inflight_completion_.erase(job->completion_key);
+    } else if (job->kind == AsyncJobKind::Hover) {
+      std::lock_guard<std::mutex> lock(inflight_mutex_);
+      inflight_hover_.erase(job->hover_key);
+    } else if (job->kind == AsyncJobKind::Format || job->kind == AsyncJobKind::FormatRange) {
+      std::lock_guard<std::mutex> lock(inflight_mutex_);
+      inflight_format_.erase(job->request_id);
+    } else if (job->kind == AsyncJobKind::Navigation) {
+      std::lock_guard<std::mutex> lock(inflight_mutex_);
+      inflight_navigation_.erase(job->request_id);
+    } else if (job->kind == AsyncJobKind::Rename) {
+      std::lock_guard<std::mutex> lock(inflight_mutex_);
+      inflight_rename_.erase(job->request_id);
     }
   }
 }
@@ -1917,7 +2051,9 @@ bool LspSymbolProvider::drain_async_results() {
   while (auto result = async_results_.try_pop()) {
     updated = true;
     ++drained;
-    if (result->kind != AsyncJobKind::Completion) {
+    if (result->kind != AsyncJobKind::Completion && result->kind != AsyncJobKind::Format &&
+        result->kind != AsyncJobKind::FormatRange && result->kind != AsyncJobKind::Navigation &&
+        result->kind != AsyncJobKind::Rename) {
       invalidates_view = true;
     }
     if (result->kind == AsyncJobKind::SemanticTokens) {
@@ -2196,6 +2332,14 @@ LspAsyncJobKind LspSymbolProvider::to_public_job_kind(const AsyncJobKind kind) {
       return LspAsyncJobKind::Hover;
     case AsyncJobKind::Completion:
       return LspAsyncJobKind::Completion;
+    case AsyncJobKind::Format:
+      return LspAsyncJobKind::Format;
+    case AsyncJobKind::FormatRange:
+      return LspAsyncJobKind::FormatRange;
+    case AsyncJobKind::Navigation:
+      return LspAsyncJobKind::Navigation;
+    case AsyncJobKind::Rename:
+      return LspAsyncJobKind::Rename;
   }
   return LspAsyncJobKind::Completion;
 }
@@ -3128,6 +3272,63 @@ bool LspSymbolProvider::supports_navigation() const {
   return lsp_enabled_;
 }
 
+bool LspSymbolProvider::navigation_uses_async_fetch() const { return true; }
+
+bool LspSymbolProvider::request_navigation(const NavigationParams& params,
+                                           NavigationRequestKind kind, uint64_t request_id) {
+  if (request_id == 0 || params.path.empty()) {
+    return false;
+  }
+  // Navigation may fall back to tree-sitter even when the path is not LSP-trackable.
+  if (is_lsp_trackable_path(params.path, params.text)) {
+    ensure_lazy_lsp_for_path(params.path);
+    std::string text = params.text;
+    prepare_lsp_client(params.path, text);
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!lsp_enabled_) {
+      return false;
+    }
+    if (!params.text.empty()) {
+      open_buffers_[params.path] = params.text;
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(inflight_mutex_);
+    if (inflight_navigation_.count(request_id) > 0) {
+      return true;
+    }
+    inflight_navigation_.insert(request_id);
+  }
+  ensure_async_worker_running();
+  AsyncJob job;
+  job.kind = AsyncJobKind::Navigation;
+  job.path = normalize_lsp_path(params.path);
+  if (job.path.empty()) {
+    job.path = params.path;
+  }
+  job.request_id = request_id;
+  job.navigation_params = params;
+  job.navigation_kind = kind;
+  async_jobs_.push(std::move(job));
+  return true;
+}
+
+std::optional<NavigationAsyncResult> LspSymbolProvider::poll_navigation(uint64_t request_id) {
+  if (request_id == 0) {
+    return std::nullopt;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = navigation_results_.find(request_id);
+  if (it == navigation_results_.end()) {
+    return std::nullopt;
+  }
+  NavigationAsyncResult result = std::move(it->second);
+  navigation_results_.erase(it);
+  return result;
+}
+
 SourceLocation LspSymbolProvider::goto_definition(const NavigationParams& params) {
   if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
     return {};
@@ -3482,27 +3683,130 @@ bool LspSymbolProvider::supports_formatting() const {
   return use_lsp_ && any_lsp_ready();
 }
 
+bool LspSymbolProvider::formatting_uses_async_fetch() const { return true; }
+
+bool LspSymbolProvider::request_format(const FormatParams& params, uint64_t request_id) {
+  if (request_id == 0 || params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
+    return false;
+  }
+  ensure_lazy_lsp_for_path(params.path);
+  std::string text = params.text;
+  LspClient* ready_client = prepare_lsp_client(params.path, text);
+  const bool starting = lazy_lsp_starting_for_path(params.path);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!lsp_enabled_) {
+      return false;
+    }
+    if (ready_client == nullptr && client_for_path(params.path) == nullptr && !starting) {
+      return false;
+    }
+    if (!text.empty()) {
+      open_buffers_[params.path] = text;
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(inflight_mutex_);
+    if (inflight_format_.count(request_id) > 0) {
+      return true;
+    }
+    inflight_format_.insert(request_id);
+  }
+  ensure_async_worker_running();
+  AsyncJob job;
+  job.kind = AsyncJobKind::Format;
+  job.path = normalize_lsp_path(params.path);
+  job.request_id = request_id;
+  job.format_params = params;
+  if (!text.empty() && job.format_params.text.empty()) {
+    job.format_params.text = std::move(text);
+  }
+  async_jobs_.push(std::move(job));
+  return true;
+}
+
+bool LspSymbolProvider::request_format_range(const FormatRangeParams& params, uint64_t request_id,
+                                             int caret_line, int caret_col) {
+  if (request_id == 0 || params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
+    return false;
+  }
+  ensure_lazy_lsp_for_path(params.path);
+  std::string text = params.text;
+  LspClient* ready_client = prepare_lsp_client(params.path, text);
+  const bool starting = lazy_lsp_starting_for_path(params.path);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!lsp_enabled_) {
+      return false;
+    }
+    if (ready_client == nullptr && client_for_path(params.path) == nullptr && !starting) {
+      return false;
+    }
+    if (!text.empty()) {
+      open_buffers_[params.path] = text;
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(inflight_mutex_);
+    if (inflight_format_.count(request_id) > 0) {
+      return true;
+    }
+    inflight_format_.insert(request_id);
+  }
+  ensure_async_worker_running();
+  AsyncJob job;
+  job.kind = AsyncJobKind::FormatRange;
+  job.path = normalize_lsp_path(params.path);
+  job.request_id = request_id;
+  job.format_range_params = params;
+  job.format_caret_line = caret_line;
+  job.format_caret_col = caret_col;
+  if (!text.empty() && job.format_range_params.text.empty()) {
+    job.format_range_params.text = std::move(text);
+  }
+  async_jobs_.push(std::move(job));
+  return true;
+}
+
+std::optional<FormatAsyncResult> LspSymbolProvider::poll_format(uint64_t request_id) {
+  if (request_id == 0) {
+    return std::nullopt;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = format_results_.find(request_id);
+  if (it == format_results_.end()) {
+    return std::nullopt;
+  }
+  FormatAsyncResult result = std::move(it->second);
+  format_results_.erase(it);
+  return result;
+}
+
 std::optional<std::string> LspSymbolProvider::format_document(const FormatParams& params) {
   if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
     return std::nullopt;
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!use_lsp_) {
+  std::string text = params.text;
+  LspClient* lsp = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_) {
+      return std::nullopt;
+    }
+    const std::string key = normalize_lsp_path(params.path);
+    if (key.empty()) {
+      return std::nullopt;
+    }
+    if (text.empty()) {
+      text = buffer_text_for_path(key);
+    }
+    lsp = client_for_path(params.path);
+  }
+  if (lsp == nullptr) {
     return std::nullopt;
   }
-
-  const std::string key = normalize_lsp_path(params.path);
-  if (key.empty()) {
-    return std::nullopt;
-  }
-
-  const std::string text =
-      params.text.empty() ? buffer_text_for_path(key) : params.text;
-  if (LspClient* lsp = client_for_path(params.path)) {
-    return lsp->format_document(key, text);
-  }
-  return std::nullopt;
+  return lsp->format_document(normalize_lsp_path(params.path), text);
 }
 
 std::optional<std::string> LspSymbolProvider::format_range(const FormatRangeParams& params) {
@@ -3510,28 +3814,89 @@ std::optional<std::string> LspSymbolProvider::format_range(const FormatRangePara
     return std::nullopt;
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!use_lsp_) {
+  std::string text = params.text;
+  LspClient* lsp = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_) {
+      return std::nullopt;
+    }
+    const std::string key = normalize_lsp_path(params.path);
+    if (key.empty()) {
+      return std::nullopt;
+    }
+    if (text.empty()) {
+      text = buffer_text_for_path(key);
+    }
+    lsp = client_for_path(params.path);
+  }
+  if (lsp == nullptr) {
     return std::nullopt;
   }
-
-  const std::string key = normalize_lsp_path(params.path);
-  if (key.empty()) {
-    return std::nullopt;
-  }
-
-  const std::string text =
-      params.text.empty() ? buffer_text_for_path(key) : params.text;
-  if (LspClient* lsp = client_for_path(params.path)) {
-    return lsp->format_range(key, text, params.start_line, params.start_character, params.end_line,
-                             params.end_character);
-  }
-  return std::nullopt;
+  return lsp->format_range(normalize_lsp_path(params.path), text, params.start_line,
+                           params.start_character, params.end_line, params.end_character);
 }
 
 bool LspSymbolProvider::supports_rename() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return use_lsp_ && any_lsp_ready();
+}
+
+bool LspSymbolProvider::rename_uses_async_fetch() const { return true; }
+
+bool LspSymbolProvider::request_rename(const RenameParams& params, uint64_t request_id) {
+  if (request_id == 0 || params.path.empty() || params.new_name.empty() ||
+      !is_lsp_trackable_path(params.path, params.text)) {
+    return false;
+  }
+  ensure_lazy_lsp_for_path(params.path);
+  std::string text = params.text;
+  LspClient* ready_client = prepare_lsp_client(params.path, text);
+  const bool starting = lazy_lsp_starting_for_path(params.path);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!lsp_enabled_) {
+      return false;
+    }
+    if (ready_client == nullptr && client_for_path(params.path) == nullptr && !starting) {
+      return false;
+    }
+    if (!text.empty()) {
+      open_buffers_[params.path] = text;
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(inflight_mutex_);
+    if (inflight_rename_.count(request_id) > 0) {
+      return true;
+    }
+    inflight_rename_.insert(request_id);
+  }
+  ensure_async_worker_running();
+  AsyncJob job;
+  job.kind = AsyncJobKind::Rename;
+  job.path = normalize_lsp_path(params.path);
+  job.request_id = request_id;
+  job.rename_params = params;
+  if (!text.empty() && job.rename_params.text.empty()) {
+    job.rename_params.text = std::move(text);
+  }
+  async_jobs_.push(std::move(job));
+  return true;
+}
+
+std::optional<RenameAsyncResult> LspSymbolProvider::poll_rename(uint64_t request_id) {
+  if (request_id == 0) {
+    return std::nullopt;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = rename_results_.find(request_id);
+  if (it == rename_results_.end()) {
+    return std::nullopt;
+  }
+  RenameAsyncResult result = std::move(it->second);
+  rename_results_.erase(it);
+  return result;
 }
 
 std::vector<LspFileEdits> LspSymbolProvider::rename_symbol(const RenameParams& params) {
@@ -3540,22 +3905,27 @@ std::vector<LspFileEdits> LspSymbolProvider::rename_symbol(const RenameParams& p
     return {};
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!use_lsp_) {
+  std::string text = params.text;
+  LspClient* lsp = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_) {
+      return {};
+    }
+    const std::string key = normalize_lsp_path(params.path);
+    if (key.empty()) {
+      return {};
+    }
+    if (text.empty()) {
+      text = buffer_text_for_path(key);
+    }
+    lsp = client_for_path(params.path);
+  }
+  if (lsp == nullptr) {
     return {};
   }
-
-  const std::string key = normalize_lsp_path(params.path);
-  if (key.empty()) {
-    return {};
-  }
-
-  const std::string text =
-      params.text.empty() ? buffer_text_for_path(key) : params.text;
-  if (LspClient* lsp = client_for_path(params.path)) {
-    return lsp->rename_symbol(key, text, params.line, params.character, params.new_name);
-  }
-  return {};
+  return lsp->rename_symbol(normalize_lsp_path(params.path), text, params.line, params.character,
+                            params.new_name);
 }
 
 bool LspSymbolProvider::supports_code_actions() const {

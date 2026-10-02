@@ -52,16 +52,36 @@ bool LspTransport::start(int stdin_write_fd, int stdout_read_fd) {
   }
   stdin_fd_ = stdin_write_fd;
   stdout_fd_ = stdout_read_fd;
+  {
+    std::lock_guard<std::mutex> lock(write_queue_mutex_);
+    outbound_.clear();
+    next_write_seq_ = 1;
+    last_written_seq_ = 0;
+  }
   running_ = true;
   reader_ = std::thread([this] {
     set_current_thread_name("lsp-read");
     reader_loop();
+  });
+  writer_ = std::thread([this] {
+    set_current_thread_name("lsp-write");
+    writer_loop();
   });
   return true;
 }
 
 void LspTransport::stop() {
   running_.store(false, std::memory_order_release);
+  write_cv_.notify_all();
+  write_progress_cv_.notify_all();
+  pending_cv_.notify_all();
+
+  // Drain/join the writer while stdin is still open so queued didChange/requests
+  // are not silently dropped on shutdown when possible.
+  if (writer_.joinable()) {
+    writer_.join();
+  }
+
   {
     std::lock_guard<std::mutex> lock(handler_mutex_);
     notification_handler_ = nullptr;
@@ -89,15 +109,38 @@ void LspTransport::stop() {
   if (reader_.joinable()) {
     reader_.join();
   }
+
+  {
+    std::lock_guard<std::mutex> lock(write_queue_mutex_);
+    outbound_.clear();
+  }
+}
+
+uint64_t LspTransport::enqueue_message(std::string payload) {
+  std::lock_guard<std::mutex> lock(write_queue_mutex_);
+  if (!running_.load(std::memory_order_acquire) || stdin_fd_ < 0) {
+    return 0;
+  }
+  const uint64_t seq = next_write_seq_++;
+  outbound_.push_back(OutboundMessage{std::move(payload), seq});
+  write_cv_.notify_one();
+  return seq;
 }
 
 bool LspTransport::write_message(const std::string& payload) {
+  return enqueue_message(payload) != 0;
+}
+
+bool LspTransport::write_bytes(const std::string& payload) {
   if (stdin_fd_ < 0) {
     return false;
   }
   const std::string header =
       "Content-Length: " + std::to_string(payload.size()) + "\r\n\r\n";
   std::lock_guard<std::mutex> lock(io_mutex_);
+  if (stdin_fd_ < 0) {
+    return false;
+  }
   if (::write(stdin_fd_, header.data(), header.size()) !=
       static_cast<ssize_t>(header.size())) {
     return false;
@@ -107,6 +150,65 @@ bool LspTransport::write_message(const std::string& payload) {
   }
   return ::write(stdin_fd_, payload.data(), payload.size()) ==
          static_cast<ssize_t>(payload.size());
+}
+
+void LspTransport::writer_loop() {
+  while (true) {
+    OutboundMessage message;
+    {
+      std::unique_lock<std::mutex> lock(write_queue_mutex_);
+      write_cv_.wait(lock, [this] {
+        return !running_.load(std::memory_order_acquire) || !outbound_.empty();
+      });
+      if (outbound_.empty()) {
+        // Stop requested and queue drained.
+        break;
+      }
+      message = std::move(outbound_.front());
+      outbound_.pop_front();
+    }
+
+    const bool ok = write_bytes(message.payload);
+    {
+      std::lock_guard<std::mutex> lock(write_queue_mutex_);
+      last_written_seq_ = message.seq;
+      if (!ok) {
+        // Drop the rest; the process/pipe is likely dead.
+        outbound_.clear();
+        running_.store(false, std::memory_order_release);
+      }
+    }
+    write_progress_cv_.notify_all();
+    if (!ok) {
+      break;
+    }
+  }
+  write_progress_cv_.notify_all();
+}
+
+bool LspTransport::flush_writes(int timeout_ms) {
+  uint64_t target = 0;
+  {
+    std::lock_guard<std::mutex> lock(write_queue_mutex_);
+    if (next_write_seq_ <= 1) {
+      return true;
+    }
+    target = next_write_seq_ - 1;
+    if (last_written_seq_ >= target && outbound_.empty()) {
+      return true;
+    }
+  }
+
+  std::unique_lock<std::mutex> lock(write_queue_mutex_);
+  if (timeout_ms < 0) {
+    timeout_ms = 0;
+  }
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  const bool signaled = write_progress_cv_.wait_until(lock, deadline, [&] {
+    return last_written_seq_ >= target || !running_.load(std::memory_order_acquire);
+  });
+  return signaled && last_written_seq_ >= target;
 }
 
 std::optional<std::string> LspTransport::read_message(ReadFailKind* fail_kind) {
@@ -402,6 +504,13 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
 
   if (!write_request(id, method, std::move(params))) {
     TUIDE_MON("lsp", "send_request write_failed method=" + method);
+    return false;
+  }
+
+  // Drain prior didOpen/didChange (+ this request) to the pipe before the RPC
+  // wait clock starts, so a large buffered notification cannot burn the timeout.
+  if (!flush_writes(timeout_ms)) {
+    TUIDE_MON("lsp", "send_request flush_failed method=" + method + " id=" + std::to_string(id));
     return false;
   }
 

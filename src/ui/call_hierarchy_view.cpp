@@ -3,10 +3,19 @@
 #include "ui/ui_wake.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <exception>
 #include <filesystem>
+#include <memory>
+#include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include "ai/l2_explore_a.hpp"
+#include "indexer/workspace_indexer.hpp"
+#include "search/workspace_search_rg.hpp"
+#include "util/bundled_tools.hpp"
 
 #include "editor/editor_context.hpp"
 #include "editor/text_ops.hpp"
@@ -448,6 +457,34 @@ void CallHierarchyViewState::clear() {
   root_label.clear();
   status.clear();
   nodes.clear();
+  causal_fold = CausalFlowFold::All;
+  causal_conditions = false;
+  causal_link.clear();
+}
+
+bool causal_node_matches(const std::string& name, const std::string& symbol) {
+  if (symbol.empty() || name.empty()) {
+    return false;
+  }
+  if (name == symbol) {
+    return true;
+  }
+  const std::string suffix = "::" + symbol;
+  return name.size() > suffix.size() &&
+         name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+bool causal_chain_mentions(const CallHierarchyViewState& view, int node_index,
+                           const std::string& symbol) {
+  for (int index : call_hierarchy_chain_indices(view, node_index)) {
+    if (index < 0 || index >= static_cast<int>(view.nodes.size())) {
+      continue;
+    }
+    if (causal_node_matches(view.nodes[static_cast<std::size_t>(index)].item.name, symbol)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 std::vector<int> call_hierarchy_visible_rows(const CallHierarchyViewState& view) {
@@ -464,7 +501,71 @@ std::vector<int> call_hierarchy_visible_rows(const CallHierarchyViewState& view)
   }
   std::vector<uint8_t> visited(view.nodes.size(), 0);
   append_leaf_rows(view, 0, &rows, &visited);
-  return rows;
+  if (view.kind != CallHierarchyContentKind::CausalFlow) {
+    return rows;
+  }
+  std::vector<int> upstream;
+  std::vector<int> downstream;
+  upstream.reserve(rows.size());
+  for (int node_index : rows) {
+    if (!view.causal_link.empty() &&
+        !causal_chain_mentions(view, node_index, view.causal_link)) {
+      continue;
+    }
+    const CausalFlowSide side = view.nodes[static_cast<std::size_t>(node_index)].causal_side;
+    if (view.causal_fold == CausalFlowFold::Upstream && side == CausalFlowSide::Downstream) {
+      continue;
+    }
+    if (view.causal_fold == CausalFlowFold::Downstream && side != CausalFlowSide::Downstream) {
+      continue;
+    }
+    if (side == CausalFlowSide::Downstream) {
+      downstream.push_back(node_index);
+    } else {
+      upstream.push_back(node_index);
+    }
+  }
+  if (view.causal_fold != CausalFlowFold::Downstream) {
+    upstream.insert(upstream.end(), downstream.begin(), downstream.end());
+    return upstream;
+  }
+  return downstream;
+}
+
+void connect_causal_flow_view(CallHierarchyViewState* view, WorkspaceModel* workspace,
+                              const std::string& target) {
+  if (view == nullptr || !view->active || view->kind != CallHierarchyContentKind::CausalFlow ||
+      target.empty()) {
+    return;
+  }
+  view->selected = 0;
+  view->causal_fold = CausalFlowFold::All;
+  if (target == view->root_label) {
+    view->causal_link.clear();
+    return;
+  }
+  std::vector<int> leaves;
+  std::vector<uint8_t> visited(view->nodes.size(), 0);
+  append_leaf_rows(*view, 0, &leaves, &visited);
+  int matches = 0;
+  for (int node_index : leaves) {
+    if (causal_chain_mentions(*view, node_index, target)) {
+      ++matches;
+    }
+  }
+  if (matches == 0) {
+    view->causal_link.clear();
+    view->status = i18n::tr_fmt("status.causal_flow.no_path", {view->root_label, target});
+    if (workspace != nullptr) {
+      workspace->status_message = view->status;
+    }
+    return;
+  }
+  view->causal_link = target;
+  view->status = i18n::tr_fmt("status.causal_flow.path", {view->root_label, target});
+  if (workspace != nullptr) {
+    workspace->status_message = view->status;
+  }
 }
 
 void call_hierarchy_set_tab(CallHierarchyViewState* view, int tab,
@@ -734,6 +835,255 @@ void navigate_to_call_hierarchy_node(WorkspaceModel* workspace, FocusManagerStat
   if (focus != nullptr) {
     focus->region = FocusRegion::Editor;
   }
+}
+
+std::string absolute_causal_path(const std::string& workspace_root, const std::string& path) {
+  if (path.empty()) {
+    return {};
+  }
+  fs::path file(path);
+  if (file.is_absolute() || workspace_root.empty()) {
+    return file.lexically_normal().string();
+  }
+  return (fs::path(workspace_root) / file).lexically_normal().string();
+}
+
+std::string causal_path_hint(const std::string& workspace_root, const std::string& absolute_path) {
+  if (absolute_path.empty() || workspace_root.empty()) {
+    return absolute_path;
+  }
+  std::error_code ec;
+  const fs::path rel = fs::relative(fs::path(absolute_path), fs::path(workspace_root), ec);
+  if (ec) {
+    return absolute_path;
+  }
+  return rel.generic_string();
+}
+
+CausalFlowSide causal_flow_side(ACausalNodeKind kind) {
+  switch (kind) {
+    case ACausalNodeKind::Write:
+    case ACausalNodeKind::Caller:
+    case ACausalNodeKind::Guard:
+      return CausalFlowSide::Upstream;
+    case ACausalNodeKind::Read:
+    case ACausalNodeKind::Callee:
+      return CausalFlowSide::Downstream;
+    case ACausalNodeKind::Decl:
+      return CausalFlowSide::Decl;
+    case ACausalNodeKind::Root:
+      return CausalFlowSide::None;
+  }
+  return CausalFlowSide::None;
+}
+
+SymbolKind causal_symbol_kind(ACausalNodeKind kind) {
+  switch (kind) {
+    case ACausalNodeKind::Write:
+    case ACausalNodeKind::Caller:
+    case ACausalNodeKind::Callee:
+    case ACausalNodeKind::Guard:
+      return SymbolKind::kFunction;
+    case ACausalNodeKind::Root:
+    case ACausalNodeKind::Decl:
+    case ACausalNodeKind::Read:
+      return SymbolKind::kVariable;
+  }
+  return SymbolKind::kVariable;
+}
+
+int append_causal_node(CallHierarchyViewState* view, const ACausalFlowNode& node,
+                       const std::string& workspace_root, int parent, int depth) {
+  CallHierarchyTreeNode tree;
+  tree.item.valid = true;
+  tree.item.name = node.name.empty() ? "?" : node.name;
+  tree.item.detail = node.detail;
+  tree.item.path = absolute_causal_path(workspace_root, node.path);
+  tree.item.line = node.line > 0 ? node.line - 1 : 0;
+  tree.item.character = 0;
+  tree.item.kind = causal_symbol_kind(node.kind);
+  tree.depth = depth;
+  tree.parent = parent;
+  tree.children_loaded = true;
+  tree.navigate_to_call_site = !tree.item.path.empty();
+  tree.nav_line = tree.item.line;
+  tree.nav_character = 0;
+  tree.nav_path = tree.item.path;
+  tree.preview = node.preview;
+  tree.causal_side = causal_flow_side(node.kind);
+  view->nodes.push_back(std::move(tree));
+  const int index = static_cast<int>(view->nodes.size()) - 1;
+  std::vector<int> children;
+  children.reserve(node.children.size());
+  for (const ACausalFlowNode& child : node.children) {
+    children.push_back(append_causal_node(view, child, workspace_root, index, depth + 1));
+  }
+  CallHierarchyTreeNode& stored = view->nodes[static_cast<std::size_t>(index)];
+  stored.children = std::move(children);
+  stored.has_children = !stored.children.empty();
+  return index;
+}
+
+bool open_causal_flow_view(CallHierarchyViewState* view, WorkspaceModel* workspace,
+                           MainLayoutState* layout_state, RightSidebarState* sidebar,
+                           const std::string& symbol, WorkspaceIndexer* indexer, int editor_line,
+                           const std::string& anchor_path) {
+  if (view == nullptr || workspace == nullptr || sidebar == nullptr) {
+    return false;
+  }
+  view->clear();
+  if (symbol.empty()) {
+    return false;
+  }
+  if (workspace->root.empty()) {
+    workspace->status_message = i18n::tr("status.causal_flow.no_workspace");
+    return false;
+  }
+  const auto rg = resolve_rg();
+  const bool have_rg = rg.has_value();
+
+  workspace->ensure_buffer();
+  const std::string active =
+      workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
+  const std::string path_hint =
+      causal_path_hint(workspace->root, anchor_path.empty() ? active : anchor_path);
+  const int anchor_line = editor_line >= 0 ? editor_line + 1 : 0;
+
+  const std::string root = workspace->root;
+  std::shared_ptr<const std::vector<std::string>> indexed_files;
+  if (!have_rg && indexer != nullptr) {
+    if (const auto snap = indexer->snapshot()) {
+      std::error_code ec;
+      const std::string snap_root = fs::absolute(snap->workspace_root, ec).lexically_normal().string();
+      const std::string want_root = fs::absolute(root, ec).lexically_normal().string();
+      if (snap_root == want_root && !snap->files.empty()) {
+        indexed_files = std::shared_ptr<const std::vector<std::string>>(snap, &snap->files);
+      }
+    }
+  }
+  if (!have_rg && indexed_files == nullptr) {
+    workspace->status_message = i18n::tr("status.causal_flow.unavailable");
+    return false;
+  }
+
+  set_busy_spinner(layout_state, BusyActivity::CallHierarchy);
+  view->active = true;
+  view->kind = CallHierarchyContentKind::CausalFlow;
+  view->root_label = symbol;
+  view->status = symbol;
+  if (layout_state != nullptr) {
+    layout_state->console_visible = true;
+    layout_state->console_tabs.selected_tab = ConsolePanelTabs::kCallHierarchy;
+    wake_console_panel(layout_state);
+  }
+
+  static std::atomic<uint64_t> causal_gen{0};
+  const uint64_t ticket = ++causal_gen;
+  const std::string rg_binary = have_rg ? rg->binary_path : std::string{};
+
+  auto apply = [view, workspace, layout_state, root, symbol, ticket](ACausalFlowTree tree) {
+    if (ticket != causal_gen.load()) {
+      return;
+    }
+    view->nodes.clear();
+    view->active = true;
+    view->kind = CallHierarchyContentKind::CausalFlow;
+    view->selected_tab = 0;
+    view->selected = 0;
+    view->root_label = symbol;
+    view->causal_fold = CausalFlowFold::All;
+    view->causal_conditions = false;
+    view->causal_link.clear();
+    append_causal_node(view, tree.root, root, -1, 0);
+    int leaves = 0;
+    for (std::size_t i = 1; i < view->nodes.size(); ++i) {
+      if (view->nodes[i].children.empty()) {
+        ++leaves;
+      }
+    }
+    if (leaves == 0) {
+      view->status = i18n::tr_fmt("status.causal_flow.none", {symbol});
+      workspace->status_message = view->status;
+    } else {
+      view->status = i18n::tr_fmt("status.causal_flow.count", {std::to_string(leaves)});
+      workspace->status_message = i18n::tr_fmt("status.causal_flow.active", {symbol});
+    }
+    clear_busy(layout_state);
+    if (layout_state != nullptr) {
+      layout_state->focus_sync_needed = true;
+      wake_console_panel(layout_state);
+    }
+  };
+
+  if (workspace->enqueue_ui_task == nullptr) {
+    clear_busy(layout_state);
+    return false;
+  }
+
+  std::thread([workspace, root, symbol, path_hint, anchor_line, have_rg, rg_binary, indexed_files,
+               apply]() mutable {
+    auto scoped_files = std::make_shared<std::vector<std::string>>();
+    if (indexed_files != nullptr) {
+      for (const std::string& path : *indexed_files) {
+        if (path.rfind("src/", 0) == 0 || path.rfind("include/", 0) == 0 ||
+            path.rfind("lib/", 0) == 0) {
+          scoped_files->push_back(path);
+        }
+      }
+      if (!path_hint.empty()) {
+        const auto it = std::find(scoped_files->begin(), scoped_files->end(), path_hint);
+        if (it != scoped_files->end() && it != scoped_files->begin()) {
+          std::rotate(scoped_files->begin(), it, it + 1);
+        }
+      }
+    }
+    auto search = [root, have_rg, rg_binary, indexed_files, scoped_files](const std::string& needle)
+        -> std::vector<ATrailSearchHit> {
+      std::vector<ATrailSearchHit> hits;
+      if (needle.empty()) {
+        return hits;
+      }
+      WorkspaceSearchOptions opts;
+      opts.workspace_root = root;
+      opts.needle = needle;
+      std::vector<WorkspaceSearchResult> results;
+      bool used_rg = false;
+      if (have_rg) {
+        int files_scanned = 0;
+        std::atomic<pid_t> child{0};
+        used_rg = search_workspace_rg(opts, rg_binary, [] { return false; }, &child, &results,
+                                      &files_scanned);
+      }
+      if (!used_rg) {
+        std::shared_ptr<const std::vector<std::string>> files = indexed_files;
+        if (scoped_files != nullptr && !scoped_files->empty()) {
+          files = scoped_files;
+        }
+        if (files == nullptr || files->empty()) {
+          return hits;
+        }
+        opts.files_ref = files;
+        results = search_workspace(opts);
+      }
+      hits.reserve(results.size());
+      for (const WorkspaceSearchResult& result : results) {
+        ATrailSearchHit hit;
+        hit.path = result.file;
+        hit.line = result.line;
+        hit.preview = result.preview;
+        hits.push_back(std::move(hit));
+      }
+      return hits;
+    };
+    ACausalFlowTree tree;
+    try {
+      tree = a_causal_flow_build(root, symbol, path_hint, search, kACausalFlowMaxWrites,
+                                 kACausalMaxChains, kACausalUpstreamDepth, anchor_line);
+    } catch (const std::exception&) {
+    }
+    workspace->enqueue_ui_task([apply, tree = std::move(tree)]() mutable { apply(std::move(tree)); });
+  }).detach();
+  return true;
 }
 
 }  // namespace tuide

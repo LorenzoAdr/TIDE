@@ -374,6 +374,7 @@ add_executable(tuide
   src/ai/l2_explore_a.cpp
   src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_causal.cpp
   src/ai/l2_effect_summary.cpp
   src/ai/l2_problem_frame.cpp
   src/ai/l2_entityness.cpp
@@ -1028,6 +1029,8 @@ target_include_directories(l2_explore_a_test PRIVATE
 
 add_executable(l2_trail_build_test
   tests/l2_trail_build_test.cpp
+  src/ai/l2_explore_a_causal.cpp
+  src/ai/l2_explore_a_dataflow.cpp
   src/ai/l2_explore_a_trail.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp

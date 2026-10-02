@@ -5,7 +5,8 @@ namespace tuide {
 
 // Stub for unit tests that only exercise trail state/judge (no TS parse).
 ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel_path,
-                             int call_line, const std::string& called_symbol) {
+                             int call_line, const std::string& called_symbol,
+                             ATrailParseCache* /*cache*/) {
   ATrailHop h;
   h.path = rel_path.empty() ? abs_path : rel_path;
   h.call_line = call_line;

@@ -4,6 +4,8 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
+#include <thread>
+#include <utility>
 
 #include "app/app_settings.hpp"
 #include "editor/undo_stack.hpp"
@@ -16,6 +18,7 @@
 #include "git/git_diff.hpp"
 #include "git/git_service.hpp"
 #include "util/path_normalize.hpp"
+#include "util/thread_name.hpp"
 #include "i18n/tr.hpp"
 
 namespace fs = std::filesystem;
@@ -110,6 +113,28 @@ void setup_diff_tab_buffer(EditorBuffer* buffer, const std::string& absolute_pat
 
 std::vector<std::string> load_working_lines_from_disk(const std::string& absolute_path) {
   return load_lines_from_file(absolute_path);
+}
+
+struct AsyncDiskReadResult {
+  bool ok = false;
+  std::vector<std::string> lines;
+};
+
+AsyncDiskReadResult read_disk_lines_async(const std::string& absolute_path) {
+  AsyncDiskReadResult result;
+  std::ifstream input(absolute_path);
+  if (!input) {
+    return result;
+  }
+  std::string line;
+  while (std::getline(input, line)) {
+    result.lines.push_back(std::move(line));
+  }
+  if (result.lines.empty()) {
+    result.lines.push_back("");
+  }
+  result.ok = true;
+  return result;
 }
 
 }  // namespace
@@ -214,6 +239,21 @@ bool WorkspaceModel::active_tab_large_virtual_view() const {
     return false;
   }
   return tabs[static_cast<std::size_t>(active_tab)].large_virtual_view;
+}
+
+bool WorkspaceModel::active_tab_pending_disk_load() const {
+  if (active_tab < 0 || active_tab >= static_cast<int>(tabs.size())) {
+    return false;
+  }
+  return tabs[static_cast<std::size_t>(active_tab)].pending_disk_load;
+}
+
+bool WorkspaceModel::consume_document_open_notify() {
+  if (!document_open_notify_pending_) {
+    return false;
+  }
+  document_open_notify_pending_ = false;
+  return true;
 }
 
 bool WorkspaceModel::active_tab_git_diff_view() const {
@@ -408,6 +448,7 @@ int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path, boo
   EditorTab tab;
   tab.path = absolute_path;
   tab.external = external;
+  uint64_t async_generation = 0;
   if (is_tabular_path(absolute_path)) {
     load_tabular_placeholder(&tab.buffer, absolute_path);
   } else if (!force_full_load &&
@@ -418,11 +459,81 @@ int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path, boo
     tab.virtual_store = std::make_shared<VirtualTextFileStore>();
     tab.virtual_store->open_async(absolute_path);
   } else {
-    load_buffer_from_disk(&tab.buffer, absolute_path);
+    // Placeholder on the UI thread; full getline runs on a worker.
+    load_virtual_text_placeholder(&tab.buffer, absolute_path);
+    tab.pending_disk_load = true;
+    tab.read_only = true;
+    async_generation = disk_load_generation_.fetch_add(1, std::memory_order_relaxed) + 1;
+    tab.disk_load_generation = async_generation;
   }
   stamp_tab_disk_mtime(&tab);
   tabs.push_back(std::move(tab));
+  if (async_generation != 0) {
+    start_async_disk_load(absolute_path, async_generation);
+  }
   return static_cast<int>(tabs.size()) - 1;
+}
+
+void WorkspaceModel::start_async_disk_load(const std::string& absolute_path, uint64_t generation) {
+  if (absolute_path.empty() || generation == 0) {
+    return;
+  }
+  std::thread([this, path = absolute_path, generation]() {
+    set_current_thread_name("file-open");
+    AsyncDiskReadResult result = read_disk_lines_async(path);
+    if (!enqueue_ui_task) {
+      return;
+    }
+    enqueue_ui_task([this, path = std::move(path), generation,
+                     lines = std::move(result.lines), ok = result.ok]() mutable {
+      apply_async_disk_load(path, generation, std::move(lines), ok);
+    });
+  }).detach();
+}
+
+void WorkspaceModel::apply_async_disk_load(const std::string& absolute_path, uint64_t generation,
+                                           std::vector<std::string> lines, bool ok) {
+  const int index = find_tab(absolute_path);
+  if (index < 0) {
+    return;
+  }
+  EditorTab& tab = tabs[static_cast<std::size_t>(index)];
+  if (!tab.pending_disk_load || tab.disk_load_generation != generation) {
+    return;
+  }
+
+  if (!ok) {
+    tab.buffer.lines.clear();
+    tab.buffer.path = absolute_path;
+    editor_buffer_invalidate_joined(&tab.buffer);
+    tab.buffer.reset_to_single_cursor(0, 0);
+    tab.buffer.scroll = 0;
+    tab.buffer.dirty = false;
+    clear_undo(&tab.buffer);
+    tab.buffer.lines.push_back(i18n::tr_fmt("workspace.open_failed", {absolute_path}));
+    tab.buffer.view_token++;
+  } else {
+    load_buffer_from_lines(&tab.buffer, absolute_path, lines);
+  }
+
+  if (tab.pending_caret_line >= 0 && !tab.buffer.lines.empty()) {
+    const int max_line = static_cast<int>(tab.buffer.lines.size()) - 1;
+    const int line = std::max(0, std::min(tab.pending_caret_line, max_line));
+    const int max_col = static_cast<int>(tab.buffer.lines[static_cast<std::size_t>(line)].size());
+    const int col = std::max(0, std::min(tab.pending_caret_col, max_col));
+    tab.buffer.reset_to_single_cursor(line, col);
+    tab.buffer.scroll = std::max(0, line - 2);
+  }
+  tab.pending_caret_line = -1;
+  tab.pending_caret_col = 0;
+  tab.pending_disk_load = false;
+  tab.read_only = false;
+  stamp_tab_disk_mtime(&tab);
+
+  if (index == active_tab) {
+    load_active_tab_into_buffer();
+    document_open_notify_pending_ = true;
+  }
 }
 
 bool WorkspaceModel::is_path_in_workspace(const std::string& workspace_root,
@@ -601,6 +712,12 @@ bool WorkspaceModel::open_file_at_impl(const std::string& absolute_path, int lin
   buffer.scroll = std::max(0, line - 2);
   buffer.view_token++;
   flush_active_tab();
+  if (active_tab >= 0 && active_tab < static_cast<int>(tabs.size()) &&
+      tabs[static_cast<std::size_t>(active_tab)].pending_disk_load) {
+    EditorTab& tab = tabs[static_cast<std::size_t>(active_tab)];
+    tab.pending_caret_line = line;
+    tab.pending_caret_col = col;
+  }
   return true;
 }
 
@@ -620,6 +737,12 @@ bool WorkspaceModel::open_file_at(const std::string& absolute_path, int line, in
   buffer.scroll = std::max(0, line - 2);
   buffer.view_token++;
   flush_active_tab();
+  if (active_tab >= 0 && active_tab < static_cast<int>(tabs.size()) &&
+      tabs[static_cast<std::size_t>(active_tab)].pending_disk_load) {
+    EditorTab& tab = tabs[static_cast<std::size_t>(active_tab)];
+    tab.pending_caret_line = line;
+    tab.pending_caret_col = col;
+  }
   return true;
 }
 
@@ -700,7 +823,7 @@ bool WorkspaceModel::load_file(const std::string& absolute_path) {
 }
 
 bool WorkspaceModel::save_buffer() {
-  if (buffer.path.empty()) {
+  if (buffer.path.empty() || active_tab_pending_disk_load()) {
     return false;
   }
 
@@ -766,7 +889,7 @@ DiskReloadResult WorkspaceModel::reload_stale_tabs_from_disk() {
   }
 
   if (tab.path.empty() || tab.read_only || tab.git_diff_view || tab.large_virtual_view ||
-      is_tabular_path(tab.path)) {
+      tab.pending_disk_load || is_tabular_path(tab.path)) {
     return DiskReloadResult::None;
   }
 
@@ -794,7 +917,7 @@ bool WorkspaceModel::reload_active_tab_from_disk() {
   }
   EditorTab& tab = tabs[static_cast<std::size_t>(active_tab)];
   if (tab.path.empty() || tab.read_only || tab.git_diff_view || tab.large_virtual_view ||
-      is_tabular_path(tab.path)) {
+      tab.pending_disk_load || is_tabular_path(tab.path)) {
     return false;
   }
 

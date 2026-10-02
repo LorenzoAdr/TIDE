@@ -288,6 +288,52 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		case LspAsyncJobKind::SemanticTokens:
 			UI_WAKE_REASON(&layout_state_, UiWakeReason::LspSemanticTokens);
 			break;
+		case LspAsyncJobKind::Format:
+		case LspAsyncJobKind::FormatRange: {
+			UiEvent event;
+			event.kind = UiEventKind::InputCorrelated;
+			event.correlation_id = ui_event_dispatcher_.current_correlation_id();
+			event.tag = std::string(ui_wake_spec(UiWakeReason::LspFormat).tag);
+			event.src_file = __FILE__;
+			event.src_line = __LINE__;
+			event.pre_paint = [this]() {
+				if (layout_state_.lsp_interactive_ready_handler && symbol_provider_) {
+					layout_state_.lsp_interactive_ready_handler(symbol_provider_.get());
+				}
+			};
+			ui_event_dispatcher_.emit_urgent(std::move(event));
+			break;
+		}
+		case LspAsyncJobKind::Navigation: {
+			UiEvent event;
+			event.kind = UiEventKind::InputCorrelated;
+			event.correlation_id = ui_event_dispatcher_.current_correlation_id();
+			event.tag = std::string(ui_wake_spec(UiWakeReason::LspNavigation).tag);
+			event.src_file = __FILE__;
+			event.src_line = __LINE__;
+			event.pre_paint = [this]() {
+				if (layout_state_.lsp_interactive_ready_handler && symbol_provider_) {
+					layout_state_.lsp_interactive_ready_handler(symbol_provider_.get());
+				}
+			};
+			ui_event_dispatcher_.emit_urgent(std::move(event));
+			break;
+		}
+		case LspAsyncJobKind::Rename: {
+			UiEvent event;
+			event.kind = UiEventKind::InputCorrelated;
+			event.correlation_id = ui_event_dispatcher_.current_correlation_id();
+			event.tag = std::string(ui_wake_spec(UiWakeReason::LspRename).tag);
+			event.src_file = __FILE__;
+			event.src_line = __LINE__;
+			event.pre_paint = [this]() {
+				if (layout_state_.lsp_interactive_ready_handler && symbol_provider_) {
+					layout_state_.lsp_interactive_ready_handler(symbol_provider_.get());
+				}
+			};
+			ui_event_dispatcher_.emit_urgent(std::move(event));
+			break;
+		}
 		}
 	});
 	symbol_provider_->set_did_change_debounce_callback([this] {
@@ -361,6 +407,8 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		}
 		workspace->enqueue_ui_task = [this](WorkspaceModel::UiTask task) {
 			enqueue_ui_task(std::move(task));
+			// Workers post completion via this queue; wake so drain_ui_tasks runs.
+			UI_WAKE(&layout_state_, "app");
 		};
 	};
 	wire_ui_tasks(&workspace_);
@@ -3388,7 +3436,9 @@ int Application::run() {
 			run_custom_event_drain(now_ms, plan, paint_before);
 			bool swallow_call_hierarchy_custom = false;
 			if ((layout_state_.right_sidebar.pending_call_hierarchy ||
-			     layout_state_.right_sidebar.pending_references) &&
+			     layout_state_.right_sidebar.pending_references ||
+			     layout_state_.right_sidebar.pending_causal_flow ||
+			     layout_state_.right_sidebar.pending_causal_connect) &&
 			    layout_state_.call_hierarchy_key_handler) {
 				layout_state_.call_hierarchy_key_handler(event);
 				swallow_call_hierarchy_custom = true;

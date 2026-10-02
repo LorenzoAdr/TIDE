@@ -86,6 +86,35 @@ struct NavigationParams {
   int character = 0;
 };
 
+enum class NavigationRequestKind { Definition, Declaration, Implementation };
+
+struct FormatAsyncResult {
+  uint64_t request_id = 0;
+  bool ok = false;
+  bool is_range = false;
+  std::string path;
+  std::string original_text;
+  std::optional<std::string> formatted;
+  int caret_line = 0;
+  int caret_col = 0;
+};
+
+struct NavigationAsyncResult {
+  uint64_t request_id = 0;
+  SourceLocation loc;
+  NavigationRequestKind kind = NavigationRequestKind::Definition;
+  NavigationParams params;
+};
+
+struct RenameAsyncResult {
+  uint64_t request_id = 0;
+  bool ok = false;
+  std::vector<LspFileEdits> edits;
+  std::string path;
+  int line = 0;
+  int col = 0;
+};
+
 class ISymbolProvider {
  public:
   virtual ~ISymbolProvider() = default;
@@ -142,6 +171,7 @@ class ISymbolProvider {
     (void)params;
     return {};
   }
+  // Prefer request_navigation/poll_navigation — see navigation_uses_async_fetch().
 
   // True when some language server that can answer textDocument/references is ready.
   virtual bool supports_references() const { return false; }
@@ -235,11 +265,52 @@ class ISymbolProvider {
     (void)params;
     return std::nullopt;
   }
+  virtual bool formatting_uses_async_fetch() const { return false; }
+  virtual bool request_format(const FormatParams& params, uint64_t request_id) {
+    (void)params;
+    (void)request_id;
+    return false;
+  }
+  virtual bool request_format_range(const FormatRangeParams& params, uint64_t request_id,
+                                    int caret_line = 0, int caret_col = 0) {
+    (void)params;
+    (void)request_id;
+    (void)caret_line;
+    (void)caret_col;
+    return false;
+  }
+  virtual std::optional<FormatAsyncResult> poll_format(uint64_t request_id) {
+    (void)request_id;
+    return std::nullopt;
+  }
 
   virtual bool supports_rename() const { return false; }
   virtual std::vector<LspFileEdits> rename_symbol(const RenameParams& params) {
     (void)params;
     return {};
+  }
+  virtual bool rename_uses_async_fetch() const { return false; }
+  virtual bool request_rename(const RenameParams& params, uint64_t request_id) {
+    (void)params;
+    (void)request_id;
+    return false;
+  }
+  virtual std::optional<RenameAsyncResult> poll_rename(uint64_t request_id) {
+    (void)request_id;
+    return std::nullopt;
+  }
+
+  virtual bool navigation_uses_async_fetch() const { return false; }
+  virtual bool request_navigation(const NavigationParams& params, NavigationRequestKind kind,
+                                  uint64_t request_id) {
+    (void)params;
+    (void)kind;
+    (void)request_id;
+    return false;
+  }
+  virtual std::optional<NavigationAsyncResult> poll_navigation(uint64_t request_id) {
+    (void)request_id;
+    return std::nullopt;
   }
 
   virtual bool supports_code_actions() const { return false; }
