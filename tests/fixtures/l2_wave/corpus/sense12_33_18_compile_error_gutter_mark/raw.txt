@@ -1,0 +1,24 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- No explorers yet.
+- Pack has 12 M* cards.
+- M1: editor panel (clear editor line paint caches)
+- M2: console expand overlay
+- M3: visual highlight (build git marks snapshot)
+- M4: editor buffer source
+- M5: editor context
+- M6: raw pty screen
+- M7: console panel (terminal selection)
+- M8:
+---- content ----
+{
+"action": "control_v1",
+"do": "bosquejar",
+"hacia": [
+"error de compilación",
+"margen izquierdo",
+"línea roja"
+],
+"why": "quiero ver si el ancla vive en un barrio o en varios"
+}

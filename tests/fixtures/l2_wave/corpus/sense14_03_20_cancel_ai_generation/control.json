@@ -1,0 +1,131 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para interrumpir la generación de la IA",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo parcialmente escrito al cancelar la generación de la IA",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se captura la pulsación de Escape o el clic fuera para interrumpir la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se limpia el archivo parcialmente escrito al cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino capturar la interrupción y limpiar el archivo parcialmente escrito",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla tiene dos polos: el disparo (Escape/clic) y el efecto (limpieza del archivo). M8 sugiere cancelación, M2 sugiere Escape, pero no está claro si están unidos o si la limpieza es automática. Rompo en dos localizadores y un puente para verificar la conexión."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el hijo leyó cancel level1, que es el efecto, no la captura del Escape/clic fuera; cierro ese mapeo y busco el disparo real"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 niega la limpieza del archivo; clear pending insert solo resetea flags en memoria y no toca el sistema de archivos. No hay evidencia de limpieza de disco."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide cancelar y limpiar; T1 confirma la cancelación (cancel level1), pero T2 refuta la limpieza (clear pending insert no toca el sistema de archivos). el claim se refuta: la cancelación actual deja el archivo a medias"
+    }
+  ],
+  "why": "el ancla pide cancelar y limpiar; T1 confirma la cancelación (cancel level1), pero T2 refuta la limpieza (clear pending insert no toca el sistema de archivos). el claim se refuta: la cancelación actual deja el archivo a medias",
+  "zooms": []
+}

@@ -1,0 +1,139 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de la IA cuando el usuario hace clic fuera del editor",
+      "keep": [
+        "M6",
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:handle_problems_button_click"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca la cancelación del agente de nivel 1",
+      "keep": [
+        "M1",
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ui/symbol_picker_match_runner.cpp:cancel",
+        "src/ai/ai_controller.hpp",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai trace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape; necesito ver si el trigger existe y a dónde apunta"
+    },
+    {
+      "consulta": "dónde se cancela la generación de la IA cuando el usuario hace clic fuera del editor",
+      "consultas": [
+        "dónde se cancela la generación de la IA cuando el usuario hace clic fuera del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack une M3 (level2 session) y M8 (ai controller) con cancelación; el clic fuera suele ser un blur o click outside que dispara la limpieza de sesión"
+    },
+    {
+      "consulta": "dónde se invoca la cancelación del agente de nivel 1",
+      "consultas": [
+        "dónde se invoca la cancelación del agente de nivel 1"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "los disparos fallaron; busco el mecanismo de cancelación en el controlador para ver si existe y cómo se limpia"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "el mecanismo de cancelación se invoca mediante cancel level1 y cancel all en el controlador de IA, pero no se encontró la captura de la tecla Escape ni el clic fuera del editor para disparar la cancelación; el archivo a medias no se limpia"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack no une los disparos (Escape, clic fuera) con la cancelación; T1 y T2 no hallaron los handlers de entrada, y T3 solo leyó el mecanismo de cancelación sin el trigger. sin camino entre polos leídos cierra el ancla"
+    }
+  ],
+  "why": "el pack no une los disparos (Escape, clic fuera) con la cancelación; T1 y T2 no hallaron los handlers de entrada, y T3 solo leyó el mecanismo de cancelación sin el trigger. sin camino entre polos leídos cierra el ancla",
+  "zooms": []
+}

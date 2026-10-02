@@ -1,0 +1,44 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ],
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la generación",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino capturar el Escape y limpiar el archivo al cancelar",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

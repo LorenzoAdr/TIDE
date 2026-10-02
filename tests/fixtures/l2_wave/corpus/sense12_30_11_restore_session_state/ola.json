@@ -1,0 +1,21 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "agujas",
+  "error": "control: cada aguja es una clase de sitio (event, mouse, ai), no ident",
+  "evita": [],
+  "hacia": [
+    "workspace_session",
+    "editor_tabs",
+    "cursor_history",
+    "panel"
+  ],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto; busco dónde se guarda y restaura ese estado"
+}

@@ -1,0 +1,18 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have two completed jobs:
+1.  **T1 (Locator):** Found `cancel level1` (M6/M8). This seems to be the mechanism to stop the AI generation.
+2.  **T2 (Locator):** Looked for file cleanup. Found `clear pending insert` and `cancel current` (M8), but the Cerrado says these only reset memory flags (`pending insert`, `insert anchor`) and *do not touch the file system*.
+
+The user's claim has two parts:
+1.  Cancel generation (Escape/click outside).
+2.  Clean up the file (don't leave it half-written).
+
+T1 found the cancellation trigger (`cancel level1`).
+T2 found that the current cancellation logic (`clear pending insert`) *fails* to clean the file.
+
+The "Puente" (P) in the original plan was to check if there is a path between capturing the interruption and cleaning the file.
+Now I know:
+- Interruption exists (`cancel level1`).
+- File cleaning *does not exist* in the current cancellation flow (
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide cancelar y limpiar; T1 confirma la cancelación (cancel level1), pero T2 refuta la limpieza (clear pending insert no toca el sistema de archivos). el claim se refuta: la cancelación actual deja el archivo a medias"}

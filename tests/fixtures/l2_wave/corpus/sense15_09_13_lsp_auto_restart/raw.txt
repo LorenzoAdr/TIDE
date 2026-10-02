@@ -1,0 +1,14 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Asked where the LSP crash is detected. Read: `on lsp notification, spawn language server`.
+2.  **T2**: Asked where the LSP is automatically restarted after a crash. Read: `restart lsp for workspace`.
+3.  **T3**: Asked where the detection is linked to the restart. Read: `schedule debounced lsp restart, on connection complete, restart lsp for workspace`.
+
+The "Cerrado" sections for all three jobs indicate that the read content was *not* the trigger for the specific claim (crash detection -> restart).
+Specifically:
+- T1 read `on lsp notification, spawn language server`. This sounds like spawning on a notification, not necessarily detecting a crash.
+- T2 read `restart lsp for workspace`. This is the restart action, but the closed section says "Lo leído no era el disparo" (The read was not the trigger).
+- T3 read `schedule debounced lsp restart, on connection complete, restart lsp for workspace`. This links a
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo de detección de caída ni su enlace al reinicio; los leídos (on lsp notification, restart lsp for workspace) no son el disparo de la caída"}

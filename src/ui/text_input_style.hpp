@@ -36,8 +36,10 @@ inline std::size_t utf8_next_len(const std::string& text, std::size_t i) {
 }
 
 // Soft-wrap by terminal columns (1 codepoint ≈ 1 column). Hard `\n` breaks a line.
+// If prefer_word_break, intenta cortar en el último espacio de la fila (si lo hay).
 inline std::vector<std::pair<std::size_t, std::size_t>> soft_wrap_ranges(const std::string& text,
-                                                                         int width) {
+                                                                         int width,
+                                                                         bool prefer_word_break = false) {
   width = std::max(1, width);
   std::vector<std::pair<std::size_t, std::size_t>> ranges;
   std::size_t i = 0;
@@ -49,10 +51,20 @@ inline std::vector<std::pair<std::size_t, std::size_t>> soft_wrap_ranges(const s
       continue;
     }
     int cols = 0;
+    std::size_t last_break = start;  // just after a space, if any
+    bool saw_break = false;
     while (i < text.size() && text[i] != '\n' && cols < width) {
       const std::size_t step = std::max<std::size_t>(1, utf8_next_len(text, i));
+      if (prefer_word_break && text[i] == ' ' && cols > 0) {
+        last_break = i + step;
+        saw_break = true;
+      }
       i += step;
       ++cols;
+    }
+    if (prefer_word_break && saw_break && i < text.size() && text[i] != '\n' &&
+        last_break > start && cols >= width) {
+      i = last_break;
     }
     ranges.emplace_back(start, i);
     if (i < text.size() && text[i] == '\n') {

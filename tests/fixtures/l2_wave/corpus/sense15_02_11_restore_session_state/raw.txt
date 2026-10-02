@@ -1,0 +1,15 @@
+The user wants to restore the editor state (cursor position, open files, visible side panels) when reopening a project.
+I have a plan with 4 phases:
+1. [en_curso] A locator: dónde se guarda la posición del cursor al cerrar el editor
+2. [pendiente] B locator: dónde se restaura la posición del cursor al abrir el editor
+3. [pendiente] C locator: dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto
+4. [pendiente] D locator: dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto
+
+Previous work:
+T1: Asked about saving/restoring cursor and files. Found `save state` but it only saves AI session state, not editor visual state.
+T2: Asked about persisting/retrieving cursor and files. Found `reset to single cursor`, `reset helix editor state`, `save workspace session`, `flush active tab`, `save`.
+T3: Asked about saving cursor position on close. Found `close`, `save`.
+
+The system says "ESA pregunta no se relanza. Lo leído no era el disparo. PROH
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto. T1, T2 y T3 no encontraron el mecanismo de guardado/restauración del estado visual del editor (cursor, archivos, paneles). T1 encontró save state pero solo para sesión IA. T2 encontró reset helix editor state y save workspace session pero no el mecanismo de persistencia visual. T3 encontró close y save pero no el guardado de posición. El pack no nombra el mecanismo del ancla. Cierro sin hijo."}

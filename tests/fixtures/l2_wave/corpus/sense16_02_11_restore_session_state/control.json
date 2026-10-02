@@ -1,0 +1,94 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor posición del cursor y archivos abiertos al cerrar y abrir un proyecto",
+      "keep": [
+        "M1",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/app_settings.cpp:save",
+        "src/app/application.cpp:restore_workspace_session"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M8",
+        "M10"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor posición del cursor y archivos abiertos al cerrar y abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor posición del cursor y archivos abiertos al cerrar y abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 nombra 'editor state' y 'CursorPos'. Es el barrio más directo para rastrear la persistencia de la sesión del editor."
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "panel lateral"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el guardado/restaurado de sesión pero no el disparo; el ancla pide paneles laterales, un polo distinto al cursor/archivos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 encontró mecanismos de sesión (save/restore) pero cerró que no eran el disparo del efecto deseado; T2 cerró que no hay objeto para paneles laterales. El pack no ofrece más nombres para estos polos. Cierra el claim: no se confirma el mecanismo de restauración."
+    }
+  ],
+  "why": "T1 encontró mecanismos de sesión (save/restore) pero cerró que no eran el disparo del efecto deseado; T2 cerró que no hay objeto para paneles laterales. El pack no ofrece más nombres para estos polos. Cierra el claim: no se confirma el mecanismo de restauración.",
+  "zooms": []
+}

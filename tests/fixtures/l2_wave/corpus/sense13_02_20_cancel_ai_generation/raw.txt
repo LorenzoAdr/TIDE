@@ -1,0 +1,17 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with 3 phases:
+1. [Done] A locator: where Escape is captured to cancel generation.
+2. [Current] B locator: where the half-written file is cleaned up upon cancellation.
+3. [Pending] P bridge: is there a path between capturing Escape and cleaning up the file.
+
+Work 1 (A) failed to find the Escape mechanism in `handle user input`. It found text commands.
+Work 2 (A retry?) found `handle ai console keys`, `cancel level1`, `3020 3165`, `3020 3139`. This seems to confirm the capture of Escape (likely key codes 3020/3165/3139 correspond to Escape or similar in the system).
+Work 3 (B) found `clear pending insert`, `cancel current`, `cancel all`, `cancel level1`. This confirms the cleanup mechanism.
+
+The last work (T3) closed with: `leído: clear pending insert, cancel current, cancel all, cancel level1`.
+---- content ----
+{
+"action": "control_v1",
+"do": "pasar",
+"why": "el Cerrado afirma el objeto de esta fase"
+}

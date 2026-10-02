@@ -1,0 +1,133 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp",
+        "src/ui/console_panel.cpp:parse_pty_filter_tokens",
+        "src/ui/console_panel.cpp:row_matches_pty_filter"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola",
+      "keep": [
+        "M12"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación con una línea roja en el margen del editor",
+      "keep": [
+        "M9",
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 3,
+      "visto": [
+        "src/editor/visual_highlight.cpp:apply_visual_highlight_fold_regions",
+        "src/editor/visual_highlight.cpp:mark_visual_highlight_dirty"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "margen editor",
+        "línea roja",
+        "error compilación"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "necesito localizar dónde se dibuja la línea roja en el margen y cómo se vinculan los errores de la consola con el editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos fenómenos distintos: la detección del error y su visualización. M11 huele a detección, M3 a visualización. Necesito confirmar ambos y su conexión."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parse compile errors"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "la fase A falló en console panel; el abierto apunta a parse compile errors. busco el lector que extrae la línea y el mensaje del texto plano de la terminal"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación con una línea roja en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación con una línea roja en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack huele visual highlight y binary symbols panel escaneando errores; busco el dibujo del margen"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack no contiene el mecanismo: la consola no parsea errores de compilación y el editor no renderiza líneas rojas en el margen para diagnósticos; la funcionalidad no existe en el código leído"
+    }
+  ],
+  "why": "el pack no contiene el mecanismo: la consola no parsea errores de compilación y el editor no renderiza líneas rojas en el margen para diagnósticos; la funcionalidad no existe en el código leído",
+  "zooms": []
+}

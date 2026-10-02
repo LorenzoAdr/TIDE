@@ -1,0 +1,162 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de la IA al hacer clic fuera del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca la cancelación del agente de nivel 1 al pulsar Escape",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ui/editor_panel.cpp:handle_editor_escape",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se invoca la cancelación del agente de nivel 1 al pulsar Escape",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se limpia el archivo o se deshace la inserción pendiente al cancelar la generación",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino invocar la cancelación del agente y limpiar el archivo",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 menciona escape en el contexto de ai trace; necesito ver si ahí se inicia la cancelación"
+    },
+    {
+      "consulta": "dónde se cancela la generación de la IA al hacer clic fuera del editor",
+      "consultas": [
+        "dónde se cancela la generación de la IA al hacer clic fuera del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla nombra dos disparos; el de Escape falló. Busco el otro polo (clic fuera) para ver si activa la cancelación limpia"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 fallaron buscando el input handler directo. El pack muestra que la cancelación se gestiona a través del controlador de IA (M8) y el agente de nivel 1 (M6). Necesito encontrar dónde se dispara la cancelación del agente (A) y dónde se asegura la limpieza del archivo (B), luego verificar si están conectados (P)."
+    },
+    {
+      "consulta": "dónde se maneja la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se maneja la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "handle editor keys"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T3 falló en handle editor escape; el pack apunta a handle editor keys como el siguiente barrio para la captura de input"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "no hay mecanismo que una Escape o clic fuera con la cancelación del agente ni con la limpieza del archivo; lo leído son formateadores de strings, controladores de cancelación sin handler de input, y gestores de UI que no invocan la parada del agente"
+    }
+  ],
+  "why": "no hay mecanismo que una Escape o clic fuera con la cancelación del agente ni con la limpieza del archivo; lo leído son formateadores de strings, controladores de cancelación sin handler de input, y gestores de UI que no invocan la parada del agente",
+  "zooms": []
+}

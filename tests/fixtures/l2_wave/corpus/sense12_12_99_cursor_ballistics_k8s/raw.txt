@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack no contiene ningún mecanismo de trayectoria balística, sincronización con Kubernetes, detección de parpadeo ni índice vectorial cuántico; el claim se refuta por ausencia total de evidencia en el atlas"}

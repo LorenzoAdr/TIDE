@@ -1,0 +1,186 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_text.hpp:EditorText",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/context_menu.cpp:context_menu_open_editor_background",
+        "src/ui/context_menu.cpp:context_menu_open_editor_symbol",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:open_file_confirmed"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar y restaurar la posición del cursor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide restaurar estado (cursor, archivos, paneles); M1 (editor state), M5 (editor panel) y M6 (panel) son los barrios candidatos para la persistencia; necesito ver si guardan/cargan sesión"
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor y los archivos abiertos al cerrar el editor",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla tiene tres estados distintos (cursor, archivos, paneles) y dos momentos (guardar al cerrar, cargar al abrir). El pack no muestra el ciclo de vida de la sesión ni la persistencia. Se necesitan locators independientes para cada estado y momento, luego un puente para confirmar que el flujo de 'abrir proyecto existente' los activa todos."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor y los archivos abiertos al cerrar el editor",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla pide tres estados distintos (cursor, archivos, paneles) en un momento específico (abrir proyecto previo). El pack no muestra el flujo de persistencia/restauración. Se necesitan locators independientes para cada estado y luego verificar si el evento de 'abrir proyecto' los dispara conjuntamente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide recordar cursor, archivos y paneles. El pack muestra editor state y panel, pero no el ciclo de sesión. Parto en 4 locators para encontrar los puntos de escritura y lectura del estado, y luego un puente para verificar si forman un ciclo coherente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla pide persistencia de 3 estados (cursor, archivos, paneles). El pack muestra M1 (cursor) y M5/M6 (paneles) pero sin mecanismo de guardado/carga. Se rompen en 4 localizadores de estado + 1 puente para verificar la coherencia de la sesión."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 6,
+      "why": "el ancla pide recordar estado (cursor, archivos, paneles). El pack muestra M1 (editor state CursorPos) pero no el mecanismo de persistencia. Parto en guardar y restaurar para verificar si existe el arco de memoria."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 7,
+      "why": "el Cerrado niega el guardado explícito del cursor; salto a la siguiente caza del plan (restauración) para ver si el mecanismo existe por otro lado o si el claim se refuta por falta de persistencia"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 8,
+      "why": "T1 y T2 refutan la existencia de un mecanismo de persistencia/restauración de la posición del cursor al cerrar/abrir el editor. El pack no ofrece otros barrios para este fenómeno específico. El claim de recordar la posición del cursor se refuta por ausencia de objeto."
+    }
+  ],
+  "why": "T1 y T2 refutan la existencia de un mecanismo de persistencia/restauración de la posición del cursor al cerrar/abrir el editor. El pack no ofrece otros barrios para este fenómeno específico. El claim de recordar la posición del cursor se refuta por ausencia de objeto.",
+  "zooms": []
+}

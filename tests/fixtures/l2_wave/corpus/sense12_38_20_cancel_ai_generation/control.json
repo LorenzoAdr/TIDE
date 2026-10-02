@@ -1,0 +1,253 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se procesa el evento de teclado para detectar la tecla Escape en la interfaz",
+      "keep": [
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 3,
+      "visto": [
+        "src/terminal/raw_pty_screen.cpp:skip_escape",
+        "src/terminal/raw_pty_screen.cpp:handle_csi"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta la tecla Escape o el clic fuera para invocar la cancelación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta la tecla Escape o el clic fuera para invocar la cancelación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se invoca la limpieza del archivo al cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino la detección de Escape clic fuera y la limpieza del archivo",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "dos polos distintos: el trigger (Escape/clic) y el efecto (limpieza del archivo). El pack sugiere M2/M8 para el trigger y M8/M6 para la inserción/cancelación, pero no unen explícitamente la limpieza del archivo."
+    },
+    {
+      "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la IA",
+      "consultas": [
+        "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró que no hay captura de Escape/clic para cancelar; el ancla pide además limpiar el archivo a medias. Busco el mecanismo de limpieza al cancelar (fase B del plan)."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "ai console keys"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 refutó el barrio anterior; el pack abre nuevos loci (handle ai console keys, handle key event, on mouse click) para la captura del gesto"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 refutó el barrio de texto; el pack apunta a handle ai console keys y handle key event como candidatos para el disparo de teclado/ratón"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla pide cancelar con Escape o clic fuera; T1 refutó que se capture así, pero el pack tiene abiertos handle ai console keys y handle key event que pueden ser el disparador real"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "handle key event"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 refutó que el disparo actual sea Escape/clic (solo texto). El ancla exige ese disparo. Debo cazar dónde se capturan esos eventos (handle key event / on mouse click) para conectarlos a la cancelación."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 refutó que existiera el disparo; el pack (T1 extra) apunta a 'Ai Controller' y 'cancel all'. Busco el controlador de eventos de teclado/ratón que debería interceptar Escape o el clic fuera para invocar la cancelación."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "T1 refutó el mapeo anterior (escape como string). El ancla pide el trigger (Escape/clic). Hay que cazar el evento real en la UI o el controlador, no el texto."
+    },
+    {
+      "consulta": "dónde se procesa el evento de teclado para detectar la tecla Escape en la interfaz",
+      "consultas": [
+        "dónde se procesa el evento de teclado para detectar la tecla Escape en la interfaz"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle key event"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 9,
+      "why": "T1 refutó que Escape cancele la IA. El pack (T1 extra) sugiere 'handle key event' como el barrio de captura de teclado. Necesito encontrar dónde se lee la tecla para añadir la lógica de cancelación."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 10,
+      "why": "T1 y T3 fallaron en encontrar la captura de Escape/clic; T2 encontró la limpieza. Necesito localizar dónde se captura el evento de UI (Escape/clic) y dónde se invoca la limpieza, luego verificar si hay camino entre ambos para cumplir el claim del usuario."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

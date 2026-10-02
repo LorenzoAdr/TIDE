@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de restauración de archivos y cursor al abrir un proyecto no se encuentra en los nombres leídos (reopen workspace documents, stabilize scroll after fold change); el pack no nombra el disparo para la posición del cursor ni la visibilidad de paneles"
+}

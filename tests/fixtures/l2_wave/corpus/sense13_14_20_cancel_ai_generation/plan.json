@@ -1,0 +1,39 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se captura el clic fuera del editor para cancelar la generación",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "cómo se limpia el archivo a medias al cancelar la generación",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "pendiente"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino el clic fuera y la limpieza del archivo",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

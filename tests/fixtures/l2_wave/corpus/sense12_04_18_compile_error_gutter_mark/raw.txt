@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"T1 y T2 cerraron sus polos (lectura de errores y dibujo de gutter) pero el pack confirma 'sin camino' entre ellos. No existe un mecanismo que una la salida de la consola con el marcador visual del editor. El ancla se refuta: no hay arco para marcar la línea roja desde el error leído."}

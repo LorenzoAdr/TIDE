@@ -43,6 +43,7 @@
 #include "ui/busy_strip.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/console_panel.hpp"
+#include "ui/console_expand_overlay.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/core_analyzer_panel.hpp"
 #include "ui/cursor_blink.hpp"
@@ -64,6 +65,7 @@
 #include "ui/docker_start_confirm.hpp"
 #include "ui/debug_launch_modal.hpp"
 #include "ui/settings_modal.hpp"
+#include "util/system_clipboard.hpp"
 #include "util/tools_status.hpp"
 #include "ui/shutdown_overlay.hpp"
 #include "ui/source_substitute_modal.hpp"
@@ -88,6 +90,7 @@
 #include "util/crash_handler.hpp"
 #include "util/docker_shell.hpp"
 #include "util/compile_commands_remap.hpp"
+#include "util/compile_commands_setup.hpp"
 #include "util/lsp_missing_prompt.hpp"
 #include "util/monitor_log.hpp"
 #include "util/nm_reader.hpp"
@@ -113,7 +116,6 @@ static int64_t steady_now_ms() {
 	return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
-
 bool is_significant_input_event(const Event &event) {
 	if (event == Event::Custom) {
 		return false;
@@ -134,7 +136,6 @@ bool is_significant_input_event(const Event &event) {
 	}
 	if (mouse.motion == Mouse::Moved && mouse.button != Mouse::None) {
 		return true;
-
 
 	}
 	return false;
@@ -163,41 +164,6 @@ bool should_block_inhibited_mouse_motion(const MainLayoutState *layout, const Ev
 	}
 	return false;
 }
-
-class BackgroundWorker {
-  public:
-	using MainThreadTask = std::function<void()>;
-
-	static constexpr int64_t kActiveIntervalMs = 50;
-
-	explicit BackgroundWorker(MainThreadTask on_main_thread)
-	    : on_main_thread_(std::move(on_main_thread)) {
-		thread_ = std::thread([this] {
-			set_current_thread_name("ui-poller");
-			while (running_.load(std::memory_order_acquire)) {
-				std::this_thread::sleep_for(std::chrono::milliseconds(kActiveIntervalMs));
-				if (on_main_thread_) {
-					on_main_thread_();
-				}
-			}
-		});
-	}
-
-	~BackgroundWorker() {
-		running_.store(false, std::memory_order_release);
-		if (thread_.joinable()) {
-			thread_.join();
-		}
-	}
-
-	BackgroundWorker(const BackgroundWorker &) = delete;
-	BackgroundWorker &operator=(const BackgroundWorker &) = delete;
-
-  private:
-	MainThreadTask on_main_thread_;
-	std::atomic<bool> running_{true};
-	std::thread thread_;
-};
 
 // Swallow pure mouse moves while interactive/inhibited so FTXUI keeps frame_valid_ and no child
 // handler can return handled=true (scrollbars, tabs, etc.).
@@ -322,6 +288,52 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		case LspAsyncJobKind::SemanticTokens:
 			UI_WAKE_REASON(&layout_state_, UiWakeReason::LspSemanticTokens);
 			break;
+		case LspAsyncJobKind::Format:
+		case LspAsyncJobKind::FormatRange: {
+			UiEvent event;
+			event.kind = UiEventKind::InputCorrelated;
+			event.correlation_id = ui_event_dispatcher_.current_correlation_id();
+			event.tag = std::string(ui_wake_spec(UiWakeReason::LspFormat).tag);
+			event.src_file = __FILE__;
+			event.src_line = __LINE__;
+			event.pre_paint = [this]() {
+				if (layout_state_.lsp_interactive_ready_handler && symbol_provider_) {
+					layout_state_.lsp_interactive_ready_handler(symbol_provider_.get());
+				}
+			};
+			ui_event_dispatcher_.emit_urgent(std::move(event));
+			break;
+		}
+		case LspAsyncJobKind::Navigation: {
+			UiEvent event;
+			event.kind = UiEventKind::InputCorrelated;
+			event.correlation_id = ui_event_dispatcher_.current_correlation_id();
+			event.tag = std::string(ui_wake_spec(UiWakeReason::LspNavigation).tag);
+			event.src_file = __FILE__;
+			event.src_line = __LINE__;
+			event.pre_paint = [this]() {
+				if (layout_state_.lsp_interactive_ready_handler && symbol_provider_) {
+					layout_state_.lsp_interactive_ready_handler(symbol_provider_.get());
+				}
+			};
+			ui_event_dispatcher_.emit_urgent(std::move(event));
+			break;
+		}
+		case LspAsyncJobKind::Rename: {
+			UiEvent event;
+			event.kind = UiEventKind::InputCorrelated;
+			event.correlation_id = ui_event_dispatcher_.current_correlation_id();
+			event.tag = std::string(ui_wake_spec(UiWakeReason::LspRename).tag);
+			event.src_file = __FILE__;
+			event.src_line = __LINE__;
+			event.pre_paint = [this]() {
+				if (layout_state_.lsp_interactive_ready_handler && symbol_provider_) {
+					layout_state_.lsp_interactive_ready_handler(symbol_provider_.get());
+				}
+			};
+			ui_event_dispatcher_.emit_urgent(std::move(event));
+			break;
+		}
 		}
 	});
 	symbol_provider_->set_did_change_debounce_callback([this] {
@@ -395,6 +407,8 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		}
 		workspace->enqueue_ui_task = [this](WorkspaceModel::UiTask task) {
 			enqueue_ui_task(std::move(task));
+			// Workers post completion via this queue; wake so drain_ui_tasks runs.
+			UI_WAKE(&layout_state_, "app");
 		};
 	};
 	wire_ui_tasks(&workspace_);
@@ -461,6 +475,7 @@ void Application::stop_all_subprocesses() {
 	save_workspace_session();
 	build_artifact_watcher_.stop();
 	global_build_environment_service().shutdown();
+	shutdown_host_cmake_compile_commands();
 	shell_session_.stop();
 	if (symbol_provider_) {
 		symbol_provider_->on_workspace_closed();
@@ -495,7 +510,7 @@ void Application::inject_terminal_command(const std::string& command) {
 	focus_state_.region = FocusRegion::Terminal;
 	layout_state_.console_visible = true;
 	layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
-	layout_state_.text_input_focus = TextInputFocus::Console;
+	layout_state_.text_input_focus = TextInputFocus::None;
 	layout_state_.terminal_start_requested = true;
 	layout_state_.focus_sync_needed = true;
 	pending_terminal_inject_ = command;
@@ -942,6 +957,11 @@ void Application::sync_symbol_workspace_indexer(bool force) {
 }
 
 void Application::request_ai_indexes() {
+	// Con admin (hot path por defecto) no hace falta mapa de símbolos ni embeds de stems:
+	// el piloto usa search/read/explore. Evita busy-strip y trabajo de fondo al abrir el panel.
+	if (workspace_config_.ai.admin_enabled) {
+		return;
+	}
 	const bool first = !ai_indexes_requested_;
 	ai_indexes_requested_ = true;
 	if (first) {
@@ -1085,6 +1105,7 @@ void Application::run_input_sync_drain(int64_t now_ms) {
 
 void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan &plan,
                                          uint64_t paint_before) {
+	process_pending_workspace_load();
 	layout_state_.activity_gate.tick(now_ms);
 	sync_activity_phase_effects();
 	refresh_editor_visible_paths();
@@ -1506,7 +1527,8 @@ void Application::set_workspace(const std::string &workspace_root,
 		if (setup.compile_dir.empty()) {
 			std::error_code cmake_ec;
 			if (fs::is_regular_file(fs::path(absolute) / "CMakeLists.txt", cmake_ec)) {
-				workspace_.status_message += i18n::tr("app.no_compile_commands");
+				workspace_.status_message += i18n::tr("app.generating_compile_commands");
+				maybe_generate_host_compile_commands(absolute);
 			} else if (detect_build_system_kind(absolute) == BuildSystemKind::kMakefile ||
 			           detect_build_system_kind(absolute) == BuildSystemKind::kHybrid) {
 				workspace_.status_message += " | generando entorno make";
@@ -1564,6 +1586,33 @@ void Application::on_workspace_complete(const std::string &workspace_root,
                                         ScreenInteractive * /*screen*/) {
 	workspace_wizard_state_.open = false;
 	pending_workspace_load_ = workspace_root;
+	UI_WAKE(&layout_state_, "app");
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->request_animation_frame();
+	}
+}
+
+void Application::maybe_generate_host_compile_commands(const std::string &workspace_root) {
+	if (workspace_root.empty()) {
+		return;
+	}
+	request_host_cmake_compile_commands(
+	    workspace_root, [this, root = workspace_root](std::string compile_dir) {
+		    enqueue_ui_task([this, root, compile_dir]() {
+			    if (workspace_.root != root) {
+				    return;
+			    }
+			    if (compile_dir.empty()) {
+				    workspace_.status_message += i18n::tr("app.no_compile_commands");
+			    } else {
+				    restart_lsp_for_workspace();
+			    }
+			    UI_WAKE(&layout_state_, "app");
+		    });
+		    if (layout_state_.ui_events != nullptr) {
+			    UI_WAKE(&layout_state_, "app");
+		    }
+	    });
 }
 
 void Application::process_pending_workspace_load() {
@@ -2777,7 +2826,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		focus_state_.region = FocusRegion::Terminal;
 		layout_state_.console_visible = true;
 		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
-		layout_state_.text_input_focus = TextInputFocus::Console;
+		layout_state_.text_input_focus = TextInputFocus::None;
 		layout_state_.terminal_start_requested = true;
 		wake_console_panel(&layout_state_, "app.focus.terminal");
 		mark_focus_sync();
@@ -2828,13 +2877,11 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 			layout_state_.console_visible = true;
 			layout_state_.terminal_start_requested = true;
 			if (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
-			    (app_mode_ == AppMode::kDebug &&
-			     (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kDebug ||
-			      layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp))) {
-				layout_state_.text_input_focus =
-				    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp
-				        ? TextInputFocus::None
-				        : TextInputFocus::Console;
+			    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp) {
+				layout_state_.text_input_focus = TextInputFocus::None;
+			} else if (app_mode_ == AppMode::kDebug &&
+			           layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kDebug) {
+				layout_state_.text_input_focus = TextInputFocus::Console;
 			}
 			wake_console_panel(&layout_state_, "app.focus.console");
 			mark_focus_sync();
@@ -2866,16 +2913,10 @@ int Application::run() {
 		enable_extended_key_reporting();
 		enable_click_drag_mouse_reporting();
 		enable_bracketed_paste();
+		warm_system_clipboard();
 	}
 
-	std::unique_ptr<BackgroundWorker> background_worker;
-	if (!ui_smoke) {
-		background_worker = std::make_unique<BackgroundWorker>([this]() {
-			if (pending_workspace_load_.has_value()) {
-				process_pending_workspace_load();
-			}
-		});
-	} else {
+	if (ui_smoke) {
 		auto exit_loop = screen.ExitLoopClosure();
 		std::thread([exit_loop] {
 			std::this_thread::sleep_for(std::chrono::milliseconds(150));
@@ -3044,6 +3085,9 @@ int Application::run() {
 			return;
 		}
 		layout_state_.console_visible = visible;
+		if (!visible) {
+			layout_state_.console_expanded = false;
+		}
 		if (visible) {
 			layout_state_.terminal_start_requested = true;
 		}
@@ -3197,8 +3241,11 @@ int Application::run() {
 		    notify_file_tree_reveal();
 	    });
 
+	auto with_console_expand =
+	    MakeConsoleExpandOverlay(with_external_file_wizard, &layout_state_);
+
 	auto with_shortcuts =
-	    MakeShortcutsModalOverlay(with_external_file_wizard, &shortcuts_modal_state_);
+	    MakeShortcutsModalOverlay(with_console_expand, &shortcuts_modal_state_);
 
 	SettingsApplyCallback on_settings_apply = [this](const AppSettings &) { apply_app_settings(); };
 	WorkspaceSettingsApplyCallback on_workspace_apply = [this](const WorkspaceConfig &config) {
@@ -3389,7 +3436,9 @@ int Application::run() {
 			run_custom_event_drain(now_ms, plan, paint_before);
 			bool swallow_call_hierarchy_custom = false;
 			if ((layout_state_.right_sidebar.pending_call_hierarchy ||
-			     layout_state_.right_sidebar.pending_references) &&
+			     layout_state_.right_sidebar.pending_references ||
+			     layout_state_.right_sidebar.pending_causal_flow ||
+			     layout_state_.right_sidebar.pending_causal_connect) &&
 			    layout_state_.call_hierarchy_key_handler) {
 				layout_state_.call_hierarchy_key_handler(event);
 				swallow_call_hierarchy_custom = true;
@@ -3509,6 +3558,38 @@ int Application::run() {
 				return true;
 			}
 
+			if (keybind_matches(KeyAction::ToggleConsoleExpand, event)) {
+				const bool line_submit = event_is_line_submit(event);
+				const bool alt_j = event_is_ctrl_alt_j(event);
+				const bool skip_for_terminal_line =
+				    line_submit && !alt_j &&
+				    layout_state_.console_visible &&
+				    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+				if (!skip_for_terminal_line) {
+					if (layout_state_.console_toggle_expanded) {
+						layout_state_.console_toggle_expanded();
+					}
+					UI_WAKE(&layout_state_, "console.expand");
+					return true;
+				}
+			}
+
+			// Expand overlay CatchEvent sits inside this CatchEvent tree, so Escape never
+			// reaches it while console_key_handler consumes Esc. Collapse here first.
+			if (layout_state_.console_expanded) {
+				const std::string& esc_in = event.input();
+				const bool is_escape =
+				    event == Event::Escape || esc_in == "\x1b" || esc_in == "\x1B" ||
+				    esc_in == "\x1b[27u" || esc_in == "\x1B[27u" ||
+				    esc_in == "\x1b[27;1u" || esc_in == "\x1B[27;1u";
+				if (is_escape) {
+					layout_state_.console_expanded = false;
+					layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
+					UI_WAKE(&layout_state_, "console.collapse");
+					return true;
+				}
+			}
+
 			if (settings_modal_state_.open && event.is_mouse()) {
 				Event mouse_event = event;
 				if (settings_modal_handle_mouse(&settings_modal_state_, mouse_event)) {
@@ -3602,6 +3683,20 @@ int Application::run() {
 			}
 			UI_WAKE(&layout_state_, "app.custom");
 		};
+
+		// Expanded console mouse must run before split/editor handlers: the modal is only a
+		// visual dbox overlay; hit-testing uses reflected boxes on console state.
+		if (layout_state_.console_expanded && layout_state_.console_visible &&
+		    event.is_mouse() && layout_state_.console_mouse_handler &&
+		    layout_state_.console_mouse_handler(event)) {
+			post_custom_throttled();
+			Event mouse_event = event;
+			const auto button = mouse_event.mouse().button;
+			if (button != Mouse::WheelUp && button != Mouse::WheelDown) {
+				layout_state_.focus_sync_needed = true;
+			}
+			return true;
+		}
 
 		if (event.is_mouse() && layout_state_.split_mouse_handler &&
 		    layout_state_.split_mouse_handler(event)) {
@@ -3757,14 +3852,32 @@ int Application::run() {
 			const bool terminal_tab =
 			    app_mode_ != AppMode::kDebug ||
 			    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+			const bool expanded_terminal =
+			    layout_state_.console_expanded && layout_state_.console_visible &&
+			    (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
+			     layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp);
 			const bool shell_terminal_focus = terminal_tab &&
 			                                  focus_state_.region == FocusRegion::Terminal &&
 			                                  shell_session_.running();
-		if ((layout_state_.text_input_focus == TextInputFocus::Console ||
-		     layout_state_.text_input_focus == TextInputFocus::TerminalFilter ||
-		     shell_terminal_focus) &&
-		    !event_is_tuide_global_shortcut(event) && layout_state_.console_key_handler &&
+		const bool shell_console_keys = shell_terminal_focus || expanded_terminal;
+		const bool skip_global_for_shell_return =
+		    event == Event::Return && shell_console_keys &&
+		    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+		if (skip_global_for_shell_return && layout_state_.console_key_handler &&
 		    layout_state_.console_key_handler(event)) {
+			UI_WAKE(&layout_state_, "app.custom");
+			return true;
+		}
+		const bool console_route =
+		    layout_state_.text_input_focus == TextInputFocus::Console ||
+		    layout_state_.text_input_focus == TextInputFocus::TerminalFilter ||
+		    shell_terminal_focus || expanded_terminal;
+		const bool console_handled =
+		    console_route &&
+		    (skip_global_for_shell_return || !event_is_tuide_global_shortcut(event)) &&
+		    layout_state_.console_key_handler &&
+		    layout_state_.console_key_handler(event);
+		if (console_handled) {
 			UI_WAKE(&layout_state_, "app.custom");
 			return true;
 		}
@@ -4047,6 +4160,9 @@ int Application::run() {
 				return true;
 			}
 			if (event == Event::CtrlT) {
+				if (layout_state_.console_visible) {
+					layout_state_.console_expanded = false;
+				}
 				layout_state_.console_visible = !layout_state_.console_visible;
 				return true;
 			}

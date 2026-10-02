@@ -1,0 +1,13 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have a plan with 3 phases:
+1. [en_curso] A locator: dónde se llama a la verificación de vida del proceso clangd y qué se hace si falla
+2. [pendiente] B locator: dónde se detecta que el servidor LSP deja de responder y se dispara el reinicio automático
+3. [pendiente] P puente: hay camino la verificación de vida del proceso y el disparo del reinicio automático (need A B)
+
+The last closed
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "el Cerrado de T4 solo lee el símbolo de verificación de vida sin revelar el flujo de fallo; salto a la siguiente caza del plan"
+}

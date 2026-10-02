@@ -1,0 +1,68 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código de la IA al pulsar Escape o hacer clic fuera",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:clear_pending_insert"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se cancela la generación de código de la IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se cancela la generación de código de la IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancelación IA"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el pack muestra ai controller cancel level1 y ai trace escape; necesito ver cómo se orquesta la cancelación limpia"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide un comportamiento que no existe en el sistema actual; T1 confirmó que no hay rama de eventos de teclado ni mouse para cancelar la IA, solo texto. el claim se refuta: no hay mecanismo que cancelar por Escape o clic fuera"
+    }
+  ],
+  "why": "el ancla pide un comportamiento que no existe en el sistema actual; T1 confirmó que no hay rama de eventos de teclado ni mouse para cancelar la IA, solo texto. el claim se refuta: no hay mecanismo que cancelar por Escape o clic fuera",
+  "zooms": []
+}

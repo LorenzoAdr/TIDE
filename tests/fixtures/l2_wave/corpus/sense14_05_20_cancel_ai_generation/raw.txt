@@ -1,0 +1,14 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Asked where Escape/click outside is captured to cancel generation. Read: `cancel level1`.
+T2: Asked where the half-written file is cleaned up when cancelling generation. Read: `cancel level1`, `cancel current`, `clear pending insert`, `cancel all`, `cancel inflight completion`, `begin insert at`, `rollback pending`.
+T3: Asked if there is a path between capturing Escape/click outside and cleaning the half-written file. Read: `ai trace escape`, `skip escape`. The closed report says: "no encontré el mecanismo de capturar Escape clic fuera para limpiar archivos a medias; lo leído son funciones de escape de strings ai trace escape y parsing de secuencias ANSI skip escape, que no gestionan estado de archivos ni limpieza".
+
+The last Closed (T3) explicitly denies the mapping/path between the trigger (Escape/click) and the effect (cleaning file). It says the read symbols are about string escaping/ANSI parsing, not file state management.
+The instructions say: "El último Cerrado negó el m
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el último Cerrado niega el camino entre capturar Escape/clic fuera y limpiar el archivo a medias; lo leído son funciones de escape de strings y parsing ANSI, no gestión de estado de archivos. Cierra ese mapeo."
+}

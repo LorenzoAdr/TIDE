@@ -1,0 +1,13 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor.
+I have three completed jobs:
+T1: Found where the red line is painted (`line diagnostic marker from map`, `line gutter marker`, `paint caches`).
+T2: Asked where console output is scanned to extract errors. Result: No object found.
+T3: Asked where console compilation errors are converted to editor diagnostics. Result: Found the mechanism in `editor panel cpp`. It turns out "console errors" are actually LSP diagnostics. The flow is `sync diagnostic cache` -> `apply lsp diagnostics to panel` -> `push active file diagnostics from cache` -> `line diagnostic marker from map`.
+
+The user's claim is that errors appearing in the console should be marked.
+T3 reveals that the system *already* marks errors (via LSP diagnostics) with red lines in the margin.
+The user's premise ("errors in the console") might be a misunderstanding of the source (LSP vs Console), or they want *specific* console errors (not LSP) to be marked.
+However, T2 explicitly looked for a scanner of console output to extract errors and found "no object".
+T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el sistema ya marca errores con línea roja en el margen (line diagnostic marker from map); los errores provienen de diagnósticos LSP (sync diagnostic cache), no de un escaneo de consola (T2 no halló objeto)"}

@@ -1,0 +1,178 @@
+{
+  "agujas": [
+    "ai",
+    "editor",
+    "ui",
+    "app"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "qué hace cancel all para limpiar el archivo a medias y detener la generación",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:clear_pending_insert"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el buffer del editor para deshacer los cambios parciales de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "ai",
+        "editor",
+        "ui",
+        "app"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla toca entrada (escape/clic), generación (ai) y archivo (editor/app); quiero ver qué barrios cubren esas zonas"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "ai"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla toca generación de código, Escape y cancelación; el barrio ai tiene stems de trace, session y controller que huelen a gestión del flujo"
+    },
+    {
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura Escape o clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack huele ai trace escape; un hijo cierra el disparo y el efecto"
+    },
+    {
+      "consulta": "qué hace cancel all para limpiar el archivo y detener la generación",
+      "consultas": [
+        "qué hace cancel all para limpiar el archivo y detener la generación"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 cerró el disparo y el inicio de la cadena; ahora necesito ver si cancel all limpia el buffer y detiene el proceso para cumplir el 'sin dejar el archivo a medias'"
+    },
+    {
+      "consulta": "qué hace cancel all para limpiar el archivo a medias y detener la generación",
+      "consultas": [
+        "qué hace cancel all para limpiar el archivo a medias y detener la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancel all"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 cerró la captura de Escape y abrió cancel all; ahora hay que ver si cancel all limpia el buffer o el archivo para cumplir el claim de 'sin dejar el archivo a medias'"
+    },
+    {
+      "consulta": "dónde se limpia el buffer del editor para deshacer los cambios parciales de la IA",
+      "consultas": [
+        "dónde se limpia el buffer del editor para deshacer los cambios parciales de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "T2 cerró que clear pending insert resetea pending insert e insert anchor, pero no dice si eso limpia el buffer del editor. Necesito ver si hay un paso que deshaga los cambios en el archivo abierto."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el mecanismo de cancelación está completo: la pulsación de Escape se captura en handle user input, que invoca cancel current y cancel all; este último limpia el archivo a medias mediante clear pending insert y detiene la generación con cancel level1. no hay evidencia de captura de clic fuera, pero el flujo de teclado cumple el requisito de limpieza."
+    }
+  ],
+  "why": "el mecanismo de cancelación está completo: la pulsación de Escape se captura en handle user input, que invoca cancel current y cancel all; este último limpia el archivo a medias mediante clear pending insert y detiene la generación con cancel level1. no hay evidencia de captura de clic fuera, pero el flujo de teclado cumple el requisito de limpieza.",
+  "zooms": [
+    "ai"
+  ]
+}

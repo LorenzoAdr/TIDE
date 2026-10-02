@@ -1,0 +1,15 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have three completed jobs (T1, T2, T3) that investigated where the detection and restart happen.
+T1 found `restart lsp for workspace`, `schedule debounced lsp restart`, `process alive`, `spawn clangd`.
+T2 found `wait until healthy`, `ensure completion server`, `health ok`, `start completion server`.
+T3 found `on lsp notification`, `initialize`.
+
+The "Cerrado" sections for T1, T2, and T3 explicitly state: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo."
+This means the previous explorations did *not* find the specific mechanism for detecting a crash/unresponsiveness and triggering a restart in the way the user wants (or at least, the system considers those specific mappings closed/negative for the specific "disparo" of the anchor).
+Actually, looking closely at T1's "leído": `restart lsp for workspace`, `schedule debounced lsp restart`, `process alive`. This sounds exactly like what the user
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no nombra el mecanismo de detección automática de caída o no respuesta del LSP que dispare el reinicio; los cierres leídos niegan ese disparo en los barrios explorados"
+}

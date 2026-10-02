@@ -392,6 +392,7 @@ struct FileTreePanelState {
       root = build_file_tree_from_paths_and_folders(snapshot->files, tree_folders);
     }
     mark_lazy_stub_folders(&root, snapshot->filter_options);
+    mark_symlink_folders_lazy(&root, workspace_root);
     if (!to_reveal.empty() && !skeleton_preview) {
       reveal_file(workspace_root, to_reveal);
     } else {
@@ -722,9 +723,9 @@ bool handle_explorer_context_menu(FileTreePanelState* state, DebugModel* model,
     const bool binary = is_nm_analyzable_path(absolute.string());
     context_menu_open_file(&layout_state->context_menu, m.x, m.y, absolute.string(),
                            entry.relative_path, trackable, true, binary);
-    if (is_markdown_path(absolute.string())) {
+    if (is_browser_preview_path(absolute.string())) {
       context_menu_append_item(&layout_state->context_menu,
-                               i18n::tr("context_menu.preview_markdown"), "preview_markdown");
+                               i18n::tr("context_menu.preview_browser"), "preview_in_browser");
     }
   } else {
     context_menu_open_folder(&layout_state->context_menu, m.x, m.y, absolute.string(),

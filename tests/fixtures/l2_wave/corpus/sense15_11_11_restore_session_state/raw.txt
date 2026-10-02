@@ -1,0 +1,16 @@
+The user wants to know if the application remembers the cursor position, open files, and visible/closed side panels when reopening a previously opened project.
+
+I have three completed jobs:
+1.  **T1**: Asked about saving/restoring editor state on project load.
+    *   *Result*: Found `save state` in `level2 session`, but it persists AI session state (turns, actions), not visual editor state (cursors, scroll, buffers).
+    *   *Conclusion*: This mechanism is not the one for the user's request.
+2.  **T2**: Asked about saving cursor position and open files on editor close.
+    *   *Result*: Found `save workspace session`, `workspace config hpp`, `flush active tab`, `save`.
+    *   *Conclusion*: These names suggest a mechanism for saving workspace state exists, but the specific details (cursor, files) weren't fully confirmed as the *trigger* for the user's specific "remember exactly" claim, or at least the previous job closed without confirming the full mechanism. The prompt says "Lo leído no era el disparo" (What was read wasn't the trigger).
+3.  **T3**: Asked about restoring
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el mecanismo de recordar la posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto no se encontró en los barrios leídos; lo leído (save state, save workspace session, load) no era el disparo del claim"
+}

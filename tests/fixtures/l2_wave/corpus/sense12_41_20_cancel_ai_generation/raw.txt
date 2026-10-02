@@ -1,0 +1,18 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA
+2. [fallo] B locator: dónde se limpia el archivo a medias al cancelar la generación de la IA
+3. [pendiente] P puente: hay camino capturar la cancelación y limpiar el archivo a medias (need A B)
+
+Work 1 (A) failed: "no encontré
+---- content ----
+{
+  "action": "control_v1",
+  "do": "explorar",
+  "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+  "hacia": [
+    "handle user input"
+  ],
+  "why": "T1 falló en M2/M8 (escape de strings, cancel interna). El pack apunta a 'handle user input' en T2 extra. Necesito el disparador UI real (Escape/clic) para cerrar el polo A del ancla."
+}

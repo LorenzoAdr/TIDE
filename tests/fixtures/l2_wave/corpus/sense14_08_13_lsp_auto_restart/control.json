@@ -1,0 +1,102 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático",
+      "keep": [
+        "M3",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 7,
+      "visto": [
+        "src/lsp/lsp_transport.cpp:is_running",
+        "src/ai/llama_backend.cpp:ensure_completion_server",
+        "src/ai/llama_backend.cpp:status_text",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/ai/llama_backend.cpp:stop_owned_unlocked"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se programa la verificación periódica del estado del servidor LSP para detectar caídas o falta de respuesta",
+      "keep": [
+        "M4",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_transport.cpp:is_running",
+        "src/ai/llama_backend.cpp:health_ok"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5/M7 tienen el núcleo de reinicio (pending lsp restart, restart lsp for workspace); necesito ver qué dispara ese reinicio y si hay detección de fallo"
+    },
+    {
+      "consulta": "dónde se programa la verificación periódica del estado del servidor LSP para detectar caídas o falta de respuesta",
+      "consultas": [
+        "dónde se programa la verificación periódica del estado del servidor LSP para detectar caídas o falta de respuesta"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "watchdog"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 dice que el reinicio se dispara al enviar una petición. Si el servidor se cuelga, la petición puede colgarse y no llegar a la verificación. Necesito ver si hay un mecanismo de fondo (watchdog/timer) que verifique la salud independientemente de las peticiones del usuario, o si la detección depende exclusivamente del flujo de trabajo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el mecanismo de detección y reinicio automático ya existe de forma reactiva: se dispara al enviar una petición (health ok probe) o al detectar EOF en el pipe, sin intervención del usuario. no hay watchdog periódico, pero el comportamiento solicitado está implementado en el flujo de uso normal."
+    }
+  ],
+  "why": "el mecanismo de detección y reinicio automático ya existe de forma reactiva: se dispara al enviar una petición (health ok probe) o al detectar EOF en el pipe, sin intervención del usuario. no hay watchdog periódico, pero el comportamiento solicitado está implementado en el flujo de uso normal.",
+  "zooms": []
+}

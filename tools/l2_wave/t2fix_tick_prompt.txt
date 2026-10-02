@@ -1,0 +1,11 @@
+# Tick T2_REJECTFIX — core5 tras cablear Último rechazo + bosquejar fuera de legales
+
+Sentinel: `AGENT_LOOP_WAKE_t2fix`
+
+1. Si `meta/STOP` → para wait/heartbeat y sal.
+2. Estado `.tuide/ai/l2_wave/v2_night/T2_REJECTFIX/`:
+   - `DONE` → scoreboard; compara vs T2_CODER80B (ok 0.4 / og 0.2, loops bosquejar); mira rachas de `bosquejar`/`follow` y si aparece `Último rechazo` en user.md; tabla por caso; no relances.
+   - cola viva → rearma wait + heartbeat 1500s.
+   - cola muerta sin DONE → anota y sal.
+3. Heartbeat: `./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_t2fix 'Lee tools/l2_wave/t2fix_tick_prompt.txt'`
+4. Wait: `./tools/l2_wave/t270b_wait_done.sh .tuide/ai/l2_wave/v2_night/T2_REJECTFIX AGENT_LOOP_WAKE_t2fix tools/l2_wave/t2fix_tick_prompt.txt`

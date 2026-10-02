@@ -10,15 +10,16 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-namespace {
-
+#if defined(__linux__)
+#include <sys/prctl.h>
 #ifndef PR_SET_PTRACER
 #define PR_SET_PTRACER 0x59616d61
 #endif
+#endif
+
+namespace {
 
 constexpr uint16_t kAppPort = 5555;
 constexpr uint16_t kPeripheralPort = 5556;
@@ -47,9 +48,11 @@ struct AckPacket {
 #pragma pack(pop)
 
 void allow_external_debugger() {
+#if defined(__linux__)
   if (prctl(PR_SET_PTRACER, -1) != 0) {
     std::cerr << "aviso: prctl(PR_SET_PTRACER): " << std::strerror(errno) << "\n";
   }
+#endif
 }
 
 int bind_udp_socket(uint16_t port) {

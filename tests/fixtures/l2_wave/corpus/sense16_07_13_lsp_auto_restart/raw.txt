@@ -1,0 +1,13 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Looked for detection of crash/unresponsiveness to trigger restart. Result: Found startup health checks (`ensure ready`, `health ok`), but *not* runtime crash detection.
+2.  **T2**: Looked for the restart mechanism itself. Result: Found `restart lsp for workspace` and `schedule debounced lsp restart`.
+3.  **T3**: Looked for detection of unexpected termination (death). Result: Found `reader loop` detecting EOF/error via `read message` returning `nullopt`, invoking `reader eof handler`, which triggers `schedule debounced lsp restart` -> `restart lsp for workspace`.
+
+Analysis:
+-   **Detection**: T3 found a mechanism for detecting when the process *dies* (EOF/error in reader loop). This covers "se cae" (crashes/dies).
+-   **Restart**: T2 and T3 confirm that `schedule debounced lsp restart` leads to `restart lsp for workspace`. This covers "lo reinicie".
+-   **
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el lector del canal detecta la muerte del proceso (EOF/error) y dispara el reinicio automático; no se encontró detección de inactividad (no responde)"}

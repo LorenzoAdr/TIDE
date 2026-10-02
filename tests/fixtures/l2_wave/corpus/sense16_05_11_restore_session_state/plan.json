@@ -1,0 +1,39 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se guarda y restaura la posición del cursor en el archivo al cerrar y abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino guardar restaurar posición del cursor y guardar restaurar visibilidad de paneles laterales",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "las tres cazas de extracción de errores de compilación cerraron sin objeto: no existe mecanismo que lea, parsee o extraiga errores de compilación del texto de la consola inferior. el pack muestra escaneo de errores de linker en M11 y marcas de git en M3, pero no el flujo de compilación general. sin extractor, no hay camino para dibujar la línea roja en el margen. el ancla se refuta: el sistema no extrae esos errores para marcarlos."
+}

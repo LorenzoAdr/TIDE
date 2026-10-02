@@ -1,0 +1,9 @@
+# Tick H_LITE — harness reducido (Grep+Read only)
+
+Sentinel: `AGENT_LOOP_WAKE_hlite`
+
+1. Si `meta/STOP` → para.
+2. Estado `.tuide/ai/l2_wave/v2_night/H_LITE/`:
+   - `DONE` o `rep_1/scoreboard.json` → lee `H_LITE_SUMMARY.json`; compara H_CURSOR/S0/H_T0; no relances.
+   - sin scoreboard → el subagente `l2-wave-lite-battery` debe estar cazando (solo Grep+Read).
+3. No armes `l2_harness` ni GPU para esta prueba.

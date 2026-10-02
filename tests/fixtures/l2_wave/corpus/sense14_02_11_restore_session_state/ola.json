@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no une la posición del cursor con la reapertura del proyecto; los archivos y paneles se restauran, pero el cursor no"
+}

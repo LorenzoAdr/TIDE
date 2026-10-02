@@ -1,0 +1,67 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 2,
+  "cerró": true,
+  "circuit": false,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [],
+  "jobs_run": 0,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "cursor",
+        "blink",
+        "kubernetes",
+        "quantum vectorial index"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide mecanismos muy específicos (trayectoria balística, parpadeo, kubernetes, índice cuántico); bosquejo para ver si el pack tiene algún barrio que rima con estos conceptos o si es un hueco total"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor",
+        "sincronización",
+        "índice vectorial"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla menciona trayectoria balística, sincronización con kubernetes y persistencia en índice vectorial; necesito ver si estos conceptos existen en el código o son metáforas"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack no nombra trayectoria balística, parpadeo, kubernetes ni índice cuántico; el barrio del editor (M1) solo rinde scroll y foco de texto"
+    }
+  ],
+  "why": "el pack no nombra trayectoria balística, parpadeo, kubernetes ni índice cuántico; el barrio del editor (M1) solo rinde scroll y foco de texto",
+  "zooms": []
+}

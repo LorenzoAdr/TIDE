@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "las tres cazas confirman que no existe un mecanismo de detección automática de caída o no-respuesta del LSP. T1 y T3 cerraron con 'no hay objeto' para la detección de fallo, y T2 solo encontró el inicio al abrir el workspace. El pack no muestra ningún hilo de supervisión (watchdog) ni handler de error de proceso. El claim se refuta: la aplicación no reinicia automáticamente al detectar caída, porque no detecta la caída."
+}

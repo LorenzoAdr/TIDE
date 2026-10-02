@@ -1,0 +1,14 @@
+The user wants to know if the application remembers the cursor position, open files, and panel visibility when reopening a project.
+I have a plan with 3 locators (A, B, C) and a bridge (P).
+T1 (Cursor position) -> Closed: "no hay objeto".
+T2 (Open files) -> Closed: "no hay objeto".
+T3 (Panel visibility) -> Closed: "leído: Split Separator Vertical, panel hpp". The closed says "ESA pregunta no se relanza. Lo leído no era el disparo."
+
+So, T1 and T2 found nothing. T3 found some UI elements (Split Separator Vertical, panel hpp) but the closed explicitly says "Lo leído no era el disparo" (what was read was not the trigger). This implies that while these elements exist, they don't seem to be the mechanism for *restoring* state upon reopening, or at least the specific mapping asked for wasn't found.
+
+The anchor claim is: "when I open a project I had open before, I want it to remember exactly where the cursor was, which files were open, and if any side panel was visible or closed".
+
+Current status:
+- Cursor restoration
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo que recuerde la posición del cursor, los archivos abiertos ni la visibilidad de los paneles al volver a abrir un proyecto"}

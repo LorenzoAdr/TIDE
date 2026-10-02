@@ -1,0 +1,17 @@
+The user wants to mark compilation errors from the console with a red line in the left margin of the editor at the exact line of the error.
+I have 3 completed jobs:
+T1: Found where errors are marked in the editor margin (`line gutter marker` in `editor panel` delegates to `line diagnostic marker from map`).
+T2: Found where compilation errors from shell output are parsed to create diagnostics (`goto helix diagnostic`, `count workspace diagnostics`).
+T3: Found where workspace diagnostics are created from console output (`diagnostics panel cpp`, `diagnostics cpp`).
+
+The pack shows:
+T1 => T2: sin camino
+T1 => T3: sin camino
+T2 => T3: sin camino
+
+The user's claim is: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error"
+This implies a connection between the console output (T2/T3) and the editor margin marking (T1).
+However, the pack explicitly states "sin camino" between T1, T2, and T3.
+T1 found the mechanism for marking the margin
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack confirma sin camino entre el parseo de errores de consola y el marcado en el margen del editor; el mecanismo no une ambos polos"}

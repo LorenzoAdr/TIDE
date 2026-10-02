@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "control: un leído no cierra el ancla; no refuta el existe",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de recordar archivos abiertos existe (open tabs mru, load working lines from disk); no hay mecanismo para recordar la posición del cursor ni el estado de paneles laterales"
+}

@@ -19,6 +19,7 @@ namespace tuide {
 
 class EmbeddingBackend;
 class CodingStemEmbedIndex;
+class L2Brain;
 
 struct Level1AgentDeps {
   ToolRegistry* tools = nullptr;
@@ -27,6 +28,7 @@ struct Level1AgentDeps {
   SymbolWorkspaceIndexer* symbol_indexer = nullptr;
   LlamaBackend* backend = nullptr;
   LlamaBackend* l2_backend = nullptr;   // optional; semantic two-pass retrieval
+  L2Brain* l2_brain = nullptr;          // optional; remote Mac / OpenAI-compatible distill
   EmbeddingBackend* embed = nullptr;  // optional; coding-pack semantic rerank
   CodingStemEmbedIndex* coding_stem_index = nullptr;
   CodingSymbolEmbedIndex* coding_symbol_index = nullptr;  // unused; kept for ABI/tests
@@ -44,12 +46,18 @@ struct Level1RunResult {
   std::vector<std::string> semantic_tokens;
   // agent|ask|plan|git — copied from settings at handoff (typed L1→L2).
   std::string workflow = "agent";
+  // Full problem_frame_v1 JSON (may include anchor_hypotheses) for L2 bootstrap.
+  std::string problem_frame_json;
   std::string error;
 };
 
 struct InvestigateNeedlesResult {
   std::vector<std::string> lexical_seeds;
   std::vector<std::string> semantic_tokens;
+  // Short distilled primary_goal/intent for hybrid body-embed query (may be empty).
+  std::string embed_intent;
+  // Full problem_frame_v1 JSON when distill succeeded (may include hyps).
+  std::string problem_frame_json;
 };
 
 class Level1Agent {

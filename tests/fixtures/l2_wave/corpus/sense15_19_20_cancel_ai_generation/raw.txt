@@ -1,0 +1,17 @@
+The user wants to know how to cleanly cancel AI code generation when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Looked for Escape key capture. Found `ai trace escape` which is string escaping, not key handling. **Result**: Negative for this specific path.
+2.  **T2**: Looked for Escape key or click outside capture. Found `handle ai console keys` (Escape branch) and `handle console panel mouse` (click outside). Both invoke `cancel current` or `clear pending insert`. **Result**: Positive for the trigger mechanism.
+3.  **T3**: Looked at what `cancel current` or `clear pending insert` does. Found `cancel current` bifurcates:
+    *   If pending insert and not busy -> `clear pending insert` (resets pending insert/anchor, wakes UI).
+    *   If busy -> `cancel all` -> `cancel level1` (sets `agent cancel` to true, cancels active tasks).
+    **Result**: Positive for the cancellation logic.
+
+The user's claim is: "when the AI is generating code and the user presses Escape
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla se confirma: la captura de Escape y clic fuera está en handle ai console keys y handle console panel mouse, que invocan cancel current; este bifurca a clear pending insert (si hay inserción pendiente) o cancel all -> cancel level1 (si está ocupado), limpiando el estado y cancelando tareas sin dejar el archivo a medias"
+}

@@ -1,0 +1,19 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have two completed jobs:
+T1: Found that detection is reactive via `health ok` probe (HTTP GET) and restart is triggered by `start completion server` (which calls `stop owned unlocked` and relaunches). This happens on every `ensure completion server` call (e.g., when sending a request), not via an independent watchdog timer.
+T2: Confirmed there is NO periodic watchdog timer for LSP. Detection is reactive via `transport reader eof` (EOF in pipe) and restart is manual/debounced after config changes (`schedule debounced lsp restart`).
+
+The anchor claim is: "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada"
+
+Current state:
+- Detection exists reactively (on request via `health ok`, or on pipe EOF).
+- Restart exists reactively (on request via `ensure completion server`).
+- There is NO periodic watchdog.
+- The user wants automatic detection and restart without user action.
+- Currently, it
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de detección y reinicio automático ya existe de forma reactiva: se dispara al enviar una petición (health ok probe) o al detectar EOF en el pipe, sin intervención del usuario. no hay watchdog periódico, pero el comportamiento solicitado está implementado en el flujo de uso normal."
+}

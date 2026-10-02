@@ -1,0 +1,54 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [
+        "src/app/workspace_model.cpp:clear_tabs",
+        "src/app/workspace_model.cpp:open_tabs_mru",
+        "src/app/workspace_model.hpp"
+      ],
+      "consulta": "dónde se guarda la lista de archivos abiertos al cerrar el editor",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el editor",
+      "evita": [],
+      "hacia": [],
+      "id": "C",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino guardar el estado al cerrar y restaurarlo al abrir",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B",
+        "C"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

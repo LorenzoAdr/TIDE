@@ -1,0 +1,9 @@
+The user wants to connect compilation errors from the console to red lines in the editor margin.
+I have a plan:
+1. [en_curso] A locator: dónde se leen los errores de compilación de la consola inferior
+2. [pendiente] B locator: dónde se pinta la línea roja en el margen izquierdo del editor
+3. [pendiente] P puente: hay camino leer los errores de la consola y pintar la línea roja en el editor (need A B)
+
+Wait, the plan says A is "dónde se leen los errores de compilación de la consola
+---- content ----
+{"action":"control_v1","do":"pasar","why":"T4 confirma el lector de errores de la consola; paso a la siguiente fase del plan"}

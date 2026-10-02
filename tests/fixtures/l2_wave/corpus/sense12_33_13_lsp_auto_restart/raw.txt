@@ -1,0 +1,10 @@
+The user wants to automatically detect if the LSP process crashes or becomes unresponsive and restart it.
+I have a plan with 3 phases:
+1. [en_curso] A locator: dónde se lee el estado de clangd process alive para decidir si reiniciar
+2. [pendiente] B locator: dónde se lee el estado de clangd index healthy para decidir si reiniciar
+3. [pendiente] P puente: hay camino leer el estado y llamar a schedule debounced lsp restart (need A B)
+
+Wait, the plan says:
+1. [en_curso] A locator:
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"el Cerrado de T4 no afirma el objeto de la fase A; solo leyó el estado sin encontrar la decisión de reinicio. salto a la siguiente caza del plan"}

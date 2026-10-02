@@ -1,0 +1,17 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Looked for detection of LSP crash/no response triggering restart.
+    *   Found: `on transport reader eof`, `start`, `schedule debounced lsp restart`, `restart lsp for workspace`.
+    *   Conclusion: `on transport reader eof` triggers `schedule debounced lsp restart`. This covers the "crash" (EOF) part.
+2.  **T2**: Looked for detection of LSP timeout triggering restart.
+    *   Found: `wait response`, `reader loop`, `schedule debounced lsp restart`, `restart lsp for workspace`, `run`.
+    *   Conclusion: `wait response` detects timeout at transport level but *does not* trigger restart. `restart lsp for workspace` is called by UI loop and missing install, but no global timeout watcher invoking `schedule debounced lsp restart` was found.
+3.  **T3**: Looked for usage of LSP restart deadline to detect unresponsiveness.
+    *   Found: `schedule debounced lsp restart`.
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "la aplicación detecta la caída del servidor LSP (transport reader eof) y lo reinicia automáticamente, pero no detecta ni reinicia por timeout de respuesta"
+}

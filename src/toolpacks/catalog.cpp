@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <sys/utsname.h>
 
 #include <nlohmann/json.hpp>
 
@@ -38,6 +39,46 @@ std::vector<std::string> string_array(const nlohmann::json& doc, const char* key
 }
 
 }  // namespace
+
+std::string normalize_catalog_arch(const std::string& raw) {
+  if (raw == "amd64" || raw == "x64" || raw == "x86_64") {
+    return "x86_64";
+  }
+  if (raw == "arm64" || raw == "aarch64") {
+    return "aarch64";
+  }
+  return raw;
+}
+
+std::string host_catalog_arch() {
+  utsname u{};
+  if (uname(&u) != 0) {
+    return "x86_64";
+  }
+  const std::string machine = u.machine;
+  const std::string canonical = normalize_catalog_arch(machine);
+  if (canonical == "x86_64" || canonical == "aarch64") {
+    return canonical;
+  }
+  return machine;
+}
+
+bool catalog_arch_matches_host(const std::vector<std::string>& archs) {
+  if (archs.empty()) {
+    return true;
+  }
+  const std::string host = host_catalog_arch();
+  for (const auto& a : archs) {
+    if (normalize_catalog_arch(a) == host) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string linux_catalog_archive_infix() {
+  return "linux-" + host_catalog_arch();
+}
 
 std::optional<Catalog> parse_catalog_json(const std::string& text) {
   if (text.empty()) {
@@ -123,14 +164,7 @@ std::optional<CatalogToolpack> find_catalog_toolpack(const Catalog& catalog,
     if (tp.id != id) {
       continue;
     }
-    bool arch_ok = tp.arch.empty();
-    for (const auto& a : tp.arch) {
-      if (a == "x86_64" || a == "amd64") {
-        arch_ok = true;
-        break;
-      }
-    }
-    if (!arch_ok) {
+    if (!catalog_arch_matches_host(tp.arch)) {
       continue;
     }
     if (!version.empty()) {

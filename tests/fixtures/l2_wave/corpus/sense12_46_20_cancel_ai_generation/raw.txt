@@ -1,0 +1,34 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current state:
+- T1 (Escape capture): Failed. `ai trace escape` is JSON escape, not key event.
+- T2 (File cleanup): Found `cancel current`, `clear pending insert`, `cancel level1`, `cancel all`.
+- T3 (Escape/Click capture): Found `handle ai console keys` (lines 3050-3100) detects Escape and calls `ai- clear pending insert`.
+- T4 (Click outside capture): Found `handle ai console keys`, `cancel current`.
+
+The plan was:
+1. A locator: dónde se captura el clic fuera para cancelar la generación de la IA
+2. B locator: dónde se revierten los cambios en el archivo al cancelar la generación
+
+T4 was the locator for "click outside". It found `handle ai console keys` and `cancel current`.
+Wait, T3 found Escape capture in `handle ai console keys`.
+T4 found "click outside" capture? The closed says "leído: handle ai console keys, cancel current". It seems T4 might have looked at the same
+---- content ----
+{
+"action": "control_v1",
+"do": "plan",
+"modo": "romper",
+"fases": [
+{
+"id": "A",
+"kind": "locator",
+"consulta": "dónde se captura el clic fuera para cancelar la generación de la IA"
+},
+{
+"id": "B",
+"kind": "locator",
+"consulta": "dónde se revierten los cambios en el archivo al cancelar la generación"
+}
+],
+"why": "T4 leyó handle ai console keys y cancel current, pero no confirmó la captura del clic fuera. T3 confirmó Escape. El plan original se rompe para re-cazar el clic fuera (A) y luego la limpieza (B)."
+}

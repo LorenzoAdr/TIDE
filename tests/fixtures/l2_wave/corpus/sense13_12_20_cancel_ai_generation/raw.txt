@@ -1,0 +1,25 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Asked where Escape is captured to cancel generation. Result: No object found (found string escape, not input handler).
+2.  **T2**: Asked where the file is cleaned when generation is cancelled. Result: Found `cancel current`, `clear pending insert`, `cancel all`, `cancel level1`.
+3.  **T3**: Asked where Escape or click outside is captured to cancel generation. Result: Empty/No object found.
+
+The "between opened" section shows:
+- T1 => T2: no path
+- T1 => T3: no path
+- T2 => T3: same object (cancel all)
+
+The "hacia el resto" shows T2 connects to `handle user input` and `handle route`.
+
+The anchor has two poles:
+1.  Trigger: User presses Escape or clicks outside.
+2.  Effect: Cancel generation cleanly (no half-written file).
+
+T2 found the mechanism for the *effect* (cleaning/cancelling): `cancel current`, `clear pending
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de limpieza existe (cancel current, clear pending insert), pero no hay camino desde la captura de Escape ni clic fuera hacia él; el ancla pide ese arco y no se encuentra"
+}

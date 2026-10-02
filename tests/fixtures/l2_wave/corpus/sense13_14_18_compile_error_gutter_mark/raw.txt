@@ -1,0 +1,10 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found the mechanism for marking errors in the margin: `line gutter marker` reads `line diagnostic marker from map` which reads `diagnostics for editor line` from `panel diagnostics by line`. This map is filled in `push active file diagnostics from cache` from LSP diagnostics.
+T2 asked where compilation errors are read from the console output to mark them in the editor. It read `push active file diagnostics from cache`, `apply lsp diagnostics to panel`. The closed says "Lo leído no era el disparo".
+T3 asked where the console output is parsed to extract compilation errors. It read `parse pty filter tokens`, `on pty output`. The closed says "Lo leído no era el disparo".
+
+The anchor claims: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error".
+This implies a feature request or a missing link: currently, console errors are not marked in the editor margin, or the user wants to enable
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de marcar errores en el margen existe y depende de diagnostics del LSP; la consola no alimenta ese mapa, por lo que el claim se refuta como funcionalidad nativa y requiere extensión o integración externa"}

@@ -1,0 +1,25 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs (T1, T2, T3).
+T1 looked for Escape/click outside capture -> found string escape/hover clear, no cancel logic.
+T2 looked for click outside capture -> found mouse handling for selection/hover, no click outside logic or cancel call.
+T3 looked for Escape capture -> found nothing.
+
+The pack (M*) mentions:
+M2: ai trace escape (read in T1, not the trigger)
+M3: level2 session (port to M8 ai controller clear)
+M4: file picker (port to M6 ai controller clear)
+M5: console panel (port to M6 ai controller clear)
+M6: level1 agent (port to M8 ai controller cancel level1)
+M8: ai controller (nucleus: pending insert, peek: cancel level1)
+
+The user's claim has two parts:
+1. Trigger: Escape or click outside cancels generation.
+2. Effect: Cleanly, without leaving file half-written.
+
+The jobs so far only looked for the *trigger*
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "no hay captura de Escape ni clic fuera que cancele la generación; lo leído son utilidades de escape de strings y manejo de hover/selección en el panel de consola, sin invocación a cancel level1 ni lógica de clic fuera. el mecanismo de cancelación no existe en el flujo de entrada del usuario."
+}

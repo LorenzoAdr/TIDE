@@ -1,5 +1,10 @@
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "indexer/index_rules.hpp"
@@ -163,6 +168,49 @@ void test_fs_change_debounce_constants() {
   check(tuide::kIndexerFsChangeMaxDebounceMs > tuide::kIndexerFsChangeDebounceMs, "max > quiet");
 }
 
+void test_symlink_dirs_keep_link_name_in_folders() {
+  namespace fs = std::filesystem;
+  const fs::path root = fs::temp_directory_path() / "tuide_symlink_explorer_test";
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(root / "src", ec);
+  {
+    std::ofstream((root / "src" / "main.cpp").string()) << "int main(){return 0;}\n";
+  }
+  fs::create_directories(fs::temp_directory_path() / "tuide_symlink_outside", ec);
+  {
+    std::ofstream((fs::temp_directory_path() / "tuide_symlink_outside" / "note.txt").string())
+        << "hi\n";
+  }
+  fs::create_directory_symlink(root / "src", root / "link_src", ec);
+  check(!ec, "internal symlink created");
+  fs::create_directory_symlink(fs::temp_directory_path() / "tuide_symlink_outside",
+                               root / "link_ext", ec);
+  check(!ec, "external symlink created");
+
+  tuide::WorkspaceIndexer indexer;
+  tuide::IndexFilterOptions options;
+  options.show_all_files = true;
+  indexer.start_scan(root.string(), options);
+  for (int i = 0; i < 200 && indexer.scanning(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  check(!indexer.scanning(), "scan finished");
+  const auto snap = indexer.snapshot();
+  check(snap != nullptr, "snapshot");
+  const auto has = [&](const std::string& name) {
+    return std::find(snap->folders.begin(), snap->folders.end(), name) != snap->folders.end();
+  };
+  check(has("src"), "real src folder");
+  check(has("link_src"), "internal symlink keeps link name");
+  check(has("link_ext"), "external symlink keeps link name");
+  check(!has("../tuide_symlink_outside"), "external symlink not collapsed via relative");
+
+  indexer.stop();
+  fs::remove_all(root, ec);
+  fs::remove_all(fs::temp_directory_path() / "tuide_symlink_outside", ec);
+}
+
 }  // namespace
 
 int main() {
@@ -174,5 +222,6 @@ int main() {
   test_coalesce_file_index_changes_drops_dominated_removes();
   test_coalesce_dedupes_consecutive_upserts();
   test_fs_change_debounce_constants();
+  test_symlink_dirs_keep_link_name_in_folders();
   return 0;
 }

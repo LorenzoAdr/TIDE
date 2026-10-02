@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el Cerrado de T1 niega la existencia del cálculo de trayectoria balística y la sincronización con cluster al parpadear; el pack no nombra ni sugiere estos mecanismos (solo decoradores visuales estáticos). No hay evidencia de persistencia en índice vectorial cuántico. El ancla describe funcionalidades inexistentes en el sistema."
+}

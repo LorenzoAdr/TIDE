@@ -59,7 +59,7 @@ gdb -i=dap -ex quit
 
 ### Optional (recommended)
 
-Language servers and debug tools can be **system installs** on `PATH` or **embedded** via `./tools/compile.sh` (bundle wizard). Common ones:
+Language servers and debug tools can be **system installs** on `PATH`, **embedded** via `./tools/compile.sh` flags / `.bundle-config`, or installed at runtime as toolpacks from GitHub Releases. Common ones:
 
 | Tool | Role | Env override |
 |------|------|--------------|

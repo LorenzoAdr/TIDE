@@ -1,0 +1,12 @@
+The user wants to restore the cursor position, open files, and side panel visibility when reopening a project.
+I have a plan with 3 phases:
+1. Cursor position (T1) - Closed: read files, no mechanism found (implied by "leído: ..."). Wait, T1 closed says "leído: ...". It doesn't explicitly say "no object" or "found". Let's look at the "Trabajos ya hechos".
+T1: "leído: editor text hpp, workspace model cpp, editor panel cpp". It doesn't say "Cerrado: encontrado..." or "Cerrado: no hay objeto". It just lists read files. Usually, if it doesn't say "encontré", it might be a partial or negative, but the prompt says "El hijo cierra SU consulta. Tú cierras el claim".
+Actually, looking at T2: "Cerrado: encontré el mecanismo...".
+T3: "Cerrado: El hijo cerró esta pregunta: no hay objeto."
+
+Let's re-read T1 carefully.
+T1 Cerrado:
+"leído: editor text hpp, workspace model cpp, editor panel cpp"
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide recordar cursor, archivos y paneles. T2 confirma archivos. T3 niega paneles. T1 leyó los archivos del editor pero no reportó mecanismo de persistencia del cursor; sin evidencia de guardado/restauración de posición, el claim queda parcialmente refutado (solo archivos)."}

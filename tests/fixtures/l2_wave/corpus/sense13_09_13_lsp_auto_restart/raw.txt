@@ -1,0 +1,16 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+The anchor claim is: "if the LSP server process crashes or stops responding, the application automatically detects it and restarts it without user intervention."
+
+Current state:
+- T1 found `schedule debounced lsp restart` but didn't find the trigger from the crash path.
+- T2 found the detection mechanisms: `reader loop` detects EOF (crash) and `wait response` detects timeout (unresponsive).
+- T3 tried to find the link between EOF detection and `schedule debounced lsp restart` but failed. `on transport reader eof` only does `waitpid` and doesn't call the restart function.
+
+The plan was:
+1. A: locator: where `schedule debounced lsp restart` is called when reader loop detects EOF. (Failed in T3)
+2. B: locator: where `schedule debounced lsp restart` is called when wait response expires timeout.
+3. P: bridge: path between detection and restart.
+
+T3 result: "no encontré la llamada a schedule debounced lsp restart desde el reader loop o su handler de EOF... on transport reader eof solo
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el handler de EOF no dispara el reinicio; el camino de detección de caída no une con el mecanismo de restart"}

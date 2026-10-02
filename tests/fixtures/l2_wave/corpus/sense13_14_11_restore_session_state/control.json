@@ -1,0 +1,114 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el proyecto para restaurarla al abrirlo",
+      "keep": [
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guardan los archivos abiertos al cerrar el proyecto para restaurarlos al abrirlo",
+      "keep": [
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/recent_projects.cpp:remember",
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:config_path",
+        "src/app/workspace_session.cpp:save"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el proyecto para restaurarlos al abrirlo",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar el proyecto para restaurarla al abrirlo",
+      "consultas": [
+        "dónde se guarda la posición del cursor al cerrar el proyecto para restaurarla al abrirlo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 owns editor state y tiene CursorPos; es el barrio más probable para la persistencia del cursor"
+    },
+    {
+      "consulta": "dónde se guardan los archivos abiertos al cerrar el proyecto para restaurarlos al abrirlo",
+      "consultas": [
+        "dónde se guardan los archivos abiertos al cerrar el proyecto para restaurarlos al abrirlo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el cursor no tiene objeto; paso al segundo polo del ancla: archivos abiertos. M1 y M5 huelen estado del editor; un hijo busca el guardado/restauración de la lista de archivos."
+    },
+    {
+      "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el proyecto para restaurarlos al abrirlo",
+      "consultas": [
+        "dónde se guarda el estado de los paneles laterales al cerrar el proyecto para restaurarlos al abrirlo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar paneles laterales; M5 y M6 huelen a panel y layout; busco el mecanismo de persistencia similar al de T2"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "se confirma la restauración de archivos abiertos vía JSON en .tuide, pero se refuta la memoria de posición del cursor y estado de paneles"
+    }
+  ],
+  "why": "se confirma la restauración de archivos abiertos vía JSON en .tuide, pero se refuta la memoria de posición del cursor y estado de paneles",
+  "zooms": []
+}

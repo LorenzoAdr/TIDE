@@ -1,0 +1,8 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Asked where Escape/click outside is captured to cancel generation. Result: No object found. `ai trace escape` is JSON string escaping, not UI event handling.
+2.  **T2**: Asked where the half-written file is cleaned up upon canceling generation. Result: Found `cancel level1`, `cancel current`, `cancel all`, `clear pending insert`.
+3.  **T3**: Asked the same as T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de limpieza existe (cancel level1, clear pending insert), pero no hay captura de Escape ni clic fuera para dispararlo; el ancla pide ambos polos unidos y el pack no une el trigger UI con el efecto"}

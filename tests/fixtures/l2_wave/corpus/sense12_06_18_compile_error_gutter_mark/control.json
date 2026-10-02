@@ -1,0 +1,134 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se extrae la línea de error del texto de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se extrae la línea de error del texto de la consola inferior",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja la línea roja en el margen del editor",
+        "evita": [],
+        "hacia": [
+          "visual highlight"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino extraer la línea del error y dibujar la marca roja",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) tiene un ejemplo de escaneo de errores de compilación. Necesito ver si M3 gestiona los 'error decorations' y cómo M11 obtiene las líneas de error para aplicarlas."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no une la consola con el highlight; M11 huele parsing de errores, M3 huele marcas visuales; necesito ver si existe el puente o si hay que crearlo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado nombra un escáner de errores de enlace (linker), no de compilación; el mecanismo no es el del ancla, salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 cierran los polos (extracción y dibujo) pero 'sin camino' entre ellos confirma que no existe el mecanismo que une la consola con el margen del editor. El claim se refuta: no hay código que realice esta conexión actualmente."
+    }
+  ],
+  "why": "T1 y T2 cierran los polos (extracción y dibujo) pero 'sin camino' entre ellos confirma que no existe el mecanismo que une la consola con el margen del editor. El claim se refuta: no hay código que realice esta conexión actualmente.",
+  "zooms": []
+}

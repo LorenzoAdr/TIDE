@@ -1,0 +1,136 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+          "src/ui/editor_panel.cpp:MakeEditorPanel"
+        ],
+        "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se leen los errores de compilación de la consola inferior",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino leer los errores de la consola y marcarlos en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) lee errores de compilación. Necesito ver si M3 expone la API para dibujar líneas rojas y si M11 emite el evento de error para conectar ambos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no une la consola con el margen; M11 huele lectura de errores pero no el efecto visual; M3 es visual pero de git; necesito confirmar si existe el mecanismo de marcado y si la consola lo alimenta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 confirma el mecanismo de marcado (gutter marker/line diagnostics). T2 confirma la lectura de errores (linker errors). El pack indica 'sin camino' entre ambos: no existe flujo que conecte la lectura de la consola con el marcado del editor. El claim se refuta: no hay código que una estos polos; la funcionalidad no existe y no se puede 'activar', requiere implementación nueva."
+    }
+  ],
+  "why": "T1 confirma el mecanismo de marcado (gutter marker/line diagnostics). T2 confirma la lectura de errores (linker errors). El pack indica 'sin camino' entre ambos: no existe flujo que conecte la lectura de la consola con el marcado del editor. El claim se refuta: no hay código que una estos polos; la funcionalidad no existe y no se puede 'activar', requiere implementación nueva.",
+  "zooms": []
+}

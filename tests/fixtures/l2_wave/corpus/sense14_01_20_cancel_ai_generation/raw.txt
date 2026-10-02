@@ -1,0 +1,18 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Where code generation is cancelled on Escape.
+    *   Read: `handle editor escape`, `cancel current`, `cancel inflight completion`, `handle editor keys`, `handle user input`, `handle route`.
+    *   Closed: "ESA pregunta no se relanza. Lo leído no era el disparo." (The read wasn't the trigger).
+    *   Wait, the prompt says "Lo leído no era el disparo" for T1 and T2. This usually means the specific mechanism found wasn't the *exact* trigger or the user's claim about *that specific* mechanism was refuted, or the job closed without finding the specific "clean" cancellation logic requested.
+    *   However, T1 found `cancel current`, `cancel inflight completion`.
+    *   T2 found `clear pending insert`, `cancel all`, `cancel level1`.
+    *   T3 (click outside) found nothing.
+
+The prompt instructions say: "El último Cerrado negó el mapeo. Cierra ESE
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el mapeo de clic fuera no se halló; el pack no une el gesto al cancelador. el ancla pide dos polos; uno falta. cierra el claim sin confirmar el arco completo"
+}

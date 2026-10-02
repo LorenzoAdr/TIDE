@@ -15,10 +15,14 @@
 #include "ai/coding_symbol_embed_index.hpp"
 #include "ai/embedding_backend.hpp"
 #include "ai/get_code_of.hpp"
+#include "ai/l2_effect_summary.hpp"
 #include "ai/level1_action.hpp"
 #include "ai/repo_map.hpp"
 #include "ai/search_needles.hpp"
+#include "ai/l2_brain.hpp"
 #include "ai/l2_feat.hpp"
+#include "ai/l2_problem_frame.hpp"
+#include "ai/l2_think.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 
 #include <filesystem>
@@ -189,6 +193,33 @@ std::string summarize_distilled_intent(const DistilledInvestigateIntent& di) {
     }
   }
   return out.str();
+}
+
+// Drop ignore[] entries that the user literally named (substring match).
+void filter_distilled_ignore(DistilledInvestigateIntent* di, const std::string& user_message) {
+  if (di == nullptr || di->ignore.empty() || user_message.empty()) {
+    return;
+  }
+  std::string ql = user_message;
+  for (char& c : ql) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  std::vector<std::string> kept;
+  kept.reserve(di->ignore.size());
+  for (const auto& g : di->ignore) {
+    if (g.size() < 3) {
+      continue;
+    }
+    std::string gl = g;
+    for (char& c : gl) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (ql.find(gl) != std::string::npos) {
+      continue;  // user named it — do not ignore
+    }
+    kept.push_back(g);
+  }
+  di->ignore = std::move(kept);
 }
 
 }  // namespace
@@ -523,6 +554,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
   }
 
   std::optional<DistilledInvestigateIntent> distilled;
+  std::optional<tuide::ProblemFrame> kept_pf;
   std::vector<std::string> semantic_outline = map_outline;
   std::vector<std::string> semantic_index_candidates = index_candidates;
   LlamaBackend* reasoning_backend = nullptr;
@@ -531,36 +563,76 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
   } else if (deps_.backend != nullptr && deps_.backend->ready()) {
     reasoning_backend = deps_.backend;
   }
-  if (reasoning_backend != nullptr) {
+  const bool via_l2_brain = reasoning_backend == nullptr && deps_.l2_brain != nullptr;
+  auto complete_reason = [&](const LlamaCompletionRequest& req) -> LlamaCompletionResult {
+    if (reasoning_backend != nullptr) {
+      return reasoning_backend->complete(req, cancel);
+    }
+    LlamaCompletionResult out;
+    if (deps_.l2_brain == nullptr) {
+      out.error = "sin backend de razonamiento";
+      return out;
+    }
+    L2BrainRequest breq;
+    breq.system_prompt = req.system_prompt;
+    breq.user_prompt = req.user_prompt;
+    breq.max_tokens = req.max_tokens;
+    breq.n_ctx = req.n_ctx;
+    breq.temperature = req.temperature;
+    breq.enable_thinking = req.enable_thinking;
+    breq.reasoning_budget = req.reasoning_budget;
+    const auto br = deps_.l2_brain->propose(breq, cancel);
+    out.ok = br.ok;
+    out.text = br.text;
+    out.error = br.error;
+    return out;
+  };
+  if (reasoning_backend != nullptr || via_l2_brain) {
     {
       LlamaCompletionRequest req;
       req.system_prompt =
-          "Eres un analizador semántico para recuperación de código. Tu trabajo en esta primera "
-          "pasada es entender la intención real del prompt y separar señal de ruido. "
-          "NO elijas todavía archivos ni símbolos concretos. Responde SOLO JSON con este formato:\n"
-          "{\"intent\":\"...\",\"primary_goal\":\"...\",\"facets\":[\"...\"],"
-          "\"ignore\":[\"...\"],\"search_terms\":[\"...\"]}\n"
+          "Eres un analizador de peticiones de código (problem_frame_v1). "
+          "NO elijas archivos concretos. Responde SOLO JSON válido:\n"
+          "{\"schema\":\"problem_frame_v1\","
+          "\"problem_kind\":\"debug|locate|implement|explain\","
+          "\"problem_frame\":\"1-2 frases que reformulan la petición\","
+          "\"primary_anchor\":{\"kind\":\"feature|module|entrypoint|control|state\","
+          "\"objective\":\"la pieza de código donde anclarse PRIMERO\","
+          "\"search_terms\":[\"term_snake_1\",\"term_snake_2\"],"
+          "\"edge_hints\":[]},"
+          "\"secondary_anchors\":[{\"kind\":\"module\",\"objective\":\"…\","
+          "\"search_terms\":[\"…\"],\"deferred\":true,"
+          "\"why_later\":\"se persigue después del ancla primaria\"}],"
+          "\"mechanism_gaps\":[{\"slot\":\"…\",\"question\":\"¿…?\"}],"
+          "\"reject_noise\":[\"…\"],\"anchor_confidence\":\"high|medium|low\"}\n"
           "Reglas:\n"
-          "- intent: una frase corta en inglés técnico.\n"
-          "- primary_goal: la meta principal, más abstracta que las palabras literales del prompt.\n"
-          "- Antes de escribir facets/search_terms, clasifica mentalmente la petición en una "
-          "familia de intención general, por ejemplo: persistencia/estado, navegación, "
-          "renderizado, ejecución runtime, integración externa, edición, búsqueda o UI.\n"
-          "- facets: 2..5 conceptos nucleares de IMPLEMENTACION, no palabras de superficie.\n"
-          "- ignore: 0..6 detalles superficiales que podrían desviar el retrieval.\n"
-          "- search_terms: 3..8 términos cortos de implementación.\n"
-          "- Si el prompt mezcla conceptos estructurales con detalles de presentación, "
-          "PRIORIZA lo estructural: estado, persistencia, modelo, coordinación, flujo, "
-          "almacenamiento, propietario del dato o ciclo de vida.\n"
-          "- Incluye en facets/search_terms los subsistemas que el usuario nombra "
-          "(p. ej. IA, chat, agente, terminal) aunque suenen a UI.\n"
-          "- NO inventes nombres de archivos o símbolos todavía.\n"
-          "- Si el prompt es largo, prioriza la semántica estable frente a detalles cosméticos.\n";
+          "- primary_anchor = el objeto FOCAL más local de la petición (control, estado, "
+          "acción, entrypoint o feature que el usuario quiere encontrar/cambiar). "
+          "NO uses como primary el ambiente contenedor (app, chat, asistente, panel "
+          "alrededor) si el texto nombra algo más concreto.\n"
+          "- secondary_anchors = ambiente / orquestación / callers a explorar DESPUÉS. "
+          "deferred=true. 0..3 entradas.\n"
+          "- search_terms: 2..6 identificadores snake_case/CamelCase. Cada término DEBE "
+          "ser proyección léxica del texto del usuario (misma raíz ≥4 letras, permitiendo "
+          "variantes morfológicas ES/EN del MISMO vocablo). NUNCA frases NL.\n"
+          "- En compuestos (a_b / a.b), CADA segmento ≥4 letras debe salir del texto; "
+          "no añadas segmentos nuevos (archivos, extensiones o tools no dichos).\n"
+          "- Prefiere sustantivos/verbos de contenido del objeto focal; no uses como "
+          "search_terms palabras vacías o de relleno del enunciado.\n"
+          "- PROHIBIDO inventar ecosistemas, toolchains, archivos de config o APIs no "
+          "nombrados en el texto.\n"
+          "- PROHIBIDO meter en primary.search_terms el ambiente contenedor "
+          "(orquestación, callers, paneles vecinos); eso va en secondary o reject_noise.\n"
+          "- mechanism_gaps: 0..2 preguntas abiertas cortas (¿…?), no afirmaciones.\n"
+          "- reject_noise: tokens demasiado genéricos para grepear.\n"
+          "- anchor_confidence: high solo si el texto nombra un locus grepeable claro; "
+          "si no, medium o low.\n";
       std::ostringstream user;
       user << "Consulta del usuario:\n" << user_message << "\n";
       user << "\nJSON:";
       req.user_prompt = user.str();
-      req.max_tokens = std::min(320, std::max(160, deps_.settings.level1.max_tokens / 2));
+      req.max_tokens = std::min(1024, std::max(512, deps_.settings.level1.max_tokens));
+      apply_think_profile(&req, think_profile(L2ThinkLevel::High));
       {
         const int prompt_tok_est =
             static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);
@@ -570,20 +642,56 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
         req.n_ctx = std::min(ctx, 2048);
       }
       req.temperature = 0.1;
-      req.context_role = reasoning_backend == deps_.l2_backend ? "L2" : "L1";
+      req.context_role =
+          (reasoning_backend == deps_.l2_backend || via_l2_brain) ? "L2" : "L1";
       req.n_ctx_setting_hint =
-          reasoning_backend == deps_.l2_backend ? "ai.level2.n_ctx" : "ai.level1.n_ctx";
+          (reasoning_backend == deps_.l2_backend || via_l2_brain) ? "ai.level2.n_ctx"
+                                                                  : "ai.level1.n_ctx";
       if (log) {
-        log(reasoning_backend == deps_.l2_backend
+        log((reasoning_backend == deps_.l2_backend || via_l2_brain)
                 ? "L1 investigar → L2 pasada 1: destilación semántica…"
                 : "L1 investigar → destilando intención…");
       }
-      const auto completion = reasoning_backend->complete(req, cancel);
+      const auto completion = complete_reason(req);
       if (completion.ok) {
         if (log) {
           log("L1 intent raw: " + completion.text);
         }
-        distilled = parse_distilled_intent_json(completion.text);
+        distilled = std::nullopt;
+        {
+          tuide::ProblemFrame pf;
+          std::string perr;
+          if (tuide::problem_frame_from_json_string(completion.text, &pf, &perr) &&
+              tuide::problem_frame_minimally_valid(pf)) {
+            tuide::problem_frame_refine_from_query(&pf, user_message);
+            pf.provenance = "l1_distill";
+            DistilledInvestigateIntent di;
+            di.intent = pf.problem_frame;
+            di.primary_goal = pf.primary_anchor.objective;
+            di.search_terms = pf.primary_anchor.search_terms;
+            di.ignore = pf.reject_noise;
+            for (const auto& g : pf.mechanism_gaps) {
+              if (!g.slot.empty()) {
+                di.facets.push_back(g.slot);
+              }
+            }
+            for (const auto& sec : pf.secondary_anchors) {
+              for (const auto& t : sec.search_terms) {
+                if (!t.empty()) {
+                  di.facets.push_back(t);
+                }
+              }
+            }
+            distilled = di;
+            kept_pf = std::move(pf);
+          }
+        }
+        if (!distilled) {
+          distilled = parse_distilled_intent_json(completion.text);
+        }
+        if (distilled) {
+          filter_distilled_ignore(&*distilled, user_message);
+        }
         if (distilled && log) {
           log("L1 intent: " + summarize_distilled_intent(*distilled));
         }
@@ -633,6 +741,8 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
             " símbolos (best_score=" + std::to_string(semantic_map.best_score) + ")");
       }
     }
+
+    // Hypothesis/anchor hunt uses registry zone cards (causal), not a second L1 map pass.
 
     LlamaCompletionRequest req;
     req.system_prompt =
@@ -704,6 +814,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
     user << "\nJSON:";
     req.user_prompt = user.str();
     req.max_tokens = std::min(480, std::max(192, deps_.settings.level1.max_tokens));
+    apply_think_profile(&req, think_profile(L2ThinkLevel::Medium));
     {
       const int prompt_tok_est =
           static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);
@@ -713,16 +824,17 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
       req.n_ctx = std::min(ctx, 2048);
     }
     req.temperature = 0.1;
-    req.context_role = reasoning_backend == deps_.l2_backend ? "L2" : "L1";
+    req.context_role = (reasoning_backend == deps_.l2_backend || via_l2_brain) ? "L2" : "L1";
     req.n_ctx_setting_hint =
-        reasoning_backend == deps_.l2_backend ? "ai.level2.n_ctx" : "ai.level1.n_ctx";
+        (reasoning_backend == deps_.l2_backend || via_l2_brain) ? "ai.level2.n_ctx"
+                                                                : "ai.level1.n_ctx";
     if (log) {
-      log(reasoning_backend == deps_.l2_backend
+      log((reasoning_backend == deps_.l2_backend || via_l2_brain)
               ? "L1 investigar → L2 pasada 2: elegir dónde buscar sobre mapa rankeado…"
               : "L1 investigar → proponiendo needles…");
     }
     const auto needles_t0 = std::chrono::steady_clock::now();
-    const auto completion = reasoning_backend->complete(req, cancel);
+    const auto completion = complete_reason(req);
     const auto needles_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 std::chrono::steady_clock::now() - needles_t0)
                                 .count();
@@ -802,6 +914,19 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
   result.lexical_seeds = std::move(expanded);
   result.semantic_tokens =
       merge_semantic_tokens(l2_semantic_tokens, compound_seeds, distilled_terms);
+  if (distilled) {
+    if (!distilled->primary_goal.empty()) {
+      result.embed_intent = distilled->primary_goal;
+    } else if (!distilled->intent.empty()) {
+      result.embed_intent = distilled->intent;
+    }
+  }
+  if (kept_pf) {
+    if (kept_pf->instruction.empty()) {
+      kept_pf->instruction = user_message;
+    }
+    result.problem_frame_json = tuide::problem_frame_to_json(*kept_pf).dump();
+  }
   if (log && !result.semantic_tokens.empty()) {
     std::ostringstream st;
     st << "semantic_tokens (" << result.semantic_tokens.size() << "):";
@@ -819,12 +944,10 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
 Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& log,
                                  std::atomic<bool>* cancel) {
   Level1RunResult out;
-  if (deps_.backend == nullptr) {
-    out.error = "sin LlamaBackend";
-    return out;
-  }
-  if (!deps_.backend->ready()) {
-    out.error = "backend L1 no listo";
+  const bool have_local_l1 = deps_.backend != nullptr && deps_.backend->ready();
+  const bool have_remote_l2 = deps_.l2_brain != nullptr;
+  if (!have_local_l1 && !have_remote_l2) {
+    out.error = "sin backend L1/L2";
     return out;
   }
 
@@ -962,6 +1085,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
     const std::vector<std::string>& semantic_tokens = investigate.semantic_tokens;
     out.seeds = needles;
     out.semantic_tokens = semantic_tokens;
+    out.problem_frame_json = investigate.problem_frame_json;
     if (log) {
       log("L1 needles propuestos:");
       if (needles.empty()) {
@@ -1011,10 +1135,50 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           l2_feat::enabled("BODY_SEMANTIC_RERANK") && deps_.embed != nullptr && deps_.embed->ready();
       if (use_body_semantic) {
         BodySemanticRerankOptions bs_opts;
-        bs_opts.query = user_message;
         bs_opts.semantic_tokens = semantic_tokens;
         bs_opts.workspace_root = root;
         bs_opts.body_pool = 40;
+        bs_opts.body_max_embed_chars = 500;
+        const bool hybrid_q = !l2_feat::enabled("L1_HYBRID_EMBED_OFF");
+        const bool es_cards = !l2_feat::enabled("L1_ES_CARD_EMBED_OFF");
+        if (hybrid_q) {
+          const std::string intent = !investigate.embed_intent.empty()
+                                         ? investigate.embed_intent
+                                         : std::string("Locate code for the user symptom");
+          bs_opts.hybrid_query =
+              build_hybrid_embed_query(intent, user_message, semantic_tokens, 12);
+          bs_opts.query = bs_opts.hybrid_query;  // debug / fallback path
+        } else {
+          bs_opts.query = user_message;
+        }
+        if (es_cards) {
+          bs_opts.passage_fn = [root, &semantic_tokens](const RepoMapEntry& e) -> std::string {
+            AQueueItem item;
+            item.path = e.file;
+            item.symbol = e.name;
+            item.line = e.line;
+            item.stem = e.stem;
+            item.score = static_cast<float>(e.score);
+            item.target = e.file + (e.name.empty() ? "" : (":" + e.name));
+            item.body_sem_permille =
+                e.body_cos >= 0.f ? static_cast<int>(e.body_cos * 1000.f) : 0;
+            item.file_rank = e.file_rank;
+            item.file_count = e.file_count;
+            item.dup_stem = e.dup_stem;
+            item.refs_in = e.refs_in;
+            EffectSummaryOpts es_opts;
+            es_opts.seeds = semantic_tokens;
+            es_opts.orphans = semantic_tokens;
+            es_opts.map_score = e.score;
+            es_opts.stem = e.stem;
+            es_opts.refs_in = e.refs_in;
+            es_opts.file_rank = e.file_rank;
+            es_opts.file_count = e.file_count;
+            es_opts.dup_stem = e.dup_stem;
+            const EffectSummary es = effect_summary_for_queue_item(root, item, es_opts);
+            return es.card_text;
+          };
+        }
         if (context_dump || code_edit) {
           bs_opts.final_top = 280;
           bs_opts.max_per_file = 14;
@@ -1029,7 +1193,9 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           bs_opts.body_max_lines = 80;
         }
         if (log) {
-          log("L1 body semantic rerank (lexical top-40 → embed cuerpos, hybrid cos+lex): candidatos=" +
+          log(std::string("L1 body semantic rerank (lexical top-40 → embed ") +
+              (es_cards ? "ES cards" : "cuerpos") +
+              (hybrid_q ? ", hybrid query" : ", nl+tokens") + "): candidatos=" +
               std::to_string(candidates.size()) + " tokens=" +
               std::to_string(semantic_tokens.size()));
         }

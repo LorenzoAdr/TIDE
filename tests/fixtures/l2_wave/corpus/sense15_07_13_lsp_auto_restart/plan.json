@@ -1,0 +1,39 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP deja de responder y se dispara el reinicio",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído y se dispara el reinicio",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "pendiente"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino detectar que el servidor de lenguaje LSP deja de responder y detectar que el servidor de lenguaje LSP se ha caído",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

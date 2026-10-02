@@ -1,0 +1,39 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se limpia el archivo de código a medias al cancelar la generación",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "pendiente"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino la captura de Escape clic fuera y la limpieza del archivo a medias",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

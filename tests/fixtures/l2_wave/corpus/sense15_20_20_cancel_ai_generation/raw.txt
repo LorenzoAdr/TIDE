@@ -1,0 +1,12 @@
+The user wants to know how to cleanly cancel AI code generation when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have 3 completed jobs:
+T1: Looked for Escape/click outside capture to interrupt AI. Result: Not found. `ai trace escape` is string escape, `handle console panel mouse` is selection/hover.
+T2: Looked for where code generation is cancelled and half-file cleaned. Result: Found `cancel current` triggered by `handle user input` / `handle route` detecting "cancel" or click outside if mapped. It cleans pending state via `clear pending insert` and stops agent via `cancel all` / `cancel level1`. No explicit buffer truncation found, just pending insert invalidation.
+T3: Looked for mapping Escape/click outside to cancellation route. Result: Escape maps to `completion close` in UI. `handle user input` processes text "cancel" or route "Cancel Agent" to call `cancel current`. Click outside is NOT explicitly mapped to AI cancellation in the read symbols.
+
+The anchor claim has two parts:
+1. Trigger: Press Escape or click outside.
+2. Effect: Cleanly cancel generation without leaving file half-written
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el polo de cancelación y limpieza de estado pendiente se confirma: handle user input y handle route invocan cancel current, que ejecuta clear pending insert y cancel all para detener el agente. el polo de captura de clic fuera para cancelar IA se refuta: no se mapea explícitamente en los símbolos leídos, solo Escape cierra la UI de completado y el texto cancel o la ruta Cancel Agent disparan la interrupción. la limpieza del archivo a medias se resuelve mediante la invalidación del estado de inserción pendiente, sin truncado explícito de buffer."}

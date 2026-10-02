@@ -1,0 +1,18 @@
+The user wants to restore the editor state (cursor position, open files, panel visibility) when reopening a project.
+I have three completed works:
+1.  **Cursor position**: Searched in `M1` (editor state). Found `Cursor Pos` struct but no restoration logic.
+2.  **Open files**: Searched in `M1` (editor state). Found nothing.
+3.  **Panel visibility**: Searched in `M2` (main layout). Found `Make Main Layout`.
+
+The pack shows:
+-   `M1` (editor state) has `Cursor Pos`.
+-   `M2` (main layout) has `AiController`.
+-   `M3` (app session) has `shell session cursor row`.
+-   `M5` (editor panel) has `end mouse selection`.
+-   `M6` (panel) has `ModalInputLine`.
+-   `M7` (file picker) has `MakeFilePickerOverlay`.
+-   `M8` (level2 session) has `search`.
+-   `M9` (intent embed) has `ai controller make store progress`.
+-   `
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra un mecanismo de restauración de sesión; las cazas en editor state y main layout no hallaron el disparo; sin camino entre polos leídos"}

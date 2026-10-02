@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "control: lanza un explorador antes de cerrar",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack describe un editor de código (paneles, modelos de workspace, servidores de lenguaje, IA local). no existe ningún mecanismo de 'trayectoria balística de cursores', 'sincronización con Kubernetes al parpadear' ni 'índice vectorial cuántico'. el ancla es una ficción o un error de contexto; se refuta por ausencia total de evidencia en el atlas."
+}

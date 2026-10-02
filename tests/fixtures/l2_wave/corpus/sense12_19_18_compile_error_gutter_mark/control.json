@@ -1,0 +1,145 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": false,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [],
+  "jobs_run": 0,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los adornos visuales; M11 (binary symbols panel) huele a parsing de errores de compilación. Necesito ver si hay un mecanismo que una el parseo de errores con la aplicación de highlights en el margen."
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el pack no une la consola con el editor; M11 huele la lectura de errores pero no el dibujo; M3 huele marcas visuales pero no de errores de compilación; necesito confirmar ambos polos y el arco"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla une dos polos (consola y margen). M11 huele el parseo de errores (A). M3/M1 huelen el dibujo visual (B). Necesito confirmar si existe el arco entre ellos o si falta el mecanismo que los une."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer línea y archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla une dos polos: origen (error consola) y efecto (línea roja margen). M11 huele el origen pero no el efecto. M3 huele el efecto pero no el origen. Necesito localizar ambos mecanismos y luego verificar si están conectados."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla une dos polos: la fuente (consola) y el efecto visual (margen). M11 sugiere que la consola se escanea, pero no une al editor. M3 sugiere highlights, pero no une a la consola. Necesito localizar ambos mecanismos y verificar si ya existe el arco o si falta por construir."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 6,
+      "why": "el ancla une dos polos (consola y editor) que no están conectados en el pack; necesito localizar ambos mecanismos y luego verificar si existe el puente que falta"
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer línea y archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla une dos fenómenos distintos (parseo de error y UI de margen). M11 sugiere parseo, M3 sugiere highlights. Necesito confirmar si existe el arco entre ellos o si son sistemas desconectados."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer línea y archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 8,
+      "why": "el ancla une dos polos (consola y margen). M11 huele el parseo de errores, pero no hay port al margen. Necesito confirmar si existe el mecanismo de dibujo (B) y si hay conexión (P)."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer línea y archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 9,
+      "why": "el ancla une dos polos (consola y margen). M11 huele a parseo de errores, M3 a highlights visuales. Necesito confirmar si existe el arco causal entre ambos."
+    },
+    {
+      "consulta": "dónde se procesan los errores de compilación de la consola para extraer línea y archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 10,
+      "why": "el pack no une la consola con el margen; M11 huele parsing de errores, M3 huele highlights; necesito confirmar si existe el puente o si hay que crearlo"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

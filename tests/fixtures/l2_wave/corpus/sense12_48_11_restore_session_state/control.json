@@ -1,0 +1,128 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los paneles laterales visibles al abrir un proyecto",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los paneles laterales visibles al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 tiene 'editor state CursorPos'; es el barrio más probable para la persistencia del cursor."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide tres cosas: cursor (T1 cerró), archivos abiertos y paneles laterales. Parto en dos cazas independientes para archivos y paneles."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el hijo cerró que no hay objeto para restaurar archivos abiertos; salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "El pack y los trabajos leídos confirman que la restauración del estado del editor al abrir un proyecto se gestiona a través de 'Cursor Pos'. No se encontraron objetos para la restauración de archivos abiertos ni paneles laterales, lo que indica que esta funcionalidad no está implementada o no existe en el código actual. El claim queda parcialmente confirmado (cursor) y parcialmente refutado (archivos/paneles)."
+    }
+  ],
+  "why": "El pack y los trabajos leídos confirman que la restauración del estado del editor al abrir un proyecto se gestiona a través de 'Cursor Pos'. No se encontraron objetos para la restauración de archivos abiertos ni paneles laterales, lo que indica que esta funcionalidad no está implementada o no existe en el código actual. El claim queda parcialmente confirmado (cursor) y parcialmente refutado (archivos/paneles).",
+  "zooms": []
+}

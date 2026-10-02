@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no nombra el mecanismo de captura de Escape ni de limpieza de texto; las cazas confirman que no existe el objeto buscado (solo cancelación por texto y reset de banderas sin revertir buffer)"
+}

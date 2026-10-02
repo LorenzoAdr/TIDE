@@ -1,0 +1,123 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la salida de la consola y se convierten en diagnósticos del editor",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/diagnostics_panel.cpp:MakeDiagnosticsPanel",
+        "src/ui/diagnostics_panel.cpp:build_rows"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se aplican los diagnósticos de la consola al panel del editor para que se dibujen",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:sync_diagnostic_cache",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/editor_panel.cpp:cached_file_diagnostics"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el usuario quiere marcar errores con una línea roja; necesito encontrar el mecanismo que pinta esa decoración en el margen para luego conectarlo con los errores de la consola"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la salida de la consola y se convierten en diagnósticos del editor",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la salida de la consola y se convierten en diagnósticos del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "shell output"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el usuario quiere que los errores de la consola inferior marquen el margen; ya tenemos el dibujo (rebuild diagnostics), ahora falta el origen: cómo se extraen los errores del texto de la consola y se inyectan en el sistema de diagnósticos"
+    },
+    {
+      "consulta": "dónde se aplican los diagnósticos de la consola al panel del editor para que se dibujen",
+      "consultas": [
+        "dónde se aplican los diagnósticos de la consola al panel del editor para que se dibujen"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "aplicar lsp"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 parsea, T1 dibuja; falta el puente que inyecta los diagnósticos de la consola en el sistema de dibujo del editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "los errores de la consola se parsean en Make Diagnostics Panel, se aplican al editor vía apply lsp diagnostics to panel y push active file diagnostics from cache, y se dibujan en el margen con rebuild diagnostics by line"
+    }
+  ],
+  "why": "los errores de la consola se parsean en Make Diagnostics Panel, se aplican al editor vía apply lsp diagnostics to panel y push active file diagnostics from cache, y se dibujan en el margen con rebuild diagnostics by line",
+  "zooms": []
+}

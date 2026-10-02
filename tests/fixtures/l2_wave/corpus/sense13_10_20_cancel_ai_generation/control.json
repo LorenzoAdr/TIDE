@@ -1,0 +1,175 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ui/editor_panel.cpp:handle_editor_escape",
+        "src/ui/editor_panel.cpp:handle_editor_keys",
+        "src/ui/editor_panel.cpp:Event"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura el clic fuera del editor para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos polos: el disparo (Escape/clic) y el efecto (limpieza). El pack huele M2/M8 para el disparo y M8/M6 para la cancelación, pero no une la limpieza del archivo. Rompo en dos cazas y un puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "sesión"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "el editor no es el disparo; la sesión de IA podría tener su propio listener de teclado o ratón para cancelar"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado de T2 solo enumera símbolos leídos sin confirmar el mecanismo de limpieza; no pasa la puerta. T1 ya falló en la captura de Escape/clic. Necesito un nuevo enfoque: explorar el port 'handle user input' del Abierto de T2 para ver si la cancelación se dispara por input del usuario, o revisar el plan con un locator distinto"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 falló en editor; el pack une M8 ai controller con cancel level1. Busco el disparo en el controlador, no en el editor."
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "consultas": [
+        "dónde se limpia el archivo a medias al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 leyó el mecanismo de limpieza pero no cerró el mapeo; tiro del port para ver si limpia el buffer o el disco"
+    },
+    {
+      "consulta": "dónde se captura el clic fuera del editor para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura el clic fuera del editor para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clic fuera"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 7,
+      "why": "el pack dice sin camino entre Escape del editor y cancel level1; pruebo el otro polo del ancla: clic fuera"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el mecanismo de limpieza existe (clear pending insert) pero no está unido a la captura de Escape ni al clic fuera; el ancla pide unirlos y el pack no ofrece el puente"
+    }
+  ],
+  "why": "el mecanismo de limpieza existe (clear pending insert) pero no está unido a la captura de Escape ni al clic fuera; el ancla pide unirlos y el pack no ofrece el puente",
+  "zooms": []
+}

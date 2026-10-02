@@ -1,0 +1,165 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al volver a abrir un proyecto",
+      "keep": [
+        "M5",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al volver a abrir un proyecto",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al volver a abrir un proyecto",
+      "keep": [
+        "M8",
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/panel.hpp:SplitSeparatorVertical",
+        "src/ui/panel.hpp"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la posición del cursor al volver a abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la lista de archivos abiertos al volver a abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al volver a abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay un único mecanismo que restaura cursor, archivos y paneles, o son independientes",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "editor state",
+        "main layout",
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "quiero ver si el ancla vive en un barrio de sesión o en varios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide tres estados distintos (cursor, archivos, paneles). Los busco por separado para ver si convergen en un solo guardado de sesión o son mecanismos distintos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: un leído no cierra el ancla; no refuta el existe",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "no hay mecanismo que recuerde la posición del cursor, los archivos abiertos ni la visibilidad de los paneles al volver a abrir un proyecto"
+    }
+  ],
+  "why": "control: un leído no cierra el ancla; no refuta el existe",
+  "zooms": []
+}

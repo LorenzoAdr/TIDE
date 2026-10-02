@@ -1,0 +1,15 @@
+The user wants to cancel AI code generation by pressing Escape or clicking outside, and wants the file to be cleaned up (not left half-written).
+
+Current state:
+- T1 (combined locator): Failed to find Escape key handling for cancellation. Found text commands "cancel", "cancelar". Found `clear pending insert` (memory state), but not file cleanup.
+- T2 (locator: Escape key): Found `ai trace escape`, `handle completion keys`, `handle editor keys`, `cancel level1`, `cancel all`.
+- T3 (locator: file cleanup): Found `cancel current`, `clear pending insert`, `cancel all`, `begin insert at`, `handle user input`, `run insert async`.
+
+Analysis:
+- T2 found `ai trace escape` and `cancel level1`. This suggests the Escape key *is* captured and triggers `cancel level1`.
+- T3 found `clear pending insert` and `cancel current`. This suggests the cancellation logic exists but might only clear memory state (`pending insert`), not the file itself.
+- The user's claim has two parts:
+    1. Cancel generation on Escape/click outside.
+    2. Clean up the file (don
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla se refuta parcialmente: la tecla Escape se captura y cancela la generación (cancel level1), pero el archivo no se limpia; solo se borra el estado pendiente en memoria (clear pending insert)."}

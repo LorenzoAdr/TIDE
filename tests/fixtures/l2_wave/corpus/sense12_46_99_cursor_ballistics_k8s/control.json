@@ -1,0 +1,64 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/terminal/raw_pty_screen.cpp:cursor_row",
+        "src/editor/editor_render.cpp:caret_visual_in_view",
+        "src/editor/editor_render.cpp:caret_column_in_body",
+        "src/ui/cursor_blink.cpp:show"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real",
+      "consultas": [
+        "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el usuario busca el módulo de física de cursores; el pack huele a editor panel y visual highlight, pero no nombra el mecanismo de trayectoria ni sincronización con kubernetes; un explorador lee el barrio del editor para confirmar o refutar"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack y el Cerrado de T1 confirman que el código maneja posición estándar de cursor (row, column, visual), no trayectorias balísticas ni sincronización con Kubernetes al parpadear. el fenómeno descrito no existe en el código."
+    }
+  ],
+  "why": "el pack y el Cerrado de T1 confirman que el código maneja posición estándar de cursor (row, column, visual), no trayectorias balísticas ni sincronización con Kubernetes al parpadear. el fenómeno descrito no existe en el código.",
+  "zooms": []
+}

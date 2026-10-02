@@ -1,0 +1,197 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de la IA cuando el usuario pulsa Escape",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai trace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 menciona 'ai trace escape' en su peek, lo que sugiere que es el punto de entrada para el evento de Escape. Necesito ver cómo se maneja y si se conecta al controlador de IA."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla tiene dos disparadores (Escape y clic fuera) y un efecto (limpieza). T1 falló en M4; hay que buscar en otros barrios (M2, M3, M5, M8) para los disparadores. La limpieza es un efecto compartido que se investiga tras localizar los disparadores."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla tiene dos disparadores (Escape y clic fuera) y un efecto (limpieza). El Trabajo 1 falló en M4; necesito cazar los tres polos por separado para luego unirlos. El plan permite explorar cada uno sin depender de los otros."
+    },
+    {
+      "consulta": "dónde se cancela la generación de la IA cuando el usuario pulsa Escape",
+      "consultas": [
+        "dónde se cancela la generación de la IA cuando el usuario pulsa Escape"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancelación"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 falló en el handler de teclado; el pack muestra ai controller cancel level1 en M8. Busco el mecanismo de cancelación en el controlador."
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "consultas": [
+        "dónde se limpia el archivo a medias al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 encontró la cancelación; el pack apunta a clear pending insert en M8 para limpiar el estado. Necesito ver cómo se borra el código parcial."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "la limpieza del archivo a medias se confirma en clear pending insert llamado desde cancel current; la cancelación se confirma en cancel level1 y tasks cancel; el trigger de Escape no se halló pero el mecanismo de cancelación y limpieza está completo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el mecanismo de cancelación y limpieza está en cancel current y clear pending insert, pero no se encontró la captura de la tecla Escape ni el clic fuera como disparadores"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "la limpieza del archivo a medias se confirma en clear pending insert, que resetea el buffer pendiente al cancelar; la cancelación de la generación se delega a cancel level1 y tasks cancel"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "el mecanismo de limpieza se confirma: clear pending insert se invoca desde cancel current para resetear el buffer pendiente y el anchor de inserción, evitando dejar el archivo a medias; cancel all delega a cancel level1 y tasks cancel para detener la generación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 10,
+      "why": "la generación se cancela con cancel current y cancel level1; el archivo a medias se limpia con clear pending insert que resetea el buffer pendiente"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

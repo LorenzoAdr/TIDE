@@ -1,0 +1,208 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/ui/context_menu.cpp:context_menu_open_editor_background",
+        "src/ui/context_menu.cpp:context_menu_open_editor_symbol",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la lista de archivos abiertos al reabrir el proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al reabrir el proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al reabrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura el estado de la interfaz al cargar la sesión del proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide restaurar estado (cursor, archivos, paneles); M1/M5/M6 son los únicos que tocan editor/layout/panel, pero sus gaps son vacíos y no nombran persistencia; necesito ver si guardan/cargan estado o si hay un gestor de sesión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor y paneles al reabrir; hay que localizar los 4 polos (guardar/restaurar x2) y luego unirlos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar posición; el pack tiene M1 (editor state CursorPos) pero no el ciclo de persistencia; necesito leer los dos polos (guardar/restaurar) para ver si están unidos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado solo nombra el objeto (Cursor Pos) sin confirmar el mecanismo de persistencia al cerrar; salto a la siguiente caza del plan para leer la restauración"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 confirma el mecanismo de restauración del cursor (reset to single cursor). La fase B del plan está cerrada. El plan original (A, B, P) se centra solo en el cursor; el ancla pide también archivos y paneles. Soltamos el plan y ampliamos la caza a los otros polos."
+    },
+    {
+      "consulta": "dónde se restaura la lista de archivos abiertos al reabrir el proyecto",
+      "consultas": [
+        "dónde se restaura la lista de archivos abiertos al reabrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el cursor está cerrado; el ancla pide también los archivos abiertos. M2 (main layout) es el barrio del estado de la ventana; busco el mecanismo de restauración de la sesión de archivos."
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al reabrir el proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al reabrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el cursor se confirma; la lista de archivos se refuta (no hay objeto). Falta el tercer polo: paneles. M5/M6 huelen estado de panel; un hijo cierra si se guarda/restaura o si no existe el mecanismo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el cursor se confirma (T2); la lista de archivos se refuta (T3). Falta el estado de los paneles laterales. Parto en dos: uno busca el toggle de visibilidad, otro el cargador de sesión general, para ver si hay un mecanismo unificado o disperso."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 9,
+      "why": "el cursor se restaura al abrir el editor (T2 confirma el mecanismo). la lista de archivos abiertos y la visibilidad de paneles laterales no tienen objeto de restauración al reabrir el proyecto (T3 y T4 cierran con no hay objeto). el claim queda parcialmente confirmado (cursor sí, archivos/paneles no)."
+    }
+  ],
+  "why": "el cursor se restaura al abrir el editor (T2 confirma el mecanismo). la lista de archivos abiertos y la visibilidad de paneles laterales no tienen objeto de restauración al reabrir el proyecto (T3 y T4 cierran con no hay objeto). el claim queda parcialmente confirmado (cursor sí, archivos/paneles no).",
+  "zooms": []
+}

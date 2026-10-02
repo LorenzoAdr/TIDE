@@ -1,0 +1,6 @@
+The user wants to ensure that if the LSP process crashes or stops responding, the application automatically detects it and restarts it without user intervention.
+
+T1 found the detection mechanism: `async worker main` checks `job lsp transport running` (which implies `is running` is false, typically due to poll failure or fd closure in the reader thread), setting `pending transport restart true`.
+T1 also found the restart orchestration: `restart lsp for workspace` is triggered after detection via `ensure async worker running` -> `start async worker` -> `async worker main` -> detection -> flag -> application loop calls `
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de detección y reinicio automático ya existe: la caída se detecta en async worker main cuando job lsp transport running devuelve falso, estableciendo pending transport restart true; el reinicio se orquesta en restart lsp for workspace, que se dispara tras la detección vía ensure async worker running - start async worker - async worker main - detección - flag - loop de aplicación que llama a restart lsp for workspace si pending lsp restart es true"}

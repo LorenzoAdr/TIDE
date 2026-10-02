@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de reinicio automático detecta cambios de configuración o conflictos de puerto (stamp antiguo/servidor healthy), pero no hay evidencia en el pack de un detector de caídas o falta de respuesta del LSP; el reinicio se dispara por condiciones de estado, no por monitorización de salud del proceso"
+}

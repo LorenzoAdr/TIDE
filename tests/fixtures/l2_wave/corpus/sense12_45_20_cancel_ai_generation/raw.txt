@@ -1,0 +1,13 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with 3 phases:
+A: locator: where Escape/click outside is detected to cancel generation.
+B: locator: where the partially written file is cleaned up upon canceling generation.
+P: bridge: is there a path between detecting Escape/click and cleaning the file.
+
+Current status:
+T1 (A): Asked "where Escape key is captured to cancel AI generation". Result: Not found. Read `ai trace escape` which is JSON string escaping, not key capture.
+T2 (B): Asked "where partially written file is cleaned up when canceling generation". Result: Read `cancel current`, `clear pending insert`, `cancel all`, `cancel level1`. This looks promising for the cleanup mechanism.
+T3 (A): Asked "where Escape key or click outside is captured to cancel AI generation". Result: Read `visual highlight selection key from`, `cancel current`, `handle user input`, `handle route`, `is cancel input`.
+T4 (A): Asked "where Escape key press or click outside is detected to cancel generation". Result: Not found. Read `
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"T4 niega la detección de Escape/clic en M8; el pack no une ese disparo a la limpieza. Cambio de estrategia: busco el mecanismo de limpieza (B) primero, ya que T2 mostró candidatos claros (cancel current, clear pending insert)."}

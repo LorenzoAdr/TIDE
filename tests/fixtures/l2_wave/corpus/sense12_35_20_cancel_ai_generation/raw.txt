@@ -1,0 +1,12 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+The previous work (T1) tried to find where the Escape key is captured to cancel generation in `ai trace` (M2), but found it was just escaping characters for JSON, not handling keyboard events.
+The anchor has two triggers: "pulsa Escape" and "hace clic fuera".
+T1 failed on "pulsa Escape" in the `ai trace` context.
+I need to look for the other trigger ("hace clic fuera") or a different mechanism for "pulsa
+---- content ----
+{
+"action": "control_v1",
+"do": "explorar",
+"consulta": "dónde se cancela la generación de código al hacer clic fuera del área de edición",
+"why": "el ancla tiene dos disparadores; T1 falló en Escape. Busco el otro polo: clic fuera. El hijo busca el gesto de desactivar la IA al perder foco o clic externo."
+}

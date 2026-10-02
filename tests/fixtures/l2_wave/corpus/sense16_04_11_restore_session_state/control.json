@@ -1,0 +1,132 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al cerrar y abrir un proyecto",
+      "keep": [
+        "M2",
+        "M9"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/recent_projects.cpp:remember",
+        "src/app/recent_projects.cpp:load"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir un proyecto",
+      "keep": [
+        "M5",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.cpp:load_working_lines_from_disk",
+        "src/app/workspace_model.cpp:remove_tab_mru",
+        "src/app/workspace_model.cpp:open_tabs_mru",
+        "src/app/workspace_model.cpp:close_tab"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar cursor, archivos abiertos y paneles; M1 y M2 huelen a estado y layout del editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el estado global no existe; rompo en cursor, archivos y paneles para cazar cada uno por su barrio"
+    },
+    {
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el cursor no se guarda; paso a la siguiente parte del ancla: archivos abiertos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "hay mecanismo para recordar archivos abiertos (open tabs mru, load working lines from disk), pero no para la posición del cursor ni el estado de paneles laterales"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: un leído no cierra el ancla; no refuta el existe",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo de recordar archivos abiertos existe (open tabs mru, load working lines from disk); no hay mecanismo para recordar la posición del cursor ni el estado de paneles laterales"
+    }
+  ],
+  "why": "control: un leído no cierra el ancla; no refuta el existe",
+  "zooms": []
+}

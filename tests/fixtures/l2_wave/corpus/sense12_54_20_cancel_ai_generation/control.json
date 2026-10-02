@@ -1,0 +1,125 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ui/clickable_interaction.cpp:clear_hover_if"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la IA",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:busy",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino capturar la cancelación y limpiar el archivo a medias",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos efectos: capturar el gesto (Escape/clic) y limpiar el estado (archivo). Son dos polos distintos que pueden estar en módulos separados (UI vs controlador de inserción). Romper permite cazar cada mecanismo por separado y luego unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "la fase A no halló el disparo en el keep; salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack no nombra el mecanismo de captura de Escape/clic ni de limpieza de archivo a medias; las cazas cerradas confirman que no hay objeto en los barrios leídos. el claim se refuta: no hay camino para cancelar limpiamente sin dejar el archivo a medias."
+    }
+  ],
+  "why": "el pack no nombra el mecanismo de captura de Escape/clic ni de limpieza de archivo a medias; las cazas cerradas confirman que no hay objeto en los barrios leídos. el claim se refuta: no hay camino para cancelar limpiamente sin dejar el archivo a medias.",
+  "zooms": []
+}

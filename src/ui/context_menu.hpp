@@ -49,6 +49,8 @@ struct ContextMenuState {
   int selected = 0;
   std::vector<std::string> labels;
   std::vector<std::string> action_ids;
+  // First selectable row in the explorer-actions group, or -1 when absent.
+  int explorer_section_start = -1;
   ContextMenuKind kind = ContextMenuKind::File;
 
   std::string absolute_path;
@@ -70,6 +72,7 @@ struct ContextMenuState {
 
   bool rename_open = false;
   bool rename_skip_return = false;
+  bool rename_targets_file = false;
   NamePromptKind name_prompt_kind = NamePromptKind::Rename;
   bool delete_confirm_open = false;
   bool indexer_paths_open = false;
@@ -105,6 +108,13 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
 void context_menu_append_item(ContextMenuState* state, const std::string& label,
                               const std::string& action_id);
 
+// Appends the same file actions shown by the explorer below the current menu.
+// The section is omitted when absolute_path is outside workspace_root.
+void context_menu_append_explorer_file_section(
+    ContextMenuState* state, const std::string& workspace_root, bool show_format = false,
+    bool show_secondary_open = true, bool show_analyze_symbols = false,
+    bool show_browser_preview = false);
+
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
                               const std::string& absolute_path, const std::string& relative_path);
 
@@ -118,7 +128,8 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
                                      bool show_references = false,
                                      const DebugModel* model = nullptr,
                                      bool has_selection = false,
-                                     bool ai_actions_enabled = false);
+                                     bool ai_actions_enabled = false,
+                                     MainLayoutState* layout_state = nullptr);
 
 void context_menu_open_debug_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                     const std::string& symbol, const std::string& absolute_path,

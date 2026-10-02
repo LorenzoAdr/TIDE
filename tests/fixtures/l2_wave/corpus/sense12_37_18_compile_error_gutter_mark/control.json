@@ -1,0 +1,134 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp",
+        "src/ui/editor_panel.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "keep": [
+        "M1",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.hpp",
+        "src/ui/editor_panel.cpp",
+        "src/ui/editor_panel.cpp:diagnostic_severity_tr",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsea la salida de la consola para extraer errores de compilación",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M10"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 y M10 son los únicos que tocan visual highlight; necesito ver si ya hay un mecanismo de marcas en el margen o si hay que crearlo"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores con una línea roja; hay que localizar el dibujo del margen para inyectar el efecto visual"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnóstico"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el pintado; ahora busco la fuente de los datos (errores de consola) que alimentan ese pintado. El pack no une consola y editor directamente, así que busco el puente de diagnóstico."
+    },
+    {
+      "consulta": "dónde se parsea la salida de la consola para extraer errores de compilación",
+      "consultas": [
+        "dónde se parsea la salida de la consola para extraer errores de compilación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 cerró que no hay lector de consola a editor; el pack huele 'parse compiler output' y 'console to diagnostics' como semillas no leídas; busco el mecanismo que convierte texto de consola en datos de error"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "no hay mecanismo que lea errores de compilación de la consola y los marque en el editor; el sistema de diagnóstico consume datos estructurados de LSP, no texto de consola"
+    }
+  ],
+  "why": "no hay mecanismo que lea errores de compilación de la consola y los marque en el editor; el sistema de diagnóstico consume datos estructurados de LSP, no texto de consola",
+  "zooms": []
+}

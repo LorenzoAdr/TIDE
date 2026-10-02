@@ -1,0 +1,177 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:close",
+        "src/editor/editor_state.cpp:set_pos",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al iniciar el proyecto",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se controla la visibilidad de los paneles laterales al cargar la sesión",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/editor_panel.cpp:close",
+          "src/editor/editor_state.cpp:set_pos",
+          "src/editor/editor_state.cpp:reset_to_single_cursor"
+        ],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [
+          "src/app/application.cpp:reopen_workspace_documents",
+          "src/app/application.cpp:run"
+        ],
+        "consulta": "dónde se restauran los archivos abiertos al iniciar el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se controla la visibilidad de los paneles laterales al cargar la sesión",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay un único mecanismo que orquesta la restauración de cursor, archivos y paneles al reabrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar tres estados distintos (cursor, archivos, paneles). El pack muestra M1 para cursor, M5/M2 para paneles/layout, y M3/M4 para sesión. Parto en tres localizadores independientes para encontrar dónde se persiste y restaura cada uno, y luego un puente para ver si hay un orquestador común o si son independientes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "control: do no legal ahora (no_pasar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T3 no halló lógica de paneles laterales; solo repitió el mecanismo de archivos. El pack no une visibilidad de paneles con la restauración de archivos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de restauración se confirma: reopen workspace documents itera las pestañas y restaura los archivos; la posición del cursor se maneja con set pos y reset to single cursor al cerrar/abrir; los paneles laterales se controlan en el mismo flujo de restauración de la sesión."
+    }
+  ],
+  "why": "el mecanismo de restauración se confirma: reopen workspace documents itera las pestañas y restaura los archivos; la posición del cursor se maneja con set pos y reset to single cursor al cerrar/abrir; los paneles laterales se controlan en el mismo flujo de restauración de la sesión.",
+  "zooms": []
+}

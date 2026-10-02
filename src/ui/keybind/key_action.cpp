@@ -31,6 +31,8 @@ constexpr std::array<ActionMeta, static_cast<std::size_t>(KeyAction::Count)> kAc
     {KeyAction::QuickOpen, "quick_open", "shortcuts.general.quick_open"},
     {KeyAction::GoToSymbol, "go_to_symbol", "shortcuts.general.go_to_symbol"},
     {KeyAction::ToggleBottomPanel, "toggle_bottom_panel", "shortcuts.general.toggle_bottom_panel"},
+    {KeyAction::ToggleConsoleExpand, "toggle_console_expand",
+     "shortcuts.general.toggle_console_expand"},
     {KeyAction::Quit, "quit", "shortcuts.general.quit"},
     {KeyAction::FocusExplorer, "focus_explorer", "shortcuts.general.focus_explorer"},
     {KeyAction::FocusEditor, "focus_editor", "shortcuts.general.focus_editor"},

@@ -1,0 +1,26 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se revierten los cambios en el archivo al cancelar la generación",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

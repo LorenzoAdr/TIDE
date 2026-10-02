@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se guarda la posición del cursor al cerrar el editor para restaurarla después",
+  "consultas": [
+    "dónde se guarda la posición del cursor al cerrar el editor para restaurarla después"
+  ],
+  "do": "explorar",
+  "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+  "evita": [
+    "reset to single cursor"
+  ],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 no encontró persistencia; T2 usa reset (sin memoria). El ancla pide recordar. Hay que cazar el guardado real, no el reseteo."
+}

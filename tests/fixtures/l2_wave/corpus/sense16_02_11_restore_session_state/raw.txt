@@ -1,0 +1,14 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+
+Current state:
+- T1 (Editor state: cursor, open files): Read `save workspace session`, `flush active tab`, `save`, `restore workspace session`. The child closed this saying "Lo leído no era el disparo" (The read wasn't the trigger). It found `save workspace session` and `restore workspace session` but claims they aren't the trigger for the specific behavior or perhaps the mechanism wasn't fully confirmed as the *cause* of the user's desired behavior (or lack thereof). Wait, the prompt says "Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo." This implies T1 found some session saving code but it wasn't the specific trigger for the user's issue or the mechanism wasn't the one causing the effect.
+- T2 (Sidebar visibility): Closed with "no hay objeto" (no object). The child found nothing related to restoring sidebar visibility.
+
+The user's claim has three parts:
+1. Cursor position
+2. Open files
+3. Sidebar visibility
+
+T1 investigated 1 & 2.
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"T1 encontró mecanismos de sesión (save/restore) pero cerró que no eran el disparo del efecto deseado; T2 cerró que no hay objeto para paneles laterales. El pack no ofrece más nombres para estos polos. Cierra el claim: no se confirma el mecanismo de restauración."}

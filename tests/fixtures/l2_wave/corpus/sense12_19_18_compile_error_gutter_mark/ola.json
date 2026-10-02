@@ -1,0 +1,16 @@
+{
+  "consulta": "dónde se procesan los errores de compilación de la consola para extraer línea y archivo",
+  "consultas": [],
+  "do": "plan",
+  "error": "control: consulta sin objeto (no una categoría)",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": "romper"
+  },
+  "why": "el pack no une la consola con el margen; M11 huele parsing de errores, M3 huele highlights; necesito confirmar si existe el puente o si hay que crearlo"
+}

@@ -1,0 +1,18 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving a partial file.
+I have two completed jobs (T1 and T2) from a previous plan.
+T1 looked for the capture of Escape/click outside to cancel AI generation. Result: Not found. Read `ai trace escape` (string escape) and `clear hover if` (UI hover), not global key/mouse handlers for cancellation.
+T2 looked for cleaning the partial file upon cancellation. Result: Not found. Read `cancel level1`, `clear pending insert` (memory flags), but no file system operations (`remove`, `unlink`, `delete file`) or temp file management.
+
+The pack shows:
+T1 => T2: `cancel level1` is the same object. `clear pending insert` -> `pending insert` -> `ai trace escape`.
+T1 -> `cancel all`, `Ai Controller`.
+T2 -> `cancel all`, `Ai Controller`.
+
+The user's claim has two parts:
+1. Trigger: Escape/click outside cancels generation.
+2. Effect: Clean cancellation without partial file.
+
+T1 failed to find the trigger mechanism (Escape/click outside).
+T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo de captura de Escape/clic fuera para cancelar la IA, ni de limpieza de archivo a medias al cancelar; lo leído son utilidades de escape de strings y flags en memoria, sin invocación de cancel level1 ni operaciones de sistema de archivos"}

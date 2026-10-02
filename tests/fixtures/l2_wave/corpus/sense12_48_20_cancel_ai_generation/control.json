@@ -1,0 +1,186 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código cuando se pulsa Escape",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "keep": [
+        "M5",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ui/console_panel.cpp:3020-3165",
+        "src/ui/console_panel.cpp:3020-3139"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "cómo se limpia el archivo a medias al cancelar la generación de código",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:busy",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta el clic fuera del editor para cancelar la generación",
+      "keep": [
+        "M7",
+        "M8"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta el clic fuera del editor para cancelar la generación",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "cómo se limpia el archivo a medias al cancelar la generación",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino detectar el clic fuera y limpiar el archivo a medias",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se cancela la generación de código cuando se pulsa Escape",
+      "consultas": [
+        "dónde se cancela la generación de código cuando se pulsa Escape"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escape"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 tiene 'ai trace escape'; M8 tiene 'ai controller cancel level1'. Necesito ver cómo se dispara la cancelación y si limpia el archivo."
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "teclado"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 falló en el controlador; busco el disparador UI que escucha el gesto y llama a cancelar"
+    },
+    {
+      "consulta": "cómo se limpia el archivo a medias al cancelar la generación de código",
+      "consultas": [
+        "cómo se limpia el archivo a medias al cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 encontró el disparador y cancel current; ahora hay que ver si el efecto borra el texto parcial o deja el archivo corrupto. El pack apunta a pending insert como estado clave."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 cerró Escape; falta clic fuera. T3 cerró limpieza; falta confirmar que ambos caminos (Escape y clic) convergen en la limpieza sin dejar residuos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 5,
+      "why": "T4 cerró sin objeto; el clic fuera no es el disparo. T2 y T3 ya leen el mecanismo de cancelación y limpieza (clear pending insert, cancel current)."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

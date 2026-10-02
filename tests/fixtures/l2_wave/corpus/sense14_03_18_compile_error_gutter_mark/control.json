@@ -1,0 +1,150 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación del texto de la consola inferior",
+      "keep": [
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ui/main_layout.cpp:problems_tab_active",
+        "src/ui/diagnostics_panel.cpp:Event",
+        "src/ui/console_panel.cpp:problems_tab_active_console",
+        "src/ui/diagnostics_panel.cpp:Render"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M4",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/editor/editor_folds.cpp:fold_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para crear diagnósticos",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/diagnostics.cpp:diagnostics_for_translation_unit",
+        "src/util/compiler_location.cpp:parse_gcc_style",
+        "src/lsp/gfortran_diagnostics.cpp:parse_gfortran_stderr",
+        "src/util/compiler_location.cpp:find_compiler_location",
+        "src/ui/console_panel.cpp:terminal_row_link"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "parseo errores consola",
+        "diagnóstico editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla une dos polos: leer errores de la consola y pintar una línea roja en el margen. necesito ver si el pack tiene barrios de decoración o de diagnóstico antes de lanzar un explorador"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos polos distintos: la fuente (consola) y el efecto visual (margen). necesito localizar ambos y ver si ya están conectados o si falta el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 encontró el mecanismo de dibujo (line diagnostic marker); avanzo a la siguiente fase del plan"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para crear diagnósticos",
+      "consultas": [
+        "dónde se extraen los errores de compilación del texto de la consola para crear diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parse errors"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 falló en el parseo; el pack huele M11 escaneando salida de shell para errores; necesito el mecanismo que lee la consola y genera los objetos de diagnóstico"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de extracción de errores de la consola (find compiler location) y el de dibujo en el margen (line diagnostic marker) están identificados; el pack no une ambos polos, por lo que el ancla se cierra con la evidencia leída"
+    }
+  ],
+  "why": "el mecanismo de extracción de errores de la consola (find compiler location) y el de dibujo en el margen (line diagnostic marker) están identificados; el pack no une ambos polos, por lo que el ancla se cierra con la evidencia leída",
+  "zooms": []
+}

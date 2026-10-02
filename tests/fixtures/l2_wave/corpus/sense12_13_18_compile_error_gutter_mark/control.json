@@ -1,0 +1,156 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar errores",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crean los marcadores de diagnóstico en el editor a partir de los errores de compilación",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se actualiza el mapa de diagnósticos por línea a partir de los errores de compilación",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) tiene un ejemplo de escaneo de errores. Necesito ver si M3 expone la API para dibujar líneas rojas y si M11 revela cómo se parsean los errores de compilación."
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el pack no une la consola con el margen; M11 huele lectura de errores pero no es el mecanismo nativo; M3 es git; necesito localizar ambos polos y verificar si existe el arco"
+    },
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar errores",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide el efecto visual; M3 (visual highlight) es el barrio que pinta marcas en el editor, necesito ver si ya existe ese mecanismo o cómo se activa"
+    },
+    {
+      "consulta": "dónde se crean los marcadores de diagnóstico en el editor a partir de los errores de compilación",
+      "consultas": [
+        "dónde se crean los marcadores de diagnóstico en el editor a partir de los errores de compilación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "for editor line"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 cerró el dibujo (efecto). El pack señala 'diagnostics for editor line' como el origen de los datos. Necesito ver cómo se generan esos marcadores para inyectar los errores de la consola."
+    },
+    {
+      "consulta": "dónde se actualiza el mapa de diagnósticos por línea a partir de los errores de compilación",
+      "consultas": [
+        "dónde se actualiza el mapa de diagnósticos por línea a partir de los errores de compilación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "update diagnostics map"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 cerró la creación del marcador pero dejó abierto 'update diagnostics map'. El pack conecta T2 con este port. Necesito ver cómo se llena el mapa para saber si los errores de la consola llegan ahí."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo está completo: los errores de compilación (LSP) alimentan el mapa de diagnósticos (rebuild diagnostics by line), el editor consulta ese mapa para cada línea (diagnostics for editor line) y pinta el marcador en el margen (line gutter marker). La línea roja ya existe para errores de compilación; el claim se confirma."
+    }
+  ],
+  "why": "el mecanismo está completo: los errores de compilación (LSP) alimentan el mapa de diagnósticos (rebuild diagnostics by line), el editor consulta ese mapa para cada línea (diagnostics for editor line) y pinta el marcador en el margen (line gutter marker). La línea roja ya existe para errores de compilación; el claim se confirma.",
+  "zooms": []
+}

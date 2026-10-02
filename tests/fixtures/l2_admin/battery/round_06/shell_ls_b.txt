@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"enumerar fixtures","spawn":{"tipo":"shell","brief":"ls fixtures","arg":"ls tests/fixtures/l2_admin"}}
+{"action":"admin_v1","do":"cerrar","why":"nombres en log","reply":"En tests/fixtures/l2_admin aparecen battery y scripts según el listado del harness."}

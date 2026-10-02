@@ -1,0 +1,17 @@
+The user wants to know if the editor remembers the cursor position, open files, and panel state when reopening a project.
+I have three completed jobs:
+1.  **T1**: Asked about saving/restoring editor state. Result: No object found.
+2.  **T2**: Asked about saving cursor position. Result: Read `reset to single cursor`. This implies a reset, not a save/restore of specific position, or at least that's what was found.
+3.  **T3**: Asked about restoring open files. Result: Found `restore workspace session` which restores open tabs and active tab.
+
+The user's claim has three parts:
+1.  Cursor position.
+2.  Open files.
+3.  Panel state (visible/closed).
+
+Current status:
+-   **Open files**: Confirmed by T3 (`restore workspace session` restores open tabs).
+-   **Cursor position**: T2 found `reset to single cursor`. This suggests the cursor might be reset rather than restored to a specific position, or at least that mechanism was found. T1 found nothing for general state.
+-   **Panel state**: Not explicitly investigated yet, but T1 (general state) found
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la restauración de archivos abiertos se confirma en restore workspace session; la posición del cursor se resetea (reset to single cursor) en lugar de restaurarse; no hay mecanismo para recordar el estado de los paneles laterales"}

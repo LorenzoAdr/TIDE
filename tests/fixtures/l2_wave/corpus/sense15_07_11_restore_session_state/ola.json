@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de restauración de posición del cursor al abrir un archivo está confirmado (open file at impl llama a buffer reset to single cursor que aplica la posición con cursors front). sin embargo, no se encontró el mecanismo para restaurar automáticamente la lista de archivos abiertos ni el estado de los paneles laterales al volver a abrir un proyecto (load solo restaura rutas recientes). el claim de recordar 'exactamente' todo el estado se refuta parcialmente: se confirma la posición del cursor en la apertura, pero se refuta la restauración de archivos y paneles."
+}

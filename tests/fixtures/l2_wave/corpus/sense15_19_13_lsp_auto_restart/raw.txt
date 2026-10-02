@@ -1,0 +1,12 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3).
+T1 looked for detection of LSP crash/unresponsiveness to trigger restart. Found `restart lsp for workspace`, `schedule debounced lsp restart`, `on lsp notification`, `spawn language server`.
+T2 looked for detection of LSP crash/unresponsiveness to trigger restart. Found `on lsp notification`, `completion wait timeout ms`, `parse wait timeout ms`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+T3 looked for where the LSP restart is triggered when a request timeout expires. Found `schedule debounced lsp restart` but noted it was a debounce for config changes, not a request timeout.
+
+The "Cerrado" for T3 explicitly states: "no encontré el disparo del reinicio por timeout de petición; lo leído es un debounce de 2s tras cambios de configuración setup build environment watching, no un timeout de respuesta LSP".
+
+The "Cerrado" for T1 and T2 also say "ESA pregunta no se relanza. Lo leído no era
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo de detección automática de caída o falta de respuesta del LSP que dispare un reinicio; lo leído son reinicios por notificaciones o debounce de configuración, no por timeout de petición"}

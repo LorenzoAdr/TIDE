@@ -1,0 +1,17 @@
+The user wants to detect when the LSP server crashes or becomes unresponsive and automatically restart it.
+I have a plan with 3 phases:
+1. [en_curso] A locator: dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio
+2. [pendiente] B locator: dónde se reinicia el servidor LSP automáticamente tras detectar una caída (hacia reinicio)
+3. [pendiente] P puente: hay camino detectar la caída y reiniciar el servidor (need A B)
+
+I have done 4 explorations for phase A.
+T1, T2, T4 all found `restart lsp for workspace`, `schedule debounced lsp restart`, `run`, `on lsp missing install`.
+T3 found `notify lsp status`, `ensure python lsp async`, `finish python lsp start locked`.
+The pack shows `T1=>T2 mismo objeto`, `T1=>T4 mismo objeto`, `T2=>T4 mismo objeto`.
+This means T1, T2, T4 are looking at the same code/object.
+T3 is different (`sin camino` from T1, T2, T4).
+The
+---- content ----
+```json
+{"action":"control_v1","do":"no_pasar","why":"T1, T2 y T4 leen el mismo objeto (restart lsp for workspace). T3 lee otro barrio (notify lsp status). Repetir la misma consulta no avanzará; salto a la siguiente caza del plan."}
+```

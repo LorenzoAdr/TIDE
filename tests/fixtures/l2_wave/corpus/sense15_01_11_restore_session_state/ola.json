@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "la restauración de archivos abiertos se confirma en reopen workspace documents; la posición del cursor y la visibilidad de paneles laterales no se hallaron en los barrios leídos"
+}

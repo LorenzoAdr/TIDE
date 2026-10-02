@@ -1,0 +1,193 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/context_menu.cpp:context_menu_open_editor_background",
+        "src/ui/context_menu.cpp:context_menu_open_editor_symbol",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:open_file_at_confirmed",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se serializa el estado de la sesión al cerrar el proyecto para restaurar cursor y paneles",
+      "keep": [
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/app_settings.cpp:save",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/workspace_model.cpp:WorkspaceSession"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide restaurar estado (cursor, archivos, paneles); M1/M5/M6 son los únicos que tocan editor/panel, pero sus gaps son vacíos y no nombran persistencia; necesito ver si hay un mecanismo de guardado/carga en esos barrios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor y paneles; el pack tiene M1 (cursor) y M5/M6 (paneles) pero no el mecanismo de persistencia; se rompen en 4 locators para encontrar el save/load y luego unir"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar posición; el pack tiene M1 (editor state) pero no el ciclo de persistencia. Parto en guardar y restaurar para cerrar el mecanismo de estado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado niega el mecanismo de guardado en el pico actual; salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 leyó la apertura de archivos pero no la restauración de la posición del cursor; el mecanismo de restauración no está en ese pico. Salto a la siguiente caza para buscar el guardado o la sesión completa."
+    },
+    {
+      "consulta": "dónde se serializa el estado de la sesión al cerrar el proyecto para restaurar cursor y paneles",
+      "consultas": [
+        "dónde se serializa el estado de la sesión al cerrar el proyecto para restaurar cursor y paneles"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "T1 y T2 fallaron en el editor aislado; el claim requiere persistencia de sesión (workspace state). El pack no tiene fichas de 'session' o 'workspace', así que amplio la búsqueda al mecanismo de guardado global del estado."
+    },
+    {
+      "consulta": "dónde se escribe la posición del cursor en el archivo de sesión al guardar el espacio de trabajo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "T3 leyó el guardado de sesión pero no el dato específico del cursor; T2 leyó la apertura pero no la restauración del estado. Hay que cerrar el ciclo de persistencia del cursor específicamente, separando escritura y lectura para asegurar que el dato viaja."
+    },
+    {
+      "consulta": "dónde se escribe la posición del cursor en el archivo de sesión al guardar el espacio de trabajo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "T3 leyó el guardado de sesión pero no el campo cursor; T2 leyó la apertura pero no la restauración de estado. Hay que cerrar el ciclo de persistencia (escribir y leer) para confirmar si el cursor se salva y restaura."
+    },
+    {
+      "consulta": "dónde se escribe la posición del cursor en el archivo de sesión al guardar el espacio de trabajo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "T3 encontró el mecanismo de guardado (Workspace Session) pero no el mapeo específico del cursor. T2 encontró la apertura pero no la restauración del estado. Hay que cerrar el ciclo: dónde se serializa el cursor y dónde se deserializa, luego verificar que son el mismo dato."
+    },
+    {
+      "consulta": "dónde se escribe la posición del cursor en el archivo de sesión al guardar el espacio de trabajo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 10,
+      "why": "T3 leyó el guardado de sesión pero no el cursor específico; T2 leyó la apertura pero no la restauración de estado. Necesito cerrar el ciclo de persistencia del cursor (guardar y cargar) para confirmar si el mecanismo existe o está roto."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

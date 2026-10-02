@@ -1,0 +1,12 @@
+The user wants to find two things:
+1. The module calculating ballistic cursor trajectory for real-time sync with Kubernetes on blink.
+2. Where that physics is persisted in the quantum vector index of the workspace.
+
+Work 1 (T1) already investigated the first part ("dónde se calcula la trayectoria balística...") and concluded "no hay objeto" (no object found). The code is a local text editor with folds and scroll, no Kubernetes sync or ballistic physics.
+
+The anchor has two parts. Part 1 is refuted (no object). Part 2 is "dónde se persiste esa física en el índice vectorial cuántico del workspace".
+Since Part 1 doesn't exist, Part 2 (persisting "that physics") also likely doesn't exist or is a hallucination in the prompt. However, I should check if there is *any* persistence of cursor state or similar in a vector index, or if the "quantum vector index" exists.
+The pack shows `M3 workspace model`, `M5 application`, `M11 file picker sync index`. `M11` mentions `file picker sync index`. `M5` mentions `ai indexes requested`.
+The prompt mentions "
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el Cerrado de T1 niega la existencia de la trayectoria balística y la sincronización con Kubernetes; al no existir el objeto físico, no hay persistencia en índice vectorial cuántico; el pack muestra un editor local sin esos mecanismos"}

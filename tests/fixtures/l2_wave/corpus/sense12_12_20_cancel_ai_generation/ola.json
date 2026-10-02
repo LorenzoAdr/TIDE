@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pide cancelar con Escape o clic fuera; la caza T1 leyó que solo existe un parser de texto para comandos literales, sin manejo de eventos de teclado ni ratón para este fin. No hay objeto que capture esos gestos para cancelar la generación."
+}

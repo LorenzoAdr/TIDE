@@ -1,0 +1,464 @@
+{
+  "version": 3,
+  "notes": "Cadenas multi-paso (dummy Cursor = scripts). Gold = expect_chain; shell enrich exige paths/facts tipados.",
+  "cases": [
+    {
+      "id": "chain_ls_head_version",
+      "tool": "chain",
+      "prompt": "Sin abrir el editor: lista el contenido de tests/fixtures/l2_admin/battery, localiza cases.json, mira solo las primeras líneas con head y dime qué valor tiene el campo \"version\". Cierra con ese número.",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "expect_spawns_min": 2,
+      "expect_notebook_min": 2,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        "cases.json"
+      ],
+      "expect_notebook_fact_any": [
+        "list:dir=",
+        "peek:path="
+      ],
+      "expect_chain": [
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "ls"
+          ]
+        },
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "head"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "version",
+        "2",
+        "cases.json"
+      ]
+    },
+    {
+      "id": "chain_ls_tail_do",
+      "tool": "chain",
+      "prompt": "Lista tests/fixtures/l2_admin/battery/round_07, localiza notebook_accum.txt, mira el final con tail y dime cuál es el último \"do\" del script. No inventes: léelo del tail.",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "expect_spawns_min": 2,
+      "expect_notebook_min": 2,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        "notebook_accum"
+      ],
+      "expect_notebook_fact_any": [
+        "list:dir=",
+        "peek:path="
+      ],
+      "expect_chain": [
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "ls"
+          ]
+        },
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "tail"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "cerrar",
+        "do",
+        "notebook_accum"
+      ]
+    },
+    {
+      "id": "chain_find_wc_lines",
+      "tool": "chain",
+      "prompt": "Confirma con ls o find que existe tools/l2_wave/admin_battery.py; después cuenta sus líneas con wc -l y reporta el número. Encadena: no asumas el conteo sin wc.",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "expect_spawns_min": 2,
+      "expect_notebook_min": 2,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        "admin_battery.py"
+      ],
+      "expect_notebook_fact_any": [
+        "wc:path=",
+        "lines="
+      ],
+      "expect_chain": [
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "ls",
+            "find"
+          ]
+        },
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "wc"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "admin_battery",
+        "línea",
+        "line",
+        "wc"
+      ]
+    },
+    {
+      "id": "chain_two_heads_docs",
+      "tool": "chain",
+      "prompt": "Lista docs/ai, luego lee con head las primeras líneas de l2-admin.md y de l2-admin-battery.md (dos heads). Resume en una frase qué cubre cada doc, sin inventar títulos que no salgan del head.",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "expect_spawns_min": 3,
+      "expect_notebook_min": 3,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        "l2-admin.md",
+        "l2-admin-battery.md"
+      ],
+      "expect_notebook_fact_any": [
+        "peek:path=",
+        "list:dir="
+      ],
+      "expect_chain": [
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "ls"
+          ]
+        },
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "head"
+          ]
+        },
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "head"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "admin",
+        "battery",
+        "administrador",
+        "notebook",
+        "harness"
+      ]
+    },
+    {
+      "id": "chain_ls_then_search",
+      "tool": "chain",
+      "prompt": "Primero lista src/ai filtrando nombres *admin* (ls o find). Con eso, haz search de AdminSessionUi y cierra diciendo en qué archivo aparece según el inbox.",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "expect_spawns_min": 2,
+      "expect_notebook_min": 2,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        "l2_admin"
+      ],
+      "expect_chain": [
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "ls",
+            "find"
+          ]
+        },
+        {
+          "tipo": "search",
+          "arg_any_substr": [
+            "AdminSessionUi",
+            "SessionUi"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "AdminSessionUi",
+        "l2_admin"
+      ]
+    },
+    {
+      "id": "chain_git_then_ls_tuide",
+      "tool": "chain",
+      "prompt": "Encadena: (1) git status para ver el estado del repo, (2) ls de .tuide para ver si existe la carpeta ai. Cierra resumiendo ambas evidencias sin inventar archivos.",
+      "gold_do": "spawn",
+      "gold_tipo": "git",
+      "expect_inbox": true,
+      "expect_spawns_min": 2,
+      "expect_notebook_min": 2,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        ".tuide",
+        "ai"
+      ],
+      "expect_notebook_fact_any": [
+        "list:dir="
+      ],
+      "expect_chain": [
+        {
+          "tipo": "git",
+          "arg_any_substr": [
+            "status",
+            "git"
+          ]
+        },
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "ls"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "status",
+        "ai",
+        ".tuide",
+        "git",
+        "carpeta"
+      ]
+    },
+    {
+      "id": "chain_discover_head_then_read",
+      "tool": "chain",
+      "prompt": "Descubre con ls qué hay en src/ai alrededor de l2_admin.*, mira el inicio de l2_admin.hpp con head, y después haz spawn read del mismo path para confirmar AdminEvidenceItem. Cierra citando que el notebook tiene search/listado + read.",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "expect_spawns_min": 3,
+      "expect_notebook_min": 3,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        "l2_admin.hpp"
+      ],
+      "expect_notebook_fact_any": [
+        "peek:path=",
+        "leído:"
+      ],
+      "expect_chain": [
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "ls"
+          ]
+        },
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "head"
+          ]
+        },
+        {
+          "tipo": "read",
+          "arg_any_substr": [
+            "l2_admin.hpp"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "AdminEvidenceItem",
+        "l2_admin",
+        "notebook",
+        "read"
+      ]
+    },
+    {
+      "id": "chain_long_then_decide",
+      "tool": "chain",
+      "prompt": "Haz ls de /usr/bin (salida larga), observa si el harness recorta (truncated/head/tail), luego con head -5 de tools/l2_wave/admin_battery.py confirma que el scorer existe, y cierra diciendo si la salida de ls vino truncada y qué hace el battery según el head.",
+      "gold_do": "spawn",
+      "gold_tipo": "shell",
+      "expect_inbox": true,
+      "expect_log_nonempty": true,
+      "expect_truncated_or_large": true,
+      "expect_spawns_min": 2,
+      "expect_notebook_min": 2,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        "admin_battery.py"
+      ],
+      "expect_notebook_fact_any": [
+        "peek:path="
+      ],
+      "expect_chain": [
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "ls"
+          ]
+        },
+        {
+          "tipo": "shell",
+          "arg_any_substr": [
+            "head"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "truncat",
+        "head",
+        "battery",
+        "recort",
+        "admin"
+      ]
+    },
+    {
+      "id": "chain_web_research",
+      "tool": "web",
+      "prompt": "Investiga en internet (no en el repo) cuál es la última release estable de nlohmann/json en GitHub y cierra citando al menos una URL de la evidencia web del notebook.",
+      "gold_do": "spawn",
+      "gold_tipo": "web",
+      "gold_arg_substr": [
+        "nlohmann",
+        "json"
+      ],
+      "expect_inbox": true,
+      "expect_spawns_min": 1,
+      "expect_notebook_min": 1,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        "http"
+      ],
+      "expect_notebook_fact_any": [
+        "web:",
+        "url="
+      ],
+      "expect_chain": [
+        {
+          "tipo": "web",
+          "arg_any_substr": [
+            "nlohmann",
+            "json"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "json",
+        "github",
+        "http",
+        "release",
+        "nlohmann",
+        "url"
+      ]
+    },
+    {
+      "id": "chain_web_fetch",
+      "tool": "web",
+      "prompt": "Investiga en internet la última release de nlohmann/json, luego abre (fetch) la primera URL del notebook y resume qué viste en el cuerpo. No uses rg del repo.",
+      "gold_do": "spawn",
+      "gold_tipo": "web",
+      "gold_arg_substr": [
+        "nlohmann",
+        "json"
+      ],
+      "expect_inbox": true,
+      "expect_spawns_min": 2,
+      "expect_notebook_min": 2,
+      "expect_close": true,
+      "chain_ground_reply": true,
+      "expect_notebook_path_any": [
+        "http"
+      ],
+      "expect_notebook_fact_any": [
+        "fetch:",
+        "web:"
+      ],
+      "expect_chain": [
+        {
+          "tipo": "web",
+          "arg_any_substr": [
+            "nlohmann",
+            "json"
+          ]
+        },
+        {
+          "tipo": "web_fetch",
+          "arg_any_substr": [
+            "http"
+          ]
+        },
+        {
+          "do": "cerrar"
+        }
+      ],
+      "reply_must_not_be_empty": true,
+      "reply_should_mention_any": [
+        "fetch",
+        "json",
+        "http",
+        "stub",
+        "nlohmann",
+        "url",
+        "notebook"
+      ]
+    }
+  ]
+}

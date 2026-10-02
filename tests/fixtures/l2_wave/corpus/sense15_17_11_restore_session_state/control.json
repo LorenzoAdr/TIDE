@@ -1,0 +1,198 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el proyecto",
+      "keep": [
+        "M1",
+        "M12"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_config.cpp:save",
+        "src/app/recent_projects.cpp:remember",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el proyecto",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file",
+        "src/app/application.cpp:set_workspace"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda qué archivos estaban abiertos al cerrar el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los archivos abiertos al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "D",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 nombra 'editor state' y 'CursorPos', que es el barrio natural para persistencia de posición, archivos y paneles. Un hijo cierra si existe el mecanismo de guardado/restauración."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "la caza anterior no encontró un mecanismo unificado de 'estado del editor'. rompo el claim en sus tres componentes (cursor, archivos, paneles) y busco por separado dónde se guarda y restaura cada uno. si hay huecos, los relleno con los resultados parciales."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 no encontró un mecanismo general de guardar/restaurar estado del editor. Rompo el ancla en 6 partes: guardar/restaurar cursor, guardar/restaurar archivos abiertos, guardar/restaurar paneles laterales. Cada parte se busca por separado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo general no existe; busco si hay partes del estado que sí se guardan o restauran por separado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se restaura la lista de archivos abiertos al abrir el proyecto",
+      "consultas": [
+        "dónde se restaura la lista de archivos abiertos al abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "restore workspace session"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T3 leyó restore workspace session y open file; ahora busco si esa sesión restaura los archivos abiertos, no solo el cursor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el pack no nombra el mecanismo de restauración de cursor ni paneles; T2 y T3 leen 'save workspace session' y 'restore workspace session' pero no el disparo; sin camino entre polos leídos"
+    }
+  ],
+  "why": "el pack no nombra el mecanismo de restauración de cursor ni paneles; T2 y T3 leen 'save workspace session' y 'restore workspace session' pero no el disparo; sin camino entre polos leídos",
+  "zooms": []
+}

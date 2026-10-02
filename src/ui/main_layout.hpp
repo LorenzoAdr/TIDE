@@ -14,6 +14,7 @@
 #include "editor/helix/helix_state.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
+#include "ftxui/dom/elements.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "terminal/shell_session.hpp"
 #include "terminal/app_session.hpp"
@@ -84,6 +85,12 @@ struct RightSidebarState {
   int pending_references_line = 0;
   int pending_references_col = 0;
   std::string pending_references_symbol;
+  bool pending_causal_flow = false;
+  std::string pending_causal_flow_symbol;
+  int pending_causal_flow_line = -1;
+  std::string pending_causal_flow_path;
+  bool pending_causal_connect = false;
+  std::string pending_causal_connect_symbol;
   CallHierarchyViewState call_hierarchy;
 };
 
@@ -146,6 +153,9 @@ struct MainLayoutState {
   MainLayoutState& operator=(MainLayoutState&&) = default;
 
   bool console_visible = true;
+  bool console_expanded = false;
+  std::function<ftxui::Element()> console_expanded_render;
+  std::function<void()> console_toggle_expanded;
   bool explorer_visible = true;
   bool welcome_visible = false;
   bool diagnostics_panel_visible = false;
@@ -235,6 +245,9 @@ struct MainLayoutState {
   PendingSymbolInfoRequest pending_symbol_info;
   EditorPanelHandlers primary_editor;
   EditorPanelHandlers secondary_editor;
+  // Apply callback for async format / goto / rename (polled in pre_paint on wake).
+  std::function<void(ISymbolProvider*)> lsp_interactive_ready_handler;
+  uint64_t lsp_interactive_request_id = 0;
   std::function<bool(const ftxui::Event&)> source_mouse_handler;
   std::function<bool(const ftxui::Event&)> source_key_handler;
   std::function<bool(const ftxui::Event&)> watches_mouse_handler;

@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra un mecanismo que lea errores de la consola y los inyecte en el gutter; T2 confirma que solo existe el renderizado de diagnostics LSP. sin camino entre consola y margen para errores de compilación: el claim se refuta"}

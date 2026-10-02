@@ -1,0 +1,58 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:open_file_at_confirmed",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ],
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file"
+      ],
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se restauran los paneles laterales al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "C",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay un mecanismo común que restaura el estado del editor al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B",
+        "C"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

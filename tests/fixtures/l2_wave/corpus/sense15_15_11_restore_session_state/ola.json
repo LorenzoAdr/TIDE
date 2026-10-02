@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de restauración de sesión (save state / load state) no guarda ni restaura el estado de la UI: no incluye posición del cursor, archivos abiertos ni visibilidad de paneles. el estado serializado es exclusivamente de la sesión de IA. el claim se refuta: no hay camino para recordar la posición del cursor, los archivos abiertos o los paneles laterales al abrir un proyecto."
+}

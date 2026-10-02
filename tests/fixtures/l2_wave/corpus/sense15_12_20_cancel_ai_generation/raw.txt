@@ -1,0 +1,15 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have two completed jobs:
+1.  **T1**: Capturing Escape key. Found `handle ai console keys`.
+2.  **T2**: Cleaning the file when cancelling. Result: "no encontré la limpieza del archivo... solo limpia estado en memoria... no hay escritura ni truncado de archivo en disco en la rama de cancelación".
+
+The user's claim is: "cancel cleanly without leaving the file half-written".
+T2 explicitly says: "no hay escritura ni truncado de archivo en disco en la rama de cancelación".
+This suggests that the mechanism to clean the file *does not exist* or is not in the cancellation path found so far.
+However, T2 looked at `clear pending insert`, `cancel level1`, etc.
+The "Abierto" list from T2 includes: `handle route`, `handle user input`, `tasks cancel`.
+The "entre abiertas" shows `T1 => T2` via `handle ai console keys -> clear pending insert`.
+
+The core issue is: does the system actually clean the file? T2 says no
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide cancelar sin dejar el archivo a medias; T2 confirma que la rama de cancelación no escribe ni trunca el archivo en disco, solo limpia estado en memoria; el mecanismo de limpieza no existe en el flujo de cancelación"}

@@ -1,0 +1,219 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/ui/context_menu.cpp:context_menu_open_editor_background",
+        "src/ui/context_menu.cpp:context_menu_open_editor_symbol",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar y restaurar la posición del cursor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide restaurar estado (cursor, archivos, paneles); M1/M5/M6 son los únicos que tocan editor/layout/panel, pero sus gaps son vacíos y no nombran persistencia; necesito ver si guardan/cargan estado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor, archivos y paneles. Son 4 estados distintos (cursor, tabs, paneles) con 2 acciones (guardar/cargar). Atomizo en 4 locators para encontrar los puntos de I/O de cada estado, y un puente para ver si hay un 'session manager' central o si es ad-hoc."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar posición; el pack tiene M1 (editor state CursorPos) pero no el ciclo de persistencia; necesito ver si se guarda y se lee, y si están unidos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 confirma la restauración, pero T1 refutó la persistencia. El pack dice 'sin camino' entre guardar y restaurar: no hay mecanismo de serialización leído. El claim del ancla (recordar posición) requiere el guardado, que falta. Salto a la siguiente caza para buscar el origen de los datos o refutar el claim completo."
+    },
+    {
+      "consulta": "dónde se serializa el estado del editor posición del cursor, archivos abiertos y paneles al cerrar la sesión o el proyecto",
+      "consultas": [
+        "dónde se serializa el estado del editor posición del cursor, archivos abiertos y paneles al cerrar la sesión o el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 refutó la persistencia en el cierre del editor individual; el claim requiere recordar el estado al reabrir el proyecto, lo que implica un mecanismo de sesión o workspace. T2 mostró la restauración, pero falta el origen de los datos (el guardado). Busco el punto de escritura a disco del estado global."
+    },
+    {
+      "consulta": "dónde se serializa el estado del editor posición del cursor, archivos abiertos, paneles al cerrar la sesión o el proyecto",
+      "consultas": [
+        "dónde se serializa el estado del editor posición del cursor, archivos abiertos, paneles al cerrar la sesión o el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 refutó la persistencia en el cierre del editor individual; el claim requiere persistencia a nivel de sesión/proyecto. Busco el mecanismo de guardado global que alimenta la restauración encontrada en T2."
+    },
+    {
+      "consulta": "dónde se serializa el estado del editor cursor, paneles, archivos al cerrar la sesión para persistencia",
+      "consultas": [
+        "dónde se serializa el estado del editor cursor, paneles, archivos al cerrar la sesión para persistencia"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "T1 refutó la persistencia en el cierre del editor individual; el mecanismo debe estar en el cierre de la sesión o workspace, no en el buffer. Cambio de locus: de editor a session/workspace."
+    },
+    {
+      "consulta": "dónde se serializa el estado del editor cursor, paneles, archivos al cerrar la sesión para persistencia",
+      "consultas": [
+        "dónde se serializa el estado del editor cursor, paneles, archivos al cerrar la sesión para persistencia"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 9,
+      "why": "T1 refutó la persistencia en el cierre del editor individual; el mecanismo debe estar en el cierre de la sesión o workspace, no en el buffer. Cambio de barrio: de editor state a session/workspace state."
+    },
+    {
+      "consulta": "dónde se serializa el estado del editor posición del cursor, archivos abiertos al cerrar la sesión o el proyecto",
+      "consultas": [
+        "dónde se serializa el estado del editor posición del cursor, archivos abiertos al cerrar la sesión o el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 10,
+      "why": "T1 refutó la persistencia en el cierre del editor individual; el claim requiere guardar el estado global del proyecto. Busco el mecanismo de escritura a disco del layout y la sesión."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

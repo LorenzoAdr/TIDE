@@ -1,0 +1,11 @@
+The user wants to mark compilation errors from the console with a red line in the left margin of the editor.
+The previous work (T1) looked for where the red line is marked in the margin.
+The result of T1 says: "no encontré el mecanismo que marca la línea roja visual highlight en el margen; lo leído es la lógica que decide qué carácter mostrar para error en el gutter, pero no cómo se pinta o resalta visualmente la línea completa o el margen con color rojo. El sistema parece usar caracteres ASCII en el gutter para indicar errores, no una línea roja continua."
+
+This means the "red line" mechanism might not exist as a continuous line, or it's handled differently (e.g., via diagnostics, or maybe the user is mistaken about the "red line" and it's actually a marker/character).
+However, the user's request is "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor".
+This implies a feature request or a modification of existing behavior.
+The previous search found "line gutter marker", "fold gutter marker", "line diagnostic marker from map", "diagnostics for editor line".
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el sistema no pinta una línea roja continua en el margen; usa marcadores de diagnóstico (caracteres) en el gutter. el ancla pide un efecto visual que no existe en el código actual; el mecanismo de resaltado es el de los diagnostics, no una línea roja."}

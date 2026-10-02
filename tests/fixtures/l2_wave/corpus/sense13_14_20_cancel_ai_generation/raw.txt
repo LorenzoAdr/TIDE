@@ -1,0 +1,21 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have a plan with 3 phases:
+1. A: locator: dónde se captura el clic fuera del editor para cancelar la generación (Done, T3)
+2. B: locator: cómo se limpia el archivo a medias al cancelar la generación (Pending)
+3. P: puente: hay camino el clic fuera y la limpieza del archivo (Pending)
+
+Wait, the plan in the prompt says:
+1. [en_curso] A locator: dónde se captura el clic fuera del editor para cancelar la generación
+2. [pendiente] B locator: cómo se limpia el archivo a medias al cancelar la generación
+3. [pendiente] P puente: hay camino el clic fuera y la limpieza del archivo (need A B)
+
+But the "Trabajos ya hechos" show:
+Trabajo 1: cómo se cancela la generación de código al pulsar Escape -> Cerrado: no encontré el mecanismo... is cancel input solo detecta comandos de texto...
+Trabajo 2: dónde se captura la tecla Escape durante la generación de código -> Cerrado: leído:
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no muestra camino entre la captura de Escape/clic fuera y la limpieza del archivo; las cazas confirmaron que no hay mecanismo que una esos gestos con la cancelación limpia, por lo que el ancla se refuta"
+}

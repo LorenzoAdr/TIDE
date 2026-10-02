@@ -1,0 +1,191 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la selección del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la lista de archivos abiertos al reabrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.hpp"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la lista de archivos abiertos al reabrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al reabrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide restaurar estado (cursor, archivos, paneles); M1 (editor state), M5 (editor panel) y M6 (panel) son los barrios candidatos para la persistencia y restauración de la UI; necesito ver si guardan/restauran estado de sesión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor y paneles; el pack tiene M1 (cursor) y M5/M6 (paneles) pero no el mecanismo de persistencia; se rompen en 4 localizadores de estado + puente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar estado; el pack tiene M1 (editor state) pero no el ciclo de persistencia. Parto en guardar y restaurar para ver si existe el mecanismo de memoria."
+    },
+    {
+      "consulta": "dónde se guarda la selección del cursor al cerrar el editor",
+      "consultas": [
+        "dónde se guarda la selección del cursor al cerrar el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "span"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 leyó la posición; el pack apunta a 'cursor selection span on line' como siguiente eslabón para capturar el estado completo"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un archivo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restaurar"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1/T2 cerraron el guardado (CursorPos). El pack señala 'ensure cursors' como siguiente paso lógico para la restauración. Necesito ver si existe el mecanismo de lectura/restauración."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el cursor está cubierto (T1-T3). faltan los otros dos polos del claim: archivos y paneles. son mecanismos independientes de restauración de estado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 7,
+      "why": "T4 no encontró el mecanismo de restauración de archivos (solo leyó la estructura de estado). El plan actual está roto: las fases A y B apuntan a 'restaurar archivos/paneles' pero el pack no tiene pistas para paneles y la caza de archivos falló en el locus actual. Necesito reorientar hacia el 'workspace' o 'session' que orquesta la apertura, no solo el editor."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

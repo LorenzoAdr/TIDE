@@ -1,0 +1,23 @@
+The user wants to find a module that calculates "ballistic trajectory of editor cursors" to sync with a "Kubernetes cluster" when the user "blinks", and where this physics is persisted in a "quantum vectorial index of the workspace".
+
+This sounds like a hallucinated or extremely metaphorical request, or perhaps a test of the system's ability to handle nonsense or highly specific, likely non-existent features in a standard codebase (like VS Code, given the stems like `editor panel`, `workspace model`, `console panel`, `llama backend`).
+
+Let's look at the Atlas (M* cards):
+- M1: editor panel (visual highlight, fold regions)
+- M2: workspace model (load tabular placeholder)
+- M3: model store (ensure llama cli)
+- M4: application (sync symbol workspace indexer, set workspace)
+- M5: console panel
+- M6: watches panel
+- M7: llama backend (model store llama bundle dir)
+- M8: application (open new tab)
+- M9: text input style / diagnostics panel
+- M10: language server spec
+- M11: application (file picker)
+- M
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el pack no contiene indicios de trayectoria balística, sincronización con kubernetes, parpadeo de usuario ni índice vectorial cuántico; el ancla describe un mecanismo inexistente en el código"
+}

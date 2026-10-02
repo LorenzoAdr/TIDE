@@ -1,0 +1,10 @@
+The user wants to restore the state of the editor when reopening a project: cursor position, open files, and visible/closed side panels.
+I have a plan with two phases:
+1. [en_curso] A locator: dónde se restauran los archivos abiertos al abrir el proyecto
+2. [pendiente] B locator: dónde se restauran los paneles laterales visibles al abrir el proyecto
+
+Wait, the plan says:
+1. [en_curso] A locator: dónde se restauran los archivos abiertos al abrir el proyecto
+2. [pendiente] B locator: dónde se restaur
+---- content ----
+{"action":"control_v1","do":"pasar","why":"el Cerrado afirma el objeto de esta fase"}

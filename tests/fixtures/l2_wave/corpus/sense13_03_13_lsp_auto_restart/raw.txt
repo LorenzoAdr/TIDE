@@ -1,0 +1,16 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have a plan with 3 phases:
+1. A: Detect LSP unresponsive/crash and trigger restart (locator)
+2. B: Detect LSP crash and trigger restart (locator)
+3. P: Bridge between A and B
+
+I have 3 completed jobs (T1, T2, T3).
+T1 looked for detection of crash/unresponsive and restart trigger. Found `schedule debounced lsp restart`, `restart lsp for workspace`, `clangd process alive`, `clangd index healthy`, `process alive`.
+T2 looked for detection of crash/unresponsive and restart trigger. Found `on transport reader eof`, `start`, `restart lsp for workspace`, `schedule debounced lsp restart`. Closed saying: "no encontré el mecanismo de detección de no-respuesta timeout heartbeat ni el disparador de reinicio automático tras caída; lo leído es la detección de EOF caída física que solo limpia estado sin reiniciar, y funciones de reinicio manual debounced por configuración".
+T3 looked for detection of unresponsive and restart trigger. Found `lsp client cpp`, `application cpp`.
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack y los cerrados confirman que no existe un mecanismo automático de detección de no-respuesta (heartbeat/timeout) ni de reinicio tras caída; solo hay detección de EOF que limpia estado y reinicios manuales/debounced por configuración. el ancla pide algo que no está implementado."
+}

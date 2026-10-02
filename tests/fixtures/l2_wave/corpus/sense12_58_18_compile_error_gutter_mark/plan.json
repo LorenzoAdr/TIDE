@@ -1,0 +1,48 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/ui/editor_panel.cpp:Event"
+      ],
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se parsean los errores de compilación de la consola para obtener la línea del error",
+      "evita": [],
+      "hacia": [
+        "parseo"
+      ],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino parsear el error de la consola y dibujar la línea roja en el editor",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

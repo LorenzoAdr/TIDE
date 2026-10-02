@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"listar dir battery","spawn":{"tipo":"shell","brief":"ls battery","arg":"ls tests/fixtures/l2_admin/battery"}}
+{"action":"admin_v1","do":"spawn","why":"ver cabecera cases.json","spawn":{"tipo":"shell","brief":"head cases","arg":"head -20 tests/fixtures/l2_admin/battery/cases.json"}}
+{"action":"admin_v1","do":"cerrar","why":"version leída del head","reply":"En cases.json el campo version es 2 (visto con head tras ls del directorio battery)."}

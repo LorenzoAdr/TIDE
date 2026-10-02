@@ -1,0 +1,32 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- No explorers yet.
+- Pack has 12 M* cards.
+- M1: editor panel (clear editor line paint caches)
+- M2: console expand overlay
+- M3: visual highlight (build git marks snapshot)
+- M4: editor buffer source
+- M5: editor context
+- M6: raw pty screen
+- M7: console panel (terminal selection)
+- M8: dap backend (debug)
+- M9: app session / shell session
+- M10: embedding backend / visual highlight
+- M11: binary symbols panel (scan shell output for linker errors)
+- M12: main layout
+
+The user's request involves:
+1.  **Source of errors**: "consola inferior" (bottom console). This likely relates to M7 (console panel), M6 (raw pty screen), or M11 (binary symbols panel - mentions "scan shell output for linker errors").
+2.  **Target of marking**: "margen izquierdo del editor
+---- content ----
+{
+  "action": "control_v1",
+  "do": "bosquejar",
+  "hacia": [
+    "error compilación",
+    "línea margen",
+    "marcar error"
+  ],
+  "why": "quiero ver si el ancla vive en un barrio o en varios"
+}

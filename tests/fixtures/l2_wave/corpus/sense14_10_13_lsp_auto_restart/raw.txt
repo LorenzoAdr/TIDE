@@ -1,0 +1,10 @@
+The user wants to know if the application automatically detects when the LSP (Language Server Protocol) process crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3) that investigated this.
+T1 looked for where the crash is detected and restart triggered. Found `restart lsp for workspace`, `schedule debounced lsp restart`.
+T2 looked for the event/signal detecting the crash and calling the restart function. Found `ensure ready`, `start completion server`, `ensure completion server`, `health ok`.
+T3 looked for where the LSP unresponsiveness is detected and restart triggered. Found `lsp client cpp`, `schedule debounced lsp restart`, `wait response`, `reader loop`, `restart lsp for workspace`, `start`, `on transport reader eof`, `run`.
+
+The "Cerrado" sections for all three jobs state: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo." This implies that the specific mechanisms found in the jobs were not the *trigger* for the automatic restart upon crash/unresponsiveness as requested by the user, or at
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"las tres cazas cerraron sin hallar el disparo automático ante caída o falta de respuesta del LSP; el mecanismo no está en el pack"}

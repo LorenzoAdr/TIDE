@@ -1,0 +1,19 @@
+The user wants to restore the cursor position, open files, and panel visibility when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A: panel visibility (T2 closed: no object)
+2. [en_curso] B: cursor position (T3 closed: no object / not the trigger)
+3. [pendiente] C: open files
+4. [pendiente] P: bridge
+
+T1 asked about cursor and open files together. Closed: "Lo leído no era el disparo". Read: `workspace model cpp`, `editor state cpp`.
+T2 asked about panel visibility. Closed: "no hay objeto".
+T3 asked about cursor position. Closed: "Lo leído no era el disparo". Read: `editor state cpp`.
+
+The pack shows:
+M1: editor state (owns: editor state, peek: editor state CursorPos)
+M3: app session (owns: app session, peek: shell session cursor row)
+M5: editor panel (owns: editor panel, peek: editor panel end mouse selection)
+M6: panel (owns: panel, peek: panel ModalInputLine)
+M7: file picker
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo de restauración de sesión al abrir un proyecto; las fichas leídas (editor state, workspace model) no son el disparo y no hay camino a un objeto de persistencia de UI"}

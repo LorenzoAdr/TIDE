@@ -7,7 +7,26 @@ BUILD_DIR="${ROOT}/build"
 WIZARD_BUILD_DIR="${ROOT}/build-wizard"
 WIZARD_SRC="${ROOT}/tools/bundle_wizard/main.cpp"
 CONFIG_FILE="${ROOT}/.bundle-config"
-JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
+# macOS: cmake/ninja/node de pip --user no están en PATH; Homebrew es opcional.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  PY_USER_BIN="$(python3 -c 'import site, os; print(os.path.join(site.USER_BASE, "bin"))' 2>/dev/null || true)"
+  if [[ -n "${PY_USER_BIN}" && -d "${PY_USER_BIN}" ]]; then
+    PATH="${PY_USER_BIN}:${PATH}"
+  fi
+  NODE_WHEEL_BIN="$(python3 -c 'import os, nodejs_wheel; print(os.path.join(os.path.dirname(nodejs_wheel.__file__), "bin"))' 2>/dev/null || true)"
+  if [[ -n "${NODE_WHEEL_BIN}" && -d "${NODE_WHEEL_BIN}" ]]; then
+    PATH="${NODE_WHEEL_BIN}:${PATH}"
+  fi
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  if command -v ninja >/dev/null 2>&1; then
+    export CMAKE_GENERATOR="${CMAKE_GENERATOR:-Ninja}"
+  fi
+fi
+JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
 WIZARD_BIN=""
 
 BUNDLE_CLANGD=0
@@ -35,8 +54,10 @@ BUILD_GDB_CA=0
 STATIC_LIBSTDCXX=0
 STATIC_LIBSTDCXX_FROM_CLI=0
 BUILD_BACKEND_FROM_CLI=0
-INTERACTIVE=1
-SKIP_WIZARD=0
+# La TUI de bundles queda desactivada por defecto (toolpacks vía GitHub Releases).
+# Usar --wizard / --interactive para abrirla; el código del asistente se conserva.
+INTERACTIVE=0
+SKIP_WIZARD=1
 CLI_OVERRIDES_BUNDLE=0
 # Si compile.sh se ejecuta dentro de la imagen portable, no re-lanzar Docker.
 IN_PORTABLE_CONTAINER="${TUIDE_IN_PORTABLE_CONTAINER:-0}"
@@ -57,12 +78,13 @@ usage() {
   cat <<'EOF'
 Uso: tools/compile.sh [opciones]
 
-Sin opciones: primero la TUI de componentes embebidos; luego una sola
-compilación de tuide con la selección elegida.
+Sin opciones: compilación directa con .bundle-config (o defaults si no existe).
+La TUI de componentes embebidos está desactivada por defecto; ábrela con --wizard.
 
 Opciones:
   -y, --yes                  Usar .bundle-config sin TUI (o defaults si no existe)
   --non-interactive          Igual que --yes
+  --wizard, --interactive    Abrir la TUI de selección de componentes embebidos
   --bundle-clangd            Embeber clangd oficial
   --no-bundle-clangd         No embeber clangd
   --force-bundled-clangd     Forzar clangd embebido en runtime (requiere bundle)
@@ -505,7 +527,13 @@ cmake_extra_args() {
   if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
     args+=(-DTUIDE_STATIC_LIBSTDCXX=ON)
   fi
-  printf '%s\n' "${args[@]}"
+  if [[ "$(uname -s)" == "Darwin" ]] || [[ "$(uname -m)" != "x86_64" ]]; then
+    # ripgrep bundle is Linux x86_64 only; use system rg elsewhere.
+    args+=(-DTUIDE_BUNDLE_RG=OFF)
+  fi
+  if ((${#args[@]} > 0)); then
+    printf '%s\n' "${args[@]}"
+  fi
 }
 
 cmake_bundle_args() {
@@ -630,6 +658,11 @@ while [[ $# -gt 0 ]]; do
     -y|--yes|--non-interactive)
       SKIP_WIZARD=1
       INTERACTIVE=0
+      shift
+      ;;
+    --wizard|--interactive)
+      SKIP_WIZARD=0
+      INTERACTIVE=1
       shift
       ;;
     --bundle-clangd)
@@ -1066,11 +1099,16 @@ done
 log "proyecto: ${ROOT}"
 log "comprobando dependencias..."
 check_command cmake
-check_command g++
+if ! command -v g++ >/dev/null 2>&1 && ! command -v clang++ >/dev/null 2>&1; then
+  die "no se encontró g++ ni clang++ en PATH (en macOS: xcode-select --install)"
+fi
+if ! command -v g++ >/dev/null 2>&1; then
+  log "aviso: g++ no está en PATH; CMake usará clang++"
+fi
 
 if [[ "${SKIP_WIZARD}" == "0" ]] && { [[ ! -t 0 ]] || [[ ! -t 1 ]]; }; then
   # Sin TTY (p. ej. task AI con stdout pipeado): el wizard FTXUI se quedaría colgado.
-  log "sin TTY: omitiendo asistente interactivo (usa .bundle-config / defaults; pasa -y explícito)"
+  log "sin TTY: omitiendo asistente interactivo (usa .bundle-config / defaults)"
   SKIP_WIZARD=1
   INTERACTIVE=0
 fi
@@ -1095,8 +1133,14 @@ sync_python_bundle_flags
 warn_gdb_dap
 ensure_gdb_ca_tarball
 
-mapfile -t CMAKE_BUNDLE_ARGS < <(cmake_bundle_args)
-mapfile -t CMAKE_EXTRA_ARGS < <(cmake_extra_args)
+CMAKE_BUNDLE_ARGS=()
+while IFS= read -r _line || [[ -n "${_line}" ]]; do
+  [[ -n "${_line}" ]] && CMAKE_BUNDLE_ARGS+=("${_line}")
+done < <(cmake_bundle_args)
+CMAKE_EXTRA_ARGS=()
+while IFS= read -r _line || [[ -n "${_line}" ]]; do
+  [[ -n "${_line}" ]] && CMAKE_EXTRA_ARGS+=("${_line}")
+done < <(cmake_extra_args)
 
 log "configurando CMake..."
 if [[ "${BUNDLE_GDB}" == "1" ]]; then
@@ -1111,7 +1155,9 @@ if [[ "${BUNDLE_GDB}" == "1" ]]; then
   fi
 fi
 # shellcheck disable=SC2068
-cmake -S "${ROOT}" -B "${BUILD_DIR}" ${CMAKE_BUNDLE_ARGS[@]} ${CMAKE_EXTRA_ARGS[@]}
+cmake -S "${ROOT}" -B "${BUILD_DIR}" \
+  ${CMAKE_BUNDLE_ARGS[@]+"${CMAKE_BUNDLE_ARGS[@]}"} \
+  ${CMAKE_EXTRA_ARGS[@]+"${CMAKE_EXTRA_ARGS[@]}"}
 
 log "compilando (${JOBS} hilos)..."
 if [[ ${#BUILD_TARGETS[@]} -gt 0 ]]; then

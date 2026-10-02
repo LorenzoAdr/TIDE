@@ -1,0 +1,16 @@
+The user wants to mark compilation errors from the console with a red line in the editor margin.
+I have a plan with 3 phases:
+A: locator: where compilation errors are parsed from console text.
+B: locator: where a red line is drawn in the editor margin to mark errors.
+P: bridge: is there a path between parsing console errors and drawing the red line in the editor.
+
+Work 1 (Phase A) closed with `scan shell output for linker errors`.
+Work 2 (Phase B) closed with `editor panel cpp`.
+
+The pack says `T1=>T2 sin camino`. This means there is no direct path between the parsing of errors (T1) and the drawing of the red line (T2).
+The user's claim is that errors appearing in the console *also* get marked with a red line.
+Since T1 and T2 are disconnected ("sin camino"), the mechanism to connect them doesn't exist or isn't found in the current scope.
+However, the user's request is "quiero que... también se marquen". This implies a feature request or a missing connection.
+The plan phase P asks "hay camino...". The pack says "sin camino".
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack cierra el puente: sin camino entre el parseo de errores de la consola y el dibujo de la línea roja en el editor; el mecanismo no existe"}

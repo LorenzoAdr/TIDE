@@ -1,0 +1,50 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "plan",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se extraen la línea y el número de columna de los errores de compilación del texto de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el análisis del error de compilación y el dibujo de la línea roja en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "why": "el pack muestra M11 (parseo de errores) y M3 (visual highlight) como barrios separados sin conexión directa; necesito confirmar si existe el puente que une la detección del error con su visualización en el editor"
+}

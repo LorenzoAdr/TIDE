@@ -1,0 +1,143 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de la IA",
+      "keep": [
+        "M2",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código y se limpia el archivo a medias",
+      "keep": [
+        "M11",
+        "M12"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/lsp/lsp_client.cpp:cancel_inflight_completion",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se mapea la tecla Escape o el clic fuera a la ruta de cancelación de la generación",
+      "keep": [
+        "M3",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:handle_completion_keys",
+        "src/ui/editor_panel.cpp:handle_editor_keys",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla une un gesto (Escape/clic fuera) con un efecto (cancelar y limpiar). El pack muestra rastros de escape en M2 y cancelación en M8, pero no el puente. Parto en dos cazas independientes para cerrar cada polo."
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de la IA",
+      "consultas": [],
+      "do": "revisar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el lector confundió escape de string con tecla; busco el handler de teclado real"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código y se limpia el archivo a medias",
+      "consultas": [
+        "dónde se cancela la generación de código y se limpia el archivo a medias"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "stop generation"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "la captura de Escape/clic no se encontró en los barrios leídos; el pack abre 'stop generation' como objeto distinto. busco el mecanismo de cancelación y limpieza directamente"
+    },
+    {
+      "consulta": "dónde se mapea la tecla Escape o el clic fuera a la ruta de cancelación de la generación",
+      "consultas": [
+        "dónde se mapea la tecla Escape o el clic fuera a la ruta de cancelación de la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 encontró el mecanismo de cancelación y limpieza, pero depende de que Escape/clic estén mapeados a la ruta de cancelación. T1 falló en la captura directa. Busco el puente que une el gesto del usuario con el disparo de cancelación encontrado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el polo de cancelación y limpieza de estado pendiente se confirma: handle user input y handle route invocan cancel current, que ejecuta clear pending insert y cancel all para detener el agente. el polo de captura de clic fuera para cancelar IA se refuta: no se mapea explícitamente en los símbolos leídos, solo Escape cierra la UI de completado y el texto cancel o la ruta Cancel Agent disparan la interrupción. la limpieza del archivo a medias se resuelve mediante la invalidación del estado de inserción pendiente, sin truncado explícito de buffer."
+    }
+  ],
+  "why": "el polo de cancelación y limpieza de estado pendiente se confirma: handle user input y handle route invocan cancel current, que ejecuta clear pending insert y cancel all para detener el agente. el polo de captura de clic fuera para cancelar IA se refuta: no se mapea explícitamente en los símbolos leídos, solo Escape cierra la UI de completado y el texto cancel o la ruta Cancel Agent disparan la interrupción. la limpieza del archivo a medias se resuelve mediante la invalidación del estado de inserción pendiente, sin truncado explícito de buffer.",
+  "zooms": []
+}

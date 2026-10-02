@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Found `handle completion keys` calling `completion close` for Escape. No evidence for click outside.
+2.  **T2**: Looked for file cleanup after cancel. Found `cancel debug launch` (debug session), not code generation cleanup.
+3.  **T3**: Looked for reverting file writing on cancel. Found `cancel current`, `clear pending insert`, `begin insert at`, `cancel level1`, `handle user input`, `run insert async`, `cancel all`.
+
+The last job (T3) found names related to cancellation (`cancel current`, `clear pending insert`, `cancel level1`, `cancel all`) but the "Cerrado" says "ESA pregunta no se relanza... Lo leído no era el disparo." This implies the specific mechanism for *reverting the file writing* wasn't found or confirmed as the trigger for the user's specific scenario (clean cancel without half-written file).
+
+However, T3 *did* read names like `clear pending insert` and `cancel level1`. The prompt
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el sistema cancela la generación al pulsar Escape (handle completion keys -> completion close), pero no se encontró el mecanismo que limpia o revierte el archivo para evitar dejarlo a medias; el mapeo de limpieza no existe en el pack"
+}

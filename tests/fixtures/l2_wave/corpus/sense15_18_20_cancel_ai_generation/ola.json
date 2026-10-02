@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla se refuta parcialmente: la tecla Escape se captura y cancela la generación (cancel level1), pero el archivo no se limpia; solo se borra el estado pendiente en memoria (clear pending insert)."
+}

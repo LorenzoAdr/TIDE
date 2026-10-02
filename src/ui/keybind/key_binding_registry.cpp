@@ -119,6 +119,10 @@ KeyBindingRegistry KeyBindingRegistry::with_defaults() {
       {chord1("ctrl+t", [](const ftxui::Event& ev) { return ev == ftxui::Event::CtrlT; })}, true,
       true, true));
   e.push_back(make_entry(
+      KeyAction::ToggleConsoleExpand, KeyScope::Global,
+      {chord1("ctrl+alt+j", [](const ftxui::Event& ev) { return event_is_ctrl_alt_j(ev); })},
+      true, true, true));
+  e.push_back(make_entry(
       KeyAction::Quit, KeyScope::Global,
       {chord1("ctrl+q", [](const ftxui::Event& ev) { return ev == ftxui::Event::CtrlQ; })}, true,
       true, true));

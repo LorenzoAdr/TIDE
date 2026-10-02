@@ -1,0 +1,24 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed works:
+T1: Found where Escape is captured to cancel generation (`handle ai console keys` -> `ai clear pending insert`).
+T2: Looked for where the half-written file is cleaned when pending insertion is cancelled. Result: `clear pending insert` only resets flags, doesn't touch disk/buffers.
+T3: Looked for where the half-written file is cleaned when generation is cancelled. Result: `cancel level1`.
+
+The pack shows:
+T1 -> `has pending insert`, `ai tab active`
+T2 -> `cancel current`, `handle user input`
+T3 -> `cancel all`, `Ai Controller`
+T1=>T2: `handle ai console keys` -> `clear pending insert`
+T1=>T3: same object: `cancel level1`
+T2=>T3: sin camino
+
+The anchor claims: "cancel cleanly without leaving the file half-written".
+T1 found the trigger (Escape -> `ai clear pending insert`).
+T2 found that `clear pending insert` does NOT clean the file.
+T
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de cancelación (clear pending insert) solo resetea flags de estado y despierta el ciclo; no limpia el archivo ni los buffers de texto, por lo que el claim de 'cancelar limpiamente sin dejar el archivo a medias' se refuta con el código actual"
+}

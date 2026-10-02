@@ -1,0 +1,122 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "cómo se reinicia el servidor LSP automáticamente cuando se cae o no responde",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se maneja la salida inesperada o el error del proceso LSP para disparar un reinicio",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene la lógica de reinicio (restart lsp for workspace), pero falta el disparador automático de detección de fallo."
+    },
+    {
+      "consulta": "cómo se reinicia el servidor LSP automáticamente cuando se cae o no responde",
+      "consultas": [
+        "cómo se reinicia el servidor LSP automáticamente cuando se cae o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp for workspace"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "Trabajo 1 encontró el disparador; ahora verifico si el reinicio es automático o requiere intervención del usuario"
+    },
+    {
+      "consulta": "dónde se maneja la salida inesperada o el error del proceso LSP para disparar un reinicio",
+      "consultas": [
+        "dónde se maneja la salida inesperada o el error del proceso LSP para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "on exit"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 no halló watchdog ni timeout, pero dejó abiertos 'on exit' y 'on error'. Un hijo caza el handler de cierre del proceso para ver si ya hay lógica de reinicio o dónde inyectarla."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección automática y reinicio ante caída o no-respuesta del LSP no existe; el reinicio actual es manual o reactivo a cambios de entorno, sin watchdog ni handler de error"
+    }
+  ],
+  "why": "el mecanismo de detección automática y reinicio ante caída o no-respuesta del LSP no existe; el reinicio actual es manual o reactivo a cambios de entorno, sin watchdog ni handler de error",
+  "zooms": []
+}

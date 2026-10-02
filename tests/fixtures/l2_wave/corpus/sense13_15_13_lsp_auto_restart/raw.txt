@@ -1,0 +1,13 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Asked where the crash/no-response is detected to trigger restart. Found `restart lsp for workspace`, `wait response`, `send lsp request`.
+2.  **T2**: Asked where the deferred restart is scheduled after a failure. Found `restart lsp for workspace`, `on lsp missing install`.
+3.  **T3**: Asked where the LSP process death/no-response is detected to schedule restart. Found `schedule debounced lsp restart`, `restart lsp for workspace`.
+
+The "Cerrado" sections for T1, T2, and T3 explicitly state: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo." This implies that the previous explorations did *not* find the specific mechanism for *automatic detection of crash/no-response* leading to restart, or at least the system is telling me to close that specific mapping because it wasn't the trigger.
+
+However, looking at the "leído" content:
+- T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"las búsquedas de detección automática de caída o no-respuesta del LSP no hallaron el mecanismo; el pack no une un detector de fallo a un reinicio automático"}

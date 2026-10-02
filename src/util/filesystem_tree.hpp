@@ -26,6 +26,9 @@ FileTreeNode build_file_tree_from_paths_and_folders(
 // Marca carpetas cuyo basename es stub pesado (lazy, sin hijos cargados).
 void mark_lazy_stub_folders(FileTreeNode* root, const IndexFilterOptions& options);
 
+// Marca carpetas que son symlinks en disco para cargar hijos al expandir.
+void mark_symlink_folders_lazy(FileTreeNode* root, const std::string& workspace_root);
+
 // Lista un nivel del directorio en disco y rellena children del nodo lazy.
 bool populate_lazy_folder_children(FileTreeNode* folder, const std::string& workspace_root,
                                    const std::string& relative_dir,

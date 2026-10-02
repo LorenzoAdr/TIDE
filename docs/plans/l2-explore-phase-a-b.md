@@ -1,36 +1,39 @@
 # Plan: L2 explore en dos fases (A localización / B pack)
 
-**Estado:** diseño normativo (sin implementar en este PR)  
-**Fecha:** 2026-08-21  
-**Rama de diseño:** `cursor/l2-explore-phase-ab-plan-0151`  
-**Alcance:** plan detallado para separar localización de acumulación en L2 explore; este documento no cambia runtime.
+**Estado:** diseño normativo (sin implementar en este documento)  
+**Fecha:** 2026-08-21 (rev. chat + PR #10)  
+**Origen:** [PR #10](https://github.com/LorenzoAdr/TIDE/pull/10) + discusión de diseño 2026-08-20/21  
+**Alcance:** plan detallado para separar **identificación de locus/stem** de **acumulación de código** en L2 explore; no cambia runtime por sí solo.
 
 ---
 
 ## 0. Resumen ejecutivo
 
-Hoy L2 explore **mezcla** dos trabajos:
+Hoy L2 explore **mezcla** dos trabajos que confunden al modelo (sobre todo 7B):
 
-1. Buscar stem / código crítico (dónde puede estar el bug).
-2. Acumular fragmentos en `pack.md` hasta `done next=edit`.
+1. **Identificar** dónde puede estar el comportamiento (stem / locus / vecindario).
+2. **Acumular** fragmentos en `pack.md` hasta `done next=edit`.
 
-Eso dispersa al modelo (sobre todo 7B) cuando empieza a retener cuerpos. La alternativa es:
+El síntoma típico (battery `17_ai_spinner_stuck`, round `anchor_rescue_v1`): el primer `action=plan` ya mete 4–5 stems distintos; `PACK_REVIEW` dice `partial`; el runtime responde con más plans / pushbacks / auto-plan a módulos peores. El sistema trata un fallo de **identidad de locus** como si fuera un fallo de **cobertura de pack**.
 
-| Fase | Job | Memoria durable | Cierre |
-|------|-----|-----------------|--------|
-| **A — Localización** | Decidir **loci** críticos | stem + ancla + mini-resumo | hipótesis estable / early-stop |
-| **B — Acumulación** | Cubrir loci con pack rígido | fragmentos (`pack.md`) | `pack_incomplete` falso + `PACK_REVIEW` OK → `done next=edit` |
+La alternativa es un explorador en **dos fases explícitas**:
+
+| Fase | Job | Pregunta | Memoria durable | Cierre |
+|------|-----|----------|-----------------|--------|
+| **A — Localización** | Decidir **loci** críticos | ¿Qué stem(s)/anclas son el vecindario correcto? | stem + ancla + mini-resumo (`a_notes`) | hipótesis estable / early-stop |
+| **B — Acumulación** | Cubrir loci con pack rígido | ¿Qué código hace falta para editar/responder? | fragmentos (`pack.md`) | `pack_incomplete` falso + `PACK_REVIEW` OK → `done next=edit` |
 
 Principios:
 
 - **Robustez > ahorro de ciclos** L2.
 - A **mira** cuerpos (firmas engañan) pero no los **guarda** como pack.
 - **Embed propone, peek dispone, pack materializa.**
-- A es **escaneo estricto** sobre cola rankeada (no navegación libre del modelo).
+- A es **escaneo estricto** sobre cola rankeada (índice estructural local), no navegación libre del modelo.
 - Miss del top-N = **expansión de cola**, no explore libre.
-- Sustituir dependencia del **LSP server** por **índice estructural local** (Tree-sitter / `SymbolIndex` + mapa) robusto por diseño.
+- Sustituir dependencia del **LSP server** en el hot path de localización por **índice estructural local** (Tree-sitter / `SymbolIndex` + mapa). Call hierarchy LSP **no** es requisito; si hace falta “profundizar”, se hace con defs/refs/outlines/siblings del índice local una vez hay stem locked.
+- L1 ya intuye la separación (`coding_stem_shortlist`, `context_stem`, `pick_stem`); L2 explore debe **usarla como fase**, no saltar a empaquetar.
 
-La propuesta **no tira** el cableado actual (mapa L1, stem embed, body semantic rerank, `plan`→pack, `PACK_REVIEW`, diversidad por path): lo **reparte** en A vs B, hace explícito el miss de ranking, y ancla la localización al índice local en lugar de clangd/LSP up.
+La propuesta **no tira** el cableado actual (mapa L1, stem embed, body semantic rerank, `plan`→pack, `PACK_REVIEW`, diversidad por path): lo **reparte** en A vs B, hace explícito el miss de ranking, y ancla la localización al índice local.
 
 ---
 
@@ -40,15 +43,29 @@ La propuesta **no tira** el cableado actual (mapa L1, stem embed, body semantic 
 
 - Explore permite tools + `action=plan` + crecimiento de Observations **y** pack a la vez.
 - El modelo compite entre “seguir cazando” y “ya tengo bastante para editar”.
-- Lock prematuro a un solo `context_stem` (L1 enrich) empuja bugs **multi-stem** al módulo equivocado.
+- Lock prematuro a un solo `context_stem` (L1 enrich) empuja bugs **multi-stem** al módulo equivocado; a la inversa, **no** lockear y planear multi-stem prematuro ensucia el pack.
+- `PACK_REVIEW` pregunta “¿el pack sirve para editar?” cuando a menudo la pregunta correcta era “¿estamos en el módulo correcto?”.
 - Depender de LSP (hover, call hierarchy, workspace symbols) para localizar es frágil: clangd down, `compile_commands` incompleto, indexado a medias.
 
-### 1.2 Qué no es el problema
+### 1.2 Insight del chat (por qué mezclar confunde)
+
+Son **políticas distintas**:
+
+| | Identificar (A) | Acumular (B) |
+|--|-----------------|--------------|
+| Descartar | bueno y barato | caro (ya invertiste tokens) |
+| Evidencia | outline / 1 ancla / peek corto | fragmentos + siblings + re-fetch |
+| Gate | “¿este stem es el vecindario?” | “¿cubre Instruction para editar?” |
+| Agencia del modelo | juzgar cola que manda el runtime | plan/pack acotado a loci |
+
+Mezclarlas hace que el modelo “vote con código”: mete targets por incertidumbre → pack ruidoso → review pide más → contexto saturado con evidencia de stems equivocados.
+
+### 1.3 Qué no es el problema
 
 - No es solo “el pack es pequeño”.
 - No es solo “el 7B es tonto”: el 7B **puede** juzgar bien ~60 líneas × 5 peeks; falla cuando el contexto mezcla peeks viejos + acumulación + caza libre.
 
-### 1.3 Objetivo de producto
+### 1.4 Objetivo de producto
 
 Explore termina con un **set de loci** justificado y un **pack** que los cubre, sin que el brain retenga basura de la caza. Ciclos L2 pueden subir; la señal por propose debe bajar en ruido.
 
@@ -81,8 +98,18 @@ window:   opcional — head | tail | mid | hit  (para cuerpos largos)
 Lista ordenada de **ventanas candidatas** (no necesariamente 1:1 con símbolos):
 
 - Origen: top-K del mapa fusionado (léxico + stem/body embed).
-- Cada ítem: `path`, símbolo o línea, hint de ventana (`#tail` si body largo), score.
+- Cada ítem: `path`, símbolo o línea, hint de ventana (`#tail` si body largo), score, `stem`.
 - El runtime avanza la cola; A solo emite veredictos.
+
+### 2.4 Stem candidate vs locus
+
+| Concepto | Fase | Qué es |
+|----------|------|--------|
+| **Stem candidate** | A (entrada de cola) | Módulo propuesto por ranking; aún no confirmado |
+| **Locus** | A (salida) | Stem + ancla + role + why confirmados |
+| **Pack fragment** | B | Cuerpo materializado en `pack.md` para editar |
+
+El bucle mental del chat (“dime stems → itera descartando → cuando hay stem interesante pide código”) se implementa así: la **cola rankeada** propone stems/ventanas; A **descarta o confirma**; B **pide código sabiendo a dónde va**.
 
 ---
 
@@ -101,14 +128,16 @@ Instruction / query
 ┌───────────────────┐
 │ Fase A            │  escaneo 5 ventanas/vuelta
 │ peeks efímeros    │  notas: useful/reject + mini-resumo
-│ early-stop        │  salida: loci[]
+│ early-stop        │  salida: loci[]  (1–N stems)
 └─────────┬─────────┘
           │ loci estables (+ brief)
           ▼
 ┌───────────────────┐
 │ Fase B            │  plan → apply_plan → pack.md
 │ pack rígido       │  pack_incomplete + PACK_REVIEW
-│ re-fetch anclas   │  done next=edit
+│ re-fetch anclas   │  profundiza por stem locked (outline/
+│                   │  siblings/defs-refs locales)
+│                   │  done next=edit
 └─────────┬─────────┘
           ▼
         edit / compile  (sin cambio de contrato)
@@ -121,27 +150,30 @@ Instruction / query
 - Tree-sitter defs/refs + `SymbolIndexSnapshot`
 - `file_outline` / `get_code_of` vía TS (ya existente)
 - `RepoMap` + facet coverage + `CodingStemEmbedIndex` + `BODY_SEMANTIC_RERANK`
-- headers/siblings por path/stem (FS + índice), no call hierarchy LSP
+- headers/siblings por path/stem (FS + índice)
 
 **Fuera del camino crítico de A** (opcional / degradable):
 
-- clangd workspace symbols, hover, incoming calls
+- clangd workspace symbols, hover, incoming/outgoing calls (LSP call hierarchy)
 - Cualquier tool que falle si el language server no está ready
+
+**Reconciliación con la intuición “call hierarchy tras encontrar el stem”:**  
+Sí a la **idea** (una vez hay stem, profundizar el grafo de llamadas/usos). No al **medio LSP** como requisito. En B, “profundizar” = outline del stem + refs/defs del índice local + siblings `.hpp` + `get_code_of` anclado. Si más adelante hay call-graph local (TS), se enchufa ahí; no se bloquea A/B a clangd.
 
 Criterio de robustez: **un workspace indexado por TS debe poder completar A→B→ready_to_edit** aunque LSP esté down. Diagnostics LSP pueden seguir existiendo para edit/compile feedback, pero no bloquean localización.
 
 ---
 
-## 4. Fase A — Localización
+## 4. Fase A — Localización (identificar)
 
 ### 4.1 Contrato del modelo (por vuelta)
 
 Entrada (runtime):
 
 - Instruction / query (compacta)
-- `A_notes` acumuladas (solo mini-resúmenes + anclas)
+- `A_notes` acumuladas (solo mini-resúmenes + anclas; **sin** cuerpos viejos)
 - Siguiente tranche de **5** ventanas (texto de peek ya recortado)
-- Metadatos: posición en cola (`16/40`), orphans de facets/idents
+- Metadatos: posición en cola (`16/40`), orphans de facets/idents, stems ya reject/useful
 
 Salida (JSON estricto, ejemplo normativo):
 
@@ -183,9 +215,10 @@ A **no** emite `plan`, **no** escribe pack, **no** hace `done next=edit`.
 
 | Permitido | Prohibido (modo normal) |
 |-----------|-------------------------|
-| Juzgar los 5 que manda el runtime | `dame path X` / caza libre |
+| Juzgar los 5 que manda el runtime | `dame path X` / caza libre / `get_code_of` arbitrario |
 | Marcar uncertain | Reordenar la cola a voluntad |
-| Early-stop vía `a_done` si loci estables | Acumular cuerpos en sesión |
+| Early-stop vía `a_done` si loci estables | Acumular cuerpos en sesión / Observations durables |
+| Descartar stems enteros tras contraste | Mezclar pack_review en A |
 
 **Escape hatch** (máx. 1–2 / run, runtime valida):
 
@@ -194,7 +227,16 @@ A **no** emite `plan`, **no** escribe pack, **no** hace `done next=edit`.
 
 Si el escape se usa mucho → arreglar ranking upstream, no ampliar agencia.
 
-### 4.3 Ventanas y funciones largas
+### 4.3 Gate de A (distinto de PACK_REVIEW)
+
+| Gate | Pregunta | Señal de éxito |
+|------|----------|----------------|
+| **A-gate** | ¿Este stem/ancla es el vecindario correcto? | `useful` + contraste; orphans de Instruction bajando |
+| **B-gate (`PACK_REVIEW`)** | ¿El pack permite editar/responder? | covered; gaps Instruction↔pack cerrados |
+
+En A, un `reject` es progreso. En B, un reject de fragmento es ruido o miss → micro-A, no “más plan libre”.
+
+### 4.4 Ventanas y funciones largas
 
 Presupuesto de juicio 7B (ver §7): ~40–80 líneas/peek; ~150–250 líneas/vuelta.
 
@@ -207,7 +249,7 @@ Para `body_lines > ~120`:
 
 Los “5” de la vuelta son **ventanas**, no siempre 5 símbolos distintos (p. ej. 3 cortos + `Foo#tail` + `Bar#head`).
 
-### 4.4 Presupuesto de A (evitar 40×2 = 80 peeks)
+### 4.5 Presupuesto de A (evitar 40×2 = 80 peeks)
 
 Worst case ingenuo: 40 símbolos × 2 tramos ≈ 80 peeks / ~16 vueltas. **No es el default.**
 
@@ -216,7 +258,7 @@ Worst case ingenuo: 40 símbolos × 2 tramos ≈ 80 peeks / ~16 vueltas. **No es
 | Peeks totales | **24–32** |
 | Vueltas | **6–8** |
 | Peeks/vuelta | **5** |
-| Multi-tramo | condicional (§4.3) |
+| Multi-tramo | condicional (§4.4) |
 
 Media objetivo ≈ **1.2–1.4 peeks** por símbolo tocado.
 
@@ -225,17 +267,24 @@ Media objetivo ≈ **1.2–1.4 peeks** por símbolo tocado.
 - 2–3 `useful` con contraste (al menos un competidor del shortlist juzgado) → `a_done`.
 - 3 vueltas sin useful tras top ~15 → disparar expansión de cola (§5) o clarify.
 - No barrer 25–40 por inercia si ya hay loci estables.
+- No exigir monogamia de stem: cerrar con **1–2 primary** (+ secondary) es el caso multi-módulo normal.
 
-### 4.5 Estado durable en disco (propuesta)
+### 4.6 Estado durable en disco (propuesta)
 
 Bajo `.tuide/ai/l2/`:
 
 ```text
 a_notes.md      # veredictos + mini-resúmenes (humano/debug)
-a_state.json    # cola, cursor, peeks_used, loci_draft, orphans
+a_state.json    # cola, cursor, peeks_used, loci_draft, orphans, rejected_stems
 ```
 
 `session.md` / prompt de A solo ve el slice: notes + tranche actual (no historial de cuerpos).
+
+### 4.7 Relación con L1 `pick_stem` / `context_stem`
+
+- L1 puede seguir proponiendo shortlist / enrich; eso **alimenta la cola de A**, no sustituye A.
+- Durante A: **relajar o no aplicar** enrich lock dominante (evita empujar multi-stem al módulo equivocado).
+- Un `context_stem` de L1 entra como hint de ranking / prioridad de cola, no como exclusión de otros stems hasta que A emita `a_done`.
 
 ---
 
@@ -265,7 +314,7 @@ Prohibido: “busca tú por el repo”. Permitido: “aquí hay N candidatos que
 
 ---
 
-## 6. Fase B — Acumulación rígida
+## 6. Fase B — Acumulación rígida (código sabiendo a dónde vas)
 
 ### 6.1 Entrada
 
@@ -277,19 +326,33 @@ Prohibido: “busca tú por el repo”. Permitido: “aquí hay N candidatos que
 
 Reutilizar y endurecer el camino actual:
 
-1. Runtime convierte loci → `targets[]` must-tier.
-2. `action=plan` / auto-plan inicial permitido; merge watchlist, normalize bare→símbolo, siblings de API según política actual.
+1. Runtime convierte loci → `targets[]` must-tier (orden = prioridad primary → secondary).
+2. `action=plan` / auto-plan inicial permitido **solo dentro de stems/paths de loci** (+ siblings policy); merge watchlist, normalize bare→símbolo.
 3. `apply_plan`: roles, diversity por path, junk→`rejected_targets`, budget pack.
-4. **Re-fetch** anclado (`path:Symbol` / `path:line`); no confiar en peeks de A.
-5. Gates: `pack_incomplete`, `PACK_REVIEW` (covered/partial/miss).
-6. Miss fuera de loci → micro-A (§5 capa 4) o pushback; no explore libre mezclado.
-7. Éxito → `done next=edit` (mismo contrato hacia edit/compile).
+4. **Re-fetch** anclado (`path:Symbol` / `path:line`); no confiar en peeks de A (el mini-resumo puede mentir; el cuerpo en pack no).
+5. Profundización dirigida (sustituto de “call hierarchy”): outline del stem locked, defs/refs locales del ancla, headers hermanos, `#mid`/`#tail` si truncado **y** se edita esa ventana.
+6. Gates: `pack_incomplete`, `PACK_REVIEW` (covered/partial/miss).
+7. Miss fuera de loci → micro-A (§5 capa 4) o pushback; **no** explore libre mezclado (prohibido volver a planear 8 stems nuevos sin señal).
+8. Éxito → `done next=edit` (mismo contrato hacia edit/compile).
 
 ### 6.3 Lo que B no hace
 
 - No reabre caza de stems sin señal de miss.
 - No usa LSP call hierarchy como requisito de cobertura.
 - No mete outlines gigantes antes de fragmentos de loci primary.
+- No interpreta `Truncated` como pack incompleto si el locus de control/estado ya está cubierto (política actual a preservar).
+
+### 6.4 Anti-patrón que B debe romper (del battery)
+
+```text
+plan multi-stem prematuro
+  → pack ruidoso
+  → PACK_REVIEW partial
+  → replan / auto-plan a tests o módulos laterales
+  → pushback loops
+```
+
+Con A previo: B arranca con must-tier desde `loci[]`; un `partial` pide **más profundidad en loci** o micro-A allowlisted, no un menú MAP/SEARCH que reinserte stems no juzgados.
 
 ---
 
@@ -303,7 +366,7 @@ Referencia: Qwen2.5-Coder-7B, `n_ctx` local ~8192 (`L2ContextBudget`: explore ~1
 | 1 vuelta A | **5 × 30–50 ≈ 150–250** líneas |
 | Contraste paralelo | ≤ ~3 cuerpos “calientes” |
 
-Recortar peeks al símbolo/ventana; evitar head+tail de 300 líneas en una sola observación. Funciones largas = varios peeks (§4.3).
+Recortar peeks al símbolo/ventana; evitar head+tail de 300 líneas en una sola observación. Funciones largas = varios peeks (§4.4).
 
 ---
 
@@ -328,9 +391,11 @@ A cierra con un **set**, no con un único stem:
 |------|---|---|
 | Un stem claro | 1 primary | pack anclado |
 | Varios archivos, un módulo | 1 stem + N anclas | diversity por path (ya existe) |
-| Varios stems | N loci primary/secondary | unión; **sin** forzar un solo `context_stem` lock en A |
+| Varios stems (p. ej. UI spinner + cancel controller) | N loci primary/secondary (típicamente 1–2 primary) | unión; **sin** forzar un solo `context_stem` lock en A |
 
 Durante A: relajar o no aplicar enrich lock dominante. El lock de un stem puede reaparecer en B solo como hint de outline, no como exclusión de otros loci.
+
+**No monogamia ciega:** muchos bugs reales cruzan 2 módulos; el plan admite 1–2 primary. Lo que se prohíbe es el plan de 5+ stems “por si acaso” antes de contrastar.
 
 ---
 
@@ -342,8 +407,8 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 
 **Trabajo:**
 
-- Flag p. ej. `L2_EXPLORE_PHASE_A` / entrada en `features_promoted.json` (off por defecto).
-- Tipos: `AVerdict`, `Locus`, `AState` (cola, cursor, peeks_used).
+- Flag p. ej. `L2_EXPLORE_PHASE_A` / entrada en `features_promoted.json` (**on** tras P7; rollback `=0`).
+- Tipos: `AVerdict`, `Locus`, `AState` (cola, cursor, peeks_used, rejected_stems).
 - Schema JSON `a_judge` / `a_done` + validación en `l2_action`.
 - Docs: este plan + nota corta en `l2-autonomous.md` (“fase A experimental”).
 
@@ -355,7 +420,8 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 
 - Builder de cola top-K desde `RepoMap` + stem shortlist + body semantic (si flag embed).
 - Política de ventana: corto=body; largo=`#tail` primero.
-- Tests unitarios: orden estable, diversify opcional `max_per_stem`, sin llamadas LSP.
+- Diversify opcional `max_per_stem` para no gastar las 5 ventanas del mismo módulo en vuelta 1.
+- Tests unitarios: orden estable, sin llamadas LSP.
 
 **Salida:** dado un fixture de mapa/snapshot, cola determinista 40 ítems con ventanas.
 
@@ -366,8 +432,9 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 - Sub-fase `explore_a` en session/autonomous loop.
 - Inyectar 5 peeks/vuelta; aplicar veredictos a `a_notes` / `a_state.json`.
 - Compactar Observations: tirar cuerpos tras juicio; conservar notes.
-- Early-stop + tope peeks/vueltas (§4.4).
+- Early-stop + tope peeks/vueltas (§4.5).
 - Transición `explore_a` → `explore_b` con `loci[]`.
+- Banners `L2 ▸ fase=explore_a|explore_b`.
 
 **Salida:** harness/scripted: A barre fixture y emite loci sin escribir `pack.md`.
 
@@ -389,16 +456,17 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 - Brief de notes en prompt B (cap estricto).
 - Re-fetch obligatorio de anclas.
 - `PACK_REVIEW` miss → micro-A (capa 4) con allowlist de paths nuevos.
+- Restringir plan libre a stems de loci salvo miss señalizado.
 - Preservar `stop_at_explore`, pack_incomplete pushback, diversity.
 
-**Salida:** explore_ok en battery actual ≥ baseline con flag on; casos multi-path no regresan.
+**Salida:** explore_ok en battery actual ≥ baseline con flag on; casos multi-path no regresan; `17_ai_spinner_stuck` no entra en plan multi-stem prematuro.
 
 ### Fase P5 — Desacoplar LSP del camino A/B locate
 
 **Trabajo:**
 
 - Auditar tools/context_pack: paths que requieren LSP en explore.
-- Garantizar `get_code_of` / outline / map / siblings vía índice local.
+- Garantizar `get_code_of` / outline / map / siblings / defs-refs vía índice local.
 - LSP queda opcional para diagnostics / niceties post-edit.
 - Test de integración: LSP disabled → A+B completan en fixture mínimo.
 
@@ -408,8 +476,8 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 
 **Trabajo:**
 
-- Extender `l2_explore_battery`: métricas `A_peeks`, `A_turns`, `loci_hit`, `rank_miss_recovered`.
-- Casos: single-stem, multi-stem (`expected_stems[]`), long-function-tail, gold fuera de top-40.
+- Extender `l2_explore_battery`: métricas `A_peeks`, `A_turns`, `loci_hit`, `rank_miss_recovered`, `premature_multi_stem_plans` (debe → 0 en A).
+- Casos: single-stem, multi-stem (`expected_stems[]`), long-function-tail, gold fuera de top-40, regresión tipo spinner/cancel.
 - Comparar flag off vs on (calidad pack / ready_to_edit, no solo tokens).
 
 **Salida:** informe en `tools/l2_explore_battery` o fixtures; criterio de promoción del flag.
@@ -418,9 +486,9 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 
 **Trabajo:**
 
-- Prompt packs / harness prompt actualizados.
-- Default flag on en remote o en local según evidencia.
-- Retirar o soft-nudge del explore mezclado (tools+plan temprano) cuando Phase A está on.
+- Prompt packs / harness prompt actualizados. *(hecho)*
+- Default flag on en remote o en local según evidencia. *(`features_promoted.json` → true)*
+- Retirar o soft-nudge del explore mezclado (tools+plan temprano) cuando Phase A está on. *(nudge plan desactivado en A/B pre-pack; bootstrap auto-seed cola)*
 
 **Salida:** feature promovida; plan marcado implementado.
 
@@ -447,9 +515,11 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 | Cerrar A en el primer useful | Exigir contraste (≥1 competidor) |
 | 16 vueltas por defecto | Topes 24–32 peeks + early-stop |
 | Cola top-40 ciega | Capas de expansión + batteries fuera de top-40 |
-| Regresión single-stem fácil | Flag off default; comparar battery antes de promover |
+| Regresión single-stem fácil | Comparar battery off vs on; rollback `L2_FEAT_…=0` |
 | Reintroducir caza libre vía escape | Cap 1–2; telemetría de uso |
 | LSP “por si acaso” en hot path | P5 + test no-LSP |
+| Monogamia de stem en bugs 2-módulo | Permitir 1–2 primary; battery multi-stem |
+| Coste de pasos A | Compensa si evita packs 9k ruidosos y plan loops (ver battery) |
 
 ---
 
@@ -460,6 +530,7 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 - Sustituir Tree-sitter por LSP (al revés: **menos** LSP en locate).
 - UI nueva del tab AI más allá de banners `L2 ▸ fase=explore_a|explore_b`.
 - Re-tunear passages ricos del stem embed battery (seguir `baseline` salvo evidencia nueva).
+- Implementar call hierarchy LSP como herramienta de A/B (opcional futuro vía grafo local).
 
 ---
 
@@ -473,30 +544,55 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 6. Casos multi-stem: recall de `expected_stems` no peor que baseline mezclado (o mejor).
 7. Caso long-tail: gold en `#tail` de función >200 líneas se localiza sin dump de 300 líneas en un solo peek.
 8. Caso rank-miss: gold en posición 45–70 recuperado por expansión, no por tools libres.
+9. Caso regresión explore mezclado: no hay `action=plan` multi-stem (≥3 stems distintos) antes de `a_done`.
 
 ---
 
 ## 15. Checklist de handoff a implementación
 
-- [ ] Aprobar este plan (contratos JSON + presupuestos).
-- [ ] P0 feature flag + schemas.
-- [ ] P1 cola índice local.
-- [ ] P2 loop A scripted.
-- [ ] P3 expansión cola.
-- [ ] P4 B ← loci + micro-A.
-- [ ] P5 no-LSP path.
-- [ ] P6 batteries + informe.
-- [ ] P7 promoción flag.
+- [x] Aprobar este plan (contratos JSON + presupuestos + gates A vs B). *(doc en main)*
+- [x] P0 feature flag + schemas. *(flag off; `a_judge`/`a_done`; tipos `l2_explore_a`)*
+- [x] P1 cola índice local. *(`build_a_scan_queue` / diversify / `#tail` policy)*
+- [x] P2 loop A scripted. *(`explore_a` bootstrap, peeks, `a_judge`/`a_done` → `explore_b`; sin pack)*
+- [x] P3 expansión cola. *(reserve + capas 1–3 / orphans / cap expansiones)*
+- [x] P4 B ← loci + micro-A. *(watchlist must-tier, plan filtrado, auto-plan, allowlist)*
+- [x] P5 no-LSP path. *(whitelist local A/B; docs/ai/l2-explore-no-lsp.md; test sin clangd)*
+- [x] P6 batteries + informe. *(score_explore phase_a metrics; PHASE_A_METRICS.md)*
+- [x] P7 promoción flag. *(`features_promoted.json` on; harness/prompts; auto-seed cola A; soft-nudge plan retirado en A/B)*
 
 ---
 
-## 16. Referencias internas
+## Estado
 
+**Implementado** (P0–P7). Promoción en `tools/l2_battery/features_promoted.json`.
+Gate de evidencia: ver `tools/l2_explore_battery/PHASE_A_METRICS.md` — re-correr battery
+off vs on tras cambios de modelo/cola; rollback con `L2_FEAT_L2_EXPLORE_PHASE_A=0`.
+
+## 16. Mapa chat ↔ documento
+
+| Idea del chat | Dónde queda en el plan |
+|---------------|------------------------|
+| Separar búsqueda de stem de acumular código | §0, §1.2, fases A/B |
+| “Dime stems → itera descartando” | Cola rankeada + `a_judge` reject/useful (§4) |
+| Tras stem interesante, pedir código | Transición A→B; re-fetch + profundización (§6) |
+| Call hierarchy / símbolos al encontrar stem | Idea sí; medio = índice local, no LSP (§3.1, §6.2) |
+| Gates distintos identify vs pack | A-gate vs `PACK_REVIEW` (§4.3) |
+| Multi-stem 1–2, no monogamia | §9 |
+| Evidencia mínima en identify | Peek efímero; no pack (§2.2, §4) |
+| Confusión del battery spinner | §1.1, §6.4, criterio 9 |
+
+---
+
+## 17. Referencias internas
+
+- [PR #10](https://github.com/LorenzoAdr/TIDE/pull/10) — plan original en rama `cursor/l2-explore-phase-ab-plan-0151`
+- [`l2-explore-effect-summary.md`](l2-explore-effect-summary.md) — evolución propuesta: olfateo por fichas AST (Effect Summary) antes del peek
 - `docs/ai/l2-autonomous.md` — explore/plan/pack actual
 - `docs/ai/l2-harness-prompt.md` — fases explore/edit/compile
 - `docs/ai/master-spec.md` — L0/L1/L2, ContextPack D17
 - `src/ai/l2_context_budget.*` — caps prompt/pack/obs
 - `src/ai/level2_session.cpp` — `apply_plan`, diversity, pack_incomplete
+- `src/ai/l2_pack_review.cpp` — gates semánticos de pack (B)
 - `src/ai/coding_embed_rerank.*` / `coding_stem_embed_index.*` — embed
 - `tests/fixtures/stem_embed_battery/RESULTS.md` — baseline > rich passages
-- Discussión de diseño 2026-08-20/21 — A/B, peeks, escaneo 5×5, miss ranking, 7B, long functions
+- `.tuide/ai/l2_explore_battery/round_anchor_rescue_v1/console.log` — fallo explore mezclado

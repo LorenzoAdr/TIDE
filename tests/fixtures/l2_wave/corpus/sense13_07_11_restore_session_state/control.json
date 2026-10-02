@@ -1,0 +1,119 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al cargar un proyecto",
+      "keep": [
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cargar un proyecto",
+      "keep": [
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/editor/editor_state.hpp",
+        "src/editor/editor_state.cpp",
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:remember",
+        "src/app/recent_projects.cpp:config_path",
+        "src/app/recent_projects.cpp:save"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al cargar un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al cargar un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 huele el estado del editor; necesito ver si persiste y restaura posición, archivos y paneles"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla tiene tres polos independientes (cursor, archivos, paneles). T1 falló en el estado general; rompo en tres cazas específicas para que cada hijo busque su propio mecanismo de persistencia sin depender de los otros."
+    },
+    {
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cargar un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la lista de archivos abiertos al cargar un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "archivo"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el cursor no tiene objeto; paso a la siguiente caza del plan: archivos abiertos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "la posición del cursor no se guarda (T2: no hay objeto); la lista de archivos abiertos sí se restaura vía JSON (T3); los paneles laterales no se mencionan en el mecanismo de estado leído"
+    }
+  ],
+  "why": "la posición del cursor no se guarda (T2: no hay objeto); la lista de archivos abiertos sí se restaura vía JSON (T3); los paneles laterales no se mencionan en el mecanismo de estado leído",
+  "zooms": []
+}

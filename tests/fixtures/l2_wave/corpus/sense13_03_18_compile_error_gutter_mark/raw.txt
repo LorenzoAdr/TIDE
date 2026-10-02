@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the console with a red line in the editor's left margin.
+I have three completed jobs:
+T1: Asked where the red line is marked. Found `line gutter marker`, `diagnostics on line`, etc.
+T2: Asked where compilation errors are read from the console. Found `parse gfortran stderr` reads from compiler stderr, not the UI console.
+T3: Asked where the diagnostic list is updated. Found `apply lsp diagnostics to panel`, `sync diagnostic cache`, etc.
+
+The user's claim is: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error".
+
+T2 found that the mechanism `parse gfortran stderr` reads from the compiler's stderr directly, not from the UI console. This implies the current system doesn't read from the UI console to generate diagnostics.
+T1 and T3 found the mechanisms for marking lines and updating diagnostics, but they are disconnected from the UI console input (T2 says "sin camino" to T1 and T3).
+
+The user wants to *add* this feature or
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el sistema lee errores del stderr del compilador, no de la consola UI; no hay camino entre la consola y los marcadores del editor"
+}

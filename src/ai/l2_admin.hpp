@@ -1,0 +1,445 @@
+#pragma once
+
+#include <atomic>
+#include <functional>
+#include <string>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "ai/l2_brain.hpp"
+
+namespace tuide {
+
+inline constexpr int kAdminMaxEpisodes = 6;
+inline constexpr int kAdminEpisodeReplyChars = 4000;
+inline constexpr int kAdminMaxProposes = 18;
+inline constexpr int kAdminMaxSpawns = 8;
+// Turnos CONSECUTIVOS donde el modelo no manda un JSON admin_v1 parseable
+// (sin objeto JSON, why/cubre/falta vacíos, etc.) que se toleran SIN gastar
+// presupuesto de `proposes` — es un tropiezo de formato, no una decisión de
+// verdad equivocada. Al superar este margen, el turno sí cuenta como
+// propose normal (evita loop infinito si el modelo nunca manda JSON válido).
+inline constexpr int kAdminMaxFormatRejectStreak = 3;
+inline constexpr int kAdminMaxExplores = 4;
+inline constexpr int kAdminMaxVerifyPasses = 2;
+inline constexpr int kAdminVerifyMaxSteps = 6;
+inline constexpr int kAdminExploreMaxSteps = 6;
+inline constexpr int kAdminExploreMaxGrep = 4;
+inline constexpr int kAdminExploreMaxRead = 3;
+// Por ola (conservador): varios greps independientes; reads solo anclados a hits.
+inline constexpr int kAdminExploreMaxGrepPerWave = 3;
+inline constexpr int kAdminExploreMaxReadPerWave = 2;
+inline constexpr int kAdminSummaryChars = 4000;
+inline constexpr int kAdminNotebookSummaryChars = 2000;
+// Prompt del verificador: no recortar el summary del job (ya ≤ kAdminSummaryChars).
+// Extra: extracto de log_tail en read/search.
+inline constexpr int kAdminVerifySummaryChars = kAdminSummaryChars;
+inline constexpr int kAdminVerifyLogTailChars = 2500;
+inline constexpr int kAdminVerifyMaxEvidenciaPerJob = 12;
+inline constexpr int kAdminVerifyMaxEvidenciaTotal = 64;
+inline constexpr int kAdminVerifyMaxFacts = 48;
+inline constexpr int kAdminVerifyMaxAnchors = 32;
+inline constexpr int kAdminClipHeadChars = 1200;
+inline constexpr int kAdminClipTailChars = 1200;
+inline constexpr int kAdminWhyMin = 4;
+inline constexpr int kAdminWhyMax = 400;
+inline constexpr int kAdminReplyMax = 8000;
+inline constexpr int kAdminBriefMax = 400;
+inline constexpr int kAdminNotebookMaxItems = 24;
+inline constexpr int kAdminNotebookFactChars = 240;
+inline constexpr int kAdminUiSelectionChars = 400;
+inline constexpr int kAdminReadMaxChars = 3000;
+inline constexpr int kAdminShellDefaultTimeoutMs = 120000;  // 2 min: comando suelto del explorador
+
+enum class AdminDo {
+  Invalid,
+  Spawn,
+  Cerrar,            // pide cerrar → runtime pide confirmación (igual que Editar)
+  AskUser,
+  Editar,            // pide pasar a edición → runtime pide confirmación
+  ConfirmarEditar,   // segunda pasada: cubre + falta
+  ConfirmarCerrar,   // segunda pasada de Cerrar: cubre + falta (P0/P8)
+  SeguirExplorando   // tras confirmación: hueco → explore
+};
+
+enum class AdminSpawnTipo {
+  Invalid,
+  Explore,
+  Build,
+  Git,
+  Shell,
+  Search,
+  Read,
+  Diagnostics,
+  Test,
+  Edit,
+  Web,
+  WebFetch
+};
+
+struct AdminSpawn {
+  AdminSpawnTipo tipo = AdminSpawnTipo::Invalid;
+  std::string brief;
+  std::string arg;
+  // edit only
+  std::string search;
+  std::string replace;
+};
+
+struct AdminOla {
+  bool ok = false;
+  AdminDo do_kind = AdminDo::Invalid;
+  AdminSpawn spawn;
+  std::string why;
+  std::string reply;
+  std::string cubre;  // confirmar_editar: qué del pedido cubre el notebook
+  std::string falta;  // confirmar_editar: qué falta (o "nada")
+  std::string error;
+  std::string raw_json;
+};
+
+struct AdminJob {
+  int id = 0;
+  std::string tipo;
+  bool ok = false;
+  std::string summary;
+  std::string veredicto;
+  std::vector<std::string> simbolos;
+  std::vector<std::string> evidencia;
+  std::string log_tail;
+  bool truncated = false;
+  int raw_bytes = 0;
+};
+
+// Accumulated session evidence — the "plan" without plan mode.
+struct AdminEvidenceItem {
+  int job_id = 0;
+  std::string tipo;
+  std::string summary;
+  std::vector<std::string> paths;
+  std::vector<std::string> simbolos;
+  std::vector<std::string> facts;
+};
+
+struct AdminSessionUi {
+  std::string active_path;
+  int cursor_line = -1;
+  std::string selection;
+  std::string git_branch;
+};
+
+struct AdminClarifyTurn {
+  std::string question;
+  std::string answer;
+};
+
+// Episodio cerrado (do=cerrar): conserva hilo entre mensajes del usuario.
+struct AdminEpisode {
+  std::string consulta;
+  std::string reply;
+};
+
+struct AdminState {
+  std::string consulta;
+  std::vector<AdminJob> jobs;
+  std::vector<AdminEvidenceItem> notebook;
+  AdminSessionUi ui;
+  int proposes = 0;
+  int spawns = 0;
+  // Turnos consecutivos rechazados por FORMATO (sin JSON parseable, campos
+  // obligatorios vacíos) — no cuenta contra `proposes` hasta
+  // kAdminMaxFormatRejectStreak. Se resetea en cualquier turno aceptado o
+  // rechazado por motivo semántico (do ilegal en este estado, etc.).
+  int format_reject_streak = 0;
+  // Explores en `jobs` anteriores a esta consulta (no cuentan para kAdminMaxExplores).
+  // Al abrir un follow-up con evidencia, se fija al nº actual de explores.
+  int explore_jobs_baseline = 0;
+  bool done = false;
+  bool clarify = false;  // pausa: esperando respuesta del usuario en el panel AI
+  std::string pending_question;  // texto de ask_user mientras clarify
+  std::vector<AdminClarifyTurn> clarifies;  // Q&A ya respondidas (historial)
+  std::vector<AdminEpisode> episodes;  // consultas/replies cerradas (mismo hilo)
+  bool awaiting_edit_confirm = false;  // tras do=editar
+  bool awaiting_close_confirm = false; // tras do=cerrar (P0/P8: mismo cerrojo que editar)
+  bool edit_confirmed = false;         // tras confirmar_editar → spawn edit legal
+  bool verify_reject_pending = false;  // tras verificador refuta/dudoso → piloto decide
+  int verify_passes = 0;               // verificador adversarial (editar/cerrar)
+  std::string last_verify_verdict;     // sostiene|refuta|dudoso
+  std::string last_verify_why;
+  std::string reply;
+  std::string last_error;
+  std::string edit_cubre;
+  std::string edit_falta;
+  std::vector<std::string> legal_hint;
+  // Shadow-repo commit refs (edit_snapshot.hpp) — no confundir con git del
+  // usuario. baseline = estado al abrir esta consulta (target de /undo);
+  // last = tras el edit aplicado más reciente. Vacíos si git no disponible.
+  std::string snapshot_baseline_ref;
+  std::string snapshot_last_ref;
+  // Confirmación de shell pendiente (gate=Ask). clarify=true a la vez; el
+  // controller debe interpretar la siguiente línea del usuario como sí/no a
+  // esto, NO como respuesta a un ask_user del piloto.
+  bool awaiting_shell_confirm = false;
+  std::string pending_shell_cmd;
+};
+
+struct AdminVerifyResult {
+  bool ok = false;
+  bool blocks = false;  // refuta|dudoso
+  std::string veredicto;  // sostiene|refuta|dudoso
+  std::string why;
+  std::string report;  // texto para last_error / piloto
+  int steps = 0;
+  // P2bis (docs/plans/l2-admin-verify-round-reduction.md): true cuando el
+  // veredicto es determinista (sin notebook, 1 job "encontrado" limpio, o
+  // bloqueo por miss tipado) — no gastó ninguna llamada LLM. El runtime no
+  // debe cargarlo contra kAdminMaxVerifyPasses.
+  bool shortcut = false;
+};
+
+struct AdminJobResult {
+  bool ok = false;
+  std::string summary;
+  std::string veredicto;
+  std::vector<std::string> simbolos;
+  std::vector<std::string> evidencia;
+  std::vector<std::string> paths;
+  std::vector<std::string> facts;
+  std::string log_tail;
+  std::string error;
+  // shell: el comando no está en el allowlist duro (Ask, no Deny) — el runtime
+  // debe pausar y preguntarle al usuario real en vez de rechazar sin más.
+  // No es un fallo (ok queda false, pero no es "exit_code!=0").
+  bool needs_user_confirm = false;
+  bool truncated = false;
+  int raw_bytes = 0;
+};
+
+struct AdminOps {
+  std::function<AdminJobResult(const AdminSpawn&)> run_explore;
+  std::function<AdminJobResult(const AdminSpawn&)> run_build;
+  std::function<AdminJobResult(const AdminSpawn&)> run_git;
+  std::function<AdminJobResult(const AdminSpawn&)> run_shell;
+  std::function<AdminJobResult(const AdminSpawn&)> run_search;
+  std::function<AdminJobResult(const AdminSpawn&)> run_read;
+  std::function<AdminJobResult(const AdminSpawn&)> run_diagnostics;
+  std::function<AdminJobResult(const AdminSpawn&)> run_test;
+  std::function<AdminJobResult(const AdminSpawn&)> run_edit;
+  std::function<AdminJobResult(const AdminSpawn&)> run_web;
+  std::function<AdminJobResult(const AdminSpawn&)> run_web_fetch;
+};
+
+struct AdminLoopOpts {
+  std::string workspace_root;
+  AiLevel2Settings settings;
+  AdminSessionUi ui;
+  int max_proposes = kAdminMaxProposes;
+  int max_spawns = kAdminMaxSpawns;
+  int max_explores = kAdminMaxExplores;
+  int explore_max_steps = kAdminExploreMaxSteps;
+  bool verifier_enabled = true;
+  int max_verify_passes = kAdminMaxVerifyPasses;
+  int verify_max_steps = kAdminVerifyMaxSteps;
+  // Segundo pase adversarial dentro de admin_run_verify (solo si el primero sostiene).
+  // Comparte presupuesto con verifier_enabled; false lo salta sin gastar el pase.
+  bool refuter_enabled = true;
+  bool allow_shell = true;
+  bool allow_web = true;
+  bool allow_test = true;
+  // false = un explore por polo (default). true = un solo explorador puede cubrir una
+  // cadena de sub-preguntas conectadas — ver admin_system_prompt() y el gate P2bis en
+  // admin_run_verify (docs/plans/l2-admin-verify-round-reduction.md sección 9, P16).
+  bool explorer_cumulative_mode = false;
+  // Herramienta "trail" del explorador (call-stack determinista vía grep, sin LLM extra).
+  bool allow_causal_trail = true;
+  // Herramienta "dataflow" (decl/write/read de una variable, mismo motor que trail).
+  bool allow_dataflow_trace = true;
+  // Herramienta "headers_of" (includes de un archivo, vía ToolRegistry compartido).
+  bool allow_headers_of = true;
+  // Herramienta "repo_map" (vista rankeada PageRank, vía ToolRegistry compartido).
+  bool allow_repo_map = true;
+  // Greps/reads del explorador por ola y en total — kAdminExploreMax*PerWave /
+  // kAdminExploreMax{Grep,Read}. <=0 en cualquiera de los cuatro cae al default.
+  int max_grep_per_wave = kAdminExploreMaxGrepPerWave;
+  int max_read_per_wave = kAdminExploreMaxReadPerWave;
+  int max_grep_total = kAdminExploreMaxGrep;
+  int max_read_total = kAdminExploreMaxRead;
+  std::function<void(const std::string&)> on_line;
+  std::atomic<bool>* cancel = nullptr;
+};
+
+struct AdminLoopResult {
+  bool ok = false;
+  bool clarify = false;
+  std::string reply;
+  std::string error;
+  int proposes = 0;
+  int spawns = 0;
+};
+
+const char* admin_do_name(AdminDo d);
+const char* admin_spawn_tipo_name(AdminSpawnTipo t);
+AdminSpawnTipo admin_spawn_tipo_parse(const std::string& s);
+
+std::string admin_dir(const std::string& workspace_root);
+std::string admin_state_path(const std::string& workspace_root);
+std::string admin_notebook_path(const std::string& workspace_root);
+bool admin_is_continuable(const std::string& workspace_root);
+// true = conservar notebook/episodios (siempre mid-run; el clear es solo boot o Reset).
+bool admin_should_keep_session(const AdminState& st, const std::string& message);
+bool admin_clear_session(const std::string& workspace_root, std::string* err);
+bool admin_save_state(const std::string& workspace_root, const AdminState& st, std::string* err);
+bool admin_load_state(const std::string& workspace_root, AdminState* st, std::string* err);
+
+nlohmann::json admin_state_to_json(const AdminState& st);
+bool admin_state_from_json(const nlohmann::json& j, AdminState* st, std::string* err);
+
+void admin_notebook_append(AdminState* st, const AdminJob& job, const AdminJobResult& jr);
+std::string admin_notebook_markdown(const AdminState& st);
+bool admin_notebook_has_path(const AdminState& st, const std::string& path);
+std::vector<std::string> admin_notebook_paths(const AdminState& st);
+// P4: resumen corto (paths/símbolos, sin prosa) de lo ya cazado en esta
+// consulta, para inyectar en el brief de un nuevo explore hermano.
+std::string admin_notebook_digest_for_explore(const AdminState& st, int max_items = 6,
+                                              int max_chars = 260);
+
+// Explores que cuentan para el tope de esta consulta (jobs totales − baseline).
+int admin_count_explore_jobs(const AdminState& st);
+int admin_explores_used_this_consulta(const AdminState& st);
+// Marca el baseline = explores actuales (presupuesto fresco; conserva jobs/notebook).
+void admin_begin_consulta_budgets(AdminState* st);
+// Como arriba pero sin tocar flags de flujo (awaiting_edit_confirm/edit_confirmed/...);
+// para reanudar tras ask_user sin perder una edición ya confirmada a mitad de camino.
+void admin_refresh_propose_budget(AdminState* st);
+
+AdminOla admin_parse(const std::string& raw);
+// max_explores/allow_*: capacidades tuneables (ver AdminLoopOpts); los valores por
+// defecto reproducen el comportamiento previo a su introducción (sin restricciones
+// extra más allá de kAdminMaxExplores).
+bool admin_legal(const AdminState& st, const AdminOla& ola, int max_proposes, int max_spawns,
+                 std::string* err, int max_explores = kAdminMaxExplores, bool allow_shell = true,
+                 bool allow_web = true, bool allow_test = true);
+std::vector<std::string> admin_legal_dos(const AdminState& st, int max_proposes, int max_spawns);
+
+AdminJobResult admin_explore_stub(const AdminSpawn& spawn);
+// Grep del explore: por defecto admin_run_search_rg; el controller puede pasar ToolRegistry.
+using AdminGrepFn = std::function<AdminJobResult(const std::string& pattern)>;
+// Invoca una tool nombrada del ToolRegistry compartido (headers_of, repo_map, ...) — el
+// controller pasa un adaptador sobre tools_.invoke(name, arg); sin él, esas acciones se
+// tratan como no disponibles (igual que allow_headers_of/allow_repo_map=false).
+using AdminToolFn = std::function<AdminJobResult(const std::string& tool_name,
+                                                  const std::string& arg)>;
+// Hijo lite: grep+read vía brain (mismo contrato que tools/l2_wave/explore_lite_local).
+AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
+                                      const std::string& workspace_root,
+                                      const AdminLoopOpts& opts,
+                                      AdminGrepFn grep_fn = {}, AdminToolFn tool_fn = {});
+// Allow = corre sin fricción; Ask = el runtime debe pausar y preguntarle al
+// usuario real (no un rechazo definitivo); Deny = bloqueo duro, nunca negociable
+// (metacaracteres/pipes fuera de forma/fuera del workspace) — ni aun con
+// aprobación humana, porque el usuario no puede auditar de un vistazo qué hace
+// de verdad un `$(...)`/`` ` `` o una redirección.
+enum class AdminShellGate { Allow, Ask, Deny };
+AdminShellGate admin_shell_cmd_gate(const std::string& cmd, std::string* reason = nullptr);
+bool admin_shell_cmd_allowed(const std::string& cmd);
+// "sí"/"yes"/"vale"/"dale"/… (y variantes con puntuación) → true; cualquier otra
+// cosa (incluye "no" y silencio) → false. Usado para la confirmación de shell.
+bool admin_parse_confirm_yes(const std::string& reply);
+std::string admin_clip_output(const std::string& text, bool* truncated, int* raw_bytes);
+// Clip con presupuestos explícitos (p.ej. read de archivos grandes: más head+tail).
+std::string admin_clip_output(const std::string& text, int head_chars, int tail_chars,
+                              bool* truncated, int* raw_bytes);
+// Infer typed paths/facts from shell cmd + raw stdout (ls/find/head/tail/wc/…).
+void admin_shell_enrich_result(const std::string& cmd, const std::string& captured,
+                               const std::string& cwd, AdminJobResult* r);
+// Docker/cancelación/timeout opcionales; ver util/docker_shell.hpp para cómo se
+// resuelve container/cwd_in_container a partir del workspace.
+struct AdminShellExecOpts {
+  std::atomic<bool>* cancel = nullptr;
+  std::string docker_container;  // vacío = ejecutar en el host
+  std::string docker_cwd;        // -w dentro del contenedor; vacío = WORKDIR de la imagen
+  int timeout_ms = kAdminShellDefaultTimeoutMs;  // <=0 desactiva el auto-kill (solo tests)
+  // true = un humano ya aprobó este comando exacto (admin_apply pausó con
+  // needs_user_confirm y el usuario respondió que sí) — salta el tier "Ask"
+  // del gate. El tier "Deny" (metacaracteres/perímetro) sigue siendo duro.
+  bool user_approved = false;
+};
+AdminJobResult admin_run_shell_safe(const std::string& cmd, const std::string& cwd,
+                                    const AdminShellExecOpts& opts = {});
+// Built-in FS helpers (CLI / fallback when ops unset). Confinadas a workspace_root.
+bool admin_path_inside_workspace(const std::string& workspace_root, const std::string& path);
+// Resuelve path (relativo o absoluto) bajo root → abs canónico + rel genérico.
+// false si escapa del root o root vacío con path absoluto externo.
+bool admin_resolve_in_workspace(const std::string& workspace_root, const std::string& path,
+                                std::string* abs_out, std::string* rel_out, std::string* err);
+bool admin_shell_stays_in_workspace(const std::string& cmd, const std::string& workspace_root,
+                                    std::string* err);
+
+AdminJobResult admin_run_search_rg(const std::string& query, const std::string& cwd);
+// Parsea salida de search (rg crudo o ToolRegistry: top_files + path:line:col).
+void admin_collect_search_hits(const std::string& text, AdminJobResult* r);
+AdminJobResult admin_run_read_file(const std::string& target, const std::string& cwd);
+
+// Parte arg de read en targets. "a.hpp,b.hpp" → 2; "a.hpp:5-7,15-17" → 1 (rangos).
+std::vector<std::string> admin_split_read_args(const std::string& raw);
+AdminJobResult admin_run_diagnostics_stub(const AdminSpawn& spawn);
+AdminJobResult admin_run_test_stub(const AdminSpawn& spawn);
+AdminJobResult admin_run_edit_file(const AdminSpawn& spawn, const AdminState& st,
+                                  const std::string& cwd);
+// Internet search (Brave si TUIDE_WEB_SEARCH_API_KEY/BRAVE_API_KEY; si no DDG HTML;
+// TUIDE_WEB_SEARCH_STUB=1 fuerza stub determinista).
+AdminJobResult admin_run_web_search(const std::string& query);
+AdminJobResult admin_run_web_search_stub(const std::string& query);
+// Fetch HTTP(S) body for a URL already in notebook paths (anclado).
+AdminJobResult admin_run_web_fetch(const std::string& url, const AdminState& st);
+AdminJobResult admin_run_web_fetch_stub(const std::string& url);
+bool admin_url_fetch_allowed(const std::string& url);
+
+// Contexto factual del verificador (veredictos + evidencia tipada + hechos;
+// sin tesis/prosa del piloto). Usado por admin_run_verify y tests.
+std::string admin_verify_context_prompt(const AdminState& st);
+// Paths legibles por el verificador: notebook + paths inferidos de evidencia.
+std::vector<std::string> admin_verify_readable_paths(const AdminState& st);
+
+// Verificador adversarial (post-explore, pre-aceptar editar/cerrar).
+// is_edit_trigger: true si lo dispara `editar` (P11bis: el verificador debe
+// confirmar dónde/cómo editar, no que el resultado ya exista — "el código
+// actual no hace X" no es motivo de refuta cuando X es el propio edit pedido).
+AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::string& thesis,
+                                   const std::string& workspace_root, const AdminLoopOpts& opts,
+                                   bool is_edit_trigger = false);
+
+bool admin_apply(AdminState* st, const AdminOla& ola, const AdminOps& ops, std::string* err);
+// Construye el AdminJob desde jr (summary/veredicto/log_tail recortado), lo
+// añade al notebook y a st->jobs, e incrementa st->spawns. Usado por
+// admin_apply para spawns normales y por el resume de confirm de shell
+// (ai_controller.cpp) para que un comando aprobado por el usuario deje
+// exactamente el mismo rastro que uno auto-aprobado.
+void admin_append_job(AdminState* st, AdminSpawnTipo tipo, const AdminJobResult& jr);
+
+// cumulative_explorer: ver AdminLoopOpts::explorer_cumulative_mode.
+std::string admin_system_prompt(bool cumulative_explorer = false);
+// workspace_root: proyecto abierto (perímetro FS). Vacío solo en tests sin cwd.
+std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
+                              const std::string& workspace_root = {},
+                              int max_explores = kAdminMaxExplores);
+
+AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& ops,
+                               const AdminLoopOpts& opts);
+
+class AdminScriptedBrain : public L2Brain {
+ public:
+  explicit AdminScriptedBrain(std::vector<std::string> script);
+  std::string name() const override;
+  bool ensure_ready(const AiSettings& settings,
+                    const std::function<void(const std::string&)>& on_progress,
+                    std::string* error) override;
+  L2BrainResult propose(const L2BrainRequest& req, std::atomic<bool>* cancel) override;
+
+ private:
+  std::vector<std::string> script_;
+  std::size_t idx_ = 0;
+};
+
+}  // namespace tuide

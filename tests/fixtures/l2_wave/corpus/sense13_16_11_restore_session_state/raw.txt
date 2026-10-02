@@ -1,0 +1,14 @@
+The user wants to restore the cursor position, open files, and sidebar state when reopening a project.
+I have three completed works:
+T1: Asked about restoring cursor, files, and sidebars. Found `restore workspace session` restores files and active tab, but uses `open file` (no cursor) instead of `open file at impl` (cursor). No code found for restoring sidebars.
+T2: Asked about restoring sidebar state. Result: No object found.
+T3: Asked about saving/restoring cursor position. Found `record jump`, `record cursor jump`, `load working lines from disk`, etc.
+
+The anchor has three poles: cursor position, open files, sidebar state.
+T1 confirmed open files are restored (via `restore workspace session`), but cursor is not (uses wrong open function).
+T2 confirmed sidebar state is NOT restored (no object).
+T3 found recording mechanisms (`record jump`), but the Cerrado says "Lo leído no era el disparo" (what was read wasn't the trigger). It implies the restoration mechanism wasn't found or the recording isn't the restoration.
+
+The prompt says: "El último Cerrado negó el mapeo. Cierra
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"los archivos abiertos se restauran, pero la posición del cursor no se restaura (se usa la función incorrecta) y el estado de los paneles laterales no se restaura (no hay objeto)"}

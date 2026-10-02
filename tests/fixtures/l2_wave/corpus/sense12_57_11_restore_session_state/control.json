@@ -1,0 +1,135 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/level2_session.cpp:save_state",
+        "src/app/workspace_config.cpp:serialize_ai_settings",
+        "src/app/workspace_config.cpp:serialize_ui_colors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura el estado del editor al abrir el proyecto",
+      "keep": [
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ai/level2_session.cpp:save_state",
+          "src/app/workspace_config.cpp:serialize_ai_settings",
+          "src/app/workspace_config.cpp:serialize_ui_colors"
+        ],
+        "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura el estado del editor al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar y restaurar el estado del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "dos cierres independientes; el hijo de A no necesita B"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "dónde se restaura el estado del editor al abrir el proyecto",
+      "consultas": [
+        "dónde se restaura el estado del editor al abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T2 no halló objeto; el pack sugiere state path y write file como extra de T1, pero no hay restauración. Exploro de nuevo con evita para no repetir save state."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack no nombra el mecanismo de restauración al abrir; T2 cerró sin objeto y no hay extra que lo sustituya"
+    }
+  ],
+  "why": "el pack no nombra el mecanismo de restauración al abrir; T2 cerró sin objeto y no hay extra que lo sustituya",
+  "zooms": []
+}

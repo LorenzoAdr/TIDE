@@ -1,0 +1,11 @@
+# Tick H_T0 — harness real + Cursor como api_base (T0)
+
+Sentinel: `AGENT_LOOP_WAKE_ht0`
+
+1. Si `meta/STOP` → para proxy/wait/heartbeat y sal.
+2. Estado `.tuide/ai/l2_wave/v2_night/H_T0/`:
+   - `DONE` → scoreboard; compara S0/H_CURSOR/T2; no relances.
+   - cola viva → rearma wait + heartbeat; si `proxy/PENDING` lleva >10 min sin response, despierta filler.
+   - cola muerta sin DONE → anota.
+3. Heartbeat: `./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_ht0 'Lee tools/l2_wave/ht0_tick_prompt.txt'`
+4. Wait: `./tools/l2_wave/t270b_wait_done.sh .tuide/ai/l2_wave/v2_night/H_T0 AGENT_LOOP_WAKE_ht0 tools/l2_wave/ht0_tick_prompt.txt`

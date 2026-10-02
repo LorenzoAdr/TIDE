@@ -1,0 +1,22 @@
+The user wants to know if the application remembers the cursor position, open files, and panel states when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A: save cursor pos (closed: no object)
+2. [en_curso] B: restore cursor pos (closed: read "restore workspace session, open file, set workspace", but "no era el disparo")
+3. [pendiente] C: save open files
+4. [pendiente] D: restore open files
+
+Current state:
+- T1 (general editor state): closed, no object.
+- T2 (save cursor): closed, read "save, remember, save workspace session, flush active tab". The system says "Lo leído no era el disparo" (what was read wasn't the trigger).
+- T3 (restore cursor): closed, read "restore workspace session, open file, set workspace". The system says "Lo leído no era el disparo".
+
+The system explicitly tells me: "exploradores agotados. Cierra citando el mecanismo leído o la refutación." (explorers exhausted. Close citing the read mechanism or refutation).
+It also says
+---- content ----
+```json
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no nombra el mecanismo de restauración de cursor ni paneles; T2 y T3 leen 'save workspace session' y 'restore workspace session' pero no el disparo; sin camino entre polos leídos"
+}
+```

@@ -1,0 +1,120 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor LSP cuando se cae o no responde",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:apply_workspace_settings",
+        "src/app/application.cpp:setup_build_environment_watching"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se verifica si el proceso del servidor LSP está vivo o responde para detectar una caída",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene la lógica de reinicio (restart lsp for workspace), pero falta el disparador de detección de fallo"
+    },
+    {
+      "consulta": "dónde se reinicia el servidor LSP cuando se cae o no responde",
+      "consultas": [
+        "dónde se reinicia el servidor LSP cuando se cae o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "la caza anterior falló en la detección; el pack muestra M5 con 'restart lsp for workspace' y 'schedule debounced lsp restart', así que busco el mecanismo de reinicio directamente"
+    },
+    {
+      "consulta": "dónde se verifica si el proceso del servidor LSP está vivo o responde para detectar una caída",
+      "consultas": [
+        "dónde se verifica si el proceso del servidor LSP está vivo o responde para detectar una caída"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "heartbeat"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró que no hay detección de caída; busco el mecanismo de verificación de vida (heartbeat/health) que dispararía el reinicio automático"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el código revisado no contiene mecanismo de detección automática de caída o no-respuesta del servidor LSP (heartbeat, timeout, verificación de proceso). los reinicios existentes se disparan por cambios de configuración, instalación de toolpacks o entorno de build, no por fallo del servidor. el claim se refuta: la funcionalidad no existe."
+    }
+  ],
+  "why": "el código revisado no contiene mecanismo de detección automática de caída o no-respuesta del servidor LSP (heartbeat, timeout, verificación de proceso). los reinicios existentes se disparan por cambios de configuración, instalación de toolpacks o entorno de build, no por fallo del servidor. el claim se refuta: la funcionalidad no existe.",
+  "zooms": []
+}

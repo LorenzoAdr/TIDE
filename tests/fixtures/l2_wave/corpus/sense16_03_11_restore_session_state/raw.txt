@@ -1,0 +1,12 @@
+The user wants to know if the application remembers the cursor position, open files, and visible/closed side panels when reopening a previously opened project.
+
+I have a plan with 3 phases:
+1.  **A (locator):** Where are open files restored when reopening a project? (Status: [en_curso] -> actually, looking at the history, T3 corresponds to this).
+2.  **B (locator):** Where is the visibility of side panels restored when opening a project? (Status: [pendiente]).
+3.  **C (locator):** Where is the cursor position restored? (Status: T2 corresponds to this).
+
+Let's review the completed work:
+*   **T1:** Asked about saving/restoring editor state. Result: "no hay objeto" (no object found).
+*   **T2:** Asked about restoring cursor position. Result: Read `restore workspace session`, `rebuild display`, `open file`. The closed message says "ESA pregunta no se relanza... leído: restore workspace session, rebuild display, open file". It seems T2 found some code related to restoring workspace session and opening files, but the prompt says "Lo leído no era el disparo" (what was
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo de restauración de archivos ni paneles; T1 niega el objeto, T3 refuta el mapeo de archivos abiertos, y T2 solo lee la sesión de trabajo sin confirmar la posición del cursor"}

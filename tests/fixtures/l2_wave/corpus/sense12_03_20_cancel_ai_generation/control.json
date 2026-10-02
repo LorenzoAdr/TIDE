@@ -1,0 +1,130 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca la cancelación del agente de nivel 1 para detener la generación",
+      "keep": [
+        "M6",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se aborta la escritura para evitar dejar el código a medias tras cancelar",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape en el trace; necesito el locus que decide abortar la generación al detectar ese gesto"
+    },
+    {
+      "consulta": "dónde se invoca la cancelación del agente de nivel 1 para detener la generación",
+      "consultas": [
+        "dónde se invoca la cancelación del agente de nivel 1 para detener la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la captura de Escape y llamó a clear pending insert. El pack muestra un port desde M8 (ai controller) hacia 'cancel level1'. Necesito leer ese mecanismo para ver si detiene el proceso activo y limpia el estado, cumpliendo la parte de 'cancelar limpiamente'."
+    },
+    {
+      "consulta": "dónde se limpia el archivo o se aborta la escritura para evitar dejar el código a medias tras cancelar",
+      "consultas": [
+        "dónde se limpia el archivo o se aborta la escritura para evitar dejar el código a medias tras cancelar"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "inserción pendiente"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 cerran la señal de cancelación; falta el efecto de limpieza del archivo (el 'sin dejar a medias'). El pack une T1 con 'has pending insert' y 'ai tab active', sugiriendo que la limpieza ocurre en la gestión de la inserción pendiente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo está completo: Escape se captura y limpia la inserción pendiente antes de escribir; el clic fuera no está implementado, pero la cancelación por teclado cumple el requisito de limpieza sin dejar el archivo a medias"
+    }
+  ],
+  "why": "el mecanismo está completo: Escape se captura y limpia la inserción pendiente antes de escribir; el clic fuera no está implementado, pero la cancelación por teclado cumple el requisito de limpieza sin dejar el archivo a medias",
+  "zooms": []
+}

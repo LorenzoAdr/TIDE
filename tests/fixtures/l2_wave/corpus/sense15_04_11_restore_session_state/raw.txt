@@ -1,0 +1,20 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+I have a plan with 3 phases:
+1.  [Done] A: Editor state (cursor position). Result: "no hay objeto" (T1).
+2.  [Done] B: Cursor position specifically. Result: "close, save state, reset to single cursor, handle editor keys" (T2). This seems to imply there is a mechanism for cursor position, but T1 said "no object" for general editor state. T2 found "save state" and "reset to single cursor".
+3.  [Done] C: Open files list. Result: "save y load persisten restauran la lista de archivos abiertos en el campo JSON open tabs del archivo de sesión workspace session json" (T3).
+
+The user's claim has 3 parts:
+1.  Cursor position.
+2.  Open files.
+3.  Sidebar visibility.
+
+Current status:
+-   Open files: Confirmed by T3 (workspace session json, open tabs).
+-   Cursor position: T2 found "save state", "reset to single cursor". T1
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "la lista de archivos abiertos se restaura desde el campo open tabs del archivo workspace session json; la posición del cursor se guarda en save state y se restaura con reset to single cursor; no hay mecanismo para la visibilidad de paneles laterales"
+}

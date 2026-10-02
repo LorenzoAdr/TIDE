@@ -1,4 +1,5 @@
 #include "ai/llama_backend.hpp"
+#include "ai/action_json.hpp"
 
 #include <algorithm>
 #include <array>
@@ -41,26 +42,6 @@ std::string shell_quote(const std::string& value) {
   }
   quoted.push_back('\'');
   return quoted;
-}
-
-std::size_t find_action_object_start(const std::string& raw, std::size_t from) {
-  std::size_t search = from;
-  while (search < raw.size()) {
-    const auto brace = raw.find('{', search);
-    if (brace == std::string::npos) {
-      return std::string::npos;
-    }
-    std::size_t i = brace + 1;
-    while (i < raw.size() &&
-           (raw[i] == ' ' || raw[i] == '\n' || raw[i] == '\r' || raw[i] == '\t')) {
-      ++i;
-    }
-    if (i + 8 <= raw.size() && raw.compare(i, 8, "\"action\"") == 0) {
-      return brace;
-    }
-    search = brace + 1;
-  }
-  return std::string::npos;
 }
 
 std::string scan_balanced_object(const std::string& raw, std::size_t start) {
@@ -125,21 +106,9 @@ std::string extract_model_text(const std::string& raw) {
   }
 
   // Prefer the LAST JSON object that looks like an action (models echo the prompt).
-  std::size_t search = 0;
-  std::string best;
-  while (search < raw.size()) {
-    const auto start = find_action_object_start(raw, search);
-    if (start == std::string::npos) {
-      break;
-    }
-    const std::string obj = scan_balanced_object(raw, start);
-    if (!obj.empty()) {
-      best = obj;
-    }
-    search = start + 1;
-  }
-  if (!best.empty()) {
-    return best;
+  const std::string action = extract_action_json(raw);
+  if (!action.empty()) {
+    return action;
   }
 
   const auto start = raw.find('{');
@@ -360,9 +329,100 @@ void shrink_prompt_for_ctx(const LlamaCompletionRequest& req, int n_ctx, int* n_
   }
 }
 
+std::string json_message_text(const nlohmann::json& msg, const char* key) {
+  if (!msg.contains(key)) {
+    return {};
+  }
+  const auto& v = msg[key];
+  if (v.is_string()) {
+    return v.get<std::string>();
+  }
+  if (v.is_array()) {
+    std::string acc;
+    for (const auto& part : v) {
+      if (part.is_string()) {
+        acc += part.get<std::string>();
+      } else if (part.is_object() && part.contains("text") && part["text"].is_string()) {
+        acc += part["text"].get<std::string>();
+      }
+    }
+    return acc;
+  }
+  return {};
+}
+
+std::string message_think_trace(const nlohmann::json& msg) {
+  std::string reasoning = json_message_text(msg, "reasoning_content");
+  if (reasoning.empty()) {
+    reasoning = json_message_text(msg, "reasoning");
+  }
+  const std::string content = json_message_text(msg, "content");
+  if (reasoning.empty()) {
+    return content;
+  }
+  if (content.empty()) {
+    return reasoning;
+  }
+  return reasoning + "\n---- content ----\n" + content;
+}
+
+std::string pick_assistant_text(const nlohmann::json& msg) {
+  const std::string content = json_message_text(msg, "content");
+  std::string reasoning = json_message_text(msg, "reasoning_content");
+  if (reasoning.empty()) {
+    reasoning = json_message_text(msg, "reasoning");
+  }
+  const std::string stripped = strip_model_think(content);
+  const std::string primary = stripped.empty() ? content : stripped;
+  if (!extract_action_json(primary).empty()) {
+    return primary;
+  }
+  if (!extract_action_json(content).empty()) {
+    return content;
+  }
+  if (!extract_action_json(reasoning).empty()) {
+    return reasoning;
+  }
+  if (!content.empty()) {
+    return content;
+  }
+  return reasoning;
+}
+
 }  // namespace
 
-bool parse_llama_chat_completion(const std::string& body, std::string* content, std::string* error) {
+void attach_thinking_json(nlohmann::json& body, const std::optional<bool>& enable_thinking,
+                          int reasoning_budget) {
+  if (enable_thinking.has_value()) {
+    body["chat_template_kwargs"] = nlohmann::json{{"enable_thinking", *enable_thinking}};
+  }
+  if (reasoning_budget >= 0) {
+    body["thinking_budget_tokens"] = reasoning_budget;
+    body["reasoning_budget_tokens"] = reasoning_budget;
+  }
+}
+
+nlohmann::json build_chat_completions_body(const LlamaCompletionRequest& req,
+                                           const std::string& model, const std::string& user_text,
+                                           bool cache_prompt) {
+  nlohmann::json body = {
+      {"model", model},
+      {"temperature", req.temperature},
+      {"max_tokens", req.max_tokens > 0 ? req.max_tokens : 512},
+      {"messages",
+       nlohmann::json::array(
+           {{{"role", "system"}, {"content", req.system_prompt}},
+            {{"role", "user"}, {"content", user_text}}})},
+  };
+  if (cache_prompt) {
+    body["cache_prompt"] = true;
+  }
+  attach_thinking_json(body, req.enable_thinking, req.reasoning_budget);
+  return body;
+}
+
+bool parse_llama_chat_completion(const std::string& body, std::string* content, std::string* error,
+                                 std::string* trace) {
   if (content == nullptr) {
     if (error) {
       *error = "content nullptr";
@@ -384,13 +444,21 @@ bool parse_llama_chat_completion(const std::string& body, std::string* content, 
       return false;
     }
     const auto& c0 = j["choices"][0];
-    if (c0.contains("message") && c0["message"].contains("content") &&
-        c0["message"]["content"].is_string()) {
-      *content = c0["message"]["content"].get<std::string>();
-      return true;
+    if (c0.contains("message") && c0["message"].is_object()) {
+      if (trace != nullptr) {
+        *trace = message_think_trace(c0["message"]);
+      }
+      const std::string text = pick_assistant_text(c0["message"]);
+      if (!text.empty()) {
+        *content = text;
+        return true;
+      }
     }
     if (c0.contains("text") && c0["text"].is_string()) {
       *content = c0["text"].get<std::string>();
+      if (trace != nullptr && (trace->empty())) {
+        *trace = *content;
+      }
       return true;
     }
     if (error) {
@@ -399,7 +467,8 @@ bool parse_llama_chat_completion(const std::string& body, std::string* content, 
     return false;
   } catch (const std::exception& ex) {
     if (error) {
-      *error = std::string("parse chat completions: ") + ex.what();
+      const std::string snippet = body.substr(0, 300);
+      *error = std::string("parse chat completions: ") + ex.what() + " | body=" + snippet;
     }
     return false;
   }
@@ -738,7 +807,14 @@ void LlamaBackend::stop_owned_unlocked() {
   }
   server_ready_.store(false);
   if (server_pid_ > 0) {
-    ::kill(server_pid_, SIGTERM);
+    errno = 0;
+    if (::kill(server_pid_, SIGTERM) != 0) {
+      // A sandbox can hide the detached child's PID (EPERM/ESRCH) while keeping
+      // its HTTP listener alive. Never wait on a process we could not signal;
+      // the next backend instance can adopt it through health+stamp.
+      server_pid_ = -1;
+      return;
+    }
     int status = 0;
     for (int i = 0; i < 20; ++i) {
       if (::waitpid(server_pid_, &status, WNOHANG) == server_pid_) {
@@ -748,8 +824,9 @@ void LlamaBackend::stop_owned_unlocked() {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     if (::waitpid(server_pid_, &status, WNOHANG) == 0) {
-      ::kill(server_pid_, SIGKILL);
-      ::waitpid(server_pid_, &status, 0);
+      if (::kill(server_pid_, SIGKILL) == 0) {
+        ::waitpid(server_pid_, &status, 0);
+      }
     }
     server_pid_ = -1;
   }
@@ -877,17 +954,21 @@ bool LlamaBackend::start_completion_server(const std::string& server_bin, const 
     }
     return false;
   }
-  if (::kill(server_pid_, 0) != 0) {
-    server_pid_ = -1;
-    if (error) {
-      if (health_ok()) {
-        *error = "llama-server L2 en :" + std::to_string(server_port_) +
-                 " no es el proceso hijo (¿puerto ocupado?)";
-      } else {
+  // Sandboxed callers may get EPERM even for the child they just spawned.
+  // waitpid above is the ownership/liveness check; EPERM is not evidence that
+  // another process owns the healthy listener.
+  errno = 0;
+  if (::kill(server_pid_, 0) != 0 && errno != EPERM) {
+    // Some sandbox PID namespaces report ESRCH for the detached child even
+    // though its listener is healthy. The port was empty before fork and the
+    // child reached the expected health endpoint, so health is authoritative.
+    if (!health_ok()) {
+      server_pid_ = -1;
+      if (error) {
         *error = "llama-server L2 terminó antes de quedar listo";
       }
+      return false;
     }
-    return false;
   }
   server_ready_.store(true);
   write_text_file(stamp_path, server_stamp_);
@@ -958,16 +1039,12 @@ LlamaCompletionResult LlamaBackend::complete_server(const LlamaCompletionRequest
   int n_predict = req.max_tokens > 0 ? req.max_tokens : 512;
   shrink_prompt_for_ctx(req, n_ctx, &n_predict, &user_text);
 
-  nlohmann::json body = {
-      {"model", "l2"},
-      {"temperature", req.temperature},
-      {"max_tokens", n_predict},
-      {"cache_prompt", true},
-      {"messages",
-       nlohmann::json::array(
-           {{{"role", "system"}, {"content", req.system_prompt}},
-            {{"role", "user"}, {"content", user_text}}})},
-  };
+  LlamaCompletionRequest body_req = req;
+  body_req.max_tokens = n_predict;
+  if (body_req.reasoning_budget > 0 && n_predict < body_req.reasoning_budget + 128) {
+    body_req.reasoning_budget = std::max(0, n_predict - 128);
+  }
+  nlohmann::json body = build_chat_completions_body(body_req, "l2", user_text, true);
   if (!req.grammar_file.empty()) {
     const std::string grammar = read_text_file(req.grammar_file);
     if (grammar.empty()) {

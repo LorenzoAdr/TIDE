@@ -1,0 +1,14 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+T1: Found where the red line is drawn in the left margin (`line gutter marker`, `line diagnostic marker from map`).
+T2: Found where console errors are read (`note console click`, `handle console panel mouse`).
+T3: Asked where compilation errors are parsed from console text to extract line and message. Result: No object found.
+
+The user's request implies a feature that doesn't exist yet or needs to be implemented. The
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el sistema no parsea errores de compilación de la consola para marcar líneas en el editor; T3 confirmó que no hay objeto que extraiga línea y mensaje del texto de la consola"
+}

@@ -1,0 +1,175 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_text.hpp:seek",
+        "src/app/workspace_model.cpp:load_working_lines_from_disk"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:save",
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:process_pending_workspace_load",
+        "src/app/recent_projects.cpp:remember",
+        "src/app/application.cpp:set_workspace",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_session.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 3,
+      "visto": [
+        "src/app/workspace_session.hpp",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/editor/editor_text.hpp:seek",
+          "src/app/workspace_model.cpp:load_working_lines_from_disk"
+        ],
+        "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [
+          "src/app/recent_projects.cpp:load",
+          "src/app/recent_projects.cpp:save",
+          "src/app/application.cpp:reopen_workspace_documents",
+          "src/app/application.cpp:process_pending_workspace_load",
+          "src/app/recent_projects.cpp:remember",
+          "src/app/application.cpp:set_workspace",
+          "src/app/application.cpp:save_workspace_session",
+          "src/app/application.cpp:restore_workspace_session",
+          "src/app/workspace_session.hpp"
+        ],
+        "consulta": "dónde se guarda y restaura la lista de archivos abiertos al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "El usuario pide recordar tres estados distintos (cursor, archivos, paneles). El atlas sugiere objetos separados para cada uno (M1 para cursor, M5/M6 para paneles, M2 para layout). Es mejor atacar cada estado por separado para encontrar sus mecanismos de persistencia individuales."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de esta fase: seek y load working lines from disk son el mecanismo de restauración del cursor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró el mecanismo de archivos abiertos; avanzo a la siguiente fase del plan (paneles laterales)"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pedía tres cosas: cursor, archivos y paneles. T1 y T2 confirmaron mecanismos para cursor y archivos. T3 cerró negando la persistencia de paneles en el objeto leído (Workspace Session). El claim se cierra con lo hallado: se restauran cursor y archivos, pero no se encontró mecanismo para paneles."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el ancla pedía tres cosas: cursor (T1 leído), archivos (T2 leído) y paneles (T3 no leído). T3 cerró el mapeo de paneles en workspace session; no hay mecanismo de persistencia para la visibilidad de paneles en el pack. el claim se refuta parcialmente: cursor y archivos sí, paneles no."
+    }
+  ],
+  "why": "el ancla pedía tres cosas: cursor (T1 leído), archivos (T2 leído) y paneles (T3 no leído). T3 cerró el mapeo de paneles en workspace session; no hay mecanismo de persistencia para la visibilidad de paneles en el pack. el claim se refuta parcialmente: cursor y archivos sí, paneles no.",
+  "zooms": []
+}

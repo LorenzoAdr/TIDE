@@ -1,0 +1,14 @@
+The user wants to know if the editor remembers the cursor position, open files, and visible/closed side panels when reopening a project.
+
+I have three completed jobs:
+1.  **Cursor position**: T1 asked "where is cursor position saved/restored". Result: "editor state cpp, helix state cpp" were read, but the closed says "ESA pregunta no se relanza... Lo leído no era el disparo." This implies the mechanism for cursor position was *not* found in those files or the specific mapping wasn't there. The closed explicitly says "do=cerrar ese mapeo".
+2.  **Open files**: T2 asked "where is the list of open files restored". Result: Found "restore workspace session" which loads "session open tabs" and calls "workspace open file". This part is confirmed.
+3.  **Side panels**: T3 asked "where is the visibility of side panels restored". Result: "restore workspace session, editor state cpp, helix state cpp, Application" were read, but the closed says "ESA pregunta no se relanza... Lo leído no era el disparo." This implies the mechanism for panel visibility was *not* found in those files.
+
+The anchor has
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "la restauración de archivos abiertos se confirma en restore workspace session; la posición del cursor y la visibilidad de paneles laterales no se encontraron en los archivos leídos (editor state, helix state, Application), por lo que se refutan esos polos del claim."
+}

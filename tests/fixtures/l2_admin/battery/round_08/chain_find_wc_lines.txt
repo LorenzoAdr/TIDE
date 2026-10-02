@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"confirmar path","spawn":{"tipo":"shell","brief":"ls battery py","arg":"ls tools/l2_wave/admin_battery.py"}}
+{"action":"admin_v1","do":"spawn","why":"contar líneas","spawn":{"tipo":"shell","brief":"wc","arg":"wc -l tools/l2_wave/admin_battery.py"}}
+{"action":"admin_v1","do":"cerrar","why":"wc en inbox","reply":"admin_battery.py existe; wc -l reporta 463 líneas en el inbox."}

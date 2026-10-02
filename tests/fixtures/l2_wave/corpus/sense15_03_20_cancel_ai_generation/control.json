@@ -1,0 +1,200 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de código",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación",
+      "keep": [
+        "M6",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de código",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se limpia el archivo a medias al cancelar la generación",
+        "evita": [],
+        "hacia": [
+          "insertar"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino cancelar la generación y limpiar el archivo a medias",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "dos polos distintos: el disparo (Escape/clic) y el efecto (limpieza del archivo). El pack sugiere M8 para cancelación y M6/M8 para inserción/limpieza."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "la fase A falló: no se halló el handler de Escape/clic; el plan requiere ambos polos para el puente. cierro el mapeo de A y busco el disparador real en otro barrio"
+    },
+    {
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura Escape o clic fuera para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "on key"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 falló en ai trace escape; el pack abre on key como barrio de captura de input; un hijo cierra el trigger"
+    },
+    {
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura Escape o clic fuera para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "el locator A falló en el keep M1 M7; el pack tiene M2 (ai trace) y M3 (level2 session) que no se han leído para el trigger; M2 tiene 'ai trace escape' que podría ser el handler"
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación",
+      "consultas": [
+        "dónde se limpia el archivo a medias al cancelar la generación"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "Job 2 encontró 'clear pending insert' y 'cancel current'. Necesito confirmar si este mecanismo limpia el archivo a medias o solo cancela la lógica interna."
+    },
+    {
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura Escape o clic fuera para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "on key"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 falló en el barrio equivocado (escape de strings). El pack abre 'on key' y 'on mouse' como el barrio correcto para el handler de input. Un hijo cierra el trigger."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 8,
+      "why": "el pack no une la captura de Escape/clic fuera con la limpieza del archivo; ambos locadores fallaron en hallar el disparo y el efecto unidos. sin camino entre polos leídos cierra el ancla"
+    }
+  ],
+  "why": "el pack no une la captura de Escape/clic fuera con la limpieza del archivo; ambos locadores fallaron en hallar el disparo y el efecto unidos. sin camino entre polos leídos cierra el ancla",
+  "zooms": []
+}

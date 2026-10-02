@@ -1,0 +1,143 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "keep": [
+        "M3",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/theme.cpp:EditorLineHi"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la salida del terminal para extraer la línea y el mensaje",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/util/compiler_location.cpp:parse_gcc_style",
+        "src/util/compiler_location.cpp:parse_msvc_style",
+        "src/util/compiler_location.cpp:find_compiler_location",
+        "src/ui/console_panel.cpp:terminal_row_link"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "línea roja margen",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "necesito ver si el pack conecta la detección de errores en la consola con el dibujo de la línea roja en el editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos fenómenos distintos: la detección del error en la consola y la visualización en el editor. Necesito localizar ambos mecanismos por separado para luego ver si están conectados o si falta el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega el objeto de esta fase; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la salida del terminal para extraer la línea y el mensaje",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la salida del terminal para extraer la línea y el mensaje"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "regex"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 no halló detector; busco el parser que extrae línea y mensaje de la salida"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de parsing de errores (find compiler location, parse gcc style, parse msvc style) extrae ruta, línea y columna; el dibujo del margen (Editor Line Hi) existe pero no hay enlace leído entre el parser y el dibujador; el ancla pide marcar la línea exacta, pero el pack no une el flujo de datos del parser al margen del editor"
+    }
+  ],
+  "why": "el mecanismo de parsing de errores (find compiler location, parse gcc style, parse msvc style) extrae ruta, línea y columna; el dibujo del margen (Editor Line Hi) existe pero no hay enlace leído entre el parser y el dibujador; el ancla pide marcar la línea exacta, pero el pack no une el flujo de datos del parser al margen del editor",
+  "zooms": []
+}

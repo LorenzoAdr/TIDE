@@ -1,0 +1,175 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo cuando se cancela la generación de código",
+      "keep": [
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detiene la inserción de código en el archivo cuando se cancela la IA",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 1,
+      "why": "el ancla pide dos polos: el disparo (Escape/clic) y el efecto (cancelar sin dejar archivo a medias). M2 huele escape, M8 huele cancel level1. Parto en dos cazas para luego unir."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide dos cosas distintas: el disparo (Escape) y el efecto (limpieza). M2 huele el Escape, M8 huele la cancelación, pero no hay ficha que una explícitamente la limpieza del archivo. Separo para cazar el trigger y el efecto por separado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el hijo no encontró el handler de Escape; lo leído fue escape de strings. salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el hijo leyó cancel current, clear pending insert, cancel all, cancel level1, pero no confirmó que el archivo se limpie al cancelar; el ancla pide limpieza sin dejar el archivo a medias"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle user input"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 falló en M4; el pack apunta a handle user input como barrio de entrada. Busco el disparo real."
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "handle user input"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 encontró el mecanismo de limpieza (cancel level1, clear pending insert) pero no el disparo. T1 y T3 fallaron buscando el handler de Escape. El pack sugiere que T2 conecta con 'handle user input', que es el barrio probable para el disparo del usuario."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el mecanismo de cancelación se activa mediante cancel level1 y cancel all, que limpian el estado con clear pending insert; no se encontró un handler específico para Escape o clic fuera en el pack"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "el mecanismo de limpieza existe (cancel current, clear pending insert, cancel all, cancel level1), pero no se halló el disparo de Escape ni clic fuera; el ancla pide ambos polos y el disparo falta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 9,
+      "why": "el mecanismo de limpieza existe (cancel current, clear pending insert), pero no hay camino desde la captura de Escape ni clic fuera hacia él; el ancla pide ese arco y no se encuentra"
+    }
+  ],
+  "why": "el mecanismo de limpieza existe (cancel current, clear pending insert), pero no hay camino desde la captura de Escape ni clic fuera hacia él; el ancla pide ese arco y no se encuentra",
+  "zooms": []
+}

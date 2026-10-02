@@ -1,0 +1,186 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación del texto de la consola inferior",
+      "keep": [
+        "M11",
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola inferior",
+      "keep": [
+        "M9",
+        "M10"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se extraen las líneas de error del texto de salida de compilación",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se extraen las líneas de error del texto de salida de compilación",
+        "evita": [],
+        "hacia": [
+          "diagnostics from text"
+        ],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja una marca en el margen del editor para resaltar una línea",
+        "evita": [],
+        "hacia": [
+          "decoración margen"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino extraer errores de compilación y dibujar marca en margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "escaneo errores consola",
+        "resaltado línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con línea roja en el margen; busco barrios que pinten decoraciones o escaneen salidas de compilación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M11",
+        "M3"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M11 huele a escaneo de errores de compilación; M3 huele a decoración visual. Necesito ver si M11 tiene el mecanismo de marcar líneas y si M3 es el que pinta el margen."
+    },
+    {
+      "consulta": "dónde se escanean los errores de compilación de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla une dos mecanismos distintos: el análisis de la salida de la consola y la decoración visual del editor. necesito localizar ambos polos por separado para luego verificar si ya están conectados o si falta el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla une dos fenómenos distintos (lectura de consola y decoración de margen); necesito localizar ambos polos por separado antes de verificar si están conectados"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola inferior",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola inferior"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "build output parser"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 falló buscando el lector; el pack sugiere un parser de salida de shell (M11) y el Abierto apunta a build output parser. Busco el mecanismo que extrae los errores del texto."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el ancla pide dos cosas: leer errores y pintar margen. las cazas anteriores fallaron porque buscaban 'consola inferior' en vez de 'texto de salida'. ahora busco el parser de errores y el pintor de márgenes por separado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "las tres cazas de extracción de errores de compilación cerraron sin objeto: no existe mecanismo que lea, parsee o extraiga errores de compilación del texto de la consola inferior. el pack muestra escaneo de errores de linker en M11 y marcas de git en M3, pero no el flujo de compilación general. sin extractor, no hay camino para dibujar la línea roja en el margen. el ancla se refuta: el sistema no extrae esos errores para marcarlos."
+    }
+  ],
+  "why": "las tres cazas de extracción de errores de compilación cerraron sin objeto: no existe mecanismo que lea, parsee o extraiga errores de compilación del texto de la consola inferior. el pack muestra escaneo de errores de linker en M11 y marcas de git en M3, pero no el flujo de compilación general. sin extractor, no hay camino para dibujar la línea roja en el margen. el ancla se refuta: el sistema no extrae esos errores para marcarlos.",
+  "zooms": []
+}

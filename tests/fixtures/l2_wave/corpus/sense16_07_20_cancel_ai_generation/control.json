@@ -1,0 +1,116 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo parcialmente escrito al cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura Escape o clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide el disparo de cancelación; M2 huele escape en ai trace"
+    },
+    {
+      "consulta": "dónde se limpia el archivo parcialmente escrito al cancelar la generación de la IA",
+      "consultas": [
+        "dónde se limpia el archivo parcialmente escrito al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancel all"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el disparo (no hay Escape/clic). El ancla pide limpieza sin dejar archivo a medias. El pack abre cancel all y clear pending insert; busco el efecto de limpieza al cancelar."
+    },
+    {
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura Escape o clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "handle user input"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 no halló el disparo; el pack une a handle user input; un hijo cierra el ON"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: un leído no cierra el ancla; no refuta el existe",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "el polo de disparo (Escape o clic fuera) no existe en el código; la cancelación solo responde al comando de texto 'cancel'. sin disparo, el efecto de limpieza no se activa por esos gestos. el claim se refuta."
+    }
+  ],
+  "why": "control: un leído no cierra el ancla; no refuta el existe",
+  "zooms": []
+}

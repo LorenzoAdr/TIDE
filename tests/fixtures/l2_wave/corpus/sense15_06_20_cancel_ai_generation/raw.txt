@@ -1,0 +1,17 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Asked how to cancel generation on Escape. Result: `is cancel input` only detects text commands ("cancel"), not the Escape key. Missing the keyboard handler.
+2.  **T2**: Asked where Escape is captured to cancel generation. Result: `handle editor escape` manages UI/modals, `handle user input` processes text. Missing the bridge to detect Escape in the console/active focus during generation and delegate to `cancel current`.
+3.  **T3**: Asked where clicking outside the editor is detected to cancel generation. Result: No object found.
+
+The pack shows:
+-   `cancel current`, `cancel level1`, `cancel all`, `handle user input` are seen.
+-   `clear pending insert` is an extra in T1 and T2.
+-   `ai trace escape` is seen in T2.
+-   `handle route` is seen in T1 and T2.
+-   `run insert async` is an extra in T2.
+
+The user's claim has two triggers:
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de captura de Escape y clic fuera no existe en el pack: is cancel input solo lee texto, handle editor escape gestiona UI, y no hay objeto para clic fuera. el polo de disparo falta; el ancla se refuta"}

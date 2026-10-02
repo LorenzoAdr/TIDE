@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se intercepta la tecla Escape para cancelar la generación de la IA",
+  "consultas": [
+    "dónde se intercepta la tecla Escape para cancelar la generación de la IA"
+  ],
+  "do": "explorar",
+  "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+  "evita": [
+    "comandos de texto"
+  ],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 cerró que no hay cancelación por texto; el ancla pide Escape. Busco el handler de teclado que detecte Escape y dispare la cancelación."
+}

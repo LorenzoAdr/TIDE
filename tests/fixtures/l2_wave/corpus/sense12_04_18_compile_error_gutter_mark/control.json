@@ -1,0 +1,144 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp",
+        "src/terminal/shell_session.cpp",
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/editor/editor_folds.cpp:fold_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:git_line_changed"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/console_panel.cpp",
+          "src/terminal/shell_session.cpp",
+          "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+        ],
+        "consulta": "dónde se leen los errores de compilación de la consola inferior",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+        "evita": [],
+        "hacia": [
+          "visual highlight"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino leer el error y dibujar la línea roja",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) tiene un ejemplo de escaneo de errores. Necesito ver si M3 expone la API para añadir líneas rojas y si M11 revela cómo se parsean los errores de compilación."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no une la consola con el highlight; M11 huele la lectura de errores, M3 el dibujo. Dos polos independientes para luego unir."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 cerraron sus polos (lectura de errores y dibujo de gutter) pero el pack confirma 'sin camino' entre ellos. No existe un mecanismo que una la salida de la consola con el marcador visual del editor. El ancla se refuta: no hay arco para marcar la línea roja desde el error leído."
+    }
+  ],
+  "why": "T1 y T2 cerraron sus polos (lectura de errores y dibujo de gutter) pero el pack confirma 'sin camino' entre ellos. No existe un mecanismo que una la salida de la consola con el marcador visual del editor. El ancla se refuta: no hay arco para marcar la línea roja desde el error leído.",
+  "zooms": []
+}

@@ -1,0 +1,10 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3).
+T1 looked for detection of crash/unresponsiveness to trigger restart. Found: `wait until healthy`, `status text`, `health ok`, `ready`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+T2 looked for automatic restart after detection. Found: `restart lsp for workspace`, `schedule debounced lsp restart`, `complete`, `ready`, `start completion server`, `stop owned unlocked`, `ensure completion server`.
+T3 looked for detection of LSP crash/unresponsiveness to trigger restart. Found: `on transport reader eof`, `start`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+
+The "Cerrado" sections for T1, T2, and T3 explicitly state: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo." This implies that the previous explorations did not find the specific mechanism requested or the mechanism found was not the "trigger" (
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide detección automática de caída/no respuesta y reinicio sin intervención. T1, T2 y T3 leyeron `restart lsp for workspace`, `schedule debounced lsp restart`, `wait until healthy`, `on transport reader eof`, pero los Cerrados indican que lo leído no era el disparo (no era el mecanismo de detección automática de caída/no respuesta que dispara el reinicio sin intervención). No hay más exploradores disponibles y el pack no nombra un mecanismo distinto. Cierra el claim: no se encontró el mecanismo de detección automática de caída/no respuesta y reinicio sin intervención."}

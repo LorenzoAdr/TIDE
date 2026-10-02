@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"pasar","why":"T4 confirmó el objeto de guardado (main layout); paso a la fase de restauración del plan"}

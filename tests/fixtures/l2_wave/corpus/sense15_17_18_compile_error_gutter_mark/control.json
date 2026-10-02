@@ -1,0 +1,146 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pintan los errores de compilación en el margen del editor",
+      "keep": [
+        "M1",
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/editor/editor_render.cpp:apply_decoration",
+        "src/editor/editor_render.cpp:RenderEditorLine"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se configuran las decoraciones de diagnóstico para aparecer en el margen izquierdo del editor",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/editor/editor_render.cpp:apply_decoration",
+        "src/editor/editor_render.cpp:RenderEditorLine"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se definen las decoraciones de diagnóstico para añadir un marcador en el margen izquierdo",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:diagnostic_severity_color",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico error",
+        "pintado línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide un efecto visual (línea roja) en el editor; busco barrios que manejen decoraciones o pintado de errores"
+    },
+    {
+      "consulta": "dónde se pintan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se pintan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores en el margen; el pack tiene M11 que escanea errores, pero necesito ver si ya hay pintado o dónde se inyecta la decoración"
+    },
+    {
+      "consulta": "dónde se configuran las decoraciones de diagnóstico para aparecer en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se configuran las decoraciones de diagnóstico para aparecer en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "gutter"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "la caza anterior cerró que se pintan en el cuerpo; necesito encontrar el mecanismo que controla la posición en el margen para añadir la línea roja"
+    },
+    {
+      "consulta": "dónde se definen las decoraciones de diagnóstico para añadir un marcador en el margen izquierdo",
+      "consultas": [
+        "dónde se definen las decoraciones de diagnóstico para añadir un marcador en el margen izquierdo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1/T2 leyeron la pintura en el cuerpo; necesito la configuración de la decoración para añadir el gutter marker"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el marcador del margen izquierdo se define en line gutter marker y line diagnostic marker from map, con el color dado por diagnostic severity color; la pintura de errores en el cuerpo de la línea usa collect diagnostic decorations y apply decoration"
+    }
+  ],
+  "why": "el marcador del margen izquierdo se define en line gutter marker y line diagnostic marker from map, con el color dado por diagnostic severity color; la pintura de errores en el cuerpo de la línea usa collect diagnostic decorations y apply decoration",
+  "zooms": []
+}

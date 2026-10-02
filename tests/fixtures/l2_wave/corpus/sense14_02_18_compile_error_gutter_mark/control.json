@@ -1,0 +1,187 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 2,
+  "cerró": false,
+  "circuit": false,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [],
+  "jobs_run": 0,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error consola",
+        "línea margen",
+        "marcar error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir dos polos: leer errores de la consola y pintar una línea en el editor. bosquejo para ver si el pack ya tiene el barrio de diagnóstico o si hay que cazar el mecanismo de lectura y el de pintura por separado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error compilación",
+        "línea margen",
+        "marcar error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide conectar errores de consola con marcas en el margen del editor; necesito ver si hay barrios que manejen errores o decoraciones de línea"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "línea margen",
+        "marcar error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla pide unir errores de consola con marcas en el margen del editor; necesito ver si el pack tiene barrios para ambos polos o si hay que ampliar"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "línea margen",
+        "marcar error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide conectar errores de consola con marcas visuales en el editor; necesito ver si el pack tiene barrios para la fuente (errores) y el efecto (márgenes)"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "línea margen",
+        "marcar error",
+        "consola inferior",
+        "editor",
+        "salida shell",
+        "decoración línea",
+        "diagnóstico"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla pide conectar errores de consola con marcas visuales en el editor; necesito ver si el pack tiene barrios para parsear salida y pintar márgenes"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "línea margen",
+        "marcar error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 6,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "línea margen",
+        "marcar error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla pide un efecto visual en el editor basado en errores de la consola; busco barrios que manejen decoración de errores y parsing de salida"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "línea margen",
+        "marcar error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 8,
+      "why": "el ancla pide un puente entre consola y margen; el pack huele M11 (linker errors) y M3/M10 (visual highlight), pero falta el barrio de 'diagnostics' o 'problems' que suele unir consola y editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "línea margen",
+        "marcar error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 9,
+      "why": "el ancla pide un efecto visual (línea roja) en el editor basado en datos de la consola; necesito ver si el pack conecta estos barrios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error compilación",
+        "línea margen",
+        "marcar error"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 10,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

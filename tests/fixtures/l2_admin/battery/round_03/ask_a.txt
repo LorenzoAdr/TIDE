@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"tal vez explore","spawn":{"tipo":"explore","brief":"eso"}}
+{"action":"admin_v1","do":"ask_user","why":"stub y vago","reply":"¿Qué hay que arreglar?"}

@@ -1,0 +1,428 @@
+{
+  "induce": "miss-answer",
+  "why": "A5: ≥20 casos (01–20 + 99 absurdo). Held-out ≥6. Core5 baseline intacto en sense_battery.json.",
+  "split": "see sense_battery_a5_split.json",
+  "cases": [
+    {
+      "id": "01_settings_about_tab",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 01_settings_about_tab; no vender traps context_menu, editor_panel como el disparo",
+      "gold": {
+        "symbols_any": [
+          "settings_modal",
+          "app_settings"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "context_menu",
+          "editor_panel",
+          "panel"
+        ]
+      }
+    },
+    {
+      "id": "02_split_resize_behavior",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 02_split_resize_behavior; no vender traps panel, editor_panel como el disparo",
+      "gold": {
+        "symbols_any": [
+          "main_layout"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "panel",
+          "editor_panel",
+          "performance_panel"
+        ]
+      }
+    },
+    {
+      "id": "03_terminal_output_paint",
+      "kind": "existe",
+      "complexity": "media_alta",
+      "via": "case",
+      "expect": "mecanismo de 03_terminal_output_paint; no vender traps search_panel, editor_panel como el disparo",
+      "gold": {
+        "symbols_any": [
+          "console_panel",
+          "ui_wake"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "search_panel",
+          "editor_panel",
+          "packet_monitor_panel"
+        ]
+      }
+    },
+    {
+      "id": "04_ai_thinking_status_bar",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 04_ai_thinking_status_bar; no vender traps settings_modal, status como el disparo",
+      "gold": {
+        "symbols_any": [
+          "busy_strip",
+          "ai_controller"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "settings_modal",
+          "status",
+          "panel"
+        ]
+      }
+    },
+    {
+      "id": "05_shortcut_open_settings",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 05_shortcut_open_settings; no vender traps shortcuts_modal, context_menu como el disparo",
+      "gold": {
+        "symbols_any": [
+          "settings_modal",
+          "key_binding_registry"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "shortcuts_modal",
+          "context_menu",
+          "helix_hints"
+        ]
+      }
+    },
+    {
+      "id": "06_quit_unsaved_warning",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 06_quit_unsaved_warning; no vender traps shutdown_overlay, settings_modal como el disparo",
+      "gold": {
+        "symbols_any": [
+          "quit_confirm"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "shutdown_overlay",
+          "settings_modal",
+          "application"
+        ]
+      }
+    },
+    {
+      "id": "07_ai_compile_task",
+      "kind": "existe",
+      "complexity": "media_alta",
+      "via": "case",
+      "expect": "mecanismo de 07_ai_compile_task; no vender traps compile, launch como el disparo",
+      "gold": {
+        "symbols_any": [
+          "task_runner",
+          "ai_controller"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "compile",
+          "launch",
+          "build-release"
+        ]
+      }
+    },
+    {
+      "id": "08_toolpacks_install_python",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 08_toolpacks_install_python; no vender traps lsp_client, lsp_transport como el disparo",
+      "gold": {
+        "symbols_any": [
+          "settings_modal",
+          "toolpacks"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "lsp_client",
+          "lsp_transport",
+          "panel"
+        ]
+      }
+    },
+    {
+      "id": "09_console_temp_tab",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 09_console_temp_tab; no vender traps editor_tabs, console_panel como el disparo",
+      "gold": {
+        "symbols_any": [
+          "main_layout"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "editor_tabs",
+          "console_panel",
+          "search_panel"
+        ]
+      }
+    },
+    {
+      "id": "10_performance_threads_panel",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 10_performance_threads_panel; no vender traps panel, editor_panel como el disparo",
+      "gold": {
+        "symbols_any": [
+          "performance_panel",
+          "ui_perf_monitor"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "panel",
+          "editor_panel"
+        ]
+      }
+    },
+    {
+      "id": "11_restore_session_state",
+      "kind": "existe",
+      "complexity": "muy_alta",
+      "via": "case",
+      "expect": "persistencia de cursor, tabs y paneles al reabrir un workspace; no recetar el ancla entero a un hijo",
+      "gold": {
+        "symbols_any": [
+          "restore_workspace_session",
+          "save_state"
+        ],
+        "polos_afirmados": [
+          "tabs",
+          "sesion"
+        ],
+        "polos_negados": [
+          "cursor_persistido_completo"
+        ],
+        "forbid_why": [
+          "console keys"
+        ]
+      }
+    },
+    {
+      "id": "12_edit_applied_animation",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 12_edit_applied_animation; no vender traps settings_modal, console_panel como el disparo",
+      "gold": {
+        "symbols_any": [
+          "editor_panel",
+          "ui_invalidation_policy",
+          "search_replace"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "settings_modal",
+          "console_panel"
+        ]
+      }
+    },
+    {
+      "id": "13_lsp_auto_restart",
+      "kind": "existe",
+      "complexity": "muy_alta",
+      "via": "case",
+      "expect": "detección de muerte/timeout del LSP y relanzado; no confundir con DAP ni con el PTY",
+      "gold": {
+        "symbols_any": [
+          "lsp",
+          "restart",
+          "watch",
+          "timeout"
+        ],
+        "polos_afirmados": [
+          "reinicio"
+        ],
+        "polos_negados": [],
+        "forbid_why": [
+          "dap",
+          "pty"
+        ]
+      }
+    },
+    {
+      "id": "14_syntax_highlight_repaint",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 14_syntax_highlight_repaint; no vender traps performance_panel, console_panel como el disparo",
+      "gold": {
+        "symbols_any": [
+          "ui_invalidation_policy",
+          "editor_panel"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "performance_panel",
+          "console_panel"
+        ]
+      }
+    },
+    {
+      "id": "15_welcome_message_first_launch",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 15_welcome_message_first_launch; no vender traps settings_modal, application como el disparo",
+      "gold": {
+        "symbols_any": [
+          "busy_strip",
+          "app_settings"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "settings_modal",
+          "application"
+        ]
+      }
+    },
+    {
+      "id": "16_drag_drop_file_open",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 16_drag_drop_file_open; no vender traps open_file_confirm, workspace_config como el disparo",
+      "gold": {
+        "symbols_any": [
+          "application",
+          "editor_tabs"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "open_file_confirm",
+          "workspace_config"
+        ]
+      }
+    },
+    {
+      "id": "17_ai_spinner_stuck",
+      "kind": "existe",
+      "complexity": "alta",
+      "via": "case",
+      "expect": "mecanismo de 17_ai_spinner_stuck; no vender traps console_panel, dap_backend como el disparo",
+      "gold": {
+        "symbols_any": [
+          "ai_controller",
+          "level2_autonomous_loop"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "console_panel",
+          "dap_backend"
+        ]
+      }
+    },
+    {
+      "id": "18_compile_error_gutter_mark",
+      "kind": "hueco",
+      "complexity": "media_alta",
+      "via": "case",
+      "expect": "la consola muestra errores de build; no hay marca de compile en el gutter del editor (el gutter de LSP no cuenta como ese mapeo)",
+      "gold": {
+        "symbols_any": [
+          "diagnostic",
+          "gutter",
+          "compile"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [
+          "compile_gutter"
+        ],
+        "forbid_why": []
+      }
+    },
+    {
+      "id": "19_editor_font_zoom",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 19_editor_font_zoom; no vender traps key_binding_registry, settings_modal como el disparo",
+      "gold": {
+        "symbols_any": [
+          "editor_panel",
+          "app_settings"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "key_binding_registry",
+          "settings_modal"
+        ]
+      }
+    },
+    {
+      "id": "20_cancel_ai_generation",
+      "kind": "hueco",
+      "complexity": "media",
+      "via": "case",
+      "expect": "el aborto y el rollback existen; Escape/clic-fuera no se traducen a esa parada; cerrar el claim, no reabrir la misma caza",
+      "gold": {
+        "symbols_any": [
+          "cancel",
+          "abort",
+          "busy"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [
+          "escape_cancela",
+          "console_keys"
+        ],
+        "forbid_why": [
+          "console keys",
+          "escape cancela la generación"
+        ]
+      }
+    },
+    {
+      "id": "99_cursor_ballistics_k8s",
+      "kind": "absurdo",
+      "complexity": "inventado",
+      "via": "prompt",
+      "prompt": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+      "expect": "rendirse: no hay física de cursores, ni k8s, ni índice cuántico; no vender un vecino (git, embed, cursor) como si fuera eso",
+      "gold": {
+        "symbols_any": [],
+        "polos_afirmados": [],
+        "polos_negados": [
+          "balistica",
+          "kubernetes",
+          "cuantico"
+        ],
+        "forbid_why": [
+          "kubernetes",
+          "balíst",
+          "cuántic"
+        ]
+      }
+    }
+  ]
+}

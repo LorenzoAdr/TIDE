@@ -1,0 +1,45 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ],
+      "consulta": "dónde se maneja la entrada del usuario para cancelar la generación de IA",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se maneja la ruta para cancelar la generación de IA",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino manejar la entrada del usuario y cancelar la generación de IA",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

@@ -1,0 +1,18 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have two completed jobs (T1 and T2) that investigated the current state.
+T1 found no active detector for crash/timeout that triggers restart; restart is manual or triggered by missing install.
+T2 found `restart lsp for workspace` and `schedule debounced lsp restart`, but the closed note says "Lo leído no era el disparo" (what was read wasn't the trigger). It seems T2 found the restart mechanism but not the automatic trigger for failure.
+
+The anchor claim is: "if the LSP process crashes or stops responding, the application automatically detects it and restarts it".
+Current findings:
+- Restart mechanism exists (`restart lsp for workspace`).
+- Detection of crash/timeout does *not* currently trigger this restart automatically (T1 says "no encontré un detector activo...").
+- T2 confirms the restart function exists but implies the trigger wasn't found or wasn't the automatic one.
+
+So the claim is currently **refuted** or at least **incomplete**. The user *needs* this feature. The investigation so far has established that the feature *doesn't exist*
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "T1 y T2 confirman que no existe un detector automático de caída o timeout que dispare el reinicio; el reinicio actual es manual o por instalación faltante. El claim se refuta: la aplicación no detecta ni reinicia automáticamente ante fallos."
+}

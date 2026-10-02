@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T3 leyó compiler location cpp y diagnostics panel cpp, que procesan los errores; T2 leyó line gutter marker, que dibuja en el margen. El pack no une ambos polos (sin camino entre T2 y T3), por lo que no hay mecanismo que conecte el procesamiento de errores con el dibujo de marcas en el margen."
+}

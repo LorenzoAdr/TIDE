@@ -1,0 +1,15 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+
+I have three completed investigations (T1, T2, T3) corresponding to the three parts of the user's request:
+1.  **Cursor Position (T1):** The investigation found that `save` only persists a list of recent project paths, not editor state or cursor position. The claim is refuted.
+2.  **Open Files (T2):** The investigation found mechanisms like `reopen workspace documents`, `load working lines from disk`, `reload stale tabs from disk`, `open tabs mru`. This suggests the application *does* restore open files. The claim is confirmed.
+3.  **Sidebar Visibility (T3):** The investigation found "no object". The claim is refuted.
+
+The user's original claim was a conjunction: "remember cursor position AND open files AND sidebar visibility".
+- Cursor position: Refuted (T1 says no mechanism found, only recent paths).
+- Open files: Confirmed (T2 found mechanisms).
+- Sidebar visibility: Refuted (T3 says no object).
+
+Since the user asked for *all* these things to be remembered ("quier
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide recordar cursor, archivos y paneles. T2 confirma que se restauran los archivos abiertos (reopen workspace documents, open tabs mru). T1 refuta el cursor (solo guarda rutas recientes). T3 refuta los paneles (no hay objeto). El claim conjunto se refuta: falta el cursor y los paneles."}

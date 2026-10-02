@@ -1,0 +1,154 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto",
+      "keep": [
+        "M6",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/app/workspace_session.cpp:save",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo",
+      "keep": [
+        "M1",
+        "M10"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:open_file_at",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto",
+      "keep": [
+        "M9",
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir un archivo",
+        "evita": [],
+        "hacia": [
+          "set cursor position"
+        ],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto",
+        "evita": [],
+        "hacia": [
+          "panel"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino restaurar el cursor y restaurar los paneles",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 nombra editor state y CursorPos; es el barrio más directo para la persistencia del cursor y archivos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mapeo de sesión para el cursor; busco el disparo en el flujo de apertura de archivo (A) y el estado de los paneles (B) por separado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 niega la restauración de la posición del cursor al abrir un archivo: se resetea al inicio. Salto a la siguiente caza del plan."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack confirma la restauración de archivos abiertos y posición del cursor al abrir un archivo, pero niega la persistencia de la visibilidad de paneles laterales al abrir el proyecto"
+    }
+  ],
+  "why": "el pack confirma la restauración de archivos abiertos y posición del cursor al abrir un archivo, pero niega la persistencia de la visibilidad de paneles laterales al abrir el proyecto",
+  "zooms": []
+}

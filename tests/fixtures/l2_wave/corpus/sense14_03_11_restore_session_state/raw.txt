@@ -1,0 +1,26 @@
+The user wants to restore the editor state when reopening a project: cursor position, open files, and side panel visibility.
+I have a plan with 3 phases:
+1. A: restore cursor position (Done, T1)
+2. B: restore open files (Done, T2)
+3. P: bridge A and B (Pending)
+
+Wait, the plan listed in the prompt is:
+1. [paso] A locator: dónde se restauran los archivos abiertos al cargar un proyecto
+2. [en_curso] B locator: dónde se restaura la visibilidad de los paneles laterales al cargar un proyecto (hacia layout)
+3. [pendiente] P puente: hay camino restaurar archivos y restaurar paneles (need A B)
+
+But the "Trabajos ya hechos" show:
+T1: cursor position (Done)
+T2: open files (Done)
+T3: side panel visibility (Done, "no hay objeto")
+
+The prompt says:
+"Plan de búsqueda (romper):
+1. [paso] A locator: dónde se restauran los archivos abiertos al cargar un proyecto
+2. [en_curso] B
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack confirma la restauración de archivos y cursor al cargar el proyecto, pero niega la restauración de paneles laterales (no hay objeto). el ancla pide recordar exactamente la posición del cursor, los archivos abiertos y la visibilidad de paneles; al no existir mecanismo para paneles, el claim se refuta parcialmente y se cierra."
+}

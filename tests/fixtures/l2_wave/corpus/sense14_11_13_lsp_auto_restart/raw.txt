@@ -1,0 +1,17 @@
+The user wants to detect when the LSP server crashes or becomes unresponsive and automatically restart it.
+I have 3 completed jobs:
+T1: Found `restart lsp for workspace`, `schedule debounced lsp restart`.
+T2: Found `ensure ready`, `ensure intent embeddings ready`.
+T3: Found the trigger for restart: `start server embedding` and `start completion server` call `stop owned unlocked` when the server is already healthy or has an old stamp (indicating config change or port conflict).
+
+The user's claim is about detecting a crash or unresponsiveness and restarting automatically.
+T3 found a restart mechanism, but it's triggered by config changes or port conflicts, not necessarily a crash or unresponsiveness.
+T1 and T2 found related functions but didn't pinpoint the crash detection.
+The pack shows `on lsp missing install`, `on workspace opened`, `handle user input`, `run level1 async`.
+T1 -> `on lsp missing install` and `on workspace opened`.
+T2/T3 -> `handle user input`, `run level1 async`.
+
+I need to check if there's a mechanism for detecting crashes/unresponsiveness.
+The pack mentions `on lsp missing
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático detecta cambios de configuración o conflictos de puerto (stamp antiguo/servidor healthy), pero no hay evidencia en el pack de un detector de caídas o falta de respuesta del LSP; el reinicio se dispara por condiciones de estado, no por monitorización de salud del proceso"}

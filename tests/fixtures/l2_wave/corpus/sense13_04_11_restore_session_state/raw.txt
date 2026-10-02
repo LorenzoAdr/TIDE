@@ -1,0 +1,21 @@
+The user wants to restore the editor state (cursor position, open files, visible/closed side panels) when reopening a project.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se guarda la posición del cursor al cerrar el editor
+2. [en_curso] B locator: dónde se restaura la posición del cursor al abrir el editor
+3. [pendiente] P puente: hay camino guardar y restaurar la posición del cursor (need A B)
+
+Wait, the plan says:
+1. [fallo] A locator: dónde se guarda la posición del cursor al cerrar el editor
+2. [en_curso] B locator: dónde se restaura la posición del cursor al abrir el editor
+3. [pendiente] P puente: hay camino guardar y restaurar la posición del cursor (need A B)
+
+But the actual trabajos done are:
+T1: dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto -> Cerrado: no hay objeto.
+T2: dónde se guarda la posición del cursor al cerrar el editor -> Cerrado: leído: close, set pos
+T3: dónde se restaura la posición del
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de restauración del cursor está confirmado en open file at impl, que invoca buffer reset to single cursor line, col tras cargar el archivo; el pack no une este flujo con la persistencia de archivos abiertos ni paneles laterales, y el límite de exploradores se ha alcanzado sin hallar el resto del claim"
+}

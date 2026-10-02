@@ -1,0 +1,136 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "keep": [
+        "M5",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp",
+        "src/ui/editor_panel.cpp",
+        "src/lsp/diagnostics.cpp",
+        "src/lsp/lsp_client.cpp"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer la línea y el mensaje",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se escanea la salida del shell para errores de compilación y se marca el margen del editor",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico compilación",
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con marcas visuales en el editor; busco barrios de decoración y diagnóstico"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escaneo consola"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M11 huele a escaneo de errores en la consola; necesito ver si ese barrio ya tiene la lógica de lectura para conectarla al margen"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer la línea y el mensaje",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer la línea y el mensaje"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "binary symbols panel"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "M11 huele a escaneo de errores de linker en la salida del shell; necesito ver si ese barrio extrae la línea para luego decorarla"
+    },
+    {
+      "consulta": "dónde se escanea la salida del shell para errores de compilación y se marca el margen del editor",
+      "consultas": [
+        "dónde se escanea la salida del shell para errores de compilación y se marca el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escaneo errores"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "M11 huele 'scan shell output for linker errors'; es el barrio que conecta consola y editor para errores. T1 y T2 fallaron en barrios genéricos; aquí hay un olor específico al mecanismo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "las tres cazas cerraron sin hallar el mecanismo: T1 leyó paneles y lsp pero no el disparo; T2 no encontró objeto; T3 encontró un escáner de linker para símbolos binarios, no para diagnósticos del editor. el pack no une consola a margen de errores de compilación; el claim se refuta."
+    }
+  ],
+  "why": "las tres cazas cerraron sin hallar el mecanismo: T1 leyó paneles y lsp pero no el disparo; T2 no encontró objeto; T3 encontró un escáner de linker para símbolos binarios, no para diagnósticos del editor. el pack no une consola a margen de errores de compilación; el claim se refuta.",
+  "zooms": []
+}

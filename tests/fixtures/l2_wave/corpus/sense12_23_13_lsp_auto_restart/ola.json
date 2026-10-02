@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "no_pasar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el Cerrado de T4 solo lee el símbolo de verificación de vida sin revelar el flujo de fallo; salto a la siguiente caza del plan"
+}

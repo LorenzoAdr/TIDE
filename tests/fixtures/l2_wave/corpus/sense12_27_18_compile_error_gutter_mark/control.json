@@ -1,0 +1,92 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:clear_editor_line_paint_caches",
+        "src/ui/editor_panel.cpp",
+        "src/ui/editor_panel.cpp:line_gutter_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "keep": [
+        "M1",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/diagnostics.cpp:diagnostics_for_translation_unit",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:diagnostic_severity_tr"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores",
+      "consultas": [
+        "dónde se dibuja la línea roja en el margen izquierdo del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide marcar errores con una línea roja en el margen; busco el mecanismo de dibujo de marcas en el editor"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el dibujo; ahora busco la lectura de la consola que dispara el marcador"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack y los trabajos leídos confirman que no existe un mecanismo que convierta la salida de compilación de la consola en diagnostics para el editor; el editor usa LSP y el panel de símbolos solo escanea errores de linker. no hay objeto que marcar."
+    }
+  ],
+  "why": "el pack y los trabajos leídos confirman que no existe un mecanismo que convierta la salida de compilación de la consola en diagnostics para el editor; el editor usa LSP y el panel de símbolos solo escanea errores de linker. no hay objeto que marcar.",
+  "zooms": []
+}

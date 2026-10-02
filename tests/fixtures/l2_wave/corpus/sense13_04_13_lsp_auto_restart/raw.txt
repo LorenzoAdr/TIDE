@@ -1,0 +1,18 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have 3 completed jobs (T1, T2, T3).
+T1: Looked for detection of crash/no-response triggering restart. Found `transport reader eof` cleans state but doesn't trigger restart. Restart is triggered by `run` or `lsp missing install`.
+T2: Looked for LSP lifecycle management to add detection/restart. Found `restart lsp for workspace` is manual/external, `clangd process alive` is just a check.
+T3: Looked for LSP process start and exit handling. Found `spawn language server` starts it, `transport reader eof` handles exit (EOF/crash) but only cleans PID, doesn't restart.
+
+The pack shows:
+T1 => T2: `restart lsp for workspace` is the same object. `apply workspace settings` -> `setup build environment watching` -> `schedule debounced lsp restart`.
+T1 => T3: `on transport reader eof` is the same object.
+T2 => T3: sin camino.
+
+The user's claim is: "necesito que si el proceso del servidor
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de detección de caída existe (transport reader eof al cerrar pipe) pero no dispara reinicio; el reinicio actual es manual o por instalación faltante, no automático ante fallo"
+}

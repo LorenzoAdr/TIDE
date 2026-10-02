@@ -1,0 +1,12 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 looked for reading errors from the console text. It found rendering/event handling in the problems tab, not the parsing mechanism.
+T2 looked for drawing the red line in the left margin. It found `line gutter marker`, `fold gutter marker`, `line diagnostic marker from map`, `line diagnostic marker`.
+T3 looked for extracting compilation errors from the console text to create diagnostics. It found the mechanism: `find compiler location` invoked by `terminal row link` processing `terminal styled rows`. It delegates to parsers like `parse gcc style`, `parse msvc style`, etc.
+
+The user's request is to connect these two: the extraction of errors from the console (T3) and the drawing of the red line in the editor margin (T2).
+T3 found how errors are extracted from the console.
+T2 found how the red line is drawn in the editor margin.
+The claim is: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exact
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de extracción de errores de la consola (find compiler location) y el de dibujo en el margen (line diagnostic marker) están identificados; el pack no une ambos polos, por lo que el ancla se cierra con la evidencia leída"}

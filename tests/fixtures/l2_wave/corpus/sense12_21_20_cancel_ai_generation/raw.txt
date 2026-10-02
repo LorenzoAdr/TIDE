@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"quién invoca la restauración del archivo al cancelar la generación de la IA","hacia":["handle route"],"why":"T4 leyó los símbolos pero no el invocador; el pack une cancel current con handle route. Necesito confirmar si el flujo de cancelación dispara rollback pending."}

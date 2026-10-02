@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA","evita":["handle user input"],"why":"la caza anterior falló en la consola; el pack abre 'handle ai console keys' y 'on mouse click' como barrios distintos para el trigger de cancelación"}

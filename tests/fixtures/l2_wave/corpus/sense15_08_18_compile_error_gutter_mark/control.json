@@ -1,0 +1,85 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marca la línea roja en el margen del editor para resaltar un error",
+      "keep": [
+        "M1",
+        "M10"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/visual_highlight.cpp:schedule_visual_highlight_debounce_wake",
+        "src/editor/visual_highlight.cpp:mark_debounce_wake_scheduled",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/editor/editor_folds.cpp:fold_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "errores compilación",
+        "margen editor",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir la consola de errores con el margen del editor; busco barrios que manejen problemas o decoraciones de línea"
+    },
+    {
+      "consulta": "dónde se marca la línea roja en el margen del editor para resaltar un error",
+      "consultas": [
+        "dónde se marca la línea roja en el margen del editor para resaltar un error"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack nombra 'visual highlight' y 'binary symbols panel' que escanea errores; necesito ver cómo se pinta el margen para luego conectarlo con la detección de errores de compilación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el sistema no pinta una línea roja continua en el margen; usa marcadores de diagnóstico (caracteres) en el gutter. el ancla pide un efecto visual que no existe en el código actual; el mecanismo de resaltado es el de los diagnostics, no una línea roja."
+    }
+  ],
+  "why": "el sistema no pinta una línea roja continua en el margen; usa marcadores de diagnóstico (caracteres) en el gutter. el ancla pide un efecto visual que no existe en el código actual; el mecanismo de resaltado es el de los diagnostics, no una línea roja.",
+  "zooms": []
+}

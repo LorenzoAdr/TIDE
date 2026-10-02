@@ -1,0 +1,14 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have a plan with 3 phases:
+1. [en_curso] A locator: dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder
+2. [pendiente] B locator: dónde se reinicia el servidor de lenguaje tras detectar que se ha caído
+3. [pendiente] P puente: hay camino detectar la caída y reiniciar el servidor (need A B)
+
+I have done 4 works.
+T1 asked: dónde se
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "el Cerrado de T4 no afirma el objeto de la fase A (detección de caída); solo lista símbolos leídos sin confirmar el mecanismo de detección. Salto a la siguiente caza (fase B) para avanzar."
+}

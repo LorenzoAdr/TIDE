@@ -1,0 +1,170 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:completion_wait_timeout_ms",
+        "src/lsp/lsp_client.cpp:parse_wait_timeout_ms",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_transport.cpp:reader_loop",
+        "src/lsp/lsp_transport.cpp:wait_response",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/lsp/lsp_transport.cpp:start",
+        "src/lsp/lsp_client.cpp:on_lsp_notification",
+        "src/lsp/lsp_transport.cpp:stop",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor LSP tras un fallo o timeout",
+      "keep": [
+        "M5",
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso del servidor LSP se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M1",
+        "M2",
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_transport.cpp:reader_loop",
+        "src/lsp/lsp_transport.cpp:wait_response",
+        "src/lsp/lsp_client.cpp:on_lsp_notification",
+        "src/lsp/lsp_transport.cpp:start",
+        "src/lsp/lsp_transport.cpp:send_request",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_transport.cpp:set_eof_handler",
+        "src/lsp/lsp_client.cpp:handle_transport_error",
+        "src/lsp/lsp_transport.cpp:set_reader_eof_handler",
+        "src/lsp/lsp_client.cpp:initialize"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'restart lsp for workspace' y 'pending lsp restart'; necesito ver qué dispara esa acción (detección de fallo) y cómo se ejecuta el reinicio automático"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "reader loop"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 encontró el reinicio pero no el disparo; busco el detector en el lector"
+    },
+    {
+      "consulta": "dónde se reinicia el servidor LSP tras un fallo o timeout",
+      "consultas": [
+        "dónde se reinicia el servidor LSP tras un fallo o timeout"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp for workspace"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el lector anterior no halló el disparo, pero nombró el reinicio; busco el mecanismo de restart"
+    },
+    {
+      "consulta": "dónde se detecta que el proceso del servidor LSP se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el proceso del servidor LSP se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reader loop"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 leyó nombres de timeouts y reinicio pero no afirmó el disparo. T2 confirmó el reinicio tras fallo de instalación. Falta confirmar la detección automática de caída/no-respuesta (crash/hang) y su enlace al reinicio. El pack une T1 y T2 en 'schedule debounced lsp restart'. Exploro el lector (reader loop) y la espera (wait response) para ver si detectan la caída y disparan el reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el reinicio del servidor LSP se detecta y dispara tras cambios de entorno o fallos de instalación mediante schedule debounced lsp restart y restart lsp for workspace; no se ha encontrado un mecanismo que detecte automáticamente que el proceso se ha caído o no responde y lo reinicie sin intervención del usuario"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el pack no nombra un detector de caída automática del proceso LSP; los cierres leídos niegan ese disparo y solo confirman reinicios tras cambios de entorno o fallos de instalación"
+    }
+  ],
+  "why": "el pack no nombra un detector de caída automática del proceso LSP; los cierres leídos niegan ese disparo y solo confirman reinicios tras cambios de entorno o fallos de instalación",
+  "zooms": []
+}

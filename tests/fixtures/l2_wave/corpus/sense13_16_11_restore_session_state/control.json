@@ -1,0 +1,189 @@
+{
+  "agujas": [
+    "app",
+    "editor",
+    "ui"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor, los archivos abiertos y los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M2",
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.cpp:load_working_lines_from_disk",
+        "src/app/workspace_model.cpp:load_virtual_text_placeholder",
+        "src/app/workspace_model.cpp:load_tabular_placeholder",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:open_file_impl",
+        "src/app/workspace_model.cpp:switch_to_tab"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura el estado de los paneles laterales al abrir una sesión de trabajo",
+      "keep": [
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al cerrar y abrir una sesión de trabajo",
+      "keep": [
+        "M12"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_model.cpp:load_working_lines_from_disk",
+        "src/app/workspace_model.cpp:load_virtual_text_placeholder",
+        "src/app/workspace_model.cpp:load_tabular_placeholder",
+        "src/editor/cursor_history.cpp:record_jump",
+        "src/app/workspace_model.cpp:record_cursor_jump"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "app",
+        "editor",
+        "ui"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al reabrir un proyecto; busco barrios que gestionen la sesión y el estado del editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "app"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "workspace_session suena a persistencia de sesión; quiero ver si ahí se guarda/restaura el estado del editor y paneles"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor, los archivos abiertos y los paneles laterales al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor, los archivos abiertos y los paneles laterales al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "workspace_model"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el zoom de app muestra workspace_model con active_tab y tabs, y application con layout_state_; ahí debería vivir la restauración del estado de la sesión"
+    },
+    {
+      "consulta": "dónde se restaura el estado de los paneles laterales al abrir una sesión de trabajo",
+      "consultas": [
+        "dónde se restaura el estado de los paneles laterales al abrir una sesión de trabajo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "paneles"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 cerró que falta la restauración de paneles; busco el mecanismo que guarda/carga la visibilidad de sidebars al reiniciar la app"
+    },
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al cerrar y abrir una sesión de trabajo",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al cerrar y abrir una sesión de trabajo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 indica que open file no restaura cursor, pero open file at impl sí. Necesito ver si hay un mecanismo que persista y recupere CursorPos en editor state, o si falta por implementar."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "los archivos abiertos se restauran al abrir la sesión; la posición del cursor no se restaura (se abre el archivo sin posición) y el estado de los paneles laterales no se restaura"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "los archivos se restauran; el cursor no se restaura porque la sesión usa open file en lugar de open file at impl; los paneles laterales no tienen objeto de restauración"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "los archivos abiertos se restauran, pero la posición del cursor no se restaura (se usa la función incorrecta) y el estado de los paneles laterales no se restaura (no hay objeto)"
+    }
+  ],
+  "why": "los archivos abiertos se restauran, pero la posición del cursor no se restaura (se usa la función incorrecta) y el estado de los paneles laterales no se restaura (no hay objeto)",
+  "zooms": [
+    "app"
+  ]
+}

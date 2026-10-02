@@ -1,0 +1,104 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "cómo se cancela la generación de código al pulsar Escape o hacer clic fuera",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:handle_key_event",
+        "src/ai/ai_controller.cpp:handle_mouse_event"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:has_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ui/console_panel.cpp:Event"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "cómo se cancela la generación de código al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "cómo se cancela la generación de código al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M8 tiene cancel level1 y begin insert at; M2 tiene escape. Necesito ver si el controlador maneja la cancelación limpia del archivo."
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "teclado"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró que no existe en el controlador de IA ni en el input textual; busco en la capa de UI o eventos globales (M7 editor panel, M4 file picker, o manejadores de teclado/ratón) si hay un listener que dispare la cancelación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "las dos cazas confirman que no existe el mecanismo de cancelación por Escape o clic fuera; la cancelación solo responde a input textual. el ancla pide un comportamiento que no está implementado en el código actual"
+    }
+  ],
+  "why": "las dos cazas confirman que no existe el mecanismo de cancelación por Escape o clic fuera; la cancelación solo responde a input textual. el ancla pide un comportamiento que no está implementado en el código actual",
+  "zooms": []
+}

@@ -1,0 +1,18 @@
+{
+  "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+  "consultas": [
+    "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+  ],
+  "do": "explorar",
+  "error": "control: esa caza ya se contestó; cierra el ancla o parte",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 falló en M2 (ai trace). M7 (editor panel) es el barrio de la UI del editor donde ocurre la generación y donde se capturan eventos de teclado/ratón. Necesito encontrar el handler de Escape/clic fuera en el panel del editor para conectarlo con la cancelación."
+}

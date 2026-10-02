@@ -14,6 +14,7 @@
 #include "parser/tree_sitter_language.hpp"
 #include "parser/tree_sitter_locals.hpp"
 #include "parser/tree_sitter_symbols.hpp"
+#include "parser/tree_sitter_xml_wrap.hpp"
 
 #include "util/csv_viewer.hpp"
 
@@ -37,6 +38,50 @@ std::string word_at_line_col_local(const std::string& line, int col) {
     ++end;
   }
   return line.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
+}
+
+int source_line_count(const std::string& source) {
+  if (source.empty()) {
+    return 1;
+  }
+  return static_cast<int>(std::count(source.begin(), source.end(), '\n') + 1);
+}
+
+TSTree* parse_tree_for_source(TSTree* old_tree, const std::string& source,
+                              const std::string& path) {
+  if (source.empty()) {
+    return nullptr;
+  }
+  const TSLanguage* language = tree_sitter_language_for_path(path);
+  if (language == nullptr) {
+    language = tree_sitter_cpp_language();
+  }
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, language);
+  const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
+  TSTree* reparsed = nullptr;
+  if (uses_xml_fragment_wrap(lang)) {
+    (void)old_tree;  // Wrapped XML always full-reparses; editor edits are unwrapped.
+    const XmlFragmentWrap wrap = xml_wrap_fragment_source(source);
+    reparsed = ts_parser_parse_string(parser, nullptr, wrap.wrapped.c_str(),
+                                      static_cast<uint32_t>(wrap.wrapped.size()));
+  } else {
+    reparsed = ts_parser_parse_string(parser, old_tree, source.c_str(),
+                                      static_cast<uint32_t>(source.size()));
+  }
+  ts_parser_delete(parser);
+  return reparsed;
+}
+
+LineHighlights highlights_for_line_maybe_xml(TSNode root, const std::string& source, int line_0,
+                                             TreeSitterLangKind lang, const std::string& /*path*/) {
+  if (!uses_xml_fragment_wrap(lang)) {
+    return highlights_for_line(root, source, line_0, lang);
+  }
+  const XmlFragmentWrap wrap = xml_wrap_fragment_source(source);
+  LineHighlights result = highlights_for_line(root, wrap.wrapped, line_0, lang);
+  xml_unmap_line_highlights_from_wrap(&result, line_0, wrap, source);
+  return result;
 }
 
 }  // namespace
@@ -144,34 +189,6 @@ std::vector<SymbolInfo> TreeSitterService::symbols_for_buffer(
   return symbols_for_file(path, join_editor_lines(lines));
 }
 
-namespace {
-
-int source_line_count(const std::string& source) {
-  if (source.empty()) {
-    return 1;
-  }
-  return static_cast<int>(std::count(source.begin(), source.end(), '\n') + 1);
-}
-
-TSTree* parse_tree_for_source(TSTree* old_tree, const std::string& source,
-                              const std::string& path) {
-  if (source.empty()) {
-    return nullptr;
-  }
-  const TSLanguage* language = tree_sitter_language_for_path(path);
-  if (language == nullptr) {
-    language = tree_sitter_cpp_language();
-  }
-  TSParser* parser = ts_parser_new();
-  ts_parser_set_language(parser, language);
-  TSTree* reparsed =
-      ts_parser_parse_string(parser, old_tree, source.c_str(), static_cast<uint32_t>(source.size()));
-  ts_parser_delete(parser);
-  return reparsed;
-}
-
-}  // namespace
-
 const std::vector<LineHighlights>* TreeSitterService::highlights_for(const std::string& path,
                                                                         const std::string& source) {
   const std::string canonical = normalize_editor_source(source);
@@ -271,9 +288,9 @@ std::optional<LineHighlights> TreeSitterService::highlights_for_editing_line(
     return std::nullopt;
   }
   const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
-  LineHighlights result = highlights_for_line(
+  LineHighlights result = highlights_for_line_maybe_xml(
       root, doc->source, line_0,
-      lang == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang);
+      lang == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang, path);
   const bool line_has_text = [&]() {
     std::size_t pos = 0;
     for (int row = 0; row < line_0; ++row) {
@@ -296,9 +313,9 @@ std::optional<LineHighlights> TreeSitterService::highlights_for_editing_line(
     if (fresh_tree != nullptr) {
       const TSNode fresh_root = ts_tree_root_node(fresh_tree);
       if (!ts_node_is_null(fresh_root)) {
-        result = highlights_for_line(
+        result = highlights_for_line_maybe_xml(
             fresh_root, doc->source, line_0,
-            lang == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang);
+            lang == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang, path);
         did_full_reparse = true;
       }
       ts_tree_delete(fresh_tree);
@@ -584,6 +601,35 @@ bool TreeSitterService::cursor_in_code(const std::string& path, const std::strin
   if (ts_node_is_null(root)) {
     return true;
   }
+  const std::string canonical = normalize_editor_source(source);
+  if (uses_xml_fragment_wrap(tree_sitter_lang_kind_for_path(path))) {
+    const XmlFragmentWrap wrap = xml_wrap_fragment_source(canonical);
+    // Convert editor (line,col) into wrapped-buffer coordinates for tree queries.
+    uint32_t byte = 0;
+    uint32_t at_row = 0;
+    while (byte < canonical.size() && static_cast<int>(at_row) < line) {
+      if (canonical[byte] == '\n') {
+        ++at_row;
+      }
+      ++byte;
+    }
+    byte += static_cast<uint32_t>(std::max(0, col));
+    if (byte > canonical.size()) {
+      byte = static_cast<uint32_t>(canonical.size());
+    }
+    const uint32_t wrapped_byte = xml_original_byte_to_wrapped(wrap, byte);
+    uint32_t wrow = 0;
+    uint32_t wcol = 0;
+    uint32_t line_begin = 0;
+    for (uint32_t i = 0; i < wrapped_byte && i < wrap.wrapped.size(); ++i) {
+      if (wrap.wrapped[i] == '\n') {
+        ++wrow;
+        line_begin = i + 1;
+      }
+    }
+    wcol = wrapped_byte >= line_begin ? wrapped_byte - line_begin : 0;
+    return cursor_in_code_node(root, wrap.wrapped, static_cast<int>(wrow), static_cast<int>(wcol));
+  }
   return cursor_in_code_node(root, source, line, col);
 }
 
@@ -592,6 +638,10 @@ std::vector<CompletionItem> TreeSitterService::local_completions_at(
   DocumentPtr doc = document_for(params.path, params.text);
   if (doc == nullptr || doc->tree == nullptr || !doc->parse_ready) {
     return {};
+  }
+  if (uses_xml_fragment_wrap(tree_sitter_lang_kind_for_path(params.path))) {
+    const XmlFragmentWrap wrap = xml_wrap_fragment_source(doc->source);
+    return tuide::local_completions_at(ts_tree_root_node(doc->tree), wrap.wrapped, params);
   }
   return tuide::local_completions_at(ts_tree_root_node(doc->tree), doc->source, params);
 }
@@ -678,7 +728,12 @@ SourceLocation TreeSitterService::definition_at(const NavigationParams& params) 
   if (symbols.empty()) {
     DocumentPtr doc = document_for(params.path, params.text);
     if (doc != nullptr && doc->parse_ready && doc->tree != nullptr && doc->source == normalize_editor_source(params.text)) {
-      symbols = extract_symbols_from_tree(ts_tree_root_node(doc->tree), doc->source, params.path);
+      if (uses_xml_fragment_wrap(tree_sitter_lang_kind_for_path(params.path))) {
+        const XmlFragmentWrap wrap = xml_wrap_fragment_source(doc->source);
+        symbols = extract_symbols_from_tree(ts_tree_root_node(doc->tree), wrap.wrapped, params.path);
+      } else {
+        symbols = extract_symbols_from_tree(ts_tree_root_node(doc->tree), doc->source, params.path);
+      }
     }
   }
 

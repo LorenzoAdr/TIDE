@@ -1,0 +1,165 @@
+{
+  "agujas": [
+    "lsp",
+    "editor",
+    "ui",
+    "build",
+    "terminal"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error de compilación",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para crear marcadores en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola inferior para alimentar los diagnostics",
+      "keep": [
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "lsp",
+        "editor",
+        "ui",
+        "build",
+        "terminal"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla conecta errores de compilación (lsp/build) con indicadores visuales en el margen del editor (editor/ui), pasando por la consola (terminal)"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "lsp",
+        "editor"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores de compilación en el margen del editor; lsp tiene diagnostics y editor tiene el buffer; quiero ver qué stems viven ahí"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error de compilación",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error de compilación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnostics"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide el efecto visual (línea roja) en el editor; el pack une editor_render con diagnosticerror y lsp/diagnostics"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para crear marcadores en el margen del editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para crear marcadores en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnostics"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 encontró el pintor del margen; ahora busco el origen que lee la consola y alimenta ese pintor"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola inferior para alimentar los diagnostics",
+      "consultas": [
+        "dónde se extraen los errores de compilación del texto de la consola inferior para alimentar los diagnostics"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 cerró el mecanismo de pintar el marcador, pero no cómo se obtienen los errores de la consola. Necesito encontrar el parser o extractor que lee la salida de compilación y genera los diagnostics."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo está completo: los errores de compilación se leen de la consola, se convierten en diagnostics y se leen en line gutter marker editor panel cpp para pintar la línea roja en el margen izquierdo del editor"
+    }
+  ],
+  "why": "el mecanismo está completo: los errores de compilación se leen de la consola, se convierten en diagnostics y se leen en line gutter marker editor panel cpp para pintar la línea roja en el margen izquierdo del editor",
+  "zooms": [
+    "lsp",
+    "editor"
+  ]
+}

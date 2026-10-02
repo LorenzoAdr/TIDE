@@ -1,0 +1,19 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have already performed three investigations:
+1.  **T1**: Where is the detection of LSP crash/non-response to trigger restart? -> No object found.
+2.  **T2**: Where is the LSP restarted when it crashes? -> Found restart logic for config changes, missing installs, build env changes, but *no* heartbeat/timeout/dead process detection.
+3.  **T3**: Where is the LSP process checked for liveness? -> No object found.
+
+The "Atlas" (M*) shows:
+-   M5 (application): `restart lsp for workspace`, `schedule debounced lsp restart`, `pending lsp restart`, `last lsp environment fingerprint`.
+-   M1 (lsp missing prompt): `lsp missing prompt`.
+-   M2/M4 (lsp symbol provider): `configure bash language server`, `join fortran startup thread`.
+-   M6/M3 (embedding backend/llama backend): related to LLM servers, not LSP.
+
+The previous closed investigations (T2 specifically) explicitly state: "no encontré la lógica
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el código revisado no contiene mecanismo de detección automática de caída o no-respuesta del servidor LSP (heartbeat, timeout, verificación de proceso). los reinicios existentes se disparan por cambios de configuración, instalación de toolpacks o entorno de build, no por fallo del servidor. el claim se refuta: la funcionalidad no existe."
+}

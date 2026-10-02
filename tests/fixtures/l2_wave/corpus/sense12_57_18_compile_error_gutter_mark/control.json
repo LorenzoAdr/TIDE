@@ -1,0 +1,134 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior para extraer la línea del error",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": []
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se parsea la salida de la consola para extraer errores de compilación y su línea",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) y M11 (binary symbols panel) son los candidatos más fuertes para el mecanismo de decoración y detección de errores. Necesito ver si M3 maneja decoraciones de margen y si M11 es el único que escanea la consola."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos polos distintos: la fuente (consola) y el efecto visual (margen). hay que localizar cada uno por separado y luego verificar si ya existe un camino o si falta construirlo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el hijo cerró la fase B con 'no hay objeto'; el mecanismo de lectura de errores de compilación no existe en el barrio explorado. salto a la siguiente caza o reviso el plan"
+    },
+    {
+      "consulta": "dónde se parsea la salida de la consola para extraer errores de compilación y su línea",
+      "consultas": [
+        "dónde se parsea la salida de la consola para extraer errores de compilación y su línea"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "console parser"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 cerró sin objeto en el barrio de depuración; el pack sugiere console parser como extra. Busco el mecanismo que lee la consola para extraer la línea del error."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de dibujo existe (line gutter marker), pero no hay objeto que lea ni parsee errores de compilación de la consola; el sistema usa dap backend para depuración, no para parsing de compilación"
+    }
+  ],
+  "why": "el mecanismo de dibujo existe (line gutter marker), pero no hay objeto que lea ni parsee errores de compilación de la consola; el sistema usa dap backend para depuración, no para parsing de compilación",
+  "zooms": []
+}

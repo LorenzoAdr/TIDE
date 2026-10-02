@@ -1,0 +1,16 @@
+The user wants to know if the application automatically detects when the LSP (Language Server Protocol) process crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed works (T1, T2, T3) that investigated this.
+T1 found: `wait until healthy`, `start completion server`, `health ok`, `ensure completion server`.
+T2 found: `ensure ready`, `ensure backend ready`, `health ok`, `wait until healthy`, `run level1 async`, `handle route`, `start completion server`, `ensure completion server`.
+T3 found: The mechanism is in `ensure completion server` invoked by `run level1 async` and L2 routes. Health detection happens in `start completion server` via `health ok`. If it fails or the stamp changes, it restarts.
+
+The user's claim is: "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada" (I need that if the LSP server process crashes or stops responding, the application automatically detects it and restarts it without the user having to do anything).
+
+T
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de detección y reinicio automático está confirmado: se verifica la salud en start completion server vía health ok y se reinicia si falla o cambia el stamp, todo orquestado por ensure completion server sin intervención del usuario"
+}

@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"la caza anterior refuta el claim: no existe captura de Escape ni clic fuera para cancelar; la cancelación es solo textual. no hay objeto que cazar."}

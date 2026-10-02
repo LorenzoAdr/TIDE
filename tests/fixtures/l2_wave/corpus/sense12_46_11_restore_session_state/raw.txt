@@ -1,0 +1,18 @@
+The user wants to restore the editor state when reopening a project: cursor position, open files, and visible/closed side panels.
+I have a plan with 3 phases:
+1. [en_curso] C locator: dónde se guardan los archivos abiertos al cerrar el proyecto
+2. [pendiente] D locator: dónde se restauran los archivos abiertos al abrir el proyecto
+3. [pendiente] Q puente: hay camino guardar y restaurar los archivos abiertos (need C D)
+
+Wait, the plan says:
+1. [en_curso] C locator: dónde se guardan los archivos abiertos al cerrar el proyecto
+2. [pendiente] D locator: dónde se restauran los archivos abiertos al abrir el proyecto
+3. [pendiente] Q puente: hay camino guardar y restaurar los archivos abiertos (need C D)
+
+But the previous work T4 was exactly phase 1: "dónde se guardan los archivos abiertos al cerrar el proyecto".
+T4 closed with: `leído: save workspace session, restore workspace session, flush active tab, open file`
+And `Abierto: run custom event drain, handle navigation`
+
+So phase 1
+---- content ----
+{"action":"control_v1","do":"pasar","why":"T4 cerró la fase C con los métodos de guardado de sesión de trabajo"}

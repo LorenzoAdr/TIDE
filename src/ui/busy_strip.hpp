@@ -25,6 +25,10 @@ enum class BusyActivity : std::uint8_t {
   CallHierarchy,
   FindReferences,
   ProjectSearch,
+  ProjectReplace,
+  LspFormat,
+  LspNavigate,
+  LspRename,
   GitPush,
   GitPull,
   OutlinePending,
@@ -55,6 +59,10 @@ struct BusyStripState {
   bool box_valid = false;
   int spinner_frame = 0;
   int64_t last_spinner_ms = 0;
+  // Steady-clock ms when current activity started (for elapsed label on AI thinking).
+  int64_t activity_started_ms = 0;
+  // Label without " · Ns" suffix; ticker rebuilds `label` from this.
+  std::string label_base;
   std::mutex paint_mutex;
   std::atomic<bool> ticker_running{false};
   std::atomic<bool> reassert_posted{false};

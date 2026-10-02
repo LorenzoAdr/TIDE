@@ -1,0 +1,15 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+
+I have three completed works:
+1.  **T1**: Searched for detection of LSP crash/non-response to trigger restart.
+    *   Result: `on transport reader eof` only cleans state (`ready false`, `waitpid`), doesn't call `start` or restart. `stop` is manual. No automatic restart trigger found here.
+2.  **T2**: Searched for where LSP restart is programmed after detecting a crash.
+    *   Result: Found `lsp client cpp`, `restart lsp for workspace`.
+3.  **T3**: Searched for where `schedule debounced lsp restart` is called when the server stops responding.
+    *   Result: Found `schedule debounced lsp restart`, `restart lsp for workspace`.
+
+Analysis:
+T1 explicitly states that the detection mechanism (`on transport reader eof`) does *not* trigger a restart. It just cleans up.
+T2 and T3 found the restart logic (`restart lsp for workspace`, `schedule debounced lsp restart`), but T1 says the trigger isn't connected to the crash
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de detección (transport reader eof) no dispara el reinicio; solo limpia estado. el reinicio existe pero no se activa automáticamente ante caída"}

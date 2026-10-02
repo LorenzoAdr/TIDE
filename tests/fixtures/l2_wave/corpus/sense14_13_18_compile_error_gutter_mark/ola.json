@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "los marcadores de diagnóstico ya existen en el margen (line diagnostic marker), pero no se pinta la línea roja porque el gutter usa selectores de carácter ASCII, no lógica de color; el mecanismo de pintura no está en el pack"
+}

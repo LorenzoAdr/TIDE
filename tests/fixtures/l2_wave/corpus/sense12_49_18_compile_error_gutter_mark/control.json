@@ -1,0 +1,134 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:clear_editor_line_paint_caches"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+        ],
+        "consulta": "dónde se parsean los errores de compilación del texto de la consola inferior",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino parsear los errores de la consola y dibujar la línea roja en el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M11",
+        "M7"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M11 menciona 'scan shell output for linker errors', lo cual es el origen de los errores de compilación. M7 es el panel de consola. Necesito ver si M11 ya tiene lógica para marcar el editor o si solo escanea, y cómo M7 expone el texto de error."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos fenómenos distintos (parseo de consola y renderizado en editor); se cazan por separado y luego se une el arco"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack confirma sin camino entre parsear errores y dibujar la línea roja; la funcionalidad no existe"
+    }
+  ],
+  "why": "el pack confirma sin camino entre parsear errores y dibujar la línea roja; la funcionalidad no existe",
+  "zooms": []
+}

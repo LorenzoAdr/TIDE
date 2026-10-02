@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "la posición del cursor se restaura en load working lines from disk y reset to single cursor; los archivos abiertos se restauran en reopen workspace documents iterando workspace tabs; la visibilidad de paneles se restaura en load working lines from disk y reopen workspace documents"
+}

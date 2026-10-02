@@ -1,0 +1,17 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Asked where the crash/unresponsiveness is detected to trigger restart. Found `restart lsp for workspace`, `schedule debounced lsp restart`, `health ok`.
+2.  **T2**: Asked where the server is restarted when missing/crashed. Found `ensure ready`, `start server`.
+3.  **T3**: Asked where health is checked to decide restart. Found `health ok` (HTTP GET), `wait until healthy` (loop with timeout, `waitpid` detects termination). T3 explicitly states: "No hay lógica explícita de reiniciar en estos cuerpos, sino de verificar y reportar estado" (There is no explicit restart logic in these bodies, only verification and status reporting).
+
+The "Atlas" (M*) shows:
+-   M5 (application): `pending lsp restart`, `last lsp environment fingerprint`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+-   M6 (embedding backend): `start server`, `ensure completion server`.
+-   M3
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "la aplicación detecta la caída del servidor de lenguaje mediante waitpid y la falta de respuesta mediante health ok en un bucle con timeout (wait until healthy). Sin embargo, no se ha encontrado lógica explícita de reinicio automático en estos cuerpos; solo verificación y reporte de estado. El mecanismo de reinicio automático no está presente en el código leído."
+}

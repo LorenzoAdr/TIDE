@@ -1,0 +1,171 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.hpp",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "hay camino cancelar la generación y limpiar el archivo a medias",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/console_panel.cpp:handle_ai_console_keys",
+          "src/ai/ai_controller.hpp",
+          "src/ai/ai_controller.cpp:cancel_current"
+        ],
+        "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [
+          "src/ai/ai_controller.cpp:cancel_current",
+          "src/ai/ai_controller.cpp:clear_pending_insert",
+          "src/ai/ai_controller.cpp:cancel_all",
+          "src/ai/ai_controller.cpp:cancel_level1",
+          "src/ai/ai_controller.cpp:begin_insert_at",
+          "src/ai/ai_controller.cpp:handle_user_input"
+        ],
+        "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino cancelar la generación y limpiar el archivo a medias",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se limpia el archivo al cancelar la generación de IA",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 1,
+      "why": "dos polos distintos: el trigger (Escape/clic) y el efecto (limpieza del archivo). Se cazan por separado y se une el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide dos efectos: cancelar la generación y limpiar el archivo. Se cazan por separado y se une el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de la fase A: la pulsación de Escape se captura en handle ai console keys y cancela la generación activa vía cancel current/cancel all"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado de T2 afirma el mecanismo de limpieza del archivo a medias al cancelar la generación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de cancelación limpia el archivo a medias: clear pending insert resetea el flag y el ancla, evitando la inserción del texto pendiente en el buffer del editor"
+    }
+  ],
+  "why": "el mecanismo de cancelación limpia el archivo a medias: clear pending insert resetea el flag y el ancla, evitando la inserción del texto pendiente en el buffer del editor",
+  "zooms": []
+}

@@ -1,0 +1,19 @@
+The user wants to cancel AI code generation when pressing Escape or clicking outside, ensuring a clean cancellation without leaving the file half-written.
+
+I have an Atlas of explorers.
+M2 (ai trace) was explored in Trabajo 1. The result was "no object found" for capturing Escape key to cancel generation. It found `ai trace escape` which is JSON escaping, not a key handler.
+The user's anchor mentions two triggers: "pulsa Escape" (press Escape) or "hace clic fuera" (click outside).
+Trabajo 1 failed to find the Escape handler.
+The prompt explicitly
+---- content ----
+```json
+{
+  "action": "control_v1",
+  "do": "explorar",
+  "consulta": "dónde se captura el clic fuera para cancelar la generación de la IA",
+  "why": "el ancla nombra dos disparos; el de Escape falló, tiro al de clic fuera",
+  "evita": [
+    "tecla Escape"
+  ]
+}
+```

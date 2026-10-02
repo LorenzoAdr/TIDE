@@ -1,0 +1,50 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se guarda la posición del cursor al cerrar el proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se restaura la posición del cursor al abrir el proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales",
+      "evita": [],
+      "hacia": [],
+      "id": "C",
+      "kind": "locator",
+      "need": [],
+      "status": "pendiente"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay un mecanismo común que orquesta la persistencia de todo el estado del editor",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B",
+        "C"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

@@ -6,15 +6,16 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-namespace {
-
+#if defined(__linux__)
+#include <sys/prctl.h>
 #ifndef PR_SET_PTRACER
 #define PR_SET_PTRACER 0x59616d61
 #endif
+#endif
+
+namespace {
 
 #pragma pack(push, 1)
 struct HeartbeatPacket {
@@ -35,10 +36,12 @@ struct SensorPacket {
 constexpr uint16_t kUdpPort = 5555;
 
 void allow_external_debugger() {
+#if defined(__linux__)
 	if (prctl(PR_SET_PTRACER, -1) != 0) {
 		std::cerr << "aviso: no se pudo permitir attach externo (prctl): " << std::strerror(errno)
 		          << "\n";
 	}
+#endif
 }
 
 int create_udp_socket() {

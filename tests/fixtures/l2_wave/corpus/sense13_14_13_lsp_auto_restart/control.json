@@ -1,0 +1,162 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:status_text",
+        "src/ai/llama_backend.cpp:ready",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/llama_backend.cpp:ensure_completion_server",
+        "src/ai/llama_backend.cpp:health_ok"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se programa el reinicio diferido del servidor de lenguaje cuando se detecta una caída",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o deja de responder y se dispara el reinicio",
+      "keep": [
+        "M2",
+        "M4"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:completion_wait_timeout_ms",
+        "src/lsp/lsp_client.cpp:parse_wait_timeout_ms",
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo de reinicio; busco el disparador de la detección"
+    },
+    {
+      "consulta": "dónde se programa el reinicio diferido del servidor de lenguaje cuando se detecta una caída",
+      "consultas": [
+        "dónde se programa el reinicio diferido del servidor de lenguaje cuando se detecta una caída"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio diferido"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "M5 tiene schedule debounced lsp restart; busco el disparador de ese reinicio"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "health check"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 y T2 no encontraron el disparo exacto. Busco el mecanismo de detección de fallo (health check o salida del proceso) que active el reinicio."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "start server"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 no encontró el disparo en los stems leídos; el pack apunta a 'start server' como extra de T1. Un hijo caza el mecanismo de detección en ese barrio."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o deja de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o deja de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "health ok"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 leyó 'health ok' y 'ensure completion server' pero no cerró el mapeo de detección. T2 confirmó el reinicio diferido. Necesito encontrar el disparador de la detección para cerrar el claim de 'detectar automáticamente'. T1=>T2 sin camino indica que falta el eslabón de detección."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de detección automática de caída o no-respuesta del LSP no existe en el código leído; solo hay reinicio manual o por EOF, sin health check ni timeout de inactividad que dispare el reinicio"
+    }
+  ],
+  "why": "el mecanismo de detección automática de caída o no-respuesta del LSP no existe en el código leído; solo hay reinicio manual o por EOF, sin health check ni timeout de inactividad que dispare el reinicio",
+  "zooms": []
+}

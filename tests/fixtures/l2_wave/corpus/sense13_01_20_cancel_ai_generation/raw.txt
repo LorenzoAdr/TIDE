@@ -1,0 +1,10 @@
+The user wants to cancel AI code generation by pressing Escape or clicking outside, cleanly without leaving the file half-written.
+The previous work (T1) looked for the cancellation mechanism triggered by Escape or click outside.
+T1's conclusion: "no encontré el mecanismo de cancelación por Escape o clic fuera; lo leído muestra que la cancelación se dispara únicamente por texto cancel, cancel, cancelar en handle user input y no hay rama de eventos de teclado mouse en el sistema de IA".
+T1 also opened: `handle console panel mouse`, `handle key event`.
+
+The anchor claim is: "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias".
+T1 refuted the existence of the mechanism for Escape/click outside in the current codebase ("no hay rama de eventos de teclado mouse en el sistema de IA").
+However, the user's request implies they *want* this behavior, or they are reporting a bug where it doesn't work, or they want to implement it. The prompt says "quiero que se cancele...". This is a feature request or a bug report expecting it to work.
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide un comportamiento que no existe en el sistema actual; T1 confirmó que no hay rama de eventos de teclado ni mouse para cancelar la IA, solo texto. el claim se refuta: no hay mecanismo que cancelar por Escape o clic fuera"}

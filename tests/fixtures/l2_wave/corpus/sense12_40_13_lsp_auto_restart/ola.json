@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 y T2 confirman que la aplicación detecta la caída del LSP (notify lsp status) y lo reinicia automáticamente (restart lsp for workspace, schedule debounced lsp restart) sin intervención del usuario."
+}

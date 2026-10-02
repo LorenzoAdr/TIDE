@@ -1,0 +1,251 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se revierte el contenido del archivo al cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 4,
+      "proposes": 7,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:busy",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/level2_session.cpp:rollback_pending",
+        "src/ai/ai_controller.cpp:snapshot_lines"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se revierte el contenido del archivo al cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se captura el clic fuera del editor para cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino capturar el clic fuera y revertir el contenido del archivo",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se limpia el archivo o se detiene la inserción de texto al cancelar la IA",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 1,
+      "why": "el ancla pide dos cosas distintas: el disparo (Escape/clic) y el efecto (limpieza del archivo). M2 huele el Escape, M8 huele la cancelación/inserción. Separar permite cazar el trigger y el efecto por separado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "dos polos distintos: el trigger (Escape/clic) y el efecto (limpieza del archivo). Se cazan por separado y luego se une el arco."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de la fase A: se captura Escape en handle ai console keys y cancela vía cancel current / clear pending insert"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado de T2 solo enumera nombres leídos sin afirmar dónde se limpia el archivo a medias; salto a la siguiente caza para buscar el mecanismo de limpieza"
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "consultas": [
+        "dónde se limpia el archivo a medias al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancel current"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 leyó los nombres de cancelación pero no el efecto de limpieza del archivo; necesito ver si cancel current o clear pending insert limpian el buffer o el archivo antes de abortar"
+    },
+    {
+      "consulta": "hay camino limpiar el archivo y capturar el clic fuera",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 y T3 se duplicaron y no avanzaron. El ancla tiene dos polos: limpieza de archivo y clic fuera. Se rompen en dos cazas independientes y se compone el puente."
+    },
+    {
+      "consulta": "dónde se revierte el contenido del archivo al cancelar la generación de la IA",
+      "consultas": [
+        "dónde se revierte el contenido del archivo al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "cancel current"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "T2 y T3 nombran los símbolos de cancelación pero no el mecanismo de limpieza del archivo. Necesito ver si cancel current o clear pending insert restauran el estado anterior del buffer o simplemente detienen la escritura."
+    },
+    {
+      "consulta": "hay camino limpiar el archivo y cancelar la generación",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "T2 y T3 fallaron en limpiar el archivo; T1 no encontró clic fuera. Necesito dos cazas independientes para cerrar el claim."
+    },
+    {
+      "consulta": "hay camino limpiar el archivo y capturar el clic fuera",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "T2 y T3 se repitieron; necesito confirmar la limpieza del archivo y la captura del clic fuera por separado antes de unirlos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 10,
+      "why": "el ancla pide dos mecanismos distintos: limpieza de archivo y captura de clic fuera. T1 cerró Escape pero no clic. T2/T3 nombraron cancelación pero no la reversión de contenido. Se atomiza para cazar cada polo y luego unir."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

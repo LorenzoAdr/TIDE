@@ -1,0 +1,137 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/app_settings.hpp",
+        "src/app/app_settings.hpp:WorkspaceSession",
+        "src/app/workspace_model.hpp:Tab",
+        "tab"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor del editor al cerrar y abrir el proyecto",
+      "keep": [
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/editor/editor_state.cpp:reset_to_single_cursor",
+        "src/app/app_settings.hpp:WorkspaceSession"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 1,
+      "why": "el ancla pide recordar cursor, archivos y paneles; el pack tiene editor state, editor panel y file picker; necesito localizar la persistencia de cada uno"
+    },
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor y los archivos abiertos al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M1 huele el estado del editor; necesito ver si persiste el cursor y los archivos abiertos para confirmar o refutar el mecanismo de restauración"
+    },
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor del editor al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor del editor al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 confirmó que Workspace Session no guarda el cursor; M1 huele editor state CursorPos; busco si hay otro mecanismo de persistencia para el cursor"
+    },
+    {
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar paneles laterales; T1/T2 cubren archivos y cursor (negado); falta el estado de los paneles"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el ancla se confirma parcialmente: se recuerdan los archivos abiertos (Workspace Session), pero se refuta la posición del cursor (no se serializa en Tab ni Workspace Session) y la visibilidad de paneles laterales (no hay objeto de persistencia)."
+    }
+  ],
+  "why": "el ancla se confirma parcialmente: se recuerdan los archivos abiertos (Workspace Session), pero se refuta la posición del cursor (no se serializa en Tab ni Workspace Session) y la visibilidad de paneles laterales (no hay objeto de persistencia).",
+  "zooms": []
+}

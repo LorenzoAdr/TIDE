@@ -1,0 +1,13 @@
+The user wants to mark compilation errors from the console with a red line in the editor margin.
+I have a plan:
+1. [en_curso] A locator: dónde se leen los errores de compilación de la consola para añadirlos al snapshot de marcas
+2. [pendiente] B locator: dónde se construye el snapshot de marcas para el margen del editor
+3. [pendiente] P puente: hay camino leer los errores de compilación y construir el snapshot de marcas (need A B)
+
+T4 just failed to find where compilation errors are read to add to the snapshot. It
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "el Cerrado niega este pico; salto a la siguiente caza"
+}

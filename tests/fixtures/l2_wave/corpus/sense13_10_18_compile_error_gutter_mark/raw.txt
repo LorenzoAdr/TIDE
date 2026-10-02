@@ -1,0 +1,17 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found the mechanism for margin decorations: `line gutter marker` reads from `diagnostics for editor line` which is populated by `push active file diagnostics from cache` and `apply lsp diagnostics to panel`. This is the LSP path.
+T2 looked for scanning the bottom console output to extract compilation errors and found "no object".
+
+The user's request implies that currently, errors in the console are *not* being marked in the editor margin, or at least not the ones the user sees in the console. The user wants to bridge the gap between "console output" and "editor margin decoration".
+
+T2 failed to find a scanner for the console. This suggests there isn't a built-in mechanism that parses the console text to generate diagnostics for the editor.
+However, the user wants this feature.
+If T2 found "no object", it means there is no existing code that parses the console to create diagnostics.
+The user's request is "quiero que...". This sounds like a feature request or a configuration issue, but in the context of this investigation, I need
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "T1 confirmó el mecanismo de decoración (margen rojo) y su fuente (diagnósticos LSP). T2 refutó la existencia de un escáner de consola que genere esos diagnósticos. El pack no une consola con margen. El claim de que existe un camino o mecanismo para marcar errores de consola en el margen queda refutado: no hay objeto que lo haga."
+}

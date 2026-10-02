@@ -1,0 +1,183 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape en el trace; necesito el locus que decide el OFF del flujo de generación"
+    },
+    {
+      "consulta": "dónde se invoca la cancelación del agente de IA al perder el foco o pulsar Escape",
+      "consultas": [
+        "dónde se invoca la cancelación del agente de IA al perder el foco o pulsar Escape"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 descartó el handler de UI; el pack une M3 (session) y M8 (controller) con cancel level1. Busco el puente que dispara la cancelación lógica desde la interacción del usuario."
+    },
+    {
+      "consulta": "dónde se invoca la cancelación del agente de IA al perder el foco o pulsar Escape",
+      "consultas": [
+        "dónde se invoca la cancelación del agente de IA al perder el foco o pulsar Escape"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "la captura de UI falló; busco el disparador de cancelación en el controlador (M8) que responde a la interacción del usuario"
+    },
+    {
+      "consulta": "dónde se invoca la cancelación del agente de IA al perder el foco o pulsar Escape",
+      "consultas": [
+        "dónde se invoca la cancelación del agente de IA al perder el foco o pulsar Escape"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "la captura de UI falló; busco el disparador de cancelación en el controlador (M8) que responde a la interacción del usuario"
+    },
+    {
+      "consulta": "dónde se inicia la cancelación de la generación de código al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se inicia la cancelación de la generación de código al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 5,
+      "why": "el trigger de UI falló; busco el efecto directo en el controlador de IA (M8) que gestiona la cancelación, saltando la capa de captura de eventos"
+    },
+    {
+      "consulta": "dónde se invoca la cancelación de la generación de IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se invoca la cancelación de la generación de IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 descartó el handler de UI en M2; el pack une M3 (session) y M8 (controller cancel). Busco el puente que dispara la cancelación lógica desde la interacción."
+    },
+    {
+      "consulta": "dónde se inicia la cancelación de la generación de IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se inicia la cancelación de la generación de IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 descartó el handler de UI en M2; el pack une M3 (session) y M8 (controller cancel). Busco el puente que dispara la cancelación desde la interacción del usuario."
+    },
+    {
+      "consulta": "dónde se inicia la cancelación de la generación de IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se inicia la cancelación de la generación de IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 8,
+      "why": "T1 descartó el barrio de traces; el pack une M3 (session) y M8 (controller) con cancelación; busco el trigger real en la sesión o el controlador"
+    },
+    {
+      "consulta": "dónde se invoca la cancelación de la generación de IA al detectar Escape o clic fuera",
+      "consultas": [
+        "dónde se invoca la cancelación de la generación de IA al detectar Escape o clic fuera"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 9,
+      "why": "T1 descartó el handler de UI; el pack une M3 (session) y M8 (controller) con cancel; busco el puente que dispara la cancelación lógica"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código de la IA para limpiar el archivo",
+      "consultas": [
+        "dónde se cancela la generación de código de la IA para limpiar el archivo"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 10,
+      "why": "la captura de UI falló; el pack muestra M8 (ai controller) con cancel level1 y clear ai session; busco el mecanismo de limpieza en el controlador"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

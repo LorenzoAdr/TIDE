@@ -1,0 +1,7 @@
+The user wants to ensure that if the LSP server process crashes or becomes unresponsive, the application automatically detects this and restarts it without user intervention.
+
+I have already investigated:
+1.  **T1**: "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio" -> Result: Empty/No object found.
+2.  **T2**: "dónde se reinicia el servidor LSP de forma automática tras detectar que se ha caído" -> Result: Found `restart lsp for workspace`, `schedule debounced lsp restart`, `
+---- content ----
+{"action":"control_v1","do":"explorar","consulta":"dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio","evita":["cambio de entorno"],"why":"T1 falló vacío; T2 solo cubre el disparador de entorno. Falta el detector de caída del proceso (crash/hang) para completar el claim del usuario."}

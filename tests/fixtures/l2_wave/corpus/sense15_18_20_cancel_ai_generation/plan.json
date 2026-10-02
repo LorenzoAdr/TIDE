@@ -1,0 +1,30 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "evita": [],
+      "hacia": [
+        "ai trace"
+      ],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se limpia el archivo cuando se cancela la generación",
+      "evita": [],
+      "hacia": [
+        "ai controller"
+      ],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    }
+  ],
+  "modo": "romper"
+}

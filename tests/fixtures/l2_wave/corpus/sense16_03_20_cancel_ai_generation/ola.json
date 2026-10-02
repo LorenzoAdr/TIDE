@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "no hay captura de Escape ni clic fuera para cancelar la generación de la IA; lo leído son escapes de strings y clears de hover UI, sin invocación a cancel level1 ni lógica de cancelación"
+}

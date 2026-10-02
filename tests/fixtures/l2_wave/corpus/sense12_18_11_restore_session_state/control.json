@@ -1,0 +1,146 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": false,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [],
+  "jobs_run": 0,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M2",
+        "M5"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide restaurar estado (cursor, archivos, paneles); M1 (editor state), M2 (main layout) y M5 (editor panel) son los barrios candidatos para la persistencia y restauración de la UI"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor, archivos y paneles. Son 4 estados distintos (cursor, paneles) con 2 acciones (guardar/restaurar). Atomizo para que cada hijo cierre un polo sin depender del resto. El puente verifica si el mecanismo de persistencia une estos datos."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar un archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla pide recordar posición; el pack tiene M1 (editor state CursorPos) pero no el ciclo de persistencia. Necesito localizar el guardado y la restauración por separado para luego unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide recordar cursor, archivos y paneles. El pack tiene pistas de editor state (M1) y layout (M2), pero no el mecanismo de persistencia. Se rompen en 4 locators independientes (guardar/restaurar cursor, guardar/restaurar paneles) y un puente para verificar la coherencia de la sesión."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar un archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla pide recordar posición; el pack tiene M1 (editor state CursorPos) pero no el ciclo de persistencia. Necesito ver si se guarda y si se lee, y si están unidos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 6,
+      "why": "el ancla pide recordar cursor y paneles; son dos mecanismos distintos (editor vs layout) que deben leerse por separado para confirmar si el estado persiste y se recupera"
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar un archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla pide recordar posición; el pack tiene M1 (editor state CursorPos) pero no el ciclo de persistencia. Necesito ver si se guarda y si se lee, y si están unidos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 8,
+      "why": "el ancla pide recordar cursor, archivos y paneles. Son 4 estados distintos (cursor, paneles) con 2 acciones (guardar/restaurar). Atomizo para que cada hijo cierre un polo sin depender del otro. El puente verifica si el mecanismo de sesión une estos puntos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 9,
+      "why": "el ancla pide recordar cursor, archivos y paneles. Son 4 estados distintos (cursor guardar/restaurar, paneles guardar/restaurar). El pack tiene M1 (editor state) y M5 (editor panel) pero no el ciclo de sesión. Necesito localizar los 4 puntos de anclaje para ver si comparten un sistema de persistencia o son independientes."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor al cerrar un archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 10,
+      "why": "el ancla pide recordar posición; el pack tiene M1 (editor state CursorPos) pero no el ciclo de persistencia. Necesito localizar el guardado y la restauración por separado para ver si están unidos."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

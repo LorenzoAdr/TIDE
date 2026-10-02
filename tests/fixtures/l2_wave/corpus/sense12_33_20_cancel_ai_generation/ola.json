@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo está completo: la captura de Escape/clic fuera (T1) dispara cancel current, que decide según el estado busy (T3) y ejecuta rollback pending en level2 session para restaurar el contenido previo del archivo (T2), cumpliendo el requisito de cancelar limpiamente sin dejar el archivo a medias"
+}

@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto","hacia":["restaurar"],"why":"T4 leyó el guardado (save state); falta leer la restauración (load state) para cerrar el polo de paneles. El pack apunta a main layout hpp."}

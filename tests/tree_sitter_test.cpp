@@ -2,6 +2,9 @@
 #include "parser/tree_sitter_locals.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "parser/tree_sitter_symbols.hpp"
+#include "parser/tree_sitter_xml_wrap.hpp"
+#include "parser/tree_sitter_highlight.hpp"
+#include "parser/tree_sitter_language.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -19,6 +22,10 @@
 #include "editor/editor_folds.hpp"
 #include "editor/editor_state.hpp"
 #include "editor/text_ops.hpp"
+
+extern "C" {
+#include <tree_sitter/api.h>
+}
 
 namespace tuide {
 namespace {
@@ -144,6 +151,59 @@ def baz():
   assert(found_nested);
   assert(bar_depth == 1);
   assert(nested_depth == 1);
+}
+
+void test_parse_lua_dotted_function_symbols() {
+  const std::string source = R"lua(
+local M = {}
+
+function M.load()
+end
+
+function M.reset()
+end
+
+function M:draw()
+end
+
+local function helper()
+end
+
+function plain()
+end
+)lua";
+  const auto symbols = wait_symbols("module.lua", source);
+  assert(!symbols.empty());
+  bool found_load = false;
+  bool found_reset = false;
+  bool found_draw = false;
+  bool found_helper = false;
+  bool found_plain = false;
+  for (const SymbolInfo& sym : symbols) {
+    // Regression: dotted/method names must not collapse to bare "M".
+    assert(sym.name != "f M");
+    if (sym.name == "f M.load") {
+      found_load = true;
+      assert(sym.kind == SymbolKind::kFunction);
+    }
+    if (sym.name == "f M.reset") {
+      found_reset = true;
+    }
+    if (sym.name == "f M:draw") {
+      found_draw = true;
+    }
+    if (sym.name == "f helper") {
+      found_helper = true;
+    }
+    if (sym.name == "f plain") {
+      found_plain = true;
+    }
+  }
+  assert(found_load);
+  assert(found_reset);
+  assert(found_draw);
+  assert(found_helper);
+  assert(found_plain);
 }
 
 void test_simple_pair() {
@@ -933,10 +993,263 @@ void test_viewport_preview_before_full_parse() {
   assert(tree_sitter_service().viewport_preview_line(path, canonical, 0) == nullptr);
 }
 
+void test_viewport_preview_xml_multi_root_no_error_spans() {
+  const std::string path = "preview_multi_root.xml";
+  const std::string source =
+      "<title>hi</title>\n"
+      "<user>u</user>\n"
+      "<body>\n"
+      "  <item id=\"1\">x</item>\n"
+      "</body>\n";
+  const std::string canonical = normalize_editor_source(source);
+  tree_sitter_service().invalidate(path);
+  assert(!tree_sitter_service().document_highlights_ready(path, canonical));
+
+  tree_sitter_service().ensure_viewport_preview(path, canonical, {0, 1, 2, 3});
+  for (int line = 0; line <= 3; ++line) {
+    const LineHighlights* hl = tree_sitter_service().viewport_preview_line(path, canonical, line);
+    assert(hl != nullptr);
+    for (const HighlightSpan& span : hl->spans) {
+      assert(span.capture != "error");
+    }
+  }
+  const LineHighlights* line0 = tree_sitter_service().viewport_preview_line(path, canonical, 0);
+  assert(line0 != nullptr);
+  bool saw_tag = false;
+  for (const HighlightSpan& span : line0->spans) {
+    if (span.capture == "tag") {
+      saw_tag = true;
+    }
+  }
+  assert(saw_tag);
+}
+
+std::string make_large_xml(int items) {
+  std::string source = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root>\n";
+  for (int i = 0; i < items; ++i) {
+    source += "  <item id=\"" + std::to_string(i) + "\" name=\"n" + std::to_string(i) + "\">\n";
+    source += "    <value key=\"k\">text " + std::to_string(i) + "</value>\n";
+    source += "    <!-- comment\n       spanning lines -->\n";
+    source += "  </item>\n";
+  }
+  source += "</root>";
+  return source;
+}
+
+bool same_line_highlights(const LineHighlights& a, const LineHighlights& b) {
+  if (a.spans.size() != b.spans.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < a.spans.size(); ++i) {
+    if (a.spans[i].start_col != b.spans[i].start_col ||
+        a.spans[i].end_col != b.spans[i].end_col || a.spans[i].capture != b.spans[i].capture) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void test_highlights_for_document_rows_matches_full_document() {
+  const std::string source = make_large_xml(40);
+  const XmlFragmentWrap wrap = xml_wrap_fragment_source(source);
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, tree_sitter_xml_language());
+  TSTree* tree = ts_parser_parse_string(parser, nullptr, wrap.wrapped.c_str(),
+                                        static_cast<uint32_t>(wrap.wrapped.size()));
+  assert(tree != nullptr);
+  const TSNode root = ts_tree_root_node(tree);
+
+  const std::vector<LineHighlights> full =
+      highlights_for_document(root, wrap.wrapped, TreeSitterLangKind::kXml);
+  const int line_count = static_cast<int>(full.size());
+  // Windows at the top, in the middle (inside a multi-line comment) and past the end.
+  const int windows[][2] = {{0, 5}, {37, 61}, {100, 100}, {line_count - 3, line_count + 50}};
+  for (const auto& window : windows) {
+    const std::vector<LineHighlights> rows = highlights_for_document_rows(
+        root, wrap.wrapped, window[0], window[1], TreeSitterLangKind::kXml);
+    const int last = std::min(window[1], line_count - 1);
+    assert(static_cast<int>(rows.size()) == last - window[0] + 1);
+    for (int row = window[0]; row <= last; ++row) {
+      assert(same_line_highlights(rows[static_cast<std::size_t>(row - window[0])],
+                                  full[static_cast<std::size_t>(row)]));
+    }
+  }
+  assert(highlights_for_document_rows(root, wrap.wrapped, line_count + 5, line_count + 9,
+                                      TreeSitterLangKind::kXml)
+             .empty());
+
+  ts_tree_delete(tree);
+  ts_parser_delete(parser);
+}
+
+void test_xml_unmap_window_matches_full_document() {
+  const std::string source = make_large_xml(40);
+  const XmlFragmentWrap wrap = xml_wrap_fragment_source(source);
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, tree_sitter_xml_language());
+  TSTree* tree = ts_parser_parse_string(parser, nullptr, wrap.wrapped.c_str(),
+                                        static_cast<uint32_t>(wrap.wrapped.size()));
+  assert(tree != nullptr);
+  const TSNode root = ts_tree_root_node(tree);
+
+  std::vector<LineHighlights> full =
+      highlights_for_document(root, wrap.wrapped, TreeSitterLangKind::kXml);
+  xml_unmap_highlights_from_wrap(&full, wrap, source);
+
+  const int first = 41;
+  const int last = 70;
+  std::vector<LineHighlights> window =
+      highlights_for_document_rows(root, wrap.wrapped, first, last, TreeSitterLangKind::kXml);
+  xml_unmap_highlights_from_wrap(&window, wrap, source, first);
+  assert(static_cast<int>(window.size()) == last - first + 1);
+  for (int row = first; row <= last; ++row) {
+    assert(same_line_highlights(window[static_cast<std::size_t>(row - first)],
+                                full[static_cast<std::size_t>(row)]));
+  }
+
+  // The single-line entry point must agree with the batch one.
+  for (int row : {0, 1, 2, 55, static_cast<int>(full.size()) - 1}) {
+    LineHighlights one =
+        highlights_for_document_rows(root, wrap.wrapped, row, row, TreeSitterLangKind::kXml)[0];
+    xml_unmap_line_highlights_from_wrap(&one, row, wrap, source);
+    assert(same_line_highlights(one, full[static_cast<std::size_t>(row)]));
+  }
+
+  // Line 0 carries the XML declaration kept outside the synthetic root: its spans must
+  // survive unmapping at their original columns.
+  bool saw_decl_span = false;
+  for (const HighlightSpan& span : full[0].spans) {
+    if (span.start_col >= 0 && span.end_col <= static_cast<int>(source.find('\n'))) {
+      saw_decl_span = true;
+    }
+  }
+  assert(saw_decl_span);
+
+  ts_tree_delete(tree);
+  ts_parser_delete(parser);
+}
+
+void test_viewport_preview_xml_far_from_top_only_visible_rows() {
+  const std::string path = "preview_large_far_rows.xml";
+  const std::string source = make_large_xml(400);
+  const std::string canonical = normalize_editor_source(source);
+  tree_sitter_service().invalidate(path);
+
+  const int first = 1200;
+  const int last = 1215;
+  std::vector<int> lines;
+  for (int line = first; line <= last; ++line) {
+    lines.push_back(line);
+  }
+  tree_sitter_service().ensure_viewport_preview(path, canonical, lines);
+
+  // Reference: the same rows from the full-document computation.
+  const XmlFragmentWrap wrap = xml_wrap_fragment_source(canonical);
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, tree_sitter_xml_language());
+  TSTree* tree = ts_parser_parse_string(parser, nullptr, wrap.wrapped.c_str(),
+                                        static_cast<uint32_t>(wrap.wrapped.size()));
+  std::vector<LineHighlights> full = highlights_for_document(
+      ts_tree_root_node(tree), wrap.wrapped, TreeSitterLangKind::kXml);
+  xml_unmap_highlights_from_wrap(&full, wrap, canonical);
+  ts_tree_delete(tree);
+  ts_parser_delete(parser);
+
+  for (int line = first; line <= last; ++line) {
+    const LineHighlights* hl = tree_sitter_service().viewport_preview_line(path, canonical, line);
+    assert(hl != nullptr);
+    assert(same_line_highlights(*hl, full[static_cast<std::size_t>(line)]));
+    for (const HighlightSpan& span : hl->spans) {
+      assert(span.capture != "error");
+    }
+  }
+  // Rows outside the requested window are not computed.
+  assert(tree_sitter_service().viewport_preview_line(path, canonical, first - 1) == nullptr);
+  assert(tree_sitter_service().viewport_preview_line(path, canonical, last + 1) == nullptr);
+}
+
 void test_normalize_editor_source_trailing_newline() {
   const std::string from_buffer = join_editor_lines({"int main() {}", "return 0;"});
   const std::string from_file = "int main() {}\nreturn 0;\n";
   assert(normalize_editor_source(from_buffer) == normalize_editor_source(from_file));
+}
+
+void test_xml_fragment_wrap_multi_root() {
+  const std::string source =
+      "<title>hi</title>\n"
+      "<user>u</user>\n"
+      "<body>\n"
+      "  <item id=\"1\">x</item>\n"
+      "</body>";
+  const XmlFragmentWrap wrap = xml_wrap_fragment_source(source);
+  assert(wrap.active());
+  assert(wrap.inject_point == 0);
+
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, tree_sitter_xml_language());
+  TSTree* bare = ts_parser_parse_string(parser, nullptr, source.c_str(),
+                                        static_cast<uint32_t>(source.size()));
+  assert(bare != nullptr);
+  assert(ts_node_has_error(ts_tree_root_node(bare)));
+  ts_tree_delete(bare);
+
+  TSTree* wrapped_tree = ts_parser_parse_string(parser, nullptr, wrap.wrapped.c_str(),
+                                                static_cast<uint32_t>(wrap.wrapped.size()));
+  assert(wrapped_tree != nullptr);
+  assert(!ts_node_has_error(ts_tree_root_node(wrapped_tree)));
+
+  std::vector<LineHighlights> highlights =
+      highlights_for_document(ts_tree_root_node(wrapped_tree), wrap.wrapped, TreeSitterLangKind::kXml);
+  xml_unmap_highlights_from_wrap(&highlights, wrap, source);
+  assert(highlights.size() == 5);
+  bool saw_tag = false;
+  bool saw_error = false;
+  for (const LineHighlights& line : highlights) {
+    for (const HighlightSpan& span : line.spans) {
+      if (span.capture == "tag") {
+        saw_tag = true;
+      }
+      if (span.capture == "error") {
+        saw_error = true;
+      }
+    }
+  }
+  assert(saw_tag);
+  assert(!saw_error);
+  // First tag name "title" should start at column 1 in the unwrapped buffer ("<title>...").
+  assert(!highlights[0].spans.empty());
+  bool title_ok = false;
+  for (const HighlightSpan& span : highlights[0].spans) {
+    if (span.capture == "tag" && span.start_col == 1 && span.end_col == 6) {
+      title_ok = true;
+    }
+  }
+  assert(title_ok);
+
+  ts_tree_delete(wrapped_tree);
+  ts_parser_delete(parser);
+}
+
+void test_xml_fragment_wrap_keeps_prolog_outside() {
+  const std::string source =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+      "<hello name=\"tuide\">\n"
+      "  <item>alpha</item>\n"
+      "</hello>";
+  const XmlFragmentWrap wrap = xml_wrap_fragment_source(source);
+  assert(wrap.active());
+  assert(wrap.inject_point > 0);
+  assert(wrap.wrapped.find("<?xml") == 0);
+  assert(wrap.wrapped.find(kXmlFragmentRootOpen) == wrap.inject_point);
+
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, tree_sitter_xml_language());
+  TSTree* tree = ts_parser_parse_string(parser, nullptr, wrap.wrapped.c_str(),
+                                        static_cast<uint32_t>(wrap.wrapped.size()));
+  assert(tree != nullptr);
+  assert(!ts_node_has_error(ts_tree_root_node(tree)));
+  ts_tree_delete(tree);
+  ts_parser_delete(parser);
 }
 
 }  // namespace
@@ -946,6 +1259,7 @@ int main() {
   tuide::test_parse_symbols();
   tuide::test_symbols_for_file_wait_cold();
   tuide::test_parse_python_symbols();
+  tuide::test_parse_lua_dotted_function_symbols();
   tuide::test_simple_pair();
   tuide::test_nested();
   tuide::test_ignores_string();
@@ -977,8 +1291,14 @@ int main() {
   tuide::test_edit_hint_matches_diff_on_char_insert();
   tuide::test_edit_hint_matches_diff_on_newline_insert();
   tuide::test_edit_hint_matches_diff_on_backspace_join();
+  tuide::test_xml_fragment_wrap_multi_root();
+  tuide::test_xml_fragment_wrap_keeps_prolog_outside();
   tuide::test_edit_hint_poisoned_by_multiple_edits_falls_back_correctly();
   tuide::test_viewport_preview_before_full_parse();
+  tuide::test_viewport_preview_xml_multi_root_no_error_spans();
+  tuide::test_highlights_for_document_rows_matches_full_document();
+  tuide::test_xml_unmap_window_matches_full_document();
+  tuide::test_viewport_preview_xml_far_from_top_only_visible_rows();
   tuide::test_normalize_editor_source_trailing_newline();
   std::cout << "tree_sitter_test ok\n";
   return 0;

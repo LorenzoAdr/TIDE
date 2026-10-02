@@ -1,0 +1,58 @@
+Al despertar: supervisión L2-wave (sense vivo + heartbeat + meta).
+
+Sin plazo. No pares el bucle. El usuario humano lo corta (`meta/STOP` o cierra Cursor).
+
+NUNCA lances la batería, el wait ni el heartbeat desde un Task/subagente.
+Lanza con Shell en ESTA sesión. La batería es setsid; wait y heartbeat NO (Cursor debe ver stdout).
+
+Protocolo: este archivo, `.cursor/rules/l2-wave-sense12.mdc`, y si toca meta
+`tools/l2_wave/sense_meta_tick_prompt.txt`.
+Sentinel vivo hoy: `AGENT_LOOP_WAKE_sense15`.
+Tick vivo hoy: `tools/l2_wave/sense15_tick_prompt.txt`.
+Base: `/home/lorenzo/workspace/TIDE/.tuide/ai/l2_wave/sense15`
+`meta/CURRENT` apunta al sense vivo.
+Induce miss-answer, ancla git d1be1c5.
+Responde siempre en español.
+
+## Tick (todo wake: DONE, battery_dead, heartbeat, eco)
+
+0. Si `meta/STOP`: no lances batería. Rearma heartbeat. Para el resto.
+1. Lee `meta/CURRENT`, CURRENT del sense, manifest. Eco de ronda ya SUPERVISED → no juzgues.
+2. why=heartbeat (o no hay DONE):
+   - Batería viva y wait muerto → relanza wait del MISMO id.
+   - Batería muerta sin DONE → relanza el MISMO id (`l2_wave_sense_battery.sh`).
+   - DONE y no SUPERVISED → paso 4.
+   - Nada que hacer → paso 9.
+3. SUPERVISED y la siguiente no vive ni DONE → lanza id+1 (salvo que este id sea múltiplo de 10: entonces meta, paso 8).
+4. DONE y no SUPERVISED: juzga las 5 cazas (jobs/control/why; el scoreboard miente).
+5. Una palanca del espacio vivo (hoy: sello). No pack/hijo. No orientación.
+   Revertir si no mueve el juicio o un caso sube a costa de otro (20 console keys, 18 gutter).
+6. Rebuild `l2_wave_test` `l2_think_test` `l2_harness_cli`.
+7. Ledger del sense. Touch SUPERVISED.
+8. Si el id SUPERVISED es 10, 20, 30… y no existe `meta/SUPERVISED_<sense>_r<id>`:
+   ejecuta el meta (no lances id+1 todavía). Según decisión: seguir → id+1;
+   cambiar → handoff; parar → STOP.
+   Si el id NO es múltiplo de 10: `./tools/l2_wave_sense_battery.sh NN $BASE`
+9. Wait: si la ronda CURRENT no tiene DONE, `./tools/l2_wave/sense15_wait_done.sh NN`
+   (o `sense_wait_done.sh` tras un cambiar). notify_on_output del sentinel vivo.
+10. Heartbeat: si no hay `sense_heartbeat.sh` vivo,
+    `./tools/l2_wave/sense_heartbeat.sh 1500` con notify_on_output del sentinel vivo.
+    Un disparo (1500 s). Rearmar SIEMPRE al terminar el tick, también en heartbeat no-op.
+
+Criterio: 11 o 13 sellan el mecanismo real y 20 no sella console keys y 18/99 no caen.
+
+Keep pack (no tocar): hops 2, peeks 3, follows 3, neighbor 4, cover keep 2–3,
+clon peek 1–2, cover chrome, atlas hijo SU consulta, hijo Medium,
+revert hijo High / peek 3 / hops 3 / follows 4 / neighbor 6 / peeks 4.
+
+Keep orientación (no tocar): bosquejo live, censo off, dump teses r03/r05/r08/r09/r12/r14,
+think High piloto, any_miss gate, al tope solo cerrar.
+
+Keep sello: keep r03 visto nombra; keep r04 polos parcial; keep r05 dump esta no afirma;
+revert r06; keep r08 hijo niega arco; keep r09 dump no refuta existe; revert r10 polo negado;
+revert r12 leer dos no une; keep r14 pasar no sella ancla; revert r15 uno no refuta otro;
+revert r17 no cazado no refuta; keep r19 solo nombres no disparo; keep r20 reinicio no es detector.
+Criterio cumplido (r19–r20). Meta r20: parar. `meta/STOP` existe: no lances batería.
+Hipótesis viva: STOP. Heartbeat no-op hasta que el humano corte.
+
+Pantalla: brillo a cero OK. No bloquear sesión. No tapa si suspende. Mac: caffeinate -dims.

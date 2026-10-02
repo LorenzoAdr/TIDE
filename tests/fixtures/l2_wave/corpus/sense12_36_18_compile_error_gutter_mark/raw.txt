@@ -1,0 +1,14 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+The plan has 3 phases:
+A: locator: dónde se leen los errores de compilación de la consola para crear los diagnósticos
+B: locator: dónde se envían los diagnósticos al editor para que aparezcan en el margen
+P: puente: hay camino leer los errores de la consola y enviarlos al editor (need A B)
+
+We are at phase A.
+T4 asked: "dónde se leen
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "T4 niega que se lean los errores de la consola para crear diagnósticos; el pack confirma que los diagnósticos vienen de LSP y los errores de shell solo se usan para símbolos de linker. Salto a la siguiente caza."
+}

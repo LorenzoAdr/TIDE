@@ -1,0 +1,187 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M7",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ai/llama_backend.cpp:wait_until_healthy",
+        "src/ai/llama_backend.cpp:status_text",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/ai/ai_controller.cpp:run_level1_async",
+        "src/ai/ai_controller.cpp:ensure_backend_ready",
+        "src/ai/llama_backend.cpp:ensure_ready"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje tras una caída o fallo",
+      "keep": [
+        "M3",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso del servidor LSP ha terminado inesperadamente o ha muerto",
+      "keep": [
+        "M7",
+        "M4"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_transport.cpp:wait_fd_readable",
+        "src/lsp/lsp_transport.cpp:stop",
+        "src/lsp/lsp_transport.cpp:reader_loop",
+        "src/lsp/lsp_transport.cpp:read_message",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_transport.cpp:start",
+        "src/app/application.cpp:run"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "aplicación"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el reinicio; busco el disparador de detección de fallo"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "on server exit"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 falló en arranque; busco el detector de caída en tiempo de ejecución (on server exit)"
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje tras una caída o fallo",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje tras una caída o fallo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart server"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró la detección; ahora busco el mecanismo de reinicio en sí para ver si existe y qué lo dispara, o si hay que implementarlo desde cero."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso del servidor LSP ha terminado inesperadamente o ha muerto",
+      "consultas": [
+        "dónde se detecta que el proceso del servidor LSP ha terminado inesperadamente o ha muerto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "salida proceso"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 no encontró detección de caída en tiempo de ejecución. Busco el manejador de eventos de finalización del proceso (exit/close) que debería disparar el reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo existe: el reader loop detecta la caída del proceso (EOF/error en read message) y dispara el reinicio automático vía reader eof handler y schedule debounced lsp restart"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el mecanismo existe: el reader loop detecta la muerte del proceso (EOF) y dispara el reinicio automático"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla se confirma: la detección de caída (proceso muerto/EOF) está en reader loop que invoca reader eof handler, y el reinicio automático se ejecuta vía schedule debounced lsp restart y restart lsp for workspace"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el lector del canal detecta la muerte del proceso (EOF/error) y dispara el reinicio automático; no se encontró detección de inactividad (no responde)"
+    }
+  ],
+  "why": "el lector del canal detecta la muerte del proceso (EOF/error) y dispara el reinicio automático; no se encontró detección de inactividad (no responde)",
+  "zooms": []
+}

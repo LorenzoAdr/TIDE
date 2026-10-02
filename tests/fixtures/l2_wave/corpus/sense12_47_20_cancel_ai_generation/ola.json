@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "pasar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el Cerrado afirma el objeto de esta fase: se leyeron los símbolos de cancelación y limpieza (cancel level1, clear pending insert, tasks cancel) que responden a dónde se limpia el archivo a medias"
+}

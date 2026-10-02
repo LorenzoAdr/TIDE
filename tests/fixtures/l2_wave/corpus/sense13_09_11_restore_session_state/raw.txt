@@ -1,0 +1,20 @@
+The user wants to restore the cursor position, open files, and panel visibility when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A locator: dónde se guarda la posición del cursor al cerrar el proyecto
+2. [en_curso] B locator: dónde se restaura la posición del cursor al abrir el proyecto
+3. [pendiente] C locator: dónde se guarda y restaura la visibilidad de los paneles laterales
+4. [pendiente] P puente: hay un mecanismo común que orquesta la persistencia de todo el estado del editor (need A B C)
+
+Work done:
+T1: Asked about saving/restoring editor state. Read: save state, reset to single cursor, reset helix editor state.
+T2: Asked about saving cursor position on close. Read: save, save workspace session, save buffer. Conclusion: save serializes open tabs and active tab path, but NOT cursor position (offset/line/col). Cursor position found belongs to search panel/text input, not main editor.
+T3: Asked about restoring cursor position on open. Read: restore workspace session, open file.
+
+Current state:
+T2 explicitly refuted the
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de persistencia del cursor no existe en el flujo de guardado de sesión; la posición no se serializa ni se restaura"
+}

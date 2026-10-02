@@ -1,0 +1,14 @@
+The user wants to know if the editor remembers the cursor position, open files, and panel visibility when reopening a project.
+I have a plan with 4 phases:
+A: cursor position (locator)
+B: open files (locator)
+C: panel visibility (locator)
+P: bridge (check if a single mechanism restores all)
+
+Work done so far:
+T1: Asked about cursor position. Read: Cursor Pos, open file at impl, editor state hpp, open file at confirmed.
+T2: Asked about open files. Read: open file at impl, open file at confirmed,
+---- content ----
+```json
+{"action":"control_v1","do":"no_pasar","why":"T4 repite T1; el pack no une cursor con archivos ni paneles. Cambio de estrategia: buscar el mecanismo de sesión."}
+```

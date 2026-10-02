@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de detección y reinicio automático está confirmado: se monitorea la vida del proceso (clangd process alive) y, al detectar caída, se dispara un reinicio diferido (schedule debounced lsp restart) que ejecuta la restauración del servicio (restart lsp for workspace) sin intervención del usuario"
+}

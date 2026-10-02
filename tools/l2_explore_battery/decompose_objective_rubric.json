@@ -1,0 +1,165 @@
+{
+  "_doc": "Prompt-fair rubric for full 20-case intent-decompose battery. Fail only when the USER PROMPT lexically supports the expectation. Never fail for product gold stems absent from the prompt.",
+  "cases": {
+    "01_settings_about_tab": {
+      "objective_class": "clear_implement",
+      "notes": "Named settings + new tab 'sobre la app'; no single code entity.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["configur", "pesta", "sobre"],
+      "expect_f1_on_best_focal": false
+    },
+    "02_split_resize_behavior": {
+      "objective_class": "diffuse_implement",
+      "notes": "Layout/resize behavior; no named module.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["redimension", "divisor", "panel"],
+      "expect_f1_on_best_focal": false
+    },
+    "03_terminal_output_paint": {
+      "objective_class": "clear_locate",
+      "notes": "Locate paint/pty/console refresh; product stems not required.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["terminal", "pty", "consola", "pinta"],
+      "expect_f1_on_best_focal": false
+    },
+    "04_ai_thinking_status_bar": {
+      "objective_class": "diffuse_implement",
+      "notes": "Progress indicator; busy_strip not in prompt.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": [],
+      "expect_f1_on_best_focal": false
+    },
+    "05_shortcut_open_settings": {
+      "objective_class": "clear_action",
+      "notes": "Keyboard shortcut + settings window.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["atajo", "teclado", "configur"],
+      "expect_f1_on_best_focal": false
+    },
+    "06_quit_unsaved_warning": {
+      "objective_class": "clear_locate",
+      "notes": "Dialog/quit/unsaved; quit_confirm not in prompt.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["cerrar", "dialog", "archivo", "guardar"],
+      "expect_f1_on_best_focal": false
+    },
+    "07_ai_compile_task": {
+      "objective_class": "clear_locate",
+      "notes": "Locate compile/build launch.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["compil", "build"],
+      "expect_f1_on_best_focal": false
+    },
+    "08_toolpacks_install_python": {
+      "objective_class": "clear_implement",
+      "notes": "toolpacks + Python named in prompt.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["toolpack", "python", "ajust"],
+      "expect_f1_on_best_focal": false
+    },
+    "09_console_temp_tab": {
+      "objective_class": "clear_implement",
+      "notes": "Add temp tab in terminal panel.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["terminal", "pesta", "temp"],
+      "expect_f1_on_best_focal": false
+    },
+    "10_performance_threads_panel": {
+      "objective_class": "clear_focal",
+      "notes": "Prompt names performance/threads panel as locate target.",
+      "require_focal_unit": true,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["rendimiento", "hilos", "performance"],
+      "expect_f1_on_best_focal": true
+    },
+    "11_restore_session_state": {
+      "objective_class": "diffuse_implement",
+      "notes": "Session restore multi-facet; no single entity name.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": [],
+      "expect_f1_on_best_focal": false
+    },
+    "12_edit_applied_animation": {
+      "objective_class": "diffuse_implement",
+      "notes": "Visual confirm after AI edit; no named widget.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": [],
+      "expect_f1_on_best_focal": false
+    },
+    "13_lsp_auto_restart": {
+      "objective_class": "clear_implement",
+      "notes": "LSP named; restart/detect behavior.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["lsp", "reinici", "lenguaje"],
+      "expect_f1_on_best_focal": false
+    },
+    "14_syntax_highlight_repaint": {
+      "objective_class": "clear_locate",
+      "notes": "Syntax highlight / repaint frequency.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["sintaxis", "repinta", "editor"],
+      "expect_f1_on_best_focal": false
+    },
+    "15_welcome_message_first_launch": {
+      "objective_class": "diffuse_implement",
+      "notes": "Welcome on status bar first launch.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["bienvenida", "estado"],
+      "expect_f1_on_best_focal": false
+    },
+    "16_drag_drop_file_open": {
+      "objective_class": "clear_locate",
+      "notes": "Drag-drop open file path.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["arrastra", "archivo", "suelta"],
+      "expect_f1_on_best_focal": false
+    },
+    "17_ai_spinner_stuck": {
+      "objective_class": "clear_focal",
+      "notes": "Spinner + carga named; ambient chat/panel must not share focal unit.",
+      "require_focal_unit": true,
+      "require_ambient_focal_separation": true,
+      "lexical_cues_any": ["spinner"],
+      "expect_f1_on_best_focal": true
+    },
+    "18_compile_error_gutter_mark": {
+      "objective_class": "clear_implement",
+      "notes": "Compile errors → editor gutter mark.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["compil", "error", "margen", "editor"],
+      "expect_f1_on_best_focal": false
+    },
+    "19_editor_font_zoom": {
+      "objective_class": "clear_locate",
+      "notes": "Font zoom ctrl+wheel; locate if implemented.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["zoom", "fuente", "editor"],
+      "expect_f1_on_best_focal": false
+    },
+    "20_cancel_ai_generation": {
+      "objective_class": "clear_action",
+      "notes": "Cancel/Escape action; no concrete widget → no F1 required.",
+      "require_focal_unit": false,
+      "require_ambient_focal_separation": false,
+      "lexical_cues_any": ["escape", "cancel"],
+      "expect_f1_on_best_focal": false
+    }
+  }
+}

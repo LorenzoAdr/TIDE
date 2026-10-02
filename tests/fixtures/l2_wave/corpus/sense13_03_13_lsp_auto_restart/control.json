@@ -1,0 +1,157 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:clangd_index_healthy",
+        "src/lsp/lsp_client.cpp:process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M2",
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP deja de responder y se dispara el reinicio automático",
+      "keep": [
+        "M2",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp",
+        "src/app/application.cpp"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el servidor de lenguaje LSP deja de responder y se dispara el reinicio automático",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el servidor de lenguaje LSP se cae y se dispara el reinicio automático",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino detectar no respuesta y reiniciar, y detectar caída y reiniciar",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 y M7 mencionan 'restart lsp for workspace' y 'schedule debounced lsp restart'. Necesito ver qué evento o condición (crash, timeout) activa esta lógica de reinicio automático."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el trabajo anterior leyó el reinicio pero no el disparo; busco el mecanismo que conecta la caída con el reinicio"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide dos fenómenos distintos (no-respuesta y caída) que disparan el mismo efecto (reinicio automático). T1 y T2 fallaron en encontrar el disparador automático; hay que cazar cada fenómeno por separado y luego unirlos en el reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack y los cerrados confirman que no existe un mecanismo automático de detección de no-respuesta (heartbeat/timeout) ni de reinicio tras caída; solo hay detección de EOF que limpia estado y reinicios manuales/debounced por configuración. el ancla pide algo que no está implementado."
+    }
+  ],
+  "why": "el pack y los cerrados confirman que no existe un mecanismo automático de detección de no-respuesta (heartbeat/timeout) ni de reinicio tras caída; solo hay detección de EOF que limpia estado y reinicios manuales/debounced por configuración. el ancla pide algo que no está implementado.",
+  "zooms": []
+}

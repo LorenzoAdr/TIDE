@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio",
+  "consultas": [
+    "dónde se detecta que el servidor LSP se ha caído o dejado de responder para disparar un reinicio"
+  ],
+  "do": "explorar",
+  "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+  "evita": [
+    "cambio de entorno"
+  ],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 falló vacío; T2 solo cubre el disparador de entorno. Falta el detector de caída del proceso (crash/hang) para completar el claim del usuario."
+}

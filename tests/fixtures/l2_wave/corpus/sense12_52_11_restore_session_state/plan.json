@@ -1,0 +1,49 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/editor/editor_text.hpp:seek",
+        "src/app/workspace_model.cpp:load_working_lines_from_disk"
+      ],
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:save",
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:process_pending_workspace_load",
+        "src/app/recent_projects.cpp:remember",
+        "src/app/application.cpp:set_workspace",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_session.hpp"
+      ],
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "C",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    }
+  ],
+  "modo": "romper"
+}

@@ -1,0 +1,18 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Asked where code generation is cancelled on Escape. Result: Not found. Cancellation is triggered by text input "cancel", not Escape key.
+T2: Asked where code generation is cancelled on click outside. Result: Not found. Read: `cancel live lsp on cursor move`, `clear suggestion cache`.
+T3: Asked where the file is cleaned when generation is cancelled. Result: Not found. Read: `cancel current`, `cancel level1`, `clear pending insert`, `cancel all`.
+
+The anchor has two parts:
+1. Trigger: Escape or click outside -> cancel generation.
+2. Effect: Cleanly cancel without leaving file half-written.
+
+T1 refutes the Escape trigger mechanism in the current codebase (it uses text input).
+T2 refutes the click outside trigger mechanism (it uses cursor move for LSP, not generation cancellation).
+T3 refutes the cleanup mechanism (it shows cancellation commands but not the actual file cleanup/rollback).
+
+The pack shows:
+T1=>T3: `handle user input` -> `
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide cancelar con Escape o clic fuera y limpiar el archivo; T1 niega Escape (usa texto), T2 niega clic fuera (usa cursor move), T3 niega limpieza (solo cancela sin rollback); sin camino entre disparo y efecto, el claim se refuta"}

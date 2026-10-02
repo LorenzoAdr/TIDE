@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "los mecanismos leídos (save, reopen workspace documents, open workspace wizard) no son el disparo de la restauración de estado; el pack no une los polos y no hay camino entre ellos"
+}

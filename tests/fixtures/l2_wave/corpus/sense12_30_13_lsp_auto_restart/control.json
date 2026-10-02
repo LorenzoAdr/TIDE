@@ -1,0 +1,105 @@
+{
+  "agujas": [
+    "lsp",
+    "app",
+    "util"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder y cómo se gestiona su reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/lsp_client.cpp:transport_running",
+        "src/lsp/lsp_transport.cpp:send_notification",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_transport.cpp:is_running"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "lsp",
+        "app",
+        "util"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide detectar caída del LSP y reiniciarlo; lsp tiene el servidor, app tiene el ciclo de vida y util tiene guardias de procesos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "lsp",
+        "app"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide detectar caída del LSP y reiniciarlo; lsp tiene el protocolo y app tiene la sesión de workspace"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder y cómo se gestiona su reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o dejado de responder y cómo se gestiona su reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "transporte"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide detección de caída/no respuesta y reinicio automático; el barrio lsp y el stem lsp_transport (running_, wait_response) son el punto de control del proceso; un hijo cierra el ciclo de vida"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección y reinicio automático ya existe: la caída se detecta en async worker main cuando job lsp transport running devuelve falso, estableciendo pending transport restart true; el reinicio se orquesta en restart lsp for workspace, que se dispara tras la detección vía ensure async worker running - start async worker - async worker main - detección - flag - loop de aplicación que llama a restart lsp for workspace si pending lsp restart es true"
+    }
+  ],
+  "why": "el mecanismo de detección y reinicio automático ya existe: la caída se detecta en async worker main cuando job lsp transport running devuelve falso, estableciendo pending transport restart true; el reinicio se orquesta en restart lsp for workspace, que se dispara tras la detección vía ensure async worker running - start async worker - async worker main - detección - flag - loop de aplicación que llama a restart lsp for workspace si pending lsp restart es true",
+  "zooms": [
+    "lsp",
+    "app"
+  ]
+}

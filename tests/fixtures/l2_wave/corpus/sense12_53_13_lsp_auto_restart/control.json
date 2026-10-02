@@ -1,0 +1,136 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:wait_until_healthy",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/ai/llama_backend.cpp:ensure_completion_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje cuando se detecta que no está saludable",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:ensure_ready",
+        "src/ai/ai_controller.cpp:ensure_backend_ready",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/ai/llama_backend.cpp:wait_until_healthy",
+        "src/ai/ai_controller.cpp:run_level1_async",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/llama_backend.cpp:ensure_completion_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia el servidor de lenguaje al arrancar la aplicación o al detectar que no está saludable",
+      "keep": [
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 7,
+      "visto": [
+        "src/ai/llama_backend.cpp:ensure_completion_server",
+        "src/ai/llama_backend.cpp:ensure_ready",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:run_level1_async",
+        "src/ai/ai_controller.cpp:ensure_backend_ready",
+        "src/ai/llama_backend.cpp:health_ok"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace), pero falta ver qué dispara la detección de fallo o caída para activarlo automáticamente."
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje cuando se detecta que no está saludable",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje cuando se detecta que no está saludable"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró 'wait until healthy' y 'ensure completion server'; ahora busco el reinicio automático tras la detección de fallo"
+    },
+    {
+      "consulta": "dónde se inicia el servidor de lenguaje al arrancar la aplicación o al detectar que no está saludable",
+      "consultas": [
+        "dónde se inicia el servidor de lenguaje al arrancar la aplicación o al detectar que no está saludable"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "start server"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 encontraron wait until healthy y ensure completion server, pero no el mecanismo de inicio real. Necesito ver cómo se lanza el proceso para entender si el reinicio automático está implementado o falta."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección y reinicio automático está confirmado: se verifica la salud en start completion server vía health ok y se reinicia si falla o cambia el stamp, todo orquestado por ensure completion server sin intervención del usuario"
+    }
+  ],
+  "why": "el mecanismo de detección y reinicio automático está confirmado: se verifica la salud en start completion server vía health ok y se reinicia si falla o cambia el stamp, todo orquestado por ensure completion server sin intervención del usuario",
+  "zooms": []
+}

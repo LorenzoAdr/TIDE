@@ -1,0 +1,20 @@
+The user wants to know how to cleanly cancel AI code generation when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have two completed jobs:
+1.  **T1 (Locator):** Found where Escape/click is captured (`handle ai console keys`, `handle console panel mouse`) and triggers `cancel current`, `clear pending insert`.
+2.  **T2 (Locator):** Searched for where the file is cleaned or changes are reverted. The result was negative: "no encontré dónde se limpia el archivo... lo leído son banderas de cancelación... pero no hay código que reverta contenido de archivos ni limpie buffers de texto en el editor".
+
+The anchor has two poles:
+1.  Capture the cancellation trigger (Escape/click). -> **Confirmed** by T1.
+2.  Clean the file/revert changes (don't leave file half-written). -> **Refuted** (or at least, the mechanism doesn't exist/is missing) by T2.
+
+The user's claim is "I want it to cancel cleanly without leaving the file half-written".
+The investigation shows:
+- The trigger exists (T1).
+- The cleanup mechanism (reverting file content) does *
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el polo de captura existe (T1: handle ai console keys -> cancel current), pero el polo de limpieza no (T2: no hay código que reverta contenido ni limpie buffers). el ancla pide limpieza; el sistema solo cancela la tarea sin revertir el archivo."
+}

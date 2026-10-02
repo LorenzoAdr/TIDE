@@ -1,0 +1,16 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have a plan with 3 phases:
+A: locator: dónde se llama al reinicio del LSP cuando el proceso no está vivo
+B: locator: dónde se detecta que el LSP no responde y se dispara el reinicio
+P: puente: hay camino la detección de caída y el reinicio automático (need A B)
+
+Current status:
+T1 asked about detection and scheduling restart. Closed: didn't find crash detection, only environment change restart.
+T2 asked same as T1. Closed: empty.
+T3 asked where it checks if LSP is alive before sending request. Closed: `process alive`, `clangd process alive`, `send request`.
+T4 asked where it calls LSP restart when process is not alive. Closed: `process alive`, `clangd process alive`.
+
+Wait, T4's closed says: `leído: process alive, clangd process alive`. It didn't explicitly say it found the restart call, but it read `process alive`.
+The pack shows `M5` owns `application`, nucleus: `pending lsp restart`, `last
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack y los cierres muestran que la aplicación ya detecta si el proceso está vivo (process alive) y programa el reinicio (schedule debounced lsp restart), pero no hay lógica de ping/timeout para detectar no-respuesta; el mecanismo de reinicio automático existe para caídas, pero falta la detección de congelación"}

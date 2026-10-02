@@ -1,0 +1,188 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "keep": [
+        "M3",
+        "M12"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:parse_pty_filter_tokens",
+        "src/lsp/diagnostics.cpp:diagnostics_for_translation_unit",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crea el marcador de línea en el margen del editor para un error de diagnóstico",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crea el marcador de línea en el margen del editor para un error de diagnóstico",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se asocia un diagnóstico de compilación con una línea del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el diagnóstico de compilación y el marcador de línea en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error consola",
+        "margen editor",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla une consola y editor; necesito ver si el pack tiene un barrio de errores o de decoración de líneas"
+    },
+    {
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "consultas": [
+        "dónde se detectan los errores de compilación en la salida de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "errores consola"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M11 menciona escaneo de errores en shell output; necesito ver si existe un mecanismo que parsea la consola para extraer errores y sus líneas"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "margen editor"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el polo de la consola; ahora busco el polo visual para ver si existe o dónde inyectar el efecto"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 cerró la detección; T2 cerró la pintura (sin éxito). Falta el puente: cómo un diagnóstico se convierte en un marcador en el margen. Rompo en dos: creación del marcador y asociación del diagnóstico."
+    },
+    {
+      "consulta": "dónde se asocia un diagnóstico de compilación con una línea del editor",
+      "consultas": [
+        "dónde se asocia un diagnóstico de compilación con una línea del editor"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnóstico"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 detecta errores, T3 crea marcadores, pero falta el enlace: cómo un diagnóstico de compilación se convierte en un marcador en el editor. T2 falló en pintura, pero la asociación es el paso previo necesario."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "los marcadores de diagnóstico ya existen en el margen (line diagnostic marker), pero no se pinta la línea roja porque el gutter usa selectores de carácter ASCII, no lógica de color; el mecanismo de pintura no está en el pack"
+    }
+  ],
+  "why": "los marcadores de diagnóstico ya existen en el margen (line diagnostic marker), pero no se pinta la línea roja porque el gutter usa selectores de carácter ASCII, no lógica de color; el mecanismo de pintura no está en el pack",
+  "zooms": []
+}

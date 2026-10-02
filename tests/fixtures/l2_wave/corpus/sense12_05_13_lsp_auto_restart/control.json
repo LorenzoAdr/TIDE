@@ -1,0 +1,196 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "quién llama a schedule debounced lsp restart cuando el servidor LSP deja de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "quién invoca el reinicio diferido del LSP cuando se detecta que el servidor falta o no responde",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:process_build_environment_updates",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:on_lsp_missing_install"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o no responde y se dispara el reinicio automático",
+      "keep": [
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:process_build_environment_updates"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el proceso LSP ha muerto o no responde y se dispara el reinicio automático",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se reinicia el servidor LSP cuando falta la instalación o el entorno cambia",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "el mecanismo de detección de caída A cubre el caso de deja de responder' o requiere un watchdog separado",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "restart"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el punto de anclaje para la lógica de detección y recuperación automática. Hay que ver qué evento o fallo activa ese schedule."
+    },
+    {
+      "consulta": "quién llama a schedule debounced lsp restart cuando el servidor LSP deja de responder",
+      "consultas": [
+        "quién llama a schedule debounced lsp restart cuando el servidor LSP deja de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mecanismo de reinicio; el pack une T1 con 'on lsp missing install'. Hay que cazar el disparador (la detección de la caída) que invoca ese reinicio."
+    },
+    {
+      "consulta": "quién invoca el reinicio diferido del LSP cuando se detecta que el servidor falta o no responde",
+      "consultas": [
+        "quién invoca el reinicio diferido del LSP cuando se detecta que el servidor falta o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró el disparador pero no el origen. El pack muestra 'on lsp missing install' como vecino de T1/T2. Hay que cazar el detector que llama a schedule debounced lsp restart ante la caída."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T3 refutó que el debounce sea el detector de caída; identificó dos caminos distintos (falta vs entorno). Necesito confirmar si existe un detector de 'muerte/crash' (A) independiente del cambio de entorno (B) para cubrir el claim de 'caída automática'."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o dejado de responder y se dispara el reinicio automático",
+      "consultas": [
+        "dónde se detecta que el proceso LSP ha muerto o dejado de responder y se dispara el reinicio automático"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 5,
+      "why": "las cazas anteriores confirmaron reinicios por entorno/falta, pero no por caída en vivo. El pack sugiere 'lsp health check' y 'clangd alive' en los extra de T4. Busco el mecanismo de watchdog o heartbeat que detecte la muerte del proceso y dispare el restart."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de reinicio automático por caída o no-respuesta del proceso LSP no existe en la aplicación; el reinicio solo se dispara por cambios en el entorno de build o falta de instalación, no por salud del proceso"
+    }
+  ],
+  "why": "el mecanismo de reinicio automático por caída o no-respuesta del proceso LSP no existe en la aplicación; el reinicio solo se dispara por cambios en el entorno de build o falta de instalación, no por salud del proceso",
+  "zooms": []
+}

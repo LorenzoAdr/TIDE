@@ -1,0 +1,15 @@
+The user wants to implement an automatic restart of the LSP server if it crashes or becomes unresponsive.
+I have three completed jobs:
+1.  **T1**: Looked for detection of crash/unresponsiveness to trigger restart. Found LLM health logic and manual restart config, but no LSP watchdog/handler.
+2.  **T2**: Looked for handling LSP disconnection to detect crash. Found `on transport reader eof` in the transport reader loop which marks client as not ready and cleans PID.
+3.  **T3**: Looked for restarting LSP after disconnection. Found that `on transport reader eof` only cleans state (ready=false, waitpid) and `start` registers the handler, but there is no restart call in the LSP client or transport.
+
+The user's claim is: "if the LSP server process crashes or stops responding, the application automatically detects it and restarts it without user intervention".
+
+Current state:
+- Detection exists (T2: `on transport reader eof` detects crash/disconnect).
+- Restart mechanism is missing (T3: `on transport reader eof` does not trigger a restart).
+
+The user's request is a feature request ("n
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático no existe: la detección de caída (transport reader eof) solo limpia estado, no dispara un reinicio"}

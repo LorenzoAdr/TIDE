@@ -1,0 +1,8 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed works:
+1.  **T1**: Found that `transport reader eof` detects the crash (pipe close), but it only cleans state (`ready false`, `waitpid`). It does *not* directly trigger `restart lsp for workspace`. The restart is triggered by `lsp missing install` or `run inicio`, or scheduled via `schedule debounced lsp restart` on config changes. No direct path from EOF to restart found in T1.
+2.  **T2**: Found `schedule debounced lsp restart` programs the restart after a transport failure detected in `transport reader eof`. However, the causal circuit is partially open: EOF doesn't call the scheduler directly in the code read, suggesting an intermediate step or reconnection logic in `start` or `stop`.
+3.  **T3**: Looked for where `schedule debounced lsp restart` is called after `transport reader eof`. Read `on transport reader eof`, `start`, `set reader eof handler`, `schedule debounced lsp restart`. The closed section is just a list of read symbols, implying the
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático no está implementado: la detección de caída en transport reader eof solo limpia estado y no dispara el reinicio; el reinicio se activa por eventos externos como lsp missing install o cambios de configuración, no por el fallo del servidor"}

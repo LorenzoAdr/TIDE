@@ -1,0 +1,12 @@
+The user wants to know if the application automatically detects when the LSP (Language Server Protocol) process crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3).
+T1 looked for detection of crash/unresponsiveness and restart trigger. It found `restart lsp for workspace`, `schedule debounced lsp restart`, `health ok`.
+T2 looked for LSP server startup. It found `start server` but noted it was for `embedding backend` (llama-server), not LSP.
+T3 looked for health check and restart scheduling. It found `restart lsp for workspace`, `notify lsp status`, `set lsp status callback`.
+
+The "Cerrado" for T3 says: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo. Si el ancla pedía más, un objeto distinto del pack; no el mismo claim en otro keep; no refutes el claim entero. leído: restart lsp for workspace, notify lsp status, set lsp status callback".
+
+Wait, the prompt says "El último Cerrado negó el mapeo. Ci
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo de detección automática de caída del LSP; los nombres leídos (restart lsp for workspace, notify lsp status) son acciones manuales o de configuración, no un detector automático de crash. sin camino entre polos leídos cierra el ancla"}

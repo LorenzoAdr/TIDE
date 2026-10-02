@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de reinicio automático tras caída del LSP no existe; se detecta la salida del proceso hijo en transport reader eof pero no hay código que lo reinicie, y no hay sistema de health-check para el LSP como sí lo hay para el backend de IA"
+}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "no_pasar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T4 no halló el detector de caída; el pack no une a otro barrio con ese fenómeno. Salto a la siguiente caza del plan (B: timeout/no-respuesta)."
+}

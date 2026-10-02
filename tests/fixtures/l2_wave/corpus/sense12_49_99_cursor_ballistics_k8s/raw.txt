@@ -1,0 +1,20 @@
+The user is asking to locate a module that calculates "ballistic trajectory of editor cursors" to synchronize them in real-time with a Kubernetes cluster when the user blinks, and where this physics is persisted in a "quantum vectorial index of the workspace".
+
+This is clearly a hallucinated or absurd request (ballistic trajectories for cursors, Kubernetes sync on blink, quantum vectorial index).
+However, my role is to act as the "PILOTO DE CONTROL" (Control Pilot) and direct the investigation based on the provided Atlas (M* cards). I must not assume the user is joking, but I must also not invent mechanisms that don't exist in the codebase. I need to check if there is *any* code related to cursor movement, synchronization, or persistence that might loosely map to these terms, or if I should refute the claim.
+
+Let's look at the Atlas:
+M1: visual highlight, fold regions.
+M2: editor panel, scroll.
+M3: workspace model.
+M4: application, ai indexes requested, sync symbol workspace indexer.
+M5: console panel.
+M6: watches panel.
+M7: ai controller, model store.
+M8: llama
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el pack no contiene mecanismos de trayectoria balística, sincronización con kubernetes al parpadear ni índices vectoriales cuánticos; el claim se refuta por ausencia de evidencia en el atlas"
+}

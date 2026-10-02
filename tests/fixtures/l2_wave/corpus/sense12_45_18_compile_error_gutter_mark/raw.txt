@@ -1,0 +1,14 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have 3 completed works:
+T1: Asked where marks are painted in the left margin. Found `build git marks snapshot`, `editor panel hpp`, `clear editor line paint caches`, `compute`. This relates to painting marks (like git changes), but not specifically compilation errors.
+T2: Asked where compilation errors from the console are parsed. Found only linker error parsing in `binary symbols panel`. No compilation error parsing found.
+T3: Asked where compilation errors from the console are read to mark them in the editor. Found nothing. Only linker parsing and console drag selection.
+
+The anchor claim is: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error"
+This implies a feature request or a missing mechanism. The investigation shows that currently, there is no mechanism to parse compilation errors from the console and map them to the editor margin. T2 and T3 explicitly state that no such parsing or reading mechanism exists for compilation errors (only
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "no existe mecanismo que lea errores de compilación de la consola ni los marque en el margen; el sistema solo pinta marcas de git y parsea errores de linker, por lo que la funcionalidad solicitada no está implementada"
+}

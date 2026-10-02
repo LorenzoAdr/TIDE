@@ -1,0 +1,43 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "evita": [],
+      "hacia": [
+        "decoración margen"
+      ],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "evita": [],
+      "hacia": [
+        "diagnóstico editor"
+      ],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino leer los errores de la consola y pintar la línea roja en el margen",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

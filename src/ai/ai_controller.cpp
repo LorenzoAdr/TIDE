@@ -12,14 +12,18 @@
 #include "ai/ai_trace.hpp"
 #include "ai/coding_embed_rerank.hpp"
 #include "ai/edit_journal.hpp"
+#include "ai/edit_snapshot.hpp"
 #include "ai/get_code_of.hpp"
+#include "ai/l2_admin.hpp"
 #include "ai/l2_brain.hpp"
 #include "ai/l2_context_budget.hpp"
+#include "editor/clipboard.hpp"
 #include "ai/level0_router.hpp"
 #include "ai/level1_agent.hpp"
 #include "ai/level2_autonomous_loop.hpp"
 #include "ai/level2_debrief.hpp"
 #include "ai/level2_session.hpp"
+#include "ai/llama_net.hpp"
 #include "ai/model_store.hpp"
 #include "ai/repo_map.hpp"
 #include "ai/search_replace.hpp"
@@ -30,6 +34,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/ui_wake.hpp"
+#include "util/docker_shell.hpp"
 #include "util/include_tree.hpp"
 #include "util/path_normalize.hpp"
 
@@ -321,12 +326,19 @@ InsertPackBuild build_insert_pack(const std::string& root, const AiInsertAnchor&
 }
 
 Level2SessionDeps make_l2_deps(AiController* self, ToolRegistry* tools, WorkspaceModel* workspace,
-                               TaskRunner* tasks, const AiSettings& settings) {
+                               TaskRunner* tasks, const AiSettings& settings,
+                               SymbolWorkspaceIndexer* symbol_indexer) {
   Level2SessionDeps l2deps;
   l2deps.tools = tools;
   l2deps.clarify_pushback_max = settings.level2.clarify_pushback_max;
   l2deps.path_scope_fn = [self]() -> const std::vector<std::string>& {
     return self->path_scope();
+  };
+  l2deps.symbol_snapshot_fn = [symbol_indexer]() -> std::shared_ptr<const SymbolIndexSnapshot> {
+    if (symbol_indexer == nullptr) {
+      return nullptr;
+    }
+    return symbol_indexer->snapshot();
   };
   l2deps.sync_edit = [self, workspace](const ApplyHunkResult& applied) {
     if (workspace == nullptr || !applied.ok) {
@@ -386,6 +398,18 @@ void AiController::set_deps(AiControllerDeps deps) {
   deps_ = std::move(deps);
   tools_ready_ = false;
   refresh_settings();
+  // Arranque en frío: no arrastrar notebook de una ejecución anterior.
+  // Solo se conserva si hay ask_user pendiente (clarify).
+  if (settings_.admin_enabled && deps_.workspace != nullptr && !deps_.workspace->root.empty()) {
+    const std::string& root = deps_.workspace->root;
+    if (admin_is_continuable(root)) {
+      AdminState st;
+      std::string err;
+      if (admin_load_state(root, &st, &err) && !st.clarify) {
+        (void)admin_clear_session(root, nullptr);
+      }
+    }
+  }
 }
 
 void AiController::refresh_settings() {
@@ -399,6 +423,7 @@ void AiController::refresh_settings() {
   const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
   ai_trace_configure(settings_.trace_enabled, root, settings_.trace_path);
   apply_llama_bundle_preference(settings_);
+  apply_ai_runtime_env(&settings_);
   sync_task_runner();
 }
 
@@ -582,6 +607,17 @@ void AiController::sync_task_runner() {
   tasks_.set_tasks(std::move(specs));
   const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
   tasks_.ensure_default_tasks(root);
+  // Si el workspace corre dentro de Docker (resolve_shell_launch_config, la
+  // misma resolución que usa la pestaña de terminal y BuildEnvironmentService),
+  // enrutar ahí lo que lanza el harness de IA — si no, build/test/shell del
+  // agente corren en el host aunque el proyecto viva en el contenedor.
+  ShellDockerRoute route;
+  if (!root.empty() && deps_.config != nullptr) {
+    const ShellLaunchConfig launch = resolve_shell_launch_config(root, *deps_.config);
+    route.container = launch.docker_container;
+    route.cwd = launch.docker_cwd;
+  }
+  tasks_.set_docker_route(std::move(route));
 }
 
 std::vector<std::string> AiController::snapshot_lines() const {
@@ -590,8 +626,9 @@ std::vector<std::string> AiController::snapshot_lines() const {
 }
 
 void AiController::append(const std::string& line) {
-  // Multiline payloads (investigate lists, tool dumps) must become separate rows:
-  // the AI console renders each vector entry with ftxui::text() at height 1.
+  // Multiline payloads (investigate lists, tool dumps) must become separate rows.
+  // El wrap al ancho del panel lo hace render_ai_console (antes: tope fijo 96 cols
+  // que dejaba la mitad del panel vacía y cortaba frases a mitad de palabra).
   std::vector<std::string> parts;
   {
     std::string normalized;
@@ -644,6 +681,12 @@ void AiController::clear() {
 bool AiController::has_continuable_session() const {
   const std::string root =
       deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+  if (root.empty()) {
+    return false;
+  }
+  if (settings_.admin_enabled && admin_is_continuable(root)) {
+    return true;
+  }
   return Level2Session::is_continuable(root);
 }
 
@@ -653,15 +696,19 @@ void AiController::clear_ai_session(bool clear_transcript) {
   clear_pending_insert();
   if (!root.empty()) {
     std::string err;
+    if (!admin_clear_session(root, &err) && !err.empty()) {
+      append("Reset: no se pudo limpiar sesión admin — " + err);
+    }
+    err.clear();
     if (!Level2Session::clear_session(root, &err)) {
-      append("Reset: no se pudo limpiar sesión L2 — " + err);
+      append("Reset: no se pudo limpiar sesión L2 legacy — " + err);
     }
   }
   if (clear_transcript) {
     clear();
   }
   append("— nueva sesión —");
-  append("Contexto L2 limpiado. El próximo mensaje arranca de cero.");
+  append("Contexto AI limpiado. El próximo mensaje arranca de cero.");
   wake(true);
 }
 
@@ -913,6 +960,517 @@ bool AiController::ensure_backend_ready() {
   return ok;
 }
 
+void AiController::run_admin_async(const std::string& message) {
+  if (download_busy_.load()) {
+    append("Hay una descarga pendiente (modelo/runtime). Espera a que termine o /cancel.");
+    return;
+  }
+  if (agent_busy_.exchange(true)) {
+    append("Admin ya está ocupado (/cancel para abortar)");
+    return;
+  }
+  join_agent_thread();
+  agent_cancel_.store(false);
+  tools_ready_ = false;
+  ensure_tools();
+  sync_task_runner();
+  begin_thinking();
+
+  std::lock_guard lock(agent_mu_);
+  agent_thread_ = std::thread([this, message] {
+    // Recoge cambios de Settings → IA (incl. harness) hechos entre consultas —
+    // a diferencia del camino L1 (ensure_backend_ready), este loop nunca
+    // refrescaba settings_ tras el arranque, así que un toggle en el modal
+    // (p.ej. desactivar el verificador) no surtía efecto hasta reiniciar.
+    refresh_settings();
+    const std::string root =
+        deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+    if (root.empty()) {
+      append("Admin: sin workspace root");
+      agent_busy_.store(false);
+      end_thinking();
+      wake(true);
+      return;
+    }
+
+    std::string mode = effective_level2_mode();
+    if (mode != "local" && mode != "remote") {
+      // Prefer remote when settings only have dry_run/harness legacy modes.
+      if (!settings_.level2.api_base.empty()) {
+        mode = "remote";
+        append("Usando backend remote (" + settings_.level2.api_base + ")");
+      } else {
+        append("Admin: configura /backend local|remote (ahora=" + effective_level2_mode() + ")");
+        agent_busy_.store(false);
+        end_thinking();
+        wake(true);
+        return;
+      }
+    }
+
+    if (mode == "local") {
+      const std::string missing = first_missing_ai_package_for_l2(settings_);
+      if (!missing.empty()) {
+        append("Admin local: falta paquete `" + missing + "` (Toolpacks o /model download l2)");
+        request_missing_package(missing);
+        agent_busy_.store(false);
+        end_thinking();
+        wake(true);
+        return;
+      }
+    }
+
+    auto brain = make_l2_brain(mode, mode == "local" ? &l2_backend_ : nullptr);
+    if (!brain) {
+      append("Admin: no se pudo crear brain mode=" + mode);
+      agent_busy_.store(false);
+      end_thinking();
+      wake(true);
+      return;
+    }
+    std::string err;
+    if (!brain->ensure_ready(settings_, [this](const std::string& line) { append(line); }, &err)) {
+      append("Admin brain ✗ " + err);
+      if (mode == "local") {
+        request_missing_package(ai_package_id_for_l2_model(settings_.level2.model_id));
+      }
+      agent_busy_.store(false);
+      end_thinking();
+      wake(true);
+      return;
+    }
+
+    AdminState st;
+    // Shadow-repo baseline (edit_snapshot.hpp): snapshot del árbol al abrir esta
+    // consulta. Target de /undo y del diff que se inyecta si falla un build/test
+    // más adelante. Best-effort: sin git disponible, ambos quedan vacíos y no
+    // bloquean nada — solo se pierde esa red de seguridad.
+    auto mark_snapshot_baseline = [&st, root]() {
+      std::string snap_err;
+      if (!snapshot_ensure_repo(root, &snap_err)) {
+        return;
+      }
+      const SnapshotResult snap = snapshot_track(root, "baseline");
+      if (snap.ok) {
+        st.snapshot_baseline_ref = snap.ref;
+        st.snapshot_last_ref = snap.ref;
+      }
+    };
+    if (admin_is_continuable(root)) {
+      if (!admin_load_state(root, &st, &err)) {
+        append("Admin: no se pudo reabrir sesión — " + err);
+        st = AdminState{};
+        st.consulta = message;
+        mark_snapshot_baseline();
+      } else if (st.clarify && st.awaiting_shell_confirm) {
+        // Confirmación de shell (gate=Ask): la pregunta la hizo el runtime, no
+        // el piloto — la siguiente línea es sí/no a ESTE comando concreto, no
+        // una respuesta libre que reabra la investigación.
+        const bool approved = admin_parse_confirm_yes(message);
+        const std::string pending_cmd = st.pending_shell_cmd;
+        AdminJobResult jr;
+        if (approved) {
+          sync_task_runner();  // refresca la ruta Docker antes de ejecutar.
+          AdminShellExecOpts sopts;
+          sopts.cancel = &agent_cancel_;
+          sopts.user_approved = true;
+          const ShellDockerRoute route = tasks_.docker_route();
+          sopts.docker_container = route.container;
+          sopts.docker_cwd = route.cwd;
+          jr = admin_run_shell_safe(pending_cmd, root, sopts);
+          append("→ Comando autorizado, ejecutando: " + pending_cmd);
+        } else {
+          jr.error = "usuario denegó ejecutar este comando";
+          jr.summary = jr.error;
+          append("→ Comando denegado; sigo con lo que ya tengo");
+        }
+        admin_append_job(&st, AdminSpawnTipo::Shell, jr);
+        st.awaiting_shell_confirm = false;
+        st.pending_shell_cmd.clear();
+        st.clarify = false;
+        st.pending_question.clear();
+        st.done = false;
+        st.reply.clear();
+        st.last_error.clear();
+      } else if (st.clarify) {
+        // Respuesta a ask_user.
+        append("→ Continúo tras tu respuesta");
+        AdminClarifyTurn turn;
+        turn.question =
+            !st.pending_question.empty() ? st.pending_question : st.reply;
+        turn.answer = message;
+        st.clarifies.push_back(std::move(turn));
+        st.clarify = false;
+        st.pending_question.clear();
+        st.done = false;
+        st.reply.clear();
+        st.last_error.clear();
+        // Responder una ask_user es continuar LA MISMA tarea, no abuso de
+        // presupuesto: si el explore/verify previo ya gastó casi todo
+        // proposes/spawns, retomar sin refrescarlos aborta casi al toque con
+        // "tope de proposes con turnos ilegales". No toca awaiting_edit_confirm/
+        // edit_confirmed — una edición ya confirmada a mitad de camino no debe
+        // perderse solo por haber pasado por un ask_user.
+        admin_refresh_propose_budget(&st);
+        // Si el usuario aporta la tarea real (p.ej. tras un saludo ask_user),
+        // promueve la respuesta a consulta — si no, el piloto se queda con "hola"
+        // y vuelve a preguntar el contexto (VS Code, etc.).
+        if (message.size() > st.consulta.size() + 8) {
+          append("→ Tomo tu mensaje como la consulta principal");
+          st.consulta = message;
+          // Esto sí es una tarea nueva de verdad: además de los contadores,
+          // resetea awaiting_edit_confirm/edit_confirmed/etc. y re-baselinea.
+          admin_begin_consulta_budgets(&st);
+          mark_snapshot_baseline();
+        }
+      } else {
+        // Misma ejecución: conserva notebook + episodios. Presupuesto fresco.
+        append("→ Sigo el hilo con la evidencia ya reunida");
+        st.consulta = message;
+        st.done = false;
+        st.clarify = false;
+        st.pending_question.clear();
+        st.reply.clear();
+        st.last_error.clear();
+        admin_begin_consulta_budgets(&st);
+        mark_snapshot_baseline();
+      }
+    } else {
+      (void)admin_clear_session(root, nullptr);
+      st.consulta = message;
+      mark_snapshot_baseline();
+    }
+
+    AdminSessionUi ui;
+    if (deps_.workspace != nullptr) {
+      ui.active_path = deps_.workspace->buffer.path.empty() ? deps_.workspace->active_file
+                                                            : deps_.workspace->buffer.path;
+      const auto& cur = deps_.workspace->buffer.primary();
+      ui.cursor_line = cur.head.line;
+      if (cur.has_selection()) {
+        ui.selection = extract_selection_text(deps_.workspace->buffer, cur);
+      }
+    }
+    if (deps_.git != nullptr) {
+      // Best-effort branch label via git tool if available later; leave empty if unknown.
+    }
+
+    AdminOps ops;
+    ops.run_search = [this, root](const AdminSpawn& s) {
+      ensure_tools();
+      if (tools_.has("search")) {
+        const AiToolResult tr = tools_.invoke("search", s.arg);
+        AdminJobResult r;
+        r.ok = tr.ok;
+        bool trunc = false;
+        int raw = 0;
+        r.log_tail = admin_clip_output(tr.text, &trunc, &raw);
+        r.truncated = trunc;
+        r.raw_bytes = raw;
+        // ToolRegistry formatea top_files + path:line:col — no mirar solo las 10
+        // primeras líneas (metadatos needles_tried / explorer: N).
+        admin_collect_search_hits(tr.text, &r);
+        if (r.paths.empty() && tr.ok) {
+          // Fallback: búsqueda in-process bajo workspace root.
+          AdminJobResult rg = admin_run_search_rg(s.arg, root);
+          if (!rg.paths.empty()) {
+            r.paths = std::move(rg.paths);
+            if (r.facts.empty()) {
+              r.facts = std::move(rg.facts);
+            }
+          }
+        }
+        r.summary = tr.ok ? ("search hits≈" + std::to_string(r.paths.size()) +
+                             " bytes=" + std::to_string(raw))
+                          : tr.text;
+        if (!tr.ok) {
+          r.error = tr.text;
+        }
+        return r;
+      }
+      return admin_run_search_rg(s.arg, root);
+    };
+    auto search_op = ops.run_search;
+    ops.run_explore = [&brain, root, this, search_op](const AdminSpawn& s) {
+      AdminLoopOpts eopts;
+      eopts.workspace_root = root;
+      eopts.settings = settings_.level2;
+      eopts.explore_max_steps = settings_.harness.explore_max_steps;
+      eopts.allow_causal_trail = settings_.harness.allow_causal_trail;
+      eopts.allow_dataflow_trace = settings_.harness.allow_dataflow_trace;
+      eopts.allow_headers_of = settings_.harness.allow_headers_of;
+      eopts.allow_repo_map = settings_.harness.allow_repo_map;
+      eopts.max_grep_per_wave = settings_.harness.max_grep_per_wave;
+      eopts.max_read_per_wave = settings_.harness.max_read_per_wave;
+      eopts.max_grep_total = settings_.harness.max_grep_total;
+      eopts.max_read_total = settings_.harness.max_read_total;
+      eopts.on_line = [this](const std::string& line) { append(line); };
+      eopts.cancel = &agent_cancel_;
+      AdminGrepFn grep;
+      if (search_op) {
+        grep = [search_op](const std::string& pattern) {
+          AdminSpawn sp;
+          sp.tipo = AdminSpawnTipo::Search;
+          sp.arg = pattern;
+          sp.brief = pattern;
+          return search_op(sp);
+        };
+      }
+      AdminToolFn tool_fn = [this](const std::string& name, const std::string& arg) {
+        ensure_tools();
+        AdminJobResult r;
+        if (!tools_.has(name)) {
+          r.ok = false;
+          r.summary = "tool no disponible: " + name;
+          return r;
+        }
+        const AiToolResult tr = tools_.invoke(name, arg);
+        r.ok = tr.ok;
+        bool trunc = false;
+        int raw = 0;
+        r.log_tail = admin_clip_output(tr.text, &trunc, &raw);
+        r.truncated = trunc;
+        r.raw_bytes = raw;
+        r.summary = tr.ok ? tr.text.substr(0, std::min<std::size_t>(tr.text.size(), 2000))
+                          : tr.text;
+        return r;
+      };
+      return admin_run_explore_lite(s, *brain, root, eopts, grep, tool_fn);
+    };
+    // Sobre un build/test que falla: si hay baseline de snapshot para esta
+    // consulta, adjunta qué tocó la IA desde entonces — el piloto no tiene que
+    // reconstruirlo de memoria para saber qué pudo romper.
+    auto append_snapshot_fail_diff = [&st, root](AdminJobResult* r) {
+      if (st.snapshot_baseline_ref.empty()) {
+        return;
+      }
+      const SnapshotDiffResult diff = snapshot_diff(root, st.snapshot_baseline_ref);
+      if (!diff.ok || diff.changed_paths.empty()) {
+        return;
+      }
+      bool trunc = false;
+      int raw = 0;
+      const std::string clipped = admin_clip_output(diff.diff, 1500, 1500, &trunc, &raw);
+      std::ostringstream extra;
+      extra << "\n\n## Cambios de esta consulta (vs baseline, " << diff.changed_paths.size()
+            << " archivo(s))\n";
+      for (const auto& p : diff.changed_paths) {
+        extra << "- " << p << '\n';
+      }
+      extra << '\n' << clipped;
+      r->log_tail += extra.str();
+    };
+    ops.run_build = [this, root, &append_snapshot_fail_diff](const AdminSpawn& s) {
+      AdminJobResult r;
+      sync_task_runner();
+      std::ostringstream log;
+      const TaskRunnerResult tr =
+          tasks_.run(s.arg, root, [&](const std::string& line) {
+            append(line);
+            log << line << '\n';
+          }, kTaskRunnerBuildTimeoutMs);
+      r.ok = tr.allowed && tr.exit_code == 0;
+      if (!tr.allowed) {
+        r.error = tr.deny_reason;
+        r.summary = "deny: " + tr.deny_reason;
+      } else {
+        r.summary = "exit_code=" + std::to_string(tr.exit_code);
+        r.log_tail = log.str();
+        if (!tr.stderr_text.empty() && tr.exit_code != 0) {
+          r.log_tail += tr.stderr_text;
+        }
+        r.facts.push_back("build:" + s.arg + " exit=" + std::to_string(tr.exit_code));
+        if (tr.exit_code != 0) {
+          append_snapshot_fail_diff(&r);
+        }
+      }
+      return r;
+    };
+    ops.run_test = [this, root, &append_snapshot_fail_diff](const AdminSpawn& s) {
+      AdminJobResult r;
+      sync_task_runner();
+      const std::string name = s.arg.empty() ? "test" : s.arg;
+      std::ostringstream log;
+      const TaskRunnerResult tr =
+          tasks_.run(name, root, [&](const std::string& line) {
+            append(line);
+            log << line << '\n';
+          }, kTaskRunnerBuildTimeoutMs);
+      r.ok = tr.allowed && tr.exit_code == 0;
+      if (!tr.allowed) {
+        r.error = tr.deny_reason;
+        r.summary = "deny: " + tr.deny_reason;
+      } else {
+        bool trunc = false;
+        int raw = 0;
+        r.log_tail = admin_clip_output(log.str(), &trunc, &raw);
+        r.truncated = trunc;
+        r.raw_bytes = raw;
+        r.summary = "test exit=" + std::to_string(tr.exit_code) + " bytes=" + std::to_string(raw);
+        r.facts.push_back("test:" + name);
+        if (tr.exit_code != 0) {
+          append_snapshot_fail_diff(&r);
+        }
+      }
+      return r;
+    };
+    ops.run_shell = [this, root](const AdminSpawn& s) {
+      sync_task_runner();  // también refresca la ruta Docker (tasks_.docker_route()).
+      if (s.arg == "launch" || s.arg == "compile" || s.arg == "test" ||
+          (!s.arg.empty() && s.arg.find(' ') == std::string::npos &&
+           tasks_.is_whitelisted(s.arg))) {
+        AdminJobResult r;
+        std::ostringstream log;
+        const TaskRunnerResult tr =
+            tasks_.run(s.arg, root, [&](const std::string& line) {
+              append(line);
+              log << line << '\n';
+            }, kTaskRunnerBuildTimeoutMs);
+        r.ok = tr.allowed && tr.exit_code == 0;
+        if (!tr.allowed) {
+          r.error = tr.deny_reason;
+          r.summary = "deny: " + tr.deny_reason;
+        } else {
+          bool trunc = false;
+          int raw = 0;
+          r.log_tail = admin_clip_output(log.str(), &trunc, &raw);
+          r.truncated = trunc;
+          r.raw_bytes = raw;
+          r.summary = "exit_code=" + std::to_string(tr.exit_code) + " bytes=" +
+                      std::to_string(raw) + (trunc ? " truncated=1" : "");
+        }
+        return r;
+      }
+      AdminShellExecOpts sopts;
+      sopts.cancel = &agent_cancel_;
+      const ShellDockerRoute route = tasks_.docker_route();
+      sopts.docker_container = route.container;
+      sopts.docker_cwd = route.cwd;
+      return admin_run_shell_safe(s.arg, root, sopts);
+    };
+    ops.run_read = [root](const AdminSpawn& s) {
+      // Siempre admin_run_read_file: la tool read_file corta a ~400 líneas y
+      // ocultaba factories/MakeXxx al final de .cpp grandes.
+      return admin_run_read_file(s.arg, root);
+    };
+    ops.run_diagnostics = [this](const AdminSpawn& s) {
+      ensure_tools();
+      AdminJobResult r;
+      if (!tools_.has("diagnostics")) {
+        r = admin_run_diagnostics_stub(s);
+        return r;
+      }
+      const AiToolResult tr = tools_.invoke("diagnostics", s.arg);
+      r.ok = tr.ok;
+      bool trunc = false;
+      int raw = 0;
+      r.log_tail = admin_clip_output(tr.text, &trunc, &raw);
+      r.truncated = trunc;
+      r.raw_bytes = raw;
+      r.summary = tr.ok ? ("diagnostics bytes=" + std::to_string(raw)) : tr.text;
+      if (!s.arg.empty()) {
+        r.paths.push_back(s.arg);
+      }
+      if (!tr.ok) {
+        r.error = tr.text;
+      }
+      return r;
+    };
+    ops.run_edit = [root, &st](const AdminSpawn& s) {
+      AdminJobResult r = admin_run_edit_file(s, st, root);
+      if (r.ok) {
+        // Snapshot tras el edit real (no el propuesto): permite /undo por
+        // consulta y ancla el diff que ve el piloto si el build falla después.
+        const SnapshotResult snap =
+            snapshot_track(root, "job:" + std::to_string(st.jobs.size() + 1));
+        if (snap.ok) {
+          st.snapshot_last_ref = snap.ref;
+        }
+      }
+      return r;
+    };
+    ops.run_web = [](const AdminSpawn& s) { return admin_run_web_search(s.arg); };
+    ops.run_web_fetch = [&st](const AdminSpawn& s) { return admin_run_web_fetch(s.arg, st); };
+    ops.run_git = [this](const AdminSpawn& s) {
+      AdminJobResult r;
+      ensure_tools();
+      std::string tool = "git_status";
+      const std::string a = s.arg;
+      std::string lower = a;
+      for (char& c : lower) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      std::string tool_arg;
+      if (lower == "status" || lower.rfind("status ", 0) == 0) {
+        tool = "git_status";
+        tool_arg = lower.size() > 7 ? a.substr(7) : "";
+      } else if (lower == "log" || lower.rfind("log ", 0) == 0) {
+        tool = "git_log";
+        tool_arg = lower.size() > 4 ? a.substr(4) : "";
+      } else if (lower == "diff" || lower.rfind("diff ", 0) == 0) {
+        tool = "git_diff";
+        tool_arg = lower.size() > 5 ? a.substr(5) : "";
+      } else if (lower == "show" || lower.rfind("show ", 0) == 0) {
+        tool = "git_show";
+        tool_arg = lower.size() > 5 ? a.substr(5) : "";
+      } else if (lower == "branches" || lower == "branch") {
+        tool = "git_branches";
+      } else {
+        r.error = "git arg inválido (status|log|diff|show|branches)";
+        r.summary = r.error;
+        return r;
+      }
+      const AiToolResult tr = tools_.invoke(tool, tool_arg);
+      r.ok = tr.ok;
+      r.summary = tr.ok ? ("git " + tool) : tr.text;
+      bool trunc = false;
+      int raw = 0;
+      r.log_tail = admin_clip_output(tr.text, &trunc, &raw);
+      r.truncated = trunc;
+      r.raw_bytes = raw;
+      r.facts.push_back("git:" + tool);
+      if (!tr.ok) {
+        r.error = tr.text;
+      }
+      return r;
+    };
+
+    AdminLoopOpts opts;
+    opts.workspace_root = root;
+    opts.settings = settings_.level2;
+    opts.ui = ui;
+    opts.max_proposes = settings_.harness.max_proposes;
+    opts.max_spawns = settings_.harness.max_spawns;
+    opts.max_explores = settings_.harness.max_explores;
+    opts.explore_max_steps = settings_.harness.explore_max_steps;
+    opts.verifier_enabled = settings_.harness.verifier_enabled;
+    opts.max_verify_passes = settings_.harness.max_verify_passes;
+    opts.verify_max_steps = settings_.harness.verify_max_steps;
+    opts.refuter_enabled = settings_.harness.refuter_enabled;
+    opts.allow_shell = settings_.harness.allow_shell;
+    opts.allow_web = settings_.harness.allow_web;
+    opts.allow_test = settings_.harness.allow_test;
+    opts.explorer_cumulative_mode = settings_.harness.explorer_cumulative_mode;
+    opts.on_line = [this](const std::string& line) { append(line); };
+    opts.cancel = &agent_cancel_;
+
+    const AdminLoopResult res = run_admin_loop(&st, *brain, ops, opts);
+    if (!res.ok) {
+      append("→ No pude terminar: " + (res.error.empty() ? std::string("fallo") : res.error));
+    } else if (res.clarify && !res.reply.empty()) {
+      append(res.reply);
+      append("(Escribe tu respuesta en este panel para continuar.)");
+    } else if (!res.reply.empty()) {
+      append(res.reply);
+    }
+    (void)admin_save_state(root, st, nullptr);
+
+    agent_busy_.store(false);
+    end_thinking();
+    wake(true);
+  });
+}
+
 void AiController::run_level1_async(const std::string& message) {
   if (download_busy_.load()) {
     append("Hay una descarga pendiente (modelo/runtime). Espera a que termine o /cancel.");
@@ -979,11 +1537,13 @@ void AiController::run_level1_async(const std::string& message) {
         settings_.level2_workflow = ai_workflow_kind_name(parse_ai_workflow_kind(result.workflow));
       }
       if (settings_.level2_mode == "harness") {
-        bootstrap_level2_session(message, result.instruction, result.seeds, wf);
+        bootstrap_level2_session(message, result.instruction, result.seeds, wf, {},
+                                 result.problem_frame_json);
         append("L1 listo → L2 harness: `.tuide/ai/l2/session.md`");
         append("Escribe `request.json` y corre `/l2_turn` (ver /help).");
       } else if (level2_mode_is_autonomous()) {
-        bootstrap_level2_session(message, result.instruction, result.seeds, wf);
+        bootstrap_level2_session(message, result.instruction, result.seeds, wf, {},
+                                 result.problem_frame_json);
         append("L1 listo → L2 autónomo (" + effective_level2_mode() + " workflow=" +
                ai_workflow_kind_name(parse_ai_workflow_kind(wf)) + ")");
         run_level2_autonomous_inline("needs_level2");
@@ -999,13 +1559,15 @@ void AiController::run_level1_async(const std::string& message) {
         bootstrap_level2_session(message, result.instruction.empty()
                                               ? "Elige del mapa y lee cuerpos con get_code_of."
                                               : result.instruction,
-                                 result.seeds, settings_.level2_workflow);
+                                 result.seeds, settings_.level2_workflow, {},
+                                 result.problem_frame_json);
         append("L2 harness: sesión sembrada en `.tuide/ai/l2/session.md`");
       } else if (level2_mode_is_autonomous()) {
         bootstrap_level2_session(message, result.instruction.empty()
                                               ? "Elige del mapa y lee cuerpos con get_code_of."
                                               : result.instruction,
-                                 result.seeds, settings_.level2_workflow);
+                                 result.seeds, settings_.level2_workflow, {},
+                                 result.problem_frame_json);
         append("L2 autónomo: sesión sembrada; arrancando loop…");
         run_level2_autonomous_inline("l1_final_seed");
       }
@@ -1177,6 +1739,8 @@ void AiController::show_model_status() {
   append("llama-server resolved: " +
          (store.resolve_llama_server().empty() ? std::string("(none)")
                                               : store.resolve_llama_server()));
+  append("embed_host=" + settings_.level0.embeddings.server_host +
+         " embed_port=" + std::to_string(settings_.level0.embeddings.server_port));
   append("index: " + std::string(intent_index_.ready() ? "ready" : "not ready") +
          " catalog=" + intent_index_.catalog_path());
   append(embed_backend_.status_text());
@@ -1365,6 +1929,10 @@ void AiController::on_symbol_map_ready() {
     return;
   }
   refresh_settings();
+  // Admin no usa stems/embeds; no lanzar warm al completar el mapa.
+  if (settings_.admin_enabled) {
+    return;
+  }
   const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
   if (root.empty()) {
     return;
@@ -1384,6 +1952,10 @@ void AiController::on_symbol_map_ready() {
 }
 
 void AiController::maybe_start_coding_stem_warm_async() {
+  refresh_settings();
+  if (settings_.admin_enabled) {
+    return;
+  }
   if (coding_stem_index_.ready()) {
     return;
   }
@@ -1646,22 +2218,14 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
   }
   switch (route.kind) {
     case AiRouteKind::Help: {
-      append("Comandos L0:");
+      append("Comandos:");
+      append("  NL → Administrador (investiga con explorar/buscar/leer; cierra o pregunta)");
       append("  /help  /build|/compile  /launch  /search <q>  /diag  /git [status|pull|branch|log]");
       append("  /read <path>  /ls [filter]  /symbols <q>  /hover [path:line:col]");
-      append("  /context [seeds…]  /contextdump [q]  /codeof <path:Sym>  /repomap [query|status]");
-      append("  /apply_demo  /tools");
-      append("  /l1 <msg>  /explain <msg>  /model […]  /trace [status|on|off|tail|clear]  /cancel");
-      append("  /mode agent|ask|plan|git  /agent|/ask|/plan|/gitmode [msg]");
-      append("  /new|/reset  — limpia contexto L2 (nueva conversación)");
-      append("  /l2_session [status|bootstrap]  /l2_turn  /l2_tool <name> [arg…]");
-      append("  /l2_run  /l2_done [summary] [--edit|--clarify]");
-      append("NL rápida: \"compila\", \"busca Foo\", \"lista errores\", \"git status\", "
-             "\"git pull\", \"últimos commits\", \"dame contexto de …\"");
-      append("NL ambigua → Nivel 1. Tras un run L2, Enter sigue en la misma sesión; "
-             "Reset o /new arranca de cero. Compile/launch en background (/cancel aborta). "
-             "Trace: .tuide/ai/trace.ndjson (/trace status); mapa: .tuide/ai/map_last.md; "
-             "L2: .tuide/ai/l2/ (mode=harness|local|remote; workflow=agent|ask|plan|git)");
+      append("  /model […]  /backend local|remote  /trace …  /cancel  /new|/reset");
+      append("Legacy L0/L1/L2 (desactivado en hot path; ai.admin_enabled=false para reactivar):");
+      append("  /l1 /explain /l2_* /mode agent|ask|plan|git");
+      append("Sesión: .tuide/ai/l2_admin/  |  en panel: → Piloto / · buscar·leer / veredictos");
       break;
     }
     case AiRouteKind::ResolveTool:
@@ -1741,7 +2305,8 @@ void AiController::bootstrap_level2_session(const std::string& query,
                                             const std::string& instruction,
                                             const std::vector<std::string>& seeds,
                                             const std::string& workflow,
-                                            const std::string& seed_pack_markdown) {
+                                            const std::string& seed_pack_markdown,
+                                            const std::string& problem_frame_json) {
   ensure_tools();
   const std::string root =
       deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
@@ -1749,13 +2314,15 @@ void AiController::bootstrap_level2_session(const std::string& query,
     append("L2 harness: sin workspace root");
     return;
   }
-  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_));
+  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_,
+                                     deps_.symbol_indexer));
   Level2BootstrapOpts opts;
   opts.workspace_root = root;
   opts.query = query;
   opts.instruction = instruction;
   opts.seeds = seeds;
   opts.seed_pack_markdown = seed_pack_markdown;
+  opts.problem_frame_json = problem_frame_json;
   opts.workflow =
       ai_workflow_kind_name(parse_ai_workflow_kind(workflow.empty() ? settings_.level2_workflow
                                                                     : workflow));
@@ -1822,7 +2389,8 @@ void AiController::run_level2_autonomous_inline(const std::string& reason) {
     return;
   }
 
-  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_));
+  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_,
+                                     deps_.symbol_indexer));
   Level2AutonomousLoopOpts opts;
   opts.workspace_root = root;
   opts.settings = settings_.level2;
@@ -1955,7 +2523,8 @@ void AiController::handle_level2_harness(const std::string& arg) {
     append("L2 harness: sin workspace root");
     return;
   }
-  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_));
+  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_,
+                                     deps_.symbol_indexer));
 
   std::string cmd;
   std::string rest;
@@ -2184,19 +2753,60 @@ void AiController::handle_user_input(const std::string& line) {
       clear_ai_session(true);
       return;
     }
+    if (c == "/undo") {
+      const std::string root =
+          deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+      if (root.empty()) {
+        append("Sin workspace abierto.");
+        return;
+      }
+      AdminState st;
+      std::string load_err;
+      if (!admin_load_state(root, &st, &load_err) || st.snapshot_baseline_ref.empty()) {
+        append("Nada que deshacer (sin sesión de IA con snapshot en este workspace).");
+        return;
+      }
+      const SnapshotDiffResult diff = snapshot_diff(root, st.snapshot_baseline_ref);
+      if (!diff.ok) {
+        append("No se pudo calcular qué revertir — " + diff.error);
+        return;
+      }
+      if (diff.changed_paths.empty()) {
+        append("No hay cambios de la IA que revertir en esta consulta.");
+        return;
+      }
+      std::string revert_err;
+      if (!snapshot_revert(root, st.snapshot_baseline_ref, diff.changed_paths, &revert_err)) {
+        append("Undo falló — " + revert_err);
+        return;
+      }
+      std::ostringstream msg;
+      msg << "→ Revertido a como estaba antes de esta consulta (" << diff.changed_paths.size()
+          << " archivo(s)):\n";
+      for (const auto& p : diff.changed_paths) {
+        msg << "  - " << p << '\n';
+      }
+      msg << "\n(Si tienes alguno de estos archivos abierto en un tab, ciérralo y reábrelo para "
+             "ver el contenido revertido — el buffer en memoria no se refresca solo.)";
+      append(msg.str());
+      return;
+    }
   }
 
   Level0SemanticMatcher semantic;
-  // Slash stays deterministic; NL benefits from embeddings when available.
-  // Skip embed ensure while L1 is busy — avoids racing a Vulkan/runtime download.
+  // Slash stays deterministic via L0; NL goes to the single admin (legacy L1/L2 off hot path).
   if (!line.empty() && line[0] != '/') {
     if (agent_busy_.load()) {
-      append("L1 ya está ocupado (/cancel para abortar)");
+      append("Admin ya está ocupado (/cancel para abortar)");
       return;
     }
-    // Continuable L2 session: skip L0/L1 bootstrap and reopen with accumulated context.
     const std::string root =
         deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+    if (settings_.admin_enabled) {
+      run_admin_async(line);
+      return;
+    }
+    // Legacy escape hatch: ai.admin_enabled=false restores L0→L1→L2.
     if (!root.empty() && Level2Session::is_continuable(root)) {
       run_level2_followup_async(line);
       return;
@@ -2231,6 +2841,16 @@ void AiController::handle_user_input(const std::string& line) {
   if (route.kind == AiRouteKind::ResolveTool || route.kind == AiRouteKind::ResolveTask) {
     last_l0_tool_ = route.kind == AiRouteKind::ResolveTool ? route.tool_name : route.task_name;
     last_l0_arg_ = route.arg;
+  }
+  // NL escalate would have been L1; with admin default we never reach here for NL.
+  if (settings_.admin_enabled && (route.kind == AiRouteKind::EscalateLevel1 ||
+                                  route.kind == AiRouteKind::ForceLevel1)) {
+    append("Admin: L0/L1 legacy desactivado. Usa NL (sin /) o /build|/git|/help.");
+    return;
+  }
+  if (settings_.admin_enabled && route.kind == AiRouteKind::Level2Harness) {
+    append("Admin: /l2_* legacy desactivado. Usa NL al administrador.");
+    return;
   }
   handle_route(route, line);
 }

@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se captura Escape o clic fuera para cancelar la generación de código
+2. [fallo] B locator: dónde se limpia el archivo a medias al cancelar la generación (hacia insertar)
+3. [pendiente] P puente: hay camino cancelar la generación y limpiar el archivo a medias (need A B)
+
+Work 1 (A) failed: "no encontré la captura de Escape ni clic fuera para cancelar la generación; lo leído es una función de escape de strings ai trace escape y un método de cancelación lógica cancel level1 sin el handler de input asociado"
+Work 2 (B) failed: "leído: cancel current, clear pending insert, cancel all, handle user input, cancel level1, is cancel input" (Wait, the prompt says "ESA pregunta no se relanza... do=cerrar ese mapeo." for both T1 and T2. It seems both locators failed to find the exact mechanism or the prompt is telling me to close the mapping.)
+
+Actually, the
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no une la captura de Escape/clic fuera con la limpieza del archivo; ambos locadores fallaron en hallar el disparo y el efecto unidos. sin camino entre polos leídos cierra el ancla"
+}

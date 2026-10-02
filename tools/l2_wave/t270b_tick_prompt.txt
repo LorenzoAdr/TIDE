@@ -1,0 +1,11 @@
+# Tick T2_70B — batería core5 vs Llama-3.3-70B local
+
+Sentinel: `AGENT_LOOP_WAKE_t270b`
+
+1. Si `meta/STOP` → para wait/heartbeat y sal.
+2. Lee estado de `.tuide/ai/l2_wave/v2_night/T2_70B/`:
+   - `DONE` → scoreboard/summary; compara vs S0 (0.44) y H_CURSOR (ok 0.80 / ok_gold 0.60); reporta tabla por caso; no relances.
+   - cola viva → rearma wait + heartbeat 1500s; no juzgues casos a medias.
+   - cola muerta sin DONE → anota FAILED y sal.
+3. Heartbeat: `./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_t270b 'Lee tools/l2_wave/t270b_tick_prompt.txt'`
+4. Wait: `./tools/l2_wave/t270b_wait_done.sh` (stdout de esta sesión).

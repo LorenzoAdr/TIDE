@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"T2 confirma que el mecanismo de reinicio automático existe y está completo (detecta caída/vía on lsp missing install y reinicia vía restart lsp for workspace). El claim del usuario se cumple."}

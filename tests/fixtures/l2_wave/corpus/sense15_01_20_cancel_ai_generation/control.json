@@ -1,0 +1,124 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ui/clickable_interaction.cpp:clear_hover_if"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M3",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:begin_insert_at"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino capturar Escape clic fuera y limpiar el archivo a medias",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "dos polos independientes: el disparo (Escape/clic) y el efecto (limpieza). El pack une M2/M4/M5 con M8/M6, pero necesito confirmar el mecanismo de cancelación y limpieza por separado antes de unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "no hay mecanismo de captura de Escape/clic fuera para cancelar la IA, ni de limpieza de archivo a medias al cancelar; lo leído son utilidades de escape de strings y flags en memoria, sin invocación de cancel level1 ni operaciones de sistema de archivos"
+    }
+  ],
+  "why": "no hay mecanismo de captura de Escape/clic fuera para cancelar la IA, ni de limpieza de archivo a medias al cancelar; lo leído son utilidades de escape de strings y flags en memoria, sin invocación de cancel level1 ni operaciones de sistema de archivos",
+  "zooms": []
+}

@@ -1,0 +1,139 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen del editor para marcar un error",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/editor/editor_render.cpp:RenderEditorLine"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación de la consola para llenar el mapa de diagnostics del editor",
+      "keep": [
+        "M5",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se analizan los errores de compilación del output de la consola para generar diagnostics",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error consola",
+        "margen editor",
+        "decoración línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "necesito ver si el pack tiene barrios para el parseo de errores de la consola y el dibujo de decoraciones en el margen del editor"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen del editor para marcar un error",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen del editor para marcar un error"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración línea"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores con una línea roja; M3 y M10 huelen visual highlight, el mecanismo probable para pintar en el margen"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación de la consola para llenar el mapa de diagnostics del editor",
+      "consultas": [
+        "dónde se extraen los errores de compilación de la consola para llenar el mapa de diagnostics del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "shell output"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró cómo se pinta; falta el origen de los datos. M11 huele a escaneo de shell; busco el puente consola->diagnostics"
+    },
+    {
+      "consulta": "dónde se analizan los errores de compilación del output de la consola para generar diagnostics",
+      "consultas": [
+        "dónde se analizan los errores de compilación del output de la consola para generar diagnostics"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "shell output"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 no encontró el extractor. M11 huele a escaneo de output de shell para errores. Necesito ver si hay un mecanismo que parsee la consola y cree diagnostics."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el editor pinta la línea roja si hay diagnostics (T1), pero no existe mecanismo que extraiga errores de la consola para generarlos (T2 vacío, T3 específico de linker). el ancla pide una conexión que no existe."
+    }
+  ],
+  "why": "el editor pinta la línea roja si hay diagnostics (T1), pero no existe mecanismo que extraiga errores de la consola para generarlos (T2 vacío, T3 específico de linker). el ancla pide una conexión que no existe.",
+  "zooms": []
+}

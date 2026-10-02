@@ -1,0 +1,15 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Asked where the crash/unresponsiveness is detected and restart triggered.
+    *   Found: `completion wait timeout ms`, `parse wait timeout ms`, `schedule debounced lsp restart`, `on lsp notification`, `reader loop`, `wait response`, `stop`, `start`.
+    *   Result: The read names suggest timeouts and restart scheduling exist, but T1 didn't explicitly confirm the causal link for *all* cases, just found the names.
+2.  **T2**: Asked where the LSP server is restarted after a failure or timeout.
+    *   Found: `schedule debounced lsp restart`, `restart lsp for workspace`, `wait response`, `reader loop`.
+    *   Result: Confirmed that EOF/closure is detected in `reader loop` via `read message` triggering `reader eof handler`. Timeout is detected in `wait response` but returns failure to caller (doesn't restart directly). Restart depends on business logic (LSP client). Debounced restart is scheduled in `schedule debounced
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "la aplicación detecta el cierre inesperado del servidor LSP en reader loop vía read message y dispara reader eof handler, y el reinicio automático se orquesta desde restart lsp for workspace; el timeout se detecta en wait response pero depende de la lógica del cliente para reiniciar"
+}

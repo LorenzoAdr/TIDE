@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"no_pasar","why":"T4 no encontró el mecanismo de restauración de la lista de archivos; el Cerrado solo lista fichas leídas sin confirmar el efecto. Salto a la siguiente caza del plan: paneles laterales."}

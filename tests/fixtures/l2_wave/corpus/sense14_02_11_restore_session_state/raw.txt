@@ -1,0 +1,22 @@
+The user wants to know if the application remembers the cursor position, open files, and visible side panels when reopening a previously opened project.
+
+I have a plan with 3 phases:
+1.  [fallo] A locator: dónde se restauran los archivos abiertos al abrir un proyecto
+2.  [en_curso] B locator: dónde se restauran los paneles laterales visibles al abrir un proyecto
+3.  [pendiente] P puente: hay camino restaurar archivos abiertos y restaurar paneles laterales (need A B)
+
+Wait, looking at the history:
+Trabajo 1 (Cursor position): "no hay objeto". Closed.
+Trabajo 2 (Open files): "reopen workspace documents, run, open workspace wizard, Event". Closed.
+Trabajo 3 (Side panels): "on workspace opened". Closed.
+
+The user's anchor has three parts:
+1.  Cursor position (T1 - failed/no object)
+2.  Open files (T2 - found "reopen workspace documents")
+3.  Side panels (T3 - found "on workspace opened")
+
+The current state is `control_opened_v1`.
+T1 failed.
+T2
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une la posición del cursor con la reapertura del proyecto; los archivos y paneles se restauran, pero el cursor no"}

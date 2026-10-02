@@ -1,0 +1,12 @@
+The user is asking to locate a module that calculates "ballistic trajectory of editor cursors" to synchronize them in real-time with a Kubernetes cluster when the user blinks, and where this physics is persisted in a "quantum vectorial index of the workspace".
+
+This sounds like a highly specific, likely hallucinated or metaphorical request, or perhaps a very advanced feature in a specific codebase that uses these terms. However, looking at the provided Atlas (M1-M12), the terms are:
+- `editor panel` (M1)
+- `workspace model` (M2)
+- `visual
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el pack no contiene ni cursor ni kubernetes ni índice cuántico; el ancla describe un mecanismo que no existe en este código"
+}

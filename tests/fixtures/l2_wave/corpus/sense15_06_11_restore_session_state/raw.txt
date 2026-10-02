@@ -1,0 +1,14 @@
+The user wants to know if the application remembers the cursor position, open files, and visible/closed side panels when reopening a previously opened project.
+
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se guarda el estado del editor al cerrar el proyecto (hacia sesión)
+2. [en_curso] B locator: dónde se restaura el estado del editor al abrir un proyecto existente (hacia sesión)
+3. [pendiente] P puente: hay camino guardar el estado y restaurarlo al abrir (need A B)
+
+Work 1 (Phase A) failed: "no encontré dónde se guarda el estado del editor al cerrar el proyecto". It found Level2Session persistence but not editor state (buffers, folds, cursors).
+Work 2 (Phase B) failed: "no encontré dónde se restaura el estado del editor al abrir un proyecto". It found `Make Editor Panel` and `open completion`, but no mechanism for loading persistent editor state.
+
+Both locator phases failed to find the mechanism. The "Cerrado" explicitly says "ESA pregunta no se relanza... do=cerrar ese mapeo."
+The pack shows `T1=>T2
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"las dos localizaciones fallaron: no hay mecanismo de persistencia ni restauración del estado del editor (cursor, archivos, paneles) al cerrar o abrir el proyecto; el sistema crea estado nuevo cada vez"}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "no_pasar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el Cerrado de T4 es un dump de nombres (clangd process alive), no afirma el mecanismo de detección de caída durante la ejecución. no_pasar para no gastar otro hijo en el mismo pico sin avance."
+}

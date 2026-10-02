@@ -1,0 +1,153 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto",
+      "keep": [
+        "M3",
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor en el editor al cerrar el proyecto",
+      "keep": [
+        "M1",
+        "M12"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:close",
+        "src/ai/level2_session.cpp:save_state",
+        "src/editor/editor_state.cpp:reset_to_single_cursor",
+        "src/ui/editor_panel.cpp:handle_editor_keys"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+      "keep": [
+        "M5",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/app/workspace_session.cpp:save",
+        "src/app/workspace_session.cpp:load"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales; M1 y M2 huelen a estado y layout del editor"
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor en el editor al cerrar el proyecto",
+      "consultas": [
+        "dónde se guarda la posición del cursor en el editor al cerrar el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack nombra editor state CursorPos; busco el guardado de esa ficha"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla tiene tres polos: cursor, archivos, paneles. El cursor ya se cazó y no dio el disparo. Quedan archivos y paneles. Son dos barrios distintos (M7 file picker vs M5/M6 panel). Rompo en dos encargos independientes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "control: do no legal ahora (pasar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "la fase A confirma la persistencia de archivos abiertos; avanzo a la fase B del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "la lista de archivos abiertos se restaura desde el campo open tabs del archivo workspace session json; la posición del cursor se guarda en save state y se restaura con reset to single cursor; no hay mecanismo para la visibilidad de paneles laterales"
+    }
+  ],
+  "why": "la lista de archivos abiertos se restaura desde el campo open tabs del archivo workspace session json; la posición del cursor se guarda en save state y se restaura con reset to single cursor; no hay mecanismo para la visibilidad de paneles laterales",
+  "zooms": []
+}

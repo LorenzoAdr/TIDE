@@ -1,0 +1,13 @@
+The user wants to know how the application remembers the cursor position, open files, and sidebar panel visibility when reopening a project.
+I have a plan with 3 phases:
+1. [en_curso] A locator: dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto
+2. [pendiente] B locator: dónde se restaura el estado de los paneles laterales al abrir un proyecto
+3. [pendiente] P puente: hay camino restaurar la visibilidad y restaurar el estado de los paneles laterales (need A B)
+
+Wait, looking at
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "el Cerrado de T4 no afirma la restauración de la visibilidad de los paneles laterales; el mecanismo leído (editor state) no cubre este polo del ancla"
+}

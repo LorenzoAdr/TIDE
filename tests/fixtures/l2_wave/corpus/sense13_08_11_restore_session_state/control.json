@@ -1,0 +1,127 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al volver a abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al volver a abrir un proyecto",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "restaurar sesión",
+        "cargar proyecto",
+        "estado editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición, archivos y paneles al reabrir; busco barrios de persistencia y restauración"
+    },
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M1 owns editor state y tiene CursorPos; es el barrio natural para la memoria del cursor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el cursor no dio con el disparo; cierro ese mapeo y paso a los otros dos polos del ancla: archivos y paneles"
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al volver a abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al volver a abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "la caza de archivos cerró sin objeto; el plan indica pasar a paneles"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el cursor se reinicia a un solo cursor y no se restaura la posición; no hay mecanismo para restaurar archivos ni paneles laterales"
+    }
+  ],
+  "why": "el cursor se reinicia a un solo cursor y no se restaura la posición; no hay mecanismo para restaurar archivos ni paneles laterales",
+  "zooms": []
+}

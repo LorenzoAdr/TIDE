@@ -1,0 +1,54 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/ui/editor_panel.cpp:close",
+        "src/app/workspace_model.cpp:close_tab",
+        "src/app/workspace_model.cpp:flush_active_tab"
+      ],
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se controla la visibilidad de los paneles laterales",
+      "evita": [],
+      "hacia": [],
+      "id": "C",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay un mecanismo común que restaura el estado del editor al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B",
+        "C"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

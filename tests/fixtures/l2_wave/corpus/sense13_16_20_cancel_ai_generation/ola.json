@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "las dos ramas del plan fallaron: no se halló la captura de Escape/clic fuera para cancelar la IA, ni la limpieza del archivo al cancelar. El pack no une un mecanismo que una ambos polos; sin camino entre lo leído y el ancla, el claim se refuta."
+}

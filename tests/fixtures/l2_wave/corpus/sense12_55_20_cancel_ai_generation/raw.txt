@@ -1,0 +1,16 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with 3 phases:
+1. A: locator: where level 1 agent cancellation is invoked on Escape.
+2. B: locator: where file is cleaned or pending insertion undone on cancel.
+3. P: bridge: path between invoking cancellation and cleaning file.
+
+Work done:
+T1: Asked where Escape is captured to cancel AI generation. Result: Not found. Read `ai trace escape` (string formatter) and `ai controller` (cancel controller but no input handler).
+T2: Asked where AI generation is cancelled on click outside editor. Result: Empty/No object.
+T3: Asked where level 1 agent cancellation is invoked on Escape. Result: Not found. Read `handle editor escape` (UI mouse, modals, etc.) and `cancel level1` (effect but no input caller).
+
+The pack shows:
+T1 => T3: `cancel level1` -> `ai trace escape` (but T3 says `cancel level1` is the effect, not the caller of input).
+T3 -> `handle editor keys`, `end
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo que una Escape o clic fuera con la cancelación del agente ni con la limpieza del archivo; lo leído son formateadores de strings, controladores de cancelación sin handler de input, y gestores de UI que no invocan la parada del agente"}

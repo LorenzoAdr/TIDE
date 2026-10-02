@@ -51,6 +51,7 @@ std::vector<ShortcutSection> shortcut_sections() {
            {"Ctrl+P", i18n::tr("shortcuts.general.quick_open")},
            {"Ctrl+O", i18n::tr("shortcuts.general.go_to_symbol")},
            {"Ctrl+T", i18n::tr("shortcuts.general.toggle_bottom_panel")},
+           {"Ctrl+Alt+J", i18n::tr("shortcuts.general.toggle_console_expand")},
            {"Ctrl+Q", i18n::tr("shortcuts.general.quit")},
            {"Ctrl+Alt+A", i18n::tr("shortcuts.general.focus_explorer")},
            {"Ctrl+E", i18n::tr("shortcuts.general.focus_editor")},

@@ -27,9 +27,9 @@ std::string format_line_number(int line_no, int width) {
 Decorator left_bg_for_kind(SideBySideRowKind kind) {
   switch (kind) {
     case SideBySideRowKind::kDeletion:
-      return bgcolor(theme::Error());
+      return bgcolor(theme::DiffDeleteBg());
     case SideBySideRowKind::kModification:
-      return bgcolor(theme::Warning());
+      return bgcolor(theme::DiffChangeBg());
     default:
       return bgcolor(theme::CodeBg());
   }
@@ -38,9 +38,9 @@ Decorator left_bg_for_kind(SideBySideRowKind kind) {
 Decorator right_bg_for_kind(SideBySideRowKind kind) {
   switch (kind) {
     case SideBySideRowKind::kAddition:
-      return bgcolor(theme::Success());
+      return bgcolor(theme::DiffAddBg());
     case SideBySideRowKind::kModification:
-      return bgcolor(theme::Warning());
+      return bgcolor(theme::DiffChangeBg());
     default:
       return bgcolor(theme::CodeBg());
   }

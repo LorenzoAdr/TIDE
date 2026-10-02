@@ -1,0 +1,12 @@
+The user wants compilation errors from the bottom console to also be marked with a red line in the left margin of the editor at the exact line of the error.
+
+I have already investigated:
+1.  **T1**: Where the red line is drawn in the left margin. Found `line gutter marker` delegates to `line diagnostic marker from map` to check for `k Error` severity.
+2.  **T2**: Where error diagnostics are inserted into the map consulted by the margin marker. Found `rebuild diagnostics by line` pushes to `panel diagnostics by line item line push back`.
+3.  **T3**: Where LSP diagnostics are applied to the editor panel. Found `apply lsp diagnostics to panel` fills `diagnostics by line`.
+
+The user's request is about *compilation errors from the console*. The current mechanism handles *LSP diagnostics*.
+The pack shows `M11` (binary symbols panel) has `scan shell output for linker errors`. This suggests there might be a mechanism for parsing console output, but the current path (T1-T3) is strictly LSP -> Diagnostics Map -> Gutter Marker.
+The user wants *console* errors to trigger the *same* visual effect
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de la línea roja en el margen depende exclusivamente de los diagnósticos de LSP aplicados al panel; no hay camino desde los errores de la consola inferior hacia este mapa de diagnósticos"}

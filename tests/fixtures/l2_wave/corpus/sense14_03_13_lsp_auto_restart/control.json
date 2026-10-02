@@ -1,0 +1,114 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ai/llama_backend.cpp:wait_until_healthy",
+        "src/ai/llama_backend.cpp:status_text",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se maneja la pérdida de conexión o caída del servidor de lenguaje para disparar un reinicio",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se inicia el servidor de lenguaje y se establece la conexión para detectar fallos",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene la lógica de reinicio (restart lsp for workspace), pero necesito ver qué dispara ese reinicio automáticamente (detección de fallo) o dónde falta esa detección."
+    },
+    {
+      "consulta": "dónde se maneja la pérdida de conexión o caída del servidor de lenguaje para disparar un reinicio",
+      "consultas": [
+        "dónde se maneja la pérdida de conexión o caída del servidor de lenguaje para disparar un reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "on connection lost"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 no encontró la detección automática; el Abierto sugiere 'on connection lost' y 'clangd monitor'. Busco el handler de desconexión o monitor de salud del LSP."
+    },
+    {
+      "consulta": "dónde se inicia el servidor de lenguaje y se establece la conexión para detectar fallos",
+      "consultas": [
+        "dónde se inicia el servidor de lenguaje y se establece la conexión para detectar fallos"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "start server"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 abrió start server; el inicio es el punto donde se puede montar el monitor de caída. T2 no encontró objeto; parto del extra de T1."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "no hay mecanismo de detección automática de caída del LSP en el código actual; el reinicio existente es manual o depende de la salud del backend L2, no del servidor de lenguaje"
+    }
+  ],
+  "why": "no hay mecanismo de detección automática de caída del LSP en el código actual; el reinicio existente es manual o depende de la salud del backend L2, no del servidor de lenguaje",
+  "zooms": []
+}

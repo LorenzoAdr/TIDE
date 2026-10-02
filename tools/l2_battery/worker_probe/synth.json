@@ -1,0 +1,22 @@
+{
+  "pack": "synth",
+  "cards_root": "tests/fixtures/pilot_worker_read",
+  "workspace": "tests/fixtures/pilot_worker_read",
+  "cases": [
+    {
+      "id": "synth_latch_como",
+      "kind": "como",
+      "case_id": ".",
+      "stem": "latch",
+      "zone": "L1",
+      "question": "¿quién pone o limpia busy en este stem?",
+      "instruction": "El indicador se queda en busy. ¿quién escribe y limpia el flag busy?",
+      "trap": false,
+      "thin": false,
+      "require_tool": true,
+      "require_read": true,
+      "gold_writers": ["start_busy", "halt_busy"],
+      "expect": { "verdict": ["chain"] }
+    }
+  ]
+}

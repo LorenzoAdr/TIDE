@@ -1,0 +1,18 @@
+{
+  "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea",
+  "consultas": [
+    "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea"
+  ],
+  "do": "explorar",
+  "error": "control: consulta sin objeto (no una categoría)",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T2 falló buscando en el panel de símbolos; el mecanismo de parsing de errores genéricos de compilación está en otro barrio, probablemente vinculado a la gestión de diagnostics o tasks"
+}

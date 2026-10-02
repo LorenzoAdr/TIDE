@@ -1,0 +1,50 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "plan",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta la tecla Escape o el clic fuera para invocar la cancelación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se invoca la limpieza del archivo al cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino la detección de Escape clic fuera y la limpieza del archivo",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "why": "T1 y T3 fallaron en encontrar la captura de Escape/clic; T2 encontró la limpieza. Necesito localizar dónde se captura el evento de UI (Escape/clic) y dónde se invoca la limpieza, luego verificar si hay camino entre ambos para cumplir el claim del usuario."
+}

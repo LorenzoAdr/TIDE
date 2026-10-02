@@ -1,0 +1,20 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Looked for Escape/click capture to interrupt AI. Found `ai trace escape` (log escaping), not the trigger.
+T2: Looked for canceling generation and cleaning the file. Found `cancel current`, `clear pending insert` (memory flags), but no file system or editor buffer touch.
+T3: Looked for cleaning editor buffer or undoing partial insertion. Found `clamp tabular scroll`, `load tabular placeholder`.
+
+The pack shows:
+M2 (ai trace) -> M3 (level2 session)
+M3 -> M8 (ai controller)
+M6 (level1 agent) -> M8 (ai controller)
+M8 (ai controller) -> M6 (level1 agent)
+M7 (editor panel) -> M6 (level1 agent)
+
+T1 failed to find the trigger.
+T2 failed to find the file cleaning.
+T3 failed to find the buffer cleaning.
+
+The user's claim is: "when AI is generating code and user presses Escape or clicks outside, I want generation
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"las tres cazas cerradas confirman que no existe el mecanismo: no hay captura de Escape/clic para interrumpir IA, ni limpieza de archivo/buffer al cancelar; el sistema solo limpia flags en memoria"}

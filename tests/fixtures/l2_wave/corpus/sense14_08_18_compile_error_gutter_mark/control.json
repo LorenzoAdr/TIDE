@@ -1,0 +1,137 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen del editor para marcar un error",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación de la consola inferior para añadirlos al mapa de diagnósticos del editor",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se analiza el texto de la consola inferior para detectar errores de compilación",
+      "keep": [
+        "M10",
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "margen editor",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir dos polos visuales: el error en la consola y la marca en el margen. necesito ver si el pack ya tiene barrios para el parseo de errores y la decoración del editor, o si hay que ampliar."
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen del editor para marcar un error",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen del editor para marcar un error"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "margen editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores con una línea roja en el margen; busco el mecanismo de pintura en el barrio del editor"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación de la consola inferior para añadirlos al mapa de diagnósticos del editor",
+      "consultas": [
+        "dónde se extraen los errores de compilación de la consola inferior para añadirlos al mapa de diagnósticos del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "consola"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el pintado (UI). Falta el origen: cómo los errores de la consola llegan al mapa que T1 leyó. El pack une packet_monitor con ui."
+    },
+    {
+      "consulta": "dónde se analiza el texto de la consola inferior para detectar errores de compilación",
+      "consultas": [
+        "dónde se analiza el texto de la consola inferior para detectar errores de compilación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parse console output"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 refutó que la consola alimente el mapa de diagnósticos. Para cumplir el ancla, necesito encontrar si existe lógica que extraiga errores del texto de la consola (parseo) para luego inyectarlos en el sistema de marcadores. T1 ya confirmó el pintado; falta la fuente de datos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de pintar la línea roja existe (line gutter marker lee line diagnostic marker from map), pero no hay código que extraiga errores de compilación del texto de la consola inferior para inyectarlos en ese mapa; T2 y T3 refutan la existencia de ese puente"
+    }
+  ],
+  "why": "el mecanismo de pintar la línea roja existe (line gutter marker lee line diagnostic marker from map), pero no hay código que extraiga errores de compilación del texto de la consola inferior para inyectarlos en ese mapa; T2 y T3 refutan la existencia de ese puente",
+  "zooms": []
+}

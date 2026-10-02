@@ -1,0 +1,126 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:reset_to_single_cursor",
+        "src/editor/helix/helix_state.cpp:reset_helix_editor_state",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:load_working_lines_from_disk"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la lista de archivos abiertos al volver a abrir un proyecto",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run",
+        "src/app/recent_projects.cpp:load",
+        "src/app/application.cpp:on_workspace_complete"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 nombra 'editor state' y 'CursorPos', que es el barrio más probable para la persistencia de la posición del cursor y archivos abiertos"
+    },
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "la caza anterior falló en el estado completo; busco el polo del cursor (M1) para ver si hay persistencia parcial"
+    },
+    {
+      "consulta": "dónde se restaura la lista de archivos abiertos al volver a abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la lista de archivos abiertos al volver a abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "sesión"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar archivos abiertos; T2 leyó reseteos, no restauración de lista; busco el mecanismo de persistencia de la sesión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar posición, archivos y paneles. T1 niega el objeto de estado. T2 y T3 leen funciones de reinicialización (reset) y apertura, pero el Cerrado indica que no son el disparo de restauración. No hay mecanismo de persistencia de sesión en el pack."
+    }
+  ],
+  "why": "el ancla pide recordar posición, archivos y paneles. T1 niega el objeto de estado. T2 y T3 leen funciones de reinicialización (reset) y apertura, pero el Cerrado indica que no son el disparo de restauración. No hay mecanismo de persistencia de sesión en el pack.",
+  "zooms": []
+}

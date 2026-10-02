@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pide una modificación (marcar errores de consola en el margen). T1 no halló extracción automática; T3 halló el mecanismo de pintura (line diagnostic marker). El pack no une consola con margen; el claim se cierra como requerimiento de puente entre diagnóstico y margen, sin camino actual."
+}

@@ -1,0 +1,12 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed works:
+1.  **T1**: Found where Escape is captured (`ai controller cpp`, `ai trace cpp`, `clear`, `handle ai console keys`).
+2.  **T2**: Found where the file is cleaned (`clear`, `cancel current`, `clear pending insert`, `cancel all`, `cancel level1`).
+3.  **T3**: Found the decision mechanism: `cancel current` cleans `clear pending insert` if `pending insert` is true AND `busy` is false. If `busy` is true, it ignores pending and calls `cancel all`.
+
+The user's claim is: "when the AI is generating code and the user presses Escape or clicks outside, I want the generation to be cancelled cleanly without leaving the file half-written".
+
+T3 reveals a potential issue: if `busy` is true, `clear pending insert` is ignored. This might mean the file is left half-written or the generation isn't cancelled cleanly in the way the user expects (or maybe `cancel all` handles it, but the condition `busy is false` for cleaning pending insert
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de cancelación ya está leído: cancel current limpia el archivo pendiente si no está busy; si está busy, llama a cancel all. el flujo de Escape a cancelación está trazado."}

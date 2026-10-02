@@ -1,0 +1,21 @@
+The user wants to find a module that calculates ballistic trajectory for editor cursors to sync with a Kubernetes cluster on blink, and where this physics is persisted in a quantum vector index of the workspace.
+
+This sounds like a highly specific, likely non-existent or metaphorical feature in a standard codebase (like VS Code or similar, given the "editor panel", "workspace model", "diagnostics" stems). The terms "balistic trajectory", "Kubernetes cluster", "blink", "quantum vector index" are very specific and likely not present in the provided M* atlas.
+
+Let's look at the M* atlas:
+M1: editor panel, watches panel (scroll, text input focus)
+M2: visual highlight (fold regions)
+M3: workspace model (load tabular placeholder)
+M4: model store (ensure llama cli)
+M5: application (ai indexes requested, sync symbol workspace indexer)
+M6: llama backend (model store llama bundle dir for)
+M7: application (open new tab, save buffer)
+M8: diagnostics (MakeDiagnosticsPanel)
+M9: language server spec (make texlab spec)
+M10: ui perf monitor (MakeMainLayout)
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no nombra trayectoria balística, sincronización con kubernetes, parpadeo ni índice vectorial cuántico; no hay barrio que huela estos mecanismos"
+}

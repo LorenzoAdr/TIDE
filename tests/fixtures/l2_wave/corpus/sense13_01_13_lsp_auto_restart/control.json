@@ -1,0 +1,136 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": false,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático",
+      "keep": [],
+      "n": 1,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se programa el reinicio diferido del servidor de lenguaje",
+      "keep": [
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se gestiona el ciclo de vida del proceso del servidor de lenguaje para añadir la detección de caída",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/ai/llama_backend.cpp:ensure_completion_server",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/llama_backend.cpp:stop_owned_unlocked",
+        "src/ai/llama_backend.cpp:stop_listener_on_port",
+        "src/ai/llama_backend.cpp:health_ok"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 y M7 contienen la lógica de reinicio (restart lsp for workspace, schedule debounced lsp restart). Necesito ver cómo se dispara este reinicio ante una caída o falta de respuesta."
+    },
+    {
+      "consulta": "dónde se programa el reinicio diferido del servidor de lenguaje",
+      "consultas": [
+        "dónde se programa el reinicio diferido del servidor de lenguaje"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "M5 y M7 nombran schedule debounced lsp restart y restart lsp for workspace; busco el mecanismo de reinicio"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio automático"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "lsp symbol provider"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 no encontró el objeto, pero T2 confirmó que existe el mecanismo de reinicio (schedule debounced lsp restart). Necesito encontrar el disparador de ese reinicio para cerrar el claim de detección automática."
+    },
+    {
+      "consulta": "dónde se gestiona el ciclo de vida del proceso del servidor de lenguaje para añadir la detección de caída",
+      "consultas": [
+        "dónde se gestiona el ciclo de vida del proceso del servidor de lenguaje para añadir la detección de caída"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "gestión proceso"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 confirmó que no existe la detección. T2 encontró el reinicio. Ahora busco el punto de gestión del proceso para inyectar la lógica de detección de caída o falta de respuesta."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "la detección de caída se basa en health ok y el reinicio en schedule debounced lsp restart; el pack une ambos mecanismos"
+    }
+  ],
+  "why": "la detección de caída se basa en health ok y el reinicio en schedule debounced lsp restart; el pack une ambos mecanismos",
+  "zooms": []
+}

@@ -64,6 +64,24 @@ std::string extract_json_object(const std::string& raw) {
   return raw.substr(a, b - a + 1);
 }
 
+// Body starts after the opener line (``` or ```cpp).
+std::size_t markdown_fence_inner_begin(const std::string& s, std::size_t fence) {
+  if (fence == std::string::npos) {
+    return std::string::npos;
+  }
+  const auto nl = s.find('\n', fence);
+  return nl == std::string::npos ? s.size() : nl + 1;
+}
+
+std::string markdown_fence_inner_text(const std::string& s, std::size_t fence0,
+                                     std::size_t fence1) {
+  const auto inner = markdown_fence_inner_begin(s, fence0);
+  if (inner == std::string::npos || fence1 == std::string::npos || fence1 < inner) {
+    return {};
+  }
+  return s.substr(inner, fence1 - inner);
+}
+
 }  // namespace
 
 std::string build_pack_digest(const std::string& pack_body, std::size_t max_chars) {
@@ -71,6 +89,7 @@ std::string build_pack_digest(const std::string& pack_body, std::size_t max_char
   std::istringstream in(pack_body);
   std::string line;
   bool in_frag = false;
+  bool in_code = false;
   int frag_lines = 0;
   int frag_line_cap = 10;
   int frags = 0;
@@ -84,6 +103,7 @@ std::string build_pack_digest(const std::string& pack_body, std::size_t max_char
         break;
       }
       in_frag = true;
+      in_code = false;
       frag_lines = 0;
       // First must/ancla fragments: keep more body so review sees real loci.
       frag_line_cap = frags < 4 ? 28 : 10;
@@ -92,9 +112,18 @@ std::string build_pack_digest(const std::string& pack_body, std::size_t max_char
       continue;
     }
     if (in_frag) {
-      if (line == "```") {
+      if (line.rfind("```", 0) == 0) {
         out << line << '\n';
-        in_frag = false;
+        if (in_code) {
+          in_frag = false;
+          in_code = false;
+        } else {
+          in_code = true;
+        }
+        continue;
+      }
+      if (!in_code) {
+        out << line << '\n';
         continue;
       }
       if (frag_lines < frag_line_cap) {
@@ -184,7 +213,8 @@ Respond ONLY with JSON:
 {"verdict":"covered|partial|miss","reason":"...","present":["..."],"missing":["..."],"reject":["path:Symbol"],"confidence":0.0}
 
 Rules:
-- verdict=covered: enough implementation context to edit or answer the request (control/state for the asked behavior is present). Prefer covered when the digest shows the real locus, even if extras are thin.
+- verdict=covered: enough implementation context to edit or answer the request (control/state for the asked behavior is present). Prefer covered when the digest shows the real locus, even if extras are thin or some windows are marked Truncated.
+- Truncated / incomplete snippet windows alone do NOT force partial or miss if the control/state locus bodies are present.
 - verdict=partial: related modules but missing key control pieces needed to edit correctly.
 - verdict=miss: mostly unrelated, wrong subsystem, or too shallow (headers-only noise).
 - present/missing: short ENGLISH implementation concepts (snake_case or technical phrases).
@@ -551,10 +581,7 @@ std::string load_pack_fragment_body(const std::string& pack_body, const std::str
   if (code_start == std::string::npos) {
     return {};
   }
-  const auto body_start = code_start + 3;
-  if (body_start < pack_body.size() && pack_body[body_start] == '\n') {
-    // skip newline after ```
-  }
+  const auto body_start = markdown_fence_inner_begin(pack_body, code_start);
   const auto code_end = pack_body.find("```", body_start);
   if (code_end == std::string::npos) {
     return pack_body.substr(body_start, std::min<std::size_t>(1200, pack_body.size() - body_start));
@@ -991,7 +1018,6 @@ std::vector<std::string> retrieval_anchor_targets(const std::string& map_last_bo
 
   const std::string map_body = extract_ranked_entries_body(map_last_body);
   if (!map_body.empty() && max_map > 0) {
-    std::vector<std::string> ai_first;
     std::vector<std::string> rest;
     std::istringstream in(map_body);
     std::string line;
@@ -1015,22 +1041,8 @@ std::vector<std::string> retrieval_anchor_targets(const std::string& map_last_bo
       } else {
         target = path_line;
       }
-      if (path_line.find("src/ai/") != std::string::npos ||
-          to_snake_token(target).find("ai_controller") != std::string::npos ||
-          to_snake_token(target).find("set_busy") != std::string::npos ||
-          to_snake_token(target).find("agent_busy") != std::string::npos ||
-          to_snake_token(target).find("clear_busy") != std::string::npos) {
-        ai_first.push_back(target);
-      } else {
-        rest.push_back(target);
-      }
-      if (static_cast<int>(ai_first.size() + rest.size()) >= max_map * 2) {
-        break;
-      }
-    }
-    for (const auto& t : ai_first) {
-      add(t);
-      if (static_cast<int>(out.size()) >= max_map) {
+      rest.push_back(target);
+      if (static_cast<int>(rest.size()) >= max_map * 2) {
         break;
       }
     }
@@ -1079,12 +1091,7 @@ std::vector<std::string> expand_anchor_api_siblings(const std::vector<std::strin
         if (dot != std::string::npos) {
           stem = stem.substr(0, dot);
         }
-        const std::string sk = to_snake_token(stem);
-        if (sk.find("busy") != std::string::npos || sk.find("spinner") != std::string::npos ||
-            sk.find("agent") != std::string::npos || sk.find("controller") != std::string::npos ||
-            sk.find("loading") != std::string::npos) {
-          seed_syms.push_back(sk);
-        }
+        seed_syms.push_back(to_snake_token(stem));
       }
       // Same translation unit: .cpp ↔ .hpp/.h for neighbor discovery.
       if (p.size() > 4 && p.compare(p.size() - 4, 4, ".cpp") == 0) {
@@ -1150,43 +1157,6 @@ std::vector<std::string> expand_anchor_api_siblings(const std::vector<std::strin
         want_names.insert("cancel_" + sym.substr(6));
         want_clear_family = true;
       }
-      if (sym.find("busy") != std::string::npos || sym.find("spinner") != std::string::npos ||
-          sym.find("loading") != std::string::npos) {
-        want_names.insert("clear_busy");
-        want_names.insert("clear_busy_if");
-        want_names.insert("cancel_current");
-        want_names.insert("cancel_all");
-        want_clear_family = true;
-      }
-    }
-    // Busy/spinner seeds often live outside the controller TU — pull controller paths
-    // from the ranked map so cancel_all / agent_busy can be discovered on disk.
-    if ((want_names.count("cancel_all") || want_names.count("cancel_current")) &&
-        !map_last_body.empty()) {
-      const std::string map_body = extract_ranked_entries_body(map_last_body);
-      std::istringstream min(map_body);
-      std::string mline;
-      while (std::getline(min, mline)) {
-        if (!is_ranked_entry_start(mline)) {
-          continue;
-        }
-        const std::string path_line = path_line_from_ranked_line(mline);
-        const std::string path_only = path_from_plan_target_simple(path_line);
-        const std::string symbol = symbol_from_ranked_line(mline);
-        const std::string pk = to_snake_token(path_only);
-        const std::string sk = to_snake_token(symbol);
-        if (pk.find("controller") == std::string::npos && pk.find("agent") == std::string::npos &&
-            sk.find("cancel_all") == std::string::npos && sk.find("agent_busy") == std::string::npos &&
-            sk.find("cancel_current") == std::string::npos) {
-          continue;
-        }
-        if (path_only.find('/') == std::string::npos) {
-          continue;
-        }
-        if (seed_paths.insert(to_snake_token(path_only)).second) {
-          seed_path_list.push_back(path_only);
-        }
-      }
     }
     // Prefer clear-side siblings first when packing under budget.
     std::vector<std::pair<std::string, std::string>> found;  // path, symbol
@@ -1221,18 +1191,6 @@ std::vector<std::string> expand_anchor_api_siblings(const std::vector<std::strin
              name.rfind("disable_", 0) == 0);
         if (!named && !family) {
           return;
-        }
-        // Family hits only on control-ish TUs (busy/spinner/controller/agent).
-        if (!named && family) {
-          const auto slash = rel.rfind('/');
-          const std::string base =
-              slash == std::string::npos ? rel : rel.substr(slash + 1);
-          const std::string sk = to_snake_token(base);
-          if (sk.find("busy") == std::string::npos && sk.find("spinner") == std::string::npos &&
-              sk.find("controller") == std::string::npos && sk.find("agent") == std::string::npos &&
-              sk.find("loading") == std::string::npos) {
-            return;
-          }
         }
         // Require a declaration/definition-looking occurrence.
         const std::string needle = name + "(";
@@ -1364,42 +1322,22 @@ std::vector<std::string> expand_anchor_api_siblings(const std::vector<std::strin
 bool target_is_lifecycle_clear(const std::string& target) {
   const std::string sym = symbol_key_from_plan_target(target);
   const std::string k = sym.empty() ? to_snake_token(target) : sym;
-  // LSP/completion cancel helpers are not the agent/UI busy clear locus.
-  if (k.find("inflight") != std::string::npos || k.find("completion") != std::string::npos ||
-      k.find("fetch") != std::string::npos) {
-    return false;
-  }
-  const std::string path = path_from_plan_target_simple(target);
-  const auto slash = path.rfind('/');
-  const std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
-  const std::string stem = to_snake_token(base);
-  const bool control_tu =
-      stem.find("busy") != std::string::npos || stem.find("spinner") != std::string::npos ||
-      stem.find("controller") != std::string::npos || stem.find("agent") != std::string::npos ||
-      stem.find("loading") != std::string::npos;
-  if (k.rfind("clear_", 0) == 0 || k.find("clear_") != std::string::npos) {
-    return control_tu || k.find("busy") != std::string::npos;
-  }
-  if (k.rfind("cancel_", 0) == 0 || k.find("cancel_") != std::string::npos) {
-    // cancel_all / cancel_current only count on controller/agent TUs.
-    return control_tu;
-  }
-  if (k.rfind("reset_", 0) == 0 || k.rfind("stop_", 0) == 0 || k.rfind("disable_", 0) == 0 ||
-      k.rfind("unset_", 0) == 0) {
-    return control_tu;
-  }
-  return false;
+  return k.rfind("clear_", 0) == 0 || k.rfind("cancel_", 0) == 0 ||
+         k.rfind("reset_", 0) == 0 || k.rfind("stop_", 0) == 0 ||
+         k.rfind("disable_", 0) == 0 || k.rfind("unset_", 0) == 0 ||
+         k.rfind("end_", 0) == 0 || k.rfind("close_", 0) == 0 ||
+         k.rfind("deactivate_", 0) == 0;
 }
 
 bool target_is_lifecycle_set(const std::string& target) {
   const std::string sym = symbol_key_from_plan_target(target);
   const std::string k = sym.empty() ? to_snake_token(target) : sym;
   if (k.rfind("set_", 0) == 0 || k.rfind("start_", 0) == 0 || k.rfind("enable_", 0) == 0 ||
-      k.rfind("begin_", 0) == 0 || k.rfind("open_", 0) == 0 || k.rfind("ensure_", 0) == 0) {
+      k.rfind("begin_", 0) == 0 || k.rfind("open_", 0) == 0 ||
+      k.rfind("activate_", 0) == 0) {
     return true;
   }
-  return k.find("busy") != std::string::npos || k.find("spinner") != std::string::npos ||
-         k.find("loading") != std::string::npos;
+  return false;
 }
 
 bool pack_has_lifecycle_pair(const std::string& pack_body) {
@@ -1408,8 +1346,6 @@ bool pack_has_lifecycle_pair(const std::string& pack_body) {
   }
   bool has_set = false;
   bool has_clear = false;
-  bool has_clear_busy = false;
-  bool has_cancel_agent = false;
   std::size_t search_from = 0;
   while (true) {
     const auto head = pack_body.find("### get_code_of `", search_from);
@@ -1435,47 +1371,26 @@ bool pack_has_lifecycle_pair(const std::string& pack_body) {
     if (fence1 == std::string::npos || fence1 <= fence0 + 3) {
       continue;
     }
-    const std::string body = pack_body.substr(fence0 + 3, fence1 - (fence0 + 3));
+    const std::string body = markdown_fence_inner_text(pack_body, fence0, fence1);
     if (body.size() < 40) {
       continue;
     }
-    const std::string body_key = to_snake_token(body);
-    const std::string tgt_key = to_snake_token(tgt);
-    auto hit = [&](const char* p) {
-      return tgt_key.find(p) != std::string::npos || body_key.find(p) != std::string::npos;
+    auto body_has_prefix = [&](const char* prefix) {
+      const std::string p(prefix);
+      return body.find(" " + p) != std::string::npos ||
+             body.find("::" + p) != std::string::npos ||
+             body.rfind(p, 0) == 0;
     };
-    if (hit("set_busy") || hit("set_busy_spinner") || hit("agent_busy") || hit("ensure_spinner") ||
-        (hit("set_") && (tgt_key.find("busy") != std::string::npos || hit("busy_spinner")))) {
-      has_set = true;
-    }
-    // Prefer real busy/agent teardown; ignore LSP/console cancel noise.
-    const bool lsp_noise =
-        hit("inflight") || hit("completion_fetch") || hit("cancel_completion");
-    const bool control_tgt = tgt_key.find("busy") != std::string::npos ||
-                             tgt_key.find("spinner") != std::string::npos ||
-                             tgt_key.find("controller") != std::string::npos ||
-                             tgt_key.find("agent") != std::string::npos;
-    if (!lsp_noise &&
-        (hit("clear_busy") || hit("clear_busy_if") ||
-         (control_tgt && (hit("cancel_all") || hit("cancel_current"))) ||
-         (hit("clear_") && hit("busy")))) {
-      has_clear = true;
-    }
-    if (body.find("void clear_busy(") != std::string::npos ||
-        body.find("void clear_busy_if(") != std::string::npos) {
-      has_clear_busy = true;
-      has_clear = true;
-    }
-    if (control_tgt &&
-        (body.find("cancel_all(") != std::string::npos ||
-         body.find("::cancel_all(") != std::string::npos ||
-         body.find("cancel_current(") != std::string::npos ||
-         body.find("::cancel_current(") != std::string::npos) &&
-        body.find('{') != std::string::npos) {
-      has_cancel_agent = true;
-      has_clear = true;
-    }
-    if ((has_set && has_clear) || (has_clear_busy && has_cancel_agent)) {
+    has_set = has_set || target_is_lifecycle_set(tgt) || body_has_prefix("set_") ||
+              body_has_prefix("start_") || body_has_prefix("enable_") ||
+              body_has_prefix("begin_") || body_has_prefix("open_") ||
+              body_has_prefix("activate_");
+    has_clear = has_clear || target_is_lifecycle_clear(tgt) || body_has_prefix("clear_") ||
+                body_has_prefix("cancel_") || body_has_prefix("reset_") ||
+                body_has_prefix("stop_") || body_has_prefix("disable_") ||
+                body_has_prefix("end_") || body_has_prefix("close_") ||
+                body_has_prefix("deactivate_");
+    if (has_set && has_clear) {
       return true;
     }
   }
@@ -1557,7 +1472,7 @@ std::string pack_code_fences_only(const std::string& pack_body) {
     if (fence1 == std::string::npos) {
       break;
     }
-    out << pack_body.substr(fence0 + 3, fence1 - (fence0 + 3)) << '\n';
+    out << markdown_fence_inner_text(pack_body, fence0, fence1) << '\n';
     pos = fence1 + 3;
   }
   return out.str();
@@ -1604,7 +1519,7 @@ bool pack_target_has_symbol_body(const std::string& pack_body, const std::string
     if (fence1 == std::string::npos || fence1 <= fence0 + 3) {
       continue;
     }
-    const std::string body = pack_body.substr(fence0 + 3, fence1 - (fence0 + 3));
+    const std::string body = markdown_fence_inner_text(pack_body, fence0, fence1);
     const std::string body_key = to_snake_token(body);
     // Skip near-empty / include-only noise.
     if (body.size() < 40) {

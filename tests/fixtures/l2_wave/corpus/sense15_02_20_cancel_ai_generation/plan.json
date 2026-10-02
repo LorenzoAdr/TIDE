@@ -1,0 +1,30 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se invoca la cancelación del controlador de IA al pulsar Escape",
+      "evita": [],
+      "hacia": [
+        "teclado"
+      ],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se invoca la cancelación del controlador de IA al hacer clic fuera",
+      "evita": [],
+      "hacia": [
+        "ventana"
+      ],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

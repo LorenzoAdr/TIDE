@@ -1,0 +1,41 @@
+### Trabajo 1
+consulta: dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA
+keep: M2 M8
+leído: ai trace escape, cancel level1, cancel current, handle user input, handle route, is cancel input
+Cerrado:
+ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo.
+no encontré la captura de la tecla Escape ni del clic fuera para cancelar la generación de la IA; lo leído es el manejo de comandos de texto cancel, cancel, cancelar en is cancel input y la lógica de cancelación en cancel level1, pero no hay código que detecte eventos de teclado Escape o ratón clic fuera en el contexto de la UI o el terminal.
+Abierto:
+- handle ai console keys
+- handle csi
+- on key event
+- on mouse click
+
+### Trabajo 2
+consulta: dónde se limpia el archivo a medias al cancelar la generación de la IA
+keep: M8
+leído: (nada)
+Cerrado:
+El hijo cerró esta pregunta: no hay objeto. Está contestada. No se relanza.
+Preguntó: dónde se limpia el archivo a medias al cancelar la generación de la IA
+ESA pregunta no se relanza. Si el ancla era esa pregunta, cierra el claim citando lo leído. Si el ancla pedía más, amplia otro keep o un hop del pack; no refutes el claim entero.
+(vacío)
+Abierto:
+(nada; no copiar ids del pack)
+
+
+# control_opened_v1
+n=2  (visto+hops extra+circuito; sin código)
+
+T1
+    visto: ai trace escape, cancel level1, cancel current, handle user input
+    extra: cycle level2 mode override, set level2 mode override
+
+T2
+    visto: (nada)
+
+entre abiertas:
+  T1=>T2  sin camino
+hacia el resto:
+  T1 → cycle level2 mode override
+  T1 → set level2 mode override

@@ -1,0 +1,13 @@
+The user wants to mark compilation errors from the console with a red line in the editor margin.
+I have three completed jobs:
+1.  **T1**: Found where errors are marked in the margin (`line diagnostic marker from map`, `line gutter marker`). It uses `diagnostics for editor line`.
+2.  **T2**: Found where errors are read from the console (`scan shell output for linker errors`).
+3.  **T3**: Found where LSP errors are converted to diagnostics (`parse diagnostic`, `parse publish diagnostics`, `apply lsp diagnostics to panel`).
+
+The user's request implies a missing link: the errors from the console (T2) are not currently triggering the margin markers (T1). T3 shows how LSP errors trigger margin markers.
+The user wants the console errors to behave like LSP errors (or at least trigger the same visual effect).
+
+The "ancla" (claim) is: "I want compilation errors appearing in the console to also be marked with a red line in the editor margin".
+This is a feature request or a configuration request, but in the context of code investigation, it usually means "find where this connection should happen" or "find why it doesn't happen
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el margen se marca en line diagnostic marker from map si hay diagnósticos; los errores de consola se leen en scan shell output for linker errors pero no hay camino a los diagnósticos del editor"}

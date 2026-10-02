@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "no_pasar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T4 niega que se lean los errores de la consola para crear diagnósticos; el pack confirma que los diagnósticos vienen de LSP y los errores de shell solo se usan para símbolos de linker. Salto a la siguiente caza."
+}

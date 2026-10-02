@@ -1,0 +1,179 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.hpp",
+        "src/editor/editor_state.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.hpp",
+        "src/editor/editor_state.cpp"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura el estado de los paneles laterales al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino restaurar la visibilidad y restaurar el estado de los paneles laterales",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 owns 'editor state' y tiene 'CursorPos'; es el barrio más probable para la persistencia de posición y archivos."
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 leyó editor state cpp; M1 tiene CursorPos. Cazo el polo del cursor para confirmar si se restaura."
+    },
+    {
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "consultas": [
+        "dónde se restauran los archivos abiertos al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró el cursor; el ancla pide también los archivos abiertos. M1 (editor state) es el barrio del estado; un hijo busca la restauración de la lista de archivos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar paneles laterales; el pack no nombra el mecanismo; se rompen en dos loci para cazar visibilidad y estado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 5,
+      "why": "el Cerrado de T4 no afirma la restauración de la visibilidad de los paneles laterales; el mecanismo leído (editor state) no cubre este polo del ancla"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

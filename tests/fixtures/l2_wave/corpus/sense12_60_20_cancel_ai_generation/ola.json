@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de cancelación (clear pending insert) solo resetea flags de estado y despierta el ciclo; no limpia el archivo ni los buffers de texto, por lo que el claim de 'cancelar limpiamente sin dejar el archivo a medias' se refuta con el código actual"
+}

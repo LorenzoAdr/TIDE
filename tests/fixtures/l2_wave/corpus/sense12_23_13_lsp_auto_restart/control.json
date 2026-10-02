@@ -1,0 +1,184 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:apply_workspace_settings",
+        "src/app/application.cpp:setup_build_environment_watching"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se verifica si el proceso del servidor de lenguaje está vivo y qué ocurre si no responde",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se llama a la verificación de vida del proceso clangd y qué se hace si falla",
+      "keep": [
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se llama a la verificación de vida del proceso clangd y qué se hace si falla",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el servidor LSP deja de responder y se dispara el reinicio automático",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino la verificación de vida del proceso y el disparo del reinicio automático",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'restart lsp for workspace' y 'schedule debounced lsp restart'; es el núcleo del mecanismo de reinicio"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "on workspace opened"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el reinicio por entorno; ahora busco la detección de caída o falta de respuesta para disparar el reinicio automático"
+    },
+    {
+      "consulta": "dónde se verifica si el proceso del servidor de lenguaje está vivo y qué ocurre si no responde",
+      "consultas": [
+        "dónde se verifica si el proceso del servidor de lenguaje está vivo y qué ocurre si no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clangd process alive"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 leyó 'clangd process alive' pero no cerró el mecanismo de detección de caída. Necesito ver si esa verificación dispara el reinicio o si falta ese enlace."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 y T3 leyeron 'clangd process alive' pero no cerraron el mecanismo de detección de caída ni el disparo del reinicio. Necesito localizar dónde se invoca esa verificación y qué lógica conecta el fallo con el reinicio automático."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 5,
+      "why": "el Cerrado de T4 solo lee el símbolo de verificación de vida sin revelar el flujo de fallo; salto a la siguiente caza del plan"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

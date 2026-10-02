@@ -1,0 +1,15 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+I have a plan with 3 phases:
+1. Cursor position (T1) -> Closed: "no hay objeto" (no mechanism found).
+2. Open files list (T2) -> Closed: Found workspace recent list, but no mechanism to restore open tabs/files from disk. `reopen workspace documents` only notifies LSP.
+3. Sidebar visibility (T3) -> Closed: Read `load`, `save`, `config path`.
+
+Current state:
+- T1 (Cursor): Refuted (no object).
+- T2 (Open files): Refuted (no object for restoring tabs).
+- T3 (Sidebar visibility): The closed report says "leído: load, save, config path". It doesn't explicitly say "found mechanism" or "no mechanism". However, looking at the "Abierto" section of T3, it is empty. The "Cerrado" section just lists keywords.
+Wait, let's look at the "Cerrado" of T3 again.
+"Cerrado: leído: load, save, config path"
+This looks like a
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide recordar cursor, archivos y paneles. T1 niega cursor. T2 niega archivos. T3 (paneles) solo lee load/save sin confirmar mecanismo de restauración de visibilidad. El pack no une estos polos a un objeto de estado persistente. Cierra el claim: no hay mecanismo que recuerde la sesión completa."}

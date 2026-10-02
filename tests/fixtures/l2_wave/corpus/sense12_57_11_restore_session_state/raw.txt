@@ -1,0 +1,15 @@
+The user wants to restore the editor state (cursor position, open files, visible panels) when reopening a project.
+I have a plan with 3 phases:
+1. A: locator - where editor state is saved on close (Done, T1 found `save state`, `serialize ai settings`, `serialize ui colors`).
+2. B: locator - where editor state is restored on open (Done, T2 found nothing).
+3. P: bridge - is there a path between save and restore.
+
+T2 (Phase B) closed with "no object". The prompt explicitly says: "Esta pregunta ya tiene respuesta (no hay objeto). No la relances ni en otro keep. Cierra ESE mapeo, o un objeto distinto del pack (un extra del Abierto); no el mismo claim en otro keep; no refutes el claim entero."
+
+So, I cannot ask "where is the editor state restored" again.
+T1 found `save state`, `serialize ai settings`, `serialize ui colors`.
+T2 found nothing.
+The "sin camino" between T1 and T2 is evidence.
+The pack (M*) has `editor state` (M1), `main layout` (M
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra el mecanismo de restauración al abrir; T2 cerró sin objeto y no hay extra que lo sustituya"}

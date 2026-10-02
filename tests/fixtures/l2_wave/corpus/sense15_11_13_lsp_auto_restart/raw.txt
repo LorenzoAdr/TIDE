@@ -1,0 +1,13 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have a plan with 3 phases:
+1. A: Detect crash/no response (Done)
+2. B: Program automatic restart (Done)
+3. P: Bridge between detection and restart (Pending)
+
+Let's review the results:
+T1 (Phase A): Read `on lsp notification`, `spawn language server`. Closed: "ESA pregunta no se relanza...". It seems T1 didn't find the specific detection mechanism for *crash* or *no response*, just general notification/spawning.
+T2 (Phase B): Read `restart lsp for workspace`, `on lsp missing install`, `on lsp notification`. Closed: "ESA pregunta no se relanza...". It found restart logic but maybe not linked to the specific detection of crash/no response in the way the user asked, or just general restart logic.
+T3 (Phase A again?): Read `wait response`, `start`, `on transport reader eof`. Closed: "encontré los dos mecanismos de detección: 1 transport reader eof detecta la caída del proceso cierre de socket EOF y limpia el PID
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la aplicación detecta la caída del LSP mediante el cierre del socket (transport reader eof) y la falta de respuesta mediante un timeout en la espera (wait response); tras la detección, se programa el reinicio automático del servidor (restart lsp for workspace) sin intervención del usuario"}

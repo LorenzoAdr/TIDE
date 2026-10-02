@@ -1,0 +1,203 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se extrae la línea de error del texto de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ui/console_panel.cpp:terminal_selected_text",
+        "src/ui/console_panel.cpp:console_selection_line",
+        "src/ui/console_panel.cpp:terminal_row_text"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/ui/console_panel.cpp:terminal_selected_text",
+        "src/ui/console_panel.cpp:console_selection_line",
+        "src/ui/console_panel.cpp:terminal_row_text"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen del editor para marcar un error",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_display_allowed",
+        "src/lsp/diagnostics.cpp:diagnostic_severity_label"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsea la salida de la consola para extraer la línea y columna del error de compilación",
+      "keep": [
+        "M11"
+      ],
+      "n": 4,
+      "proposes": 3,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsea la salida de la consola para extraer la línea y columna del error de compilación",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crea el diagnóstico en el editor a partir de la línea y columna extraída",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parser de errores de la consola y la creación del diagnóstico en el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) tiene un ejemplo de escaneo de errores. Necesito ver si M3 expone la API para añadir líneas rojas y si M11 revela cómo se parsean los errores de compilación."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no une la consola con el highlight; M11 huele parsing de errores, M3 huele marcas visuales; necesito ver si existe el puente o si hay que crearlo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 niega el objeto de la fase A: no hay extracción específica de línea de error, solo texto genérico. Salto a la fase B para localizar el dibujo de la marca roja."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 leyó extracción de texto de consola, no pintura de margen; el objeto de la fase B no está en ese barrio. Salto a la siguiente caza."
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen del editor para marcar un error",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen del editor para marcar un error"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 falló por leer texto de consola en vez de pintura; M3 (visual highlight) es el barrio correcto para el efecto visual en el editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T3 encontró el mecanismo de visualización (diagnostics) pero no su origen. T1 falló en encontrar un parser específico. Hay que localizar el puente: qué código lee la consola, extrae la línea/columna y lo inyecta en el sistema de diagnostics del editor."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 7,
+      "why": "T4 niega el parser de errores de compilación; el mecanismo leído es para enlazado. Salto a la siguiente caza del plan (B: creación del diagnóstico en el editor)."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

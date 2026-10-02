@@ -1,0 +1,10 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have a plan with 3 phases:
+A: locator: dónde se extraen los errores de compilación del texto de la consola para crear diagnósticos
+B: locator: dónde se pinta el carácter del gutter en la UI del editor
+P: puente: hay camino extraer errores de la consola y pintar el carácter del gutter (need A B)
+
+Current status:
+T1 (A?): asked "dónde se dibuja la línea
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une la consola con el gutter; las cazas de extracción y pintura no hallaron el mecanismo de puente. sin camino entre polos leídos cierra el ancla"}

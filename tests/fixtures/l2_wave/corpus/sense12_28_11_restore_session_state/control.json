@@ -1,0 +1,188 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp",
+        "src/app/application.cpp:restore_workspace_session"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/ui/main_layout.cpp",
+        "src/ui/main_layout.hpp",
+        "src/app/application.cpp:set_workspace"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/editor/editor_state.cpp:CursorPos"
+        ],
+        "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [
+          "src/editor/editor_state.cpp",
+          "src/app/application.cpp:restore_workspace_session"
+        ],
+        "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay un único mecanismo que restaura cursor, archivos y paneles al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 y M5 son los únicos que nombran estado del editor y paneles; necesito ver si guardan/restauran sesión o solo estado en vivo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla enumera tres estados distintos (cursor, archivos, paneles). Un hijo no puede cerrar los tres a la vez sin perder filo. Parto en tres locators independientes y luego pregunto si hay camino entre ellos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 encontró el mecanismo de restauración de archivos abiertos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "T3 no halló el mecanismo de paneles; salto al puente para ver si el mecanismo de archivos (T2) cubre también los paneles"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T2 confirma la restauración de archivos abiertos; T3 confirma la restauración de paneles laterales; T1 confirma la restauración de la posición del cursor. El claim se confirma."
+    }
+  ],
+  "why": "T2 confirma la restauración de archivos abiertos; T3 confirma la restauración de paneles laterales; T1 confirma la restauración de la posición del cursor. El claim se confirma.",
+  "zooms": []
+}

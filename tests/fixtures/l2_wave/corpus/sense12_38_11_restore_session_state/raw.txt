@@ -1,0 +1,14 @@
+The user wants to restore the exact state of the editor when reopening a project: cursor position, open files, and visible/closed side panels.
+The previous plan tried to find "save editor state" and "restore editor state" in `editor state cpp/hpp`.
+T3 closed saying: "no encontré el mecanismo de guardar restaurar estado del editor; lo leído son funciones de gestión de cursores reset to single cursor, set primary y la estructura Editor Buffer, sin serialización ni persistencia".
+It also mentions `restore workspace session` and `open file` in T2, but T3 says no
+---- content ----
+{
+  "action": "control_v1",
+  "do": "explorar",
+  "consulta": "dónde se restaura la sesión de trabajo al abrir el proyecto",
+  "hacia": [
+    "workspace"
+  ],
+  "why": "el editor no persiste su estado; la sesión de trabajo (workspace) es el objeto que guarda y restaura archivos, cursores y paneles"
+}

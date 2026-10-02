@@ -1,0 +1,15 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current state:
+- T1 (Escape key): Failed to find the handler. Read `ai trace escape` which is for logs, not the trigger.
+- T2 (Escape/Click outside capture): Found `handle ai console keys`, `cancel current`, `clear pending insert`.
+- T3 (Clean up file): Found `clear pending insert`, `cancel current`, `cancel all`, `busy`, `cancel level1`, `begin insert at`.
+- T4 (Click outside detection): No object found.
+
+Analysis:
+- T2 and T3 seem to have found the mechanism for cancellation and cleanup (`clear pending insert`, `cancel current`).
+- T4 explicitly says "no object" for click outside detection. This implies the click outside might not be the trigger, or it's handled elsewhere, or simply doesn't exist as a distinct mechanism for this specific action.
+- T1 failed to find the Escape key handler specifically, but T2 mentions `handle ai console keys` which likely handles the Escape key (standard for console/key handling).
+- The "cleanly without leaving the file half-written
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"T4 cerró sin objeto; el clic fuera no es el disparo. T2 y T3 ya leen el mecanismo de cancelación y limpieza (clear pending insert, cancel current)."}

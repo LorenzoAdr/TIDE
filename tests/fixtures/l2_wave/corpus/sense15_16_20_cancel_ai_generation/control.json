@@ -1,0 +1,165 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código al pulsar Escape",
+      "keep": [
+        "M4",
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código al hacer clic fuera del área de edición",
+      "keep": [
+        "M2",
+        "M9"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:cancel_live_lsp_on_cursor_move",
+        "src/ui/editor_panel.cpp:clear_suggestion_cache"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo cuando se cancela la generación de código",
+      "keep": [
+        "M6",
+        "M12"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se cancela la generación de código al pulsar Escape",
+      "consultas": [
+        "dónde se cancela la generación de código al pulsar Escape"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M8 tiene cancel level1 y pending insert; huele el núcleo de la cancelación"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código al hacer clic fuera del área de edición",
+      "consultas": [
+        "dónde se cancela la generación de código al hacer clic fuera del área de edición"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 descartó Escape; pruebo el otro disparador del ancla (clic fuera) para ver si existe el mecanismo de cancelación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla tiene dos disparos (Escape, clic fuera) y un efecto (limpieza). T1 y T2 cerraron sin hallar el disparo exacto para la generación principal (T1 fue texto, T2 fue LSP). Necesito localizar los disparos reales de la generación (no sugerencias) y luego verificar la limpieza."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla tiene dos disparos (Escape, clic) y un efecto (limpieza). Los trabajos anteriores fallaron en los disparos específicos o encontraron mecanismos distintos (LSP). Necesito localizar los disparos reales y luego verificar si limpian el archivo."
+    },
+    {
+      "consulta": "dónde se cancela la generación de código al hacer clic fuera del área de edición",
+      "consultas": [
+        "dónde se cancela la generación de código al hacer clic fuera del área de edición"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "el trabajo 2 leyó cancelación de sugerencias lsp; la generación de código es otro mecanismo; busco el disparo de clic fuera para la generación"
+    },
+    {
+      "consulta": "dónde se limpia el archivo cuando se cancela la generación de código",
+      "consultas": [
+        "dónde se limpia el archivo cuando se cancela la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancelación"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el usuario pide que no quede el archivo a medias; busco el efecto de limpieza tras la cancelación, independientemente del trigger"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el ancla pide cancelar con Escape o clic fuera y limpiar el archivo; T1 niega Escape (usa texto), T2 niega clic fuera (usa cursor move), T3 niega limpieza (solo cancela sin rollback); sin camino entre disparo y efecto, el claim se refuta"
+    }
+  ],
+  "why": "el ancla pide cancelar con Escape o clic fuera y limpiar el archivo; T1 niega Escape (usa texto), T2 niega clic fuera (usa cursor move), T3 niega limpieza (solo cancela sin rollback); sin camino entre disparo y efecto, el claim se refuta",
+  "zooms": []
+}

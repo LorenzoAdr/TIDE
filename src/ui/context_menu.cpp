@@ -1,9 +1,11 @@
 #include "ui/binary_symbols_panel.hpp"
+#include "ui/busy_strip.hpp"
 #include "ui/call_hierarchy_view.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/ui_wake.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -99,8 +101,10 @@ void set_items(ContextMenuState* state, ContextMenuKind kind,
   state->labels.clear();
   state->action_ids.clear();
   state->row_boxes.clear();
+  state->explorer_section_start = -1;
   state->selected = 0;
   state->delete_confirm_open = false;
+  state->rename_targets_file = false;
   state->template_picker_open = false;
   for (const auto& item : items) {
     state->labels.push_back(item.first);
@@ -118,8 +122,10 @@ void set_items(ContextMenuState* state, ContextMenuKind kind,
   state->labels.clear();
   state->action_ids.clear();
   state->row_boxes.clear();
+  state->explorer_section_start = -1;
   state->selected = 0;
   state->delete_confirm_open = false;
+  state->rename_targets_file = false;
   state->template_picker_open = false;
   for (const auto& item : items) {
     state->labels.push_back(item.first);
@@ -220,6 +226,29 @@ void append_doc_comment_items(ContextMenuState* state, bool include_doc_comment)
   append_menu_item(state, i18n::tr("context_menu.add_separator"), "add_separator");
   append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
   append_menu_item(state, i18n::tr("context_menu.insert_template"), "insert_template");
+}
+
+void append_explorer_file_items(ContextMenuState* state, bool show_format,
+                                bool show_secondary_open, bool show_analyze_symbols,
+                                bool show_browser_preview) {
+  if (show_analyze_symbols) {
+    append_menu_item(state, i18n::tr("context_menu.analyze_symbols"), "analyze_symbols");
+  }
+  if (show_secondary_open) {
+    append_menu_item(state, i18n::tr("context_menu.open_secondary"), "open_file_secondary");
+  }
+  append_menu_item(state, i18n::tr("context_menu.open_file"), "open_file");
+  append_menu_item(state, i18n::tr("context_menu.indexer_paths"), "show_indexer_paths");
+  if (show_format) {
+    append_menu_item(state, i18n::tr("context_menu.format_file"), "format_file");
+  }
+  append_menu_item(state, i18n::tr("context_menu.rename_file"), "rename_file");
+  append_menu_item(state, i18n::tr("context_menu.move_to"), "move_to");
+  append_menu_item(state, i18n::tr("context_menu.delete_file"), "delete_file");
+  append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
+  if (show_browser_preview) {
+    append_menu_item(state, i18n::tr("context_menu.preview_browser"), "preview_in_browser");
+  }
 }
 
 int leading_indent_cols(const std::string& line) {
@@ -351,13 +380,8 @@ NavigationParams navigation_params_at(WorkspaceModel* workspace, int line, int c
     return params;
   }
   params.path = workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
-  for (const auto& ln : workspace->buffer.lines) {
-    params.text += ln;
-    params.text.push_back('\n');
-  }
-  if (!params.text.empty()) {
-    params.text.pop_back();
-  }
+  // Use the cached joined source (O(1) when valid) instead of re-joining on the UI thread.
+  params.text = editor_buffer_joined_source(workspace->buffer);
   params.line = line;
   params.character = col;
   return params;
@@ -515,6 +539,61 @@ bool write_file_text(const std::string& absolute_path, const std::string& text) 
   return static_cast<bool>(output);
 }
 
+uint64_t next_lsp_interactive_id(MainLayoutState* layout_state) {
+  if (layout_state == nullptr) {
+    static std::atomic<uint64_t> fallback{0};
+    return fallback.fetch_add(1, std::memory_order_relaxed) + 1;
+  }
+  return ++layout_state->lsp_interactive_request_id;
+}
+
+void apply_format_async_result(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                               const std::shared_ptr<ISymbolProvider>& symbols,
+                               const FormatAsyncResult& result) {
+  clear_busy_if(layout_state, BusyActivity::LspFormat);
+  if (workspace == nullptr) {
+    return;
+  }
+  if (!result.ok || !result.formatted.has_value()) {
+    workspace->status_message = i18n::tr("status.format_error");
+    return;
+  }
+  const std::string path = normalize_path(result.path);
+  if (*result.formatted == result.original_text) {
+    workspace->status_message =
+        i18n::tr_fmt("status.format_no_changes", {fs::path(path).filename().string()});
+    return;
+  }
+
+  const int tab = workspace->find_tab(path);
+  if (tab >= 0) {
+    EditorBuffer& tab_buffer = workspace->tabs[static_cast<std::size_t>(tab)].buffer;
+    if (result.is_range) {
+      push_undo(&tab_buffer);
+      reload_buffer_text(&tab_buffer, *result.formatted, result.caret_line, result.caret_col);
+      editor_buffer_invalidate_joined(&tab_buffer);
+      tab_buffer.semantic_layout_dirty = true;
+      tab_buffer.semantic_layout_dirty_from_line = 0;
+    } else {
+      apply_document_text_to_buffer(&tab_buffer, *result.formatted);
+    }
+    if (tab == workspace->active_tab) {
+      workspace->load_active_tab_into_buffer();
+    }
+    if (symbols != nullptr) {
+      symbols->on_document_changed(path, *result.formatted);
+      symbols->flush_document_sync(path);
+    }
+    refresh_tree_sitter_after_format(path, *result.formatted);
+  } else if (!write_file_text(path, *result.formatted)) {
+    workspace->status_message =
+        i18n::tr_fmt("status.save_failed", {fs::path(path).filename().string()});
+    return;
+  }
+
+  workspace->status_message = i18n::tr_fmt("status.formatted", {fs::path(path).filename().string()});
+}
+
 bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_state,
                          const std::shared_ptr<ISymbolProvider>& symbols,
                          const std::string& absolute_path) {
@@ -548,35 +627,39 @@ bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_stat
     return false;
   }
 
-  const std::optional<std::string> formatted =
-      symbols->format_document(FormatParams{path, text});
-  if (!formatted.has_value()) {
-    workspace->status_message = i18n::tr("status.format_error");
-    return false;
-  }
-  if (*formatted == text) {
-    workspace->status_message =
-        i18n::tr_fmt("status.format_no_changes", {fs::path(path).filename().string()});
+  FormatParams params{path, text};
+  if (symbols->formatting_uses_async_fetch() && layout_state != nullptr) {
+    const uint64_t request_id = next_lsp_interactive_id(layout_state);
+    layout_state->lsp_interactive_ready_handler =
+        [workspace, layout_state, symbols, request_id](ISymbolProvider* provider) {
+          if (provider == nullptr) {
+            return;
+          }
+          auto polled = provider->poll_format(request_id);
+          if (!polled) {
+            return;
+          }
+          layout_state->lsp_interactive_ready_handler = nullptr;
+          apply_format_async_result(workspace, layout_state, symbols, *polled);
+        };
+    if (!symbols->request_format(params, request_id)) {
+      layout_state->lsp_interactive_ready_handler = nullptr;
+      workspace->status_message = i18n::tr("status.format_error");
+      return false;
+    }
+    set_busy_spinner(layout_state, BusyActivity::LspFormat);
+    workspace->status_message = i18n::tr("status.formatting");
     return true;
   }
 
-  if (tab >= 0) {
-    EditorBuffer& tab_buffer = workspace->tabs[static_cast<std::size_t>(tab)].buffer;
-    apply_document_text_to_buffer(&tab_buffer, *formatted);
-    if (tab == workspace->active_tab) {
-      workspace->load_active_tab_into_buffer();
-    }
-    symbols->on_document_changed(path, *formatted);
-    symbols->flush_document_sync(path);
-    refresh_tree_sitter_after_format(path, *formatted);
-  } else if (!write_file_text(path, *formatted)) {
-    workspace->status_message = i18n::tr_fmt("status.save_failed",
-                                             {fs::path(path).filename().string()});
-    return false;
-  }
-
-  workspace->status_message = i18n::tr_fmt("status.formatted", {fs::path(path).filename().string()});
-  return true;
+  const std::optional<std::string> formatted = symbols->format_document(params);
+  FormatAsyncResult sync_result;
+  sync_result.ok = formatted.has_value();
+  sync_result.path = path;
+  sync_result.original_text = text;
+  sync_result.formatted = formatted;
+  apply_format_async_result(workspace, layout_state, symbols, sync_result);
+  return sync_result.ok;
 }
 
 bool format_selection_at_path(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -618,6 +701,8 @@ bool format_selection_at_path(WorkspaceModel* workspace, MainLayoutState* layout
   int end_col = 0;
   tab_buffer.primary().normalized_range(&start_line, &start_col, &end_line, &end_col);
   const std::string text = buffer_document_text(tab_buffer);
+  const int keep_line = tab_buffer.primary_line();
+  const int keep_col = tab_buffer.primary_col();
 
   FormatRangeParams params;
   params.path = path;
@@ -627,33 +712,41 @@ bool format_selection_at_path(WorkspaceModel* workspace, MainLayoutState* layout
   params.end_line = end_line;
   params.end_character = end_col;
 
-  const std::optional<std::string> formatted = symbols->format_range(params);
-  if (!formatted.has_value()) {
-    workspace->status_message = i18n::tr("status.format_error");
-    return false;
-  }
-  if (*formatted == text) {
-    workspace->status_message =
-        i18n::tr_fmt("status.format_no_changes", {fs::path(path).filename().string()});
+  if (symbols->formatting_uses_async_fetch() && layout_state != nullptr) {
+    const uint64_t request_id = next_lsp_interactive_id(layout_state);
+    layout_state->lsp_interactive_ready_handler =
+        [workspace, layout_state, symbols, request_id](ISymbolProvider* provider) {
+          if (provider == nullptr) {
+            return;
+          }
+          auto polled = provider->poll_format(request_id);
+          if (!polled) {
+            return;
+          }
+          layout_state->lsp_interactive_ready_handler = nullptr;
+          apply_format_async_result(workspace, layout_state, symbols, *polled);
+        };
+    if (!symbols->request_format_range(params, request_id, keep_line, keep_col)) {
+      layout_state->lsp_interactive_ready_handler = nullptr;
+      workspace->status_message = i18n::tr("status.format_error");
+      return false;
+    }
+    set_busy_spinner(layout_state, BusyActivity::LspFormat);
+    workspace->status_message = i18n::tr("status.formatting");
     return true;
   }
 
-  const int keep_line = tab_buffer.primary_line();
-  const int keep_col = tab_buffer.primary_col();
-  push_undo(&tab_buffer);
-  reload_buffer_text(&tab_buffer, *formatted, keep_line, keep_col);
-  editor_buffer_invalidate_joined(&tab_buffer);
-  tab_buffer.semantic_layout_dirty = true;
-  tab_buffer.semantic_layout_dirty_from_line = 0;
-  if (tab == workspace->active_tab) {
-    workspace->load_active_tab_into_buffer();
-  }
-  symbols->on_document_changed(path, *formatted);
-  symbols->flush_document_sync(path);
-  refresh_tree_sitter_after_format(path, *formatted);
-  workspace->status_message =
-      i18n::tr_fmt("status.formatted_selection", {fs::path(path).filename().string()});
-  return true;
+  const std::optional<std::string> formatted = symbols->format_range(params);
+  FormatAsyncResult sync_result;
+  sync_result.ok = formatted.has_value();
+  sync_result.is_range = true;
+  sync_result.path = path;
+  sync_result.original_text = text;
+  sync_result.formatted = formatted;
+  sync_result.caret_line = keep_line;
+  sync_result.caret_col = keep_col;
+  apply_format_async_result(workspace, layout_state, symbols, sync_result);
+  return sync_result.ok;
 }
 
 bool navigate_to_location(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -681,13 +774,51 @@ bool go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
   if (params.path.empty()) {
     return false;
   }
+  flash_symbol_at_buffer_pos(workspace, layout_state, line, col, visible_lines);
+
+  if (symbols->navigation_uses_async_fetch() && layout_state != nullptr) {
+    const uint64_t request_id = next_lsp_interactive_id(layout_state);
+    const NavigationRequestKind kind =
+        declaration ? NavigationRequestKind::Declaration : NavigationRequestKind::Definition;
+    layout_state->lsp_interactive_ready_handler =
+        [workspace, layout_state, request_id, declaration, visible_lines, line,
+         col](ISymbolProvider* provider) {
+          if (provider == nullptr) {
+            return;
+          }
+          auto polled = provider->poll_navigation(request_id);
+          if (!polled) {
+            return;
+          }
+          layout_state->lsp_interactive_ready_handler = nullptr;
+          clear_busy_if(layout_state, BusyActivity::LspNavigate);
+          if (!polled->loc.valid) {
+            if (workspace != nullptr) {
+              workspace->status_message = declaration ? i18n::tr("status.no_declaration")
+                                                      : i18n::tr("status.no_definition");
+            }
+            return;
+          }
+          apply_editor_navigation(layout_state, polled->loc, [&](const SourceLocation& target) {
+            navigate_to_location(workspace, layout_state, target, visible_lines);
+          });
+        };
+    if (!symbols->request_navigation(params, kind, request_id)) {
+      layout_state->lsp_interactive_ready_handler = nullptr;
+      workspace->status_message =
+          declaration ? i18n::tr("status.no_declaration") : i18n::tr("status.no_definition");
+      return false;
+    }
+    set_busy_spinner(layout_state, BusyActivity::LspNavigate);
+    return true;
+  }
+
   SourceLocation loc = resolve_symbol_navigation(*symbols, params, declaration);
   if (!loc.valid) {
     workspace->status_message =
         declaration ? i18n::tr("status.no_declaration") : i18n::tr("status.no_definition");
     return false;
   }
-  flash_symbol_at_buffer_pos(workspace, layout_state, line, col, visible_lines);
   apply_editor_navigation(layout_state, loc, [&](const SourceLocation& target) {
     navigate_to_location(workspace, layout_state, target, visible_lines);
   });
@@ -704,12 +835,45 @@ bool go_to_implementation(WorkspaceModel* workspace, MainLayoutState* layout_sta
   if (params.path.empty()) {
     return false;
   }
+  flash_symbol_at_buffer_pos(workspace, layout_state, line, col, visible_lines);
+
+  if (symbols->navigation_uses_async_fetch() && layout_state != nullptr) {
+    const uint64_t request_id = next_lsp_interactive_id(layout_state);
+    layout_state->lsp_interactive_ready_handler =
+        [workspace, layout_state, request_id, visible_lines, params](ISymbolProvider* provider) {
+          if (provider == nullptr) {
+            return;
+          }
+          auto polled = provider->poll_navigation(request_id);
+          if (!polled) {
+            return;
+          }
+          layout_state->lsp_interactive_ready_handler = nullptr;
+          clear_busy_if(layout_state, BusyActivity::LspNavigate);
+          if (!polled->loc.valid || navigation_at_same_spot(polled->loc, params)) {
+            if (workspace != nullptr) {
+              workspace->status_message = i18n::tr("status.no_definition");
+            }
+            return;
+          }
+          apply_editor_navigation(layout_state, polled->loc, [&](const SourceLocation& target) {
+            navigate_to_location(workspace, layout_state, target, visible_lines);
+          });
+        };
+    if (!symbols->request_navigation(params, NavigationRequestKind::Implementation, request_id)) {
+      layout_state->lsp_interactive_ready_handler = nullptr;
+      workspace->status_message = i18n::tr("status.no_definition");
+      return false;
+    }
+    set_busy_spinner(layout_state, BusyActivity::LspNavigate);
+    return true;
+  }
+
   SourceLocation loc = resolve_implementation_navigation(*symbols, params);
   if (!loc.valid || navigation_at_same_spot(loc, params)) {
     workspace->status_message = i18n::tr("status.no_definition");
     return false;
   }
-  flash_symbol_at_buffer_pos(workspace, layout_state, line, col, visible_lines);
   apply_editor_navigation(layout_state, loc, [&](const SourceLocation& target) {
     navigate_to_location(workspace, layout_state, target, visible_lines);
   });
@@ -747,6 +911,56 @@ bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
   params.line = state->editor_line;
   params.character = state->editor_col;
   params.new_name = new_name;
+
+  if (symbols->rename_uses_async_fetch() && layout_state != nullptr) {
+    const uint64_t request_id = next_lsp_interactive_id(layout_state);
+    const std::string nav_path = nav.path;
+    const int nav_line = state->editor_line;
+    const int nav_col = state->editor_col;
+    const std::string old_name = state->symbol_name;
+    const std::string renamed_to = new_name;
+    layout_state->lsp_interactive_ready_handler =
+        [workspace, layout_state, symbols, model, symbol_indexer, request_id, nav_path, nav_line,
+         nav_col, old_name, renamed_to](ISymbolProvider* provider) {
+          if (provider == nullptr) {
+            return;
+          }
+          auto polled = provider->poll_rename(request_id);
+          if (!polled) {
+            return;
+          }
+          layout_state->lsp_interactive_ready_handler = nullptr;
+          clear_busy_if(layout_state, BusyActivity::LspRename);
+          if (!polled->ok || polled->edits.empty()) {
+            if (workspace != nullptr) {
+              workspace->status_message = i18n::tr("status.rename_failed");
+            }
+            return;
+          }
+          std::string status;
+          if (!apply_workspace_file_edits(workspace, model, symbols, symbol_indexer, polled->edits,
+                                          nav_path, nav_line, nav_col, &status)) {
+            if (workspace != nullptr) {
+              workspace->status_message =
+                  status.empty() ? i18n::tr("status.rename_failed") : status;
+            }
+            return;
+          }
+          if (workspace != nullptr) {
+            workspace->status_message = i18n::tr_fmt(
+                "status.renamed",
+                {old_name, renamed_to, std::to_string(polled->edits.size())});
+          }
+        };
+    if (!symbols->request_rename(params, request_id)) {
+      layout_state->lsp_interactive_ready_handler = nullptr;
+      workspace->status_message = i18n::tr("status.rename_failed");
+      return false;
+    }
+    set_busy_spinner(layout_state, BusyActivity::LspRename);
+    workspace->status_message = i18n::tr("status.renaming");
+    return true;
+  }
 
   const std::vector<LspFileEdits> file_edits = symbols->rename_symbol(params);
   if (file_edits.empty()) {
@@ -794,6 +1008,8 @@ void focus_call_hierarchy(MainLayoutState* layout_state, int line, int col,
   layout_state->console_tabs.selected_tab = ConsolePanelTabs::kCallHierarchy;
   layout_state->right_panel_active_section = 0;
   layout_state->right_sidebar.pending_references = false;
+  layout_state->right_sidebar.pending_causal_flow = false;
+  layout_state->right_sidebar.pending_causal_connect = false;
   layout_state->right_sidebar.pending_call_hierarchy = true;
   layout_state->right_sidebar.pending_call_hierarchy_line = line;
   layout_state->right_sidebar.pending_call_hierarchy_col = col;
@@ -812,10 +1028,33 @@ void focus_references(MainLayoutState* layout_state, int line, int col,
   layout_state->console_tabs.selected_tab = ConsolePanelTabs::kCallHierarchy;
   layout_state->right_panel_active_section = 0;
   layout_state->right_sidebar.pending_call_hierarchy = false;
+  layout_state->right_sidebar.pending_causal_flow = false;
+  layout_state->right_sidebar.pending_causal_connect = false;
   layout_state->right_sidebar.pending_references = true;
   layout_state->right_sidebar.pending_references_line = line;
   layout_state->right_sidebar.pending_references_col = col;
   layout_state->right_sidebar.pending_references_symbol = symbol;
+  layout_state->text_input_focus = TextInputFocus::None;
+  layout_state->focus_sync_needed = true;
+  wake_console_panel(layout_state);
+}
+
+void focus_causal_flow(MainLayoutState* layout_state, const std::string& symbol, bool connect,
+                       int line, const std::string& path) {
+  if (layout_state == nullptr || symbol.empty()) {
+    return;
+  }
+  layout_state->console_visible = true;
+  layout_state->console_tabs.selected_tab = ConsolePanelTabs::kCallHierarchy;
+  layout_state->right_panel_active_section = 0;
+  layout_state->right_sidebar.pending_call_hierarchy = false;
+  layout_state->right_sidebar.pending_references = false;
+  layout_state->right_sidebar.pending_causal_flow = !connect;
+  layout_state->right_sidebar.pending_causal_flow_symbol = connect ? std::string{} : symbol;
+  layout_state->right_sidebar.pending_causal_flow_line = connect ? -1 : line;
+  layout_state->right_sidebar.pending_causal_flow_path = connect ? std::string{} : path;
+  layout_state->right_sidebar.pending_causal_connect = connect;
+  layout_state->right_sidebar.pending_causal_connect_symbol = connect ? symbol : std::string{};
   layout_state->text_input_focus = TextInputFocus::None;
   layout_state->focus_sync_needed = true;
   wake_console_panel(layout_state);
@@ -1192,9 +1431,9 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
-  if (action_id == "preview_markdown") {
+  if (action_id == "preview_in_browser") {
     if (workspace != nullptr) {
-      workspace->preview_markdown_in_browser(state->absolute_path);
+      workspace->preview_in_browser(state->absolute_path);
     }
     return true;
   }
@@ -1220,6 +1459,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
   }
 
   if (action_id == "rename_file") {
+    state->rename_targets_file = true;
     open_rename_prompt(state, fs::path(state->absolute_path).filename().string());
     return true;
   }
@@ -1288,12 +1528,22 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
   }
 
   if (action_id == "rename_symbol") {
+    state->rename_targets_file = false;
     open_rename_prompt(state, state->symbol_name);
     return true;
   }
 
   if (action_id == "call_hierarchy") {
     focus_call_hierarchy(layout_state, state->editor_line, state->editor_col, state->symbol_name);
+    if (focus != nullptr) {
+      focus->region = FocusRegion::RightPanel;
+    }
+    return true;
+  }
+
+  if (action_id == "causal_flow" || action_id == "causal_connect") {
+    focus_causal_flow(layout_state, state->symbol_name, action_id == "causal_connect",
+                      state->editor_line, state->absolute_path);
     if (focus != nullptr) {
       focus->region = FocusRegion::RightPanel;
     }
@@ -1522,7 +1772,7 @@ bool commit_rename(ContextMenuState* state, WorkspaceModel* workspace, DebugMode
     return false;
   }
 
-  if (state->kind == ContextMenuKind::EditorSymbol) {
+  if (state->kind == ContextMenuKind::EditorSymbol && !state->rename_targets_file) {
     const bool ok = rename_symbol_with_lsp(state, workspace, layout_state, symbols, model,
                                            symbol_indexer, new_name);
     if (ok && focus != nullptr) {
@@ -1679,9 +1929,11 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
   state->indexer_paths_scroll = 0;
   state->indexer_paths_lines.clear();
   state->rename_skip_return = false;
+  state->rename_targets_file = false;
   state->rename_input.clear();
   state->name_prompt_kind = NamePromptKind::Rename;
   state->batch_targets.clear();
+  state->explorer_section_start = -1;
   state->selected = 0;
   state->row_boxes.clear();
   if (layout_state != nullptr) {
@@ -1700,6 +1952,27 @@ void context_menu_append_item(ContextMenuState* state, const std::string& label,
   state->row_boxes.push_back(Box{});
 }
 
+void context_menu_append_explorer_file_section(
+    ContextMenuState* state, const std::string& workspace_root, bool show_format,
+    bool show_secondary_open, bool show_analyze_symbols, bool show_browser_preview) {
+  if (state == nullptr || state->absolute_path.empty() || workspace_root.empty() ||
+      !path_is_same_or_descendant(workspace_root, state->absolute_path)) {
+    return;
+  }
+
+  std::error_code ec;
+  const fs::path relative =
+      fs::relative(fs::path(state->absolute_path), fs::path(workspace_root), ec);
+  if (ec || relative.empty()) {
+    return;
+  }
+
+  state->relative_path = relative.generic_string();
+  state->explorer_section_start = static_cast<int>(state->labels.size());
+  append_explorer_file_items(state, show_format, show_secondary_open, show_analyze_symbols,
+                             show_browser_preview);
+}
+
 void context_menu_open_file(ContextMenuState* state, int x, int y,
                             const std::string& absolute_path, const std::string& relative_path,
                             bool show_format, bool show_secondary_open, bool show_analyze_symbols) {
@@ -1716,89 +1989,9 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
   state->anchor_y = y;
   state->absolute_path = absolute_path;
   state->relative_path = relative_path;
-  if (show_analyze_symbols) {
-    if (show_format) {
-      if (show_secondary_open) {
-        set_items(state, ContextMenuKind::File,
-                  {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
-                   {i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
-                   {i18n::tr("context_menu.open_file"), "open_file"},
-                   {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                   {i18n::tr("context_menu.format_file"), "format_file"},
-                   {i18n::tr("context_menu.rename_file"), "rename_file"},
-                   {i18n::tr("context_menu.move_to"), "move_to"},
-                   {i18n::tr("context_menu.delete_file"), "delete_file"}});
-      } else {
-        set_items(state, ContextMenuKind::File,
-                  {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
-                   {i18n::tr("context_menu.open_file"), "open_file"},
-                   {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                   {i18n::tr("context_menu.format_file"), "format_file"},
-                   {i18n::tr("context_menu.rename_file"), "rename_file"},
-                   {i18n::tr("context_menu.move_to"), "move_to"},
-                   {i18n::tr("context_menu.delete_file"), "delete_file"}});
-      }
-    } else if (show_secondary_open) {
-      set_items(state, ContextMenuKind::File,
-                {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
-                 {i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
-                 {i18n::tr("context_menu.open_file"), "open_file"},
-                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                 {i18n::tr("context_menu.rename_file"), "rename_file"},
-                 {i18n::tr("context_menu.move_to"), "move_to"},
-                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    } else {
-      set_items(state, ContextMenuKind::File,
-                {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
-                 {i18n::tr("context_menu.open_file"), "open_file"},
-                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                 {i18n::tr("context_menu.rename_file"), "rename_file"},
-                 {i18n::tr("context_menu.move_to"), "move_to"},
-                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    }
-    append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
-    return;
-  }
-  if (show_format) {
-    if (show_secondary_open) {
-      set_items(state, ContextMenuKind::File,
-                {{i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
-                 {i18n::tr("context_menu.open_file"), "open_file"},
-                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                 {i18n::tr("context_menu.format_file"), "format_file"},
-                 {i18n::tr("context_menu.rename_file"), "rename_file"},
-                 {i18n::tr("context_menu.move_to"), "move_to"},
-                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    } else {
-      set_items(state, ContextMenuKind::File,
-                {{i18n::tr("context_menu.open_file"), "open_file"},
-                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                 {i18n::tr("context_menu.format_file"), "format_file"},
-                 {i18n::tr("context_menu.rename_file"), "rename_file"},
-                 {i18n::tr("context_menu.move_to"), "move_to"},
-                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    }
-    append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
-    return;
-  }
-  if (show_secondary_open) {
-    set_items(state, ContextMenuKind::File,
-              {{i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
-               {i18n::tr("context_menu.open_file"), "open_file"},
-               {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-               {i18n::tr("context_menu.rename_file"), "rename_file"},
-               {i18n::tr("context_menu.move_to"), "move_to"},
-               {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
-    return;
-  }
-  set_items(state, ContextMenuKind::File,
-            {{i18n::tr("context_menu.open_file"), "open_file"},
-             {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-             {i18n::tr("context_menu.rename_file"), "rename_file"},
-             {i18n::tr("context_menu.move_to"), "move_to"},
-             {i18n::tr("context_menu.delete_file"), "delete_file"}});
-  append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
+  set_items(state, ContextMenuKind::File, {});
+  append_explorer_file_items(state, show_format, show_secondary_open, show_analyze_symbols,
+                             false);
 }
 
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
@@ -1850,7 +2043,8 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
                                      int sym_start, int sym_end, const std::string& symbol,
                                      const std::string& absolute_path, bool show_call_hierarchy,
                                      bool show_references, const DebugModel* model,
-                                     bool has_selection, bool ai_actions_enabled) {
+                                     bool has_selection, bool ai_actions_enabled,
+                                     MainLayoutState* layout_state) {
   if (state == nullptr || symbol.empty()) {
     return;
   }
@@ -1861,6 +2055,8 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   state->anchor_x = x;
   state->anchor_y = y;
   state->absolute_path = absolute_path;
+  state->relative_path.clear();
+  state->batch_targets.clear();
   state->editor_line = line;
   state->editor_col = col;
   state->editor_sym_start = sym_start;
@@ -1878,6 +2074,16 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   }
   if (show_references) {
     items.push_back({i18n::tr("context_menu.find_references"), "find_references"});
+  }
+  bool causal_connect = false;
+  if (layout_state != nullptr) {
+    const CallHierarchyViewState& flow = layout_state->right_sidebar.call_hierarchy;
+    causal_connect = flow.active && flow.kind == CallHierarchyContentKind::CausalFlow &&
+                     symbol != flow.root_label;
+  }
+  items.push_back({i18n::tr("context_menu.causal_flow"), "causal_flow"});
+  if (causal_connect) {
+    items.push_back({i18n::tr("context_menu.causal_connect"), "causal_connect"});
   }
   items.push_back({i18n::tr("context_menu.rename_symbol"), "rename_symbol"});
   if (show_format) {
@@ -1933,6 +2139,7 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
   state->anchor_y = y;
   state->absolute_path = absolute_path;
   state->relative_path.clear();
+  state->batch_targets.clear();
   state->editor_line = line;
   state->editor_col = col;
   state->symbol_name.clear();
@@ -1943,7 +2150,9 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
   if (has_selection) {
     items.push_back({i18n::tr("context_menu.format_selection"), "format_selection"});
   }
-  items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
+  if (is_lsp_trackable_path(absolute_path)) {
+    items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
+  }
   set_items(state, ContextMenuKind::EditorBackground, items);
   if (ai_actions_enabled) {
     append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
@@ -2049,7 +2258,7 @@ Element render_rename_modal(ContextMenuState* state) {
           ? i18n::tr("context_menu.create.folder")
           : state->name_prompt_kind == NamePromptKind::CreateFile
                 ? i18n::tr("context_menu.create.file")
-          : state->kind == ContextMenuKind::EditorSymbol
+          : state->kind == ContextMenuKind::EditorSymbol && !state->rename_targets_file
                 ? i18n::tr("context_menu.rename.symbol")
           : state->kind == ContextMenuKind::Folder ? i18n::tr("context_menu.rename.folder")
                                                    : i18n::tr("context_menu.rename.file");
@@ -2232,6 +2441,9 @@ Element render_context_menu_overlay(ContextMenuState* state, MainLayoutState* la
   Elements rows;
   state->row_boxes.resize(state->labels.size());
   for (int i = 0; i < static_cast<int>(state->labels.size()); ++i) {
+    if (i == state->explorer_section_start && i > 0) {
+      rows.push_back(separator() | color(theme::AccentDim()));
+    }
     const std::string row_id = press_id::context_menu_row(i);
     const bool hovered =
         layout_state != nullptr && layout_state->clickable.is_hovered(row_id);

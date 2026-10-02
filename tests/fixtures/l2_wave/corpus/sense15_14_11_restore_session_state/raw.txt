@@ -1,0 +1,17 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+I have a plan with 3 locators and a bridge.
+T1 (cursor position): Failed to find the mechanism. Read `reopen workspace documents`, `load working lines from disk`.
+T2 (open files): Found the mechanism `restore workspace session` which iterates `session open tabs` and calls `workspace open file path`.
+T3 (sidebar visibility): Failed to find the mechanism. Read `reopen workspace documents`, `load working lines from disk`, `restore workspace session`, `load`.
+
+The user's claim has three parts:
+1. Cursor position
+2. Open files
+3. Sidebar visibility
+
+T2 confirmed part 2 (open files).
+T1 and T3 failed to find the specific mechanisms for cursor position and sidebar visibility in the provided keeps/reads.
+The instructions say: "Si el Cerrado niega el enlace o el disparo, tu why no lo afirma." and "Un leído: no refuta el existe. Solo niega ese disparo."
+However, T1 and T3 read `restore workspace session` (T3) and `reopen workspace
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"se restauran los archivos abiertos (restore workspace session itera session open tabs); no se halló mecanismo para posición del cursor ni visibilidad de paneles laterales en lo leído"}

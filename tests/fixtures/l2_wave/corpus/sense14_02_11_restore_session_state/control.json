@@ -1,0 +1,147 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M10"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:open_workspace_wizard",
+        "src/app/application.cpp:Event"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los paneles laterales visibles al abrir un proyecto",
+      "keep": [
+        "M4",
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/symbol_provider.hpp:on_workspace_opened"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los paneles laterales visibles al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino restaurar archivos abiertos y restaurar paneles laterales",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 tiene CursorPos; busco el mecanismo de restauración"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla tiene tres polos: cursor (ya cerrado sin objeto), archivos abiertos y paneles laterales. Parto en dos cazas independientes para archivos y paneles, y luego un puente para ver si comparten mecanismo. El hijo de A no necesita B."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack no une la posición del cursor con la reapertura del proyecto; los archivos y paneles se restauran, pero el cursor no"
+    }
+  ],
+  "why": "el pack no une la posición del cursor con la reapertura del proyecto; los archivos y paneles se restauran, pero el cursor no",
+  "zooms": []
+}

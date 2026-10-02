@@ -1,0 +1,43 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se extraen las líneas de error del texto de salida de compilación",
+      "evita": [],
+      "hacia": [
+        "diagnostics from text"
+      ],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se dibuja una marca en el margen del editor para resaltar una línea",
+      "evita": [],
+      "hacia": [
+        "decoración margen"
+      ],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "pendiente"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "hay camino extraer errores de compilación y dibujar marca en margen",
+      "evita": [],
+      "hacia": [],
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "status": "pendiente"
+    }
+  ],
+  "modo": "romper"
+}

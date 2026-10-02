@@ -1,0 +1,16 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor.
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se pintan las marcas en el margen izquierdo del editor
+2. [en_curso] B locator: dónde se parsean los errores de compilación de la consola inferior
+3. [pendiente] P puente: hay camino parsear el error y pintar la marca en el margen (need A B)
+
+T1 (Phase A) failed. It read `handle git gutter click`, `handle gutter marker click`, `build git marks snapshot`. These are related to git marks, not compilation errors. The user wants compilation errors.
+T2 (Phase B) failed. It read `Make Diagnostics Panel`, `build rows`, `supports diagnostics`. It found that the diagnostics panel consumes LSP data, not plain text parsing from the console. It says "no encontré el mecanismo de parsing de errores de compilación desde la consola inferior".
+
+The anchor claims: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no nombra el mecanismo de parsing de errores de compilación desde la consola inferior ni el puente hacia el margen del editor; el panel de diagnósticos consume exclusivamente LSP, y las búsquedas de parsing de texto plano retornaron 0 hits. sin camino entre polos leídos cierra el ancla."
+}

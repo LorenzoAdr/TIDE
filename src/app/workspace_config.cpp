@@ -70,6 +70,13 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
   if (doc.contains("enabled") && doc["enabled"].is_boolean()) {
     settings->enabled = doc["enabled"].get<bool>();
   }
+  if (doc.contains("admin_enabled") && doc["admin_enabled"].is_boolean()) {
+    settings->admin_enabled = doc["admin_enabled"].get<bool>();
+  }
+  if (doc.contains("admin") && doc["admin"].is_object() && doc["admin"].contains("enabled") &&
+      doc["admin"]["enabled"].is_boolean()) {
+    settings->admin_enabled = doc["admin"]["enabled"].get<bool>();
+  }
   if (doc.contains("command_whitelist") && doc["command_whitelist"].is_array()) {
     settings->command_whitelist.clear();
     for (const auto& entry : doc["command_whitelist"]) {
@@ -242,6 +249,9 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
       if (emb.contains("auto_download") && emb["auto_download"].is_boolean()) {
         settings->level0.embeddings.auto_download = emb["auto_download"].get<bool>();
       }
+      if (emb.contains("server_host") && emb["server_host"].is_string()) {
+        settings->level0.embeddings.server_host = emb["server_host"].get<std::string>();
+      }
       if (emb.contains("server_port") && emb["server_port"].is_number_integer()) {
         settings->level0.embeddings.server_port = emb["server_port"].get<int>();
       }
@@ -268,6 +278,70 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
       }
     }
   }
+  if (doc.contains("harness") && doc["harness"].is_object()) {
+    const auto& h = doc["harness"];
+    auto& out = settings->harness;
+    if (h.contains("max_proposes") && h["max_proposes"].is_number_integer()) {
+      out.max_proposes = h["max_proposes"].get<int>();
+    }
+    if (h.contains("max_spawns") && h["max_spawns"].is_number_integer()) {
+      out.max_spawns = h["max_spawns"].get<int>();
+    }
+    if (h.contains("max_explores") && h["max_explores"].is_number_integer()) {
+      out.max_explores = h["max_explores"].get<int>();
+    }
+    if (h.contains("explore_max_steps") && h["explore_max_steps"].is_number_integer()) {
+      out.explore_max_steps = h["explore_max_steps"].get<int>();
+    }
+    if (h.contains("verifier_enabled") && h["verifier_enabled"].is_boolean()) {
+      out.verifier_enabled = h["verifier_enabled"].get<bool>();
+    }
+    if (h.contains("max_verify_passes") && h["max_verify_passes"].is_number_integer()) {
+      out.max_verify_passes = h["max_verify_passes"].get<int>();
+    }
+    if (h.contains("verify_max_steps") && h["verify_max_steps"].is_number_integer()) {
+      out.verify_max_steps = h["verify_max_steps"].get<int>();
+    }
+    if (h.contains("refuter_enabled") && h["refuter_enabled"].is_boolean()) {
+      out.refuter_enabled = h["refuter_enabled"].get<bool>();
+    }
+    if (h.contains("allow_shell") && h["allow_shell"].is_boolean()) {
+      out.allow_shell = h["allow_shell"].get<bool>();
+    }
+    if (h.contains("allow_web") && h["allow_web"].is_boolean()) {
+      out.allow_web = h["allow_web"].get<bool>();
+    }
+    if (h.contains("allow_test") && h["allow_test"].is_boolean()) {
+      out.allow_test = h["allow_test"].get<bool>();
+    }
+    if (h.contains("explorer_cumulative_mode") && h["explorer_cumulative_mode"].is_boolean()) {
+      out.explorer_cumulative_mode = h["explorer_cumulative_mode"].get<bool>();
+    }
+    if (h.contains("allow_causal_trail") && h["allow_causal_trail"].is_boolean()) {
+      out.allow_causal_trail = h["allow_causal_trail"].get<bool>();
+    }
+    if (h.contains("allow_dataflow_trace") && h["allow_dataflow_trace"].is_boolean()) {
+      out.allow_dataflow_trace = h["allow_dataflow_trace"].get<bool>();
+    }
+    if (h.contains("allow_headers_of") && h["allow_headers_of"].is_boolean()) {
+      out.allow_headers_of = h["allow_headers_of"].get<bool>();
+    }
+    if (h.contains("allow_repo_map") && h["allow_repo_map"].is_boolean()) {
+      out.allow_repo_map = h["allow_repo_map"].get<bool>();
+    }
+    if (h.contains("max_grep_per_wave") && h["max_grep_per_wave"].is_number_integer()) {
+      out.max_grep_per_wave = h["max_grep_per_wave"].get<int>();
+    }
+    if (h.contains("max_read_per_wave") && h["max_read_per_wave"].is_number_integer()) {
+      out.max_read_per_wave = h["max_read_per_wave"].get<int>();
+    }
+    if (h.contains("max_grep_total") && h["max_grep_total"].is_number_integer()) {
+      out.max_grep_total = h["max_grep_total"].get<int>();
+    }
+    if (h.contains("max_read_total") && h["max_read_total"].is_number_integer()) {
+      out.max_read_total = h["max_read_total"].get<int>();
+    }
+  }
 }
 
 nlohmann::json serialize_ai_settings(const AiSettings& settings) {
@@ -277,6 +351,7 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
   }
   return nlohmann::json{
       {"enabled", settings.enabled},
+      {"admin_enabled", settings.admin_enabled},
       {"command_whitelist", settings.command_whitelist},
       {"tasks", std::move(tasks)},
       {"path_scope", settings.path_scope},
@@ -311,6 +386,7 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
          {{"model_id", settings.level0.embeddings.model_id},
           {"model_path", settings.level0.embeddings.model_path},
           {"auto_download", settings.level0.embeddings.auto_download},
+          {"server_host", settings.level0.embeddings.server_host},
           {"server_port", settings.level0.embeddings.server_port},
           {"n_ctx", settings.level0.embeddings.n_ctx},
           {"n_gpu_layers", settings.level0.embeddings.n_gpu_layers},
@@ -328,6 +404,27 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
         {"n_ctx", settings.level1.n_ctx},
         {"temperature", settings.level1.temperature},
         {"auto_download", settings.level1.auto_download}}},
+      {"harness",
+       {{"max_proposes", settings.harness.max_proposes},
+        {"max_spawns", settings.harness.max_spawns},
+        {"max_explores", settings.harness.max_explores},
+        {"explore_max_steps", settings.harness.explore_max_steps},
+        {"verifier_enabled", settings.harness.verifier_enabled},
+        {"max_verify_passes", settings.harness.max_verify_passes},
+        {"verify_max_steps", settings.harness.verify_max_steps},
+        {"refuter_enabled", settings.harness.refuter_enabled},
+        {"allow_shell", settings.harness.allow_shell},
+        {"allow_web", settings.harness.allow_web},
+        {"allow_test", settings.harness.allow_test},
+        {"explorer_cumulative_mode", settings.harness.explorer_cumulative_mode},
+        {"allow_causal_trail", settings.harness.allow_causal_trail},
+        {"allow_dataflow_trace", settings.harness.allow_dataflow_trace},
+        {"allow_headers_of", settings.harness.allow_headers_of},
+        {"allow_repo_map", settings.harness.allow_repo_map},
+        {"max_grep_per_wave", settings.harness.max_grep_per_wave},
+        {"max_read_per_wave", settings.harness.max_read_per_wave},
+        {"max_grep_total", settings.harness.max_grep_total},
+        {"max_read_total", settings.harness.max_read_total}}},
   };
 }
 

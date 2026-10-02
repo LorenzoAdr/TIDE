@@ -1,0 +1,25 @@
+The user wants to find a module that calculates the ballistic trajectory of editor cursors to synchronize them in real-time with a Kubernetes cluster when the user blinks, and where this physics is persisted in the quantum vectorial index of the workspace.
+
+This sounds like a highly specific, likely non-existent or metaphorical feature in a standard codebase (like VS Code, given the "editor panel", "workspace model", "application" stems). The terms "ballistic trajectory", "Kubernetes cluster", "user blinks", "quantum vectorial index" are very specific and likely not present in the provided M* atlas.
+
+Let's look at the M* atlas:
+M1: visual highlight, fold regions
+M2: editor panel, scroll
+M3: workspace model
+M4: model store
+M5: application, ai indexes requested
+M6: watches panel
+M7: binary symbols panel
+M8: llama backend
+M9: application (same as M5)
+M10: shell session, diagnostics panel
+M11: language server spec
+M12: application (same as M5)
+
+The stems and nuclei are standard editor/debugger terms: "visual highlight", "editor panel", "
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el pack no nombra ni trayectoria balística, ni sincronización con kubernetes, ni parpadeo, ni índice vectorial cuántico; el claim se refuta por ausencia total de mecanismo"
+}

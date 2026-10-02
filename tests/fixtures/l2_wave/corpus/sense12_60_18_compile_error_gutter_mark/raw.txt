@@ -1,0 +1,14 @@
+The user wants to know how to make compilation errors from the console appear as red lines in the editor margin.
+I have three completed investigations:
+1.  **T1**: How the red line is drawn in the editor margin.
+    *   Mechanism: `Make Editor Panel` draws `underline diagnostics` if `rich session enabled` is true. `gutter marker` and `suffix ptr` manage the gutter marker.
+2.  **T2**: How error locations are extracted from the console text.
+    *   Mechanism: `find compiler location` (delegating to `parse gcc style`, etc.) is called by `terminal row link` on rendered rows.
+3.  **T3**: How extracted diagnostics are sent to the editor to be drawn.
+    *   Mechanism: `apply lsp diagnostics to panel` syncs the cache (`sync diagnostic cache`) and rebuilds line maps (`rebuild diagnostics by line`). The editor reads these via `diagnostics for editor line`.
+
+The user's claim is "I want compilation errors... to be marked with a red line...".
+The investigations show the full path:
+Console text -> `terminal row link` -> `find compiler location` ->
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"los diagnósticos se extraen de la consola con find compiler location, se sincronizan al editor con apply lsp diagnostics to panel y se dibujan en el margen con gutter marker y suffix ptr"}

@@ -1,0 +1,18 @@
+The user wants to restore the cursor position, open files, and side panel visibility when reopening a project.
+I have 3 completed jobs:
+T1: Asked about saving/restoring cursor and files. Found `save workspace session`, `flush active tab`, `save`.
+T2: Asked about restoring side panel visibility. Found `handle source panel event`, `Make File Tree Panel`.
+T3: Asked about restoring cursor and files. Found `restore workspace session` (restores files/tabs), but explicitly stated it did NOT find cursor position restoration (`record jump` was just recording).
+
+The anchor has 3 poles:
+1. Cursor position
+2. Open files
+3. Side panel visibility
+
+T3 confirmed open files are restored (`restore workspace session`).
+T2 found something about panels (`handle source panel event`, `Make File Tree Panel`), but the closed message says "ESA pregunta no se relanza... Lo leído no era el disparo". This implies the mechanism for restoring panel visibility wasn't found or confirmed as the trigger.
+T3 explicitly said it did NOT find cursor position restoration.
+
+The instructions say: "El último Cerrado negó el mapeo. Cierra ESE mapeo (
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo de restauración de la posición del cursor; los archivos se restauran pero el cursor no"}

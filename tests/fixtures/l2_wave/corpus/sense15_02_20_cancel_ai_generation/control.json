@@ -1,0 +1,160 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M4",
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/clickable_interaction.cpp",
+        "src/ui/quit_confirm.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca la cancelación del controlador de IA al pulsar Escape",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:AiController"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se invoca la cancelación del controlador de IA al pulsar Escape",
+        "evita": [],
+        "hacia": [
+          "teclado"
+        ],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se invoca la cancelación del controlador de IA al hacer clic fuera",
+        "evita": [],
+        "hacia": [
+          "ventana"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai trace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 tiene 'ai trace escape'; necesito ver si ese es el disparo del usuario"
+    },
+    {
+      "consulta": "dónde se detecta el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se detecta el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 falló en Escape; pruebo el otro disparador del ancla (clic fuera) para ver si existe el handler de cancelación por foco"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "input handler"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 falló en el barrio de logs; el pack huele M5 (console panel handle ai console keys) y M4 (file picker cancel ctrl chord) como barrios de input. Busco el handler que dispara la cancelación."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "los disparadores (Escape y clic) son independientes; busco el puente hacia el mecanismo de cancelación ya visto en el pack (ai controller cancel level1)"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack no une el disparo (Escape/clic) con la cancelación limpia; T1 y T2 no hallaron los handlers de input, y T3 solo mostró el controlador sin el puente de cancelación limpia"
+    }
+  ],
+  "why": "el pack no une el disparo (Escape/clic) con la cancelación limpia; T1 y T2 no hallaron los handlers de input, y T3 solo mostró el controlador sin el puente de cancelación limpia",
+  "zooms": []
+}

@@ -1,0 +1,223 @@
+{
+  "name": "admin_explore_pilot_v1",
+  "diet": "explore_only + typed notebook + confirm cerrar/editar",
+  "why": "Estadística nocturna: ~20 prompts diversos sobre el piloto bare + hijo grep+read.",
+  "cases": [
+    {
+      "id": "01_short_exists_adminstate",
+      "kind": "existe",
+      "difficulty": "baja",
+      "style": "corto_claro",
+      "prompt": "dónde está definida la struct AdminState",
+      "gold": {
+        "expect_exit": ["confirmar_cerrar", "confirmar_editar", "cerrar"],
+        "symbols_any": ["AdminState", "l2_admin.hpp"],
+        "forbid_claim_already_done": false,
+        "false_friend_forbid": []
+      }
+    },
+    {
+      "id": "02_short_exists_git_branch_ui",
+      "kind": "existe",
+      "difficulty": "baja",
+      "style": "corto_claro",
+      "prompt": "dónde se muestra el nombre de la rama git en la UI",
+      "gold": {
+        "expect_exit": ["confirmar_cerrar", "confirmar_editar"],
+        "symbols_any": ["git_branch", "branch"],
+        "false_friend_forbid": []
+      }
+    },
+    {
+      "id": "03_short_hole_pink_gutter",
+      "kind": "no_existe",
+      "difficulty": "media",
+      "style": "corto_claro",
+      "prompt": "dónde se pinta el gutter rosa fluorescente al guardar un archivo",
+      "gold": {
+        "expect_exit": ["confirmar_cerrar", "ask_user"],
+        "expect_not_already_implemented": true,
+        "false_friend_forbid": ["DiagnosticError", "underlined"]
+      }
+    },
+    {
+      "id": "04_deseo_console_gutter",
+      "kind": "deseo_trampa",
+      "difficulty": "alta",
+      "style": "deseo",
+      "prompt": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+      "gold": {
+        "expect_exit": ["confirmar_editar", "seguir_explorando", "confirmar_cerrar"],
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": ["ya está implementad", "ya está en el código", "funcionalidad solicitada ya"]
+      }
+    },
+    {
+      "id": "05_vague_arregla_margen",
+      "kind": "ask",
+      "difficulty": "baja",
+      "style": "vago",
+      "prompt": "arregla lo del margen",
+      "gold": {
+        "expect_exit": ["ask_user", "confirmar_cerrar"],
+        "prefer_ask_user": true
+      }
+    },
+    {
+      "id": "06_typo_compialcion",
+      "kind": "deseo_trampa",
+      "difficulty": "media",
+      "style": "mal_escrito",
+      "prompt": "kiero q los errores de compialcion de la consolatambien salgan en el gutter del editor",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": ["ya está implementad"]
+      }
+    },
+    {
+      "id": "07_exists_restore_session",
+      "kind": "existe",
+      "difficulty": "alta",
+      "style": "largo",
+      "prompt": "al reabrir un workspace, ¿dónde se restauran tabs, paneles y posición de cursor? no me digas solo el archivo, quiero el mecanismo",
+      "gold": {
+        "symbols_any": ["restore_workspace", "save_state", "session"],
+        "expect_exit": ["confirmar_cerrar", "confirmar_editar"]
+      }
+    },
+    {
+      "id": "08_hole_animation_edit",
+      "kind": "no_existe",
+      "difficulty": "media",
+      "style": "deseo",
+      "prompt": "quiero una animación de partículas cuando se aplica un edit del agente en el buffer",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "09_multipolo_console_and_style",
+      "kind": "deseo_trampa",
+      "difficulty": "muy_alta",
+      "style": "largo_multipolo",
+      "prompt": "Necesito dos cosas: (1) que los errores que salen en la consola de build se reflejen en el margen del editor y (2) que el indicador sea una línea roja vertical, no un carácter. ¿Existe ya o hay que implementarlo?",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "expect_atomize_or_multi_explore": true
+      }
+    },
+    {
+      "id": "10_short_exists_diagnostics_struct",
+      "kind": "existe",
+      "difficulty": "baja",
+      "style": "corto_claro",
+      "prompt": "dónde se define DiagnosticSeverity",
+      "gold": {
+        "symbols_any": ["DiagnosticSeverity", "diagnostics.hpp"]
+      }
+    },
+    {
+      "id": "11_hole_voice_commands",
+      "kind": "no_existe",
+      "difficulty": "baja",
+      "style": "corto_claro",
+      "prompt": "dónde se procesan los comandos de voz para el editor",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "12_exists_lsp_restart",
+      "kind": "existe",
+      "difficulty": "alta",
+      "style": "medio",
+      "prompt": "si el language server se cae, ¿hay reinicio automático? dónde vive eso",
+      "gold": {
+        "symbols_any": ["restart", "lsp", "LanguageServer"]
+      }
+    },
+    {
+      "id": "13_deseo_underline_to_gutter",
+      "kind": "deseo_trampa",
+      "difficulty": "alta",
+      "style": "deseo",
+      "prompt": "los squiggles de error del LSP ya están; quiero además una barrita en el gutter izquierdo por cada error de clangd",
+      "gold": {
+        "note": "puede existir parcial via ! marker; no afirmar consola→margen",
+        "false_friend_forbid_in_cubre_or_reply": ["consola inferior"]
+      }
+    },
+    {
+      "id": "14_vague_eso",
+      "kind": "ask",
+      "difficulty": "baja",
+      "style": "vago",
+      "prompt": "eso",
+      "gold": {
+        "prefer_ask_user": true,
+        "expect_exit": ["ask_user"]
+      }
+    },
+    {
+      "id": "15_exists_search_replace_apply",
+      "kind": "existe",
+      "difficulty": "media",
+      "style": "medio",
+      "prompt": "cómo se aplica un search/replace de un edit del admin al archivo en disco",
+      "gold": {
+        "symbols_any": ["apply_hunk", "search_replace", "admin_run_edit"]
+      }
+    },
+    {
+      "id": "16_mal_escrito_tabs",
+      "kind": "existe",
+      "difficulty": "media",
+      "style": "mal_escrito",
+      "prompt": "onde se guardan los tabs abiertos pa restaurarlos dspues",
+      "gold": {
+        "symbols_any": ["tab", "session", "restore", "save_state"]
+      }
+    },
+    {
+      "id": "17_hole_blockchain",
+      "kind": "no_existe",
+      "difficulty": "baja",
+      "style": "corto_claro",
+      "prompt": "dónde está el módulo de sincronización blockchain del workspace",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    },
+    {
+      "id": "18_largo_settings_diag_suffix",
+      "kind": "existe",
+      "difficulty": "media",
+      "style": "largo",
+      "prompt": "Hay una opción de settings sobre sufijos de diagnósticos al final de línea. Quiero saber dónde se lee esa preferencia y dónde se pinta el sufijo en el editor, con los símbolos concretos.",
+      "gold": {
+        "symbols_any": ["diagnostic_suffix", "DiagnosticSuffix"]
+      }
+    },
+    {
+      "id": "19_deseo_build_panel_redline",
+      "kind": "deseo_trampa",
+      "difficulty": "muy_alta",
+      "style": "deseo",
+      "prompt": "cuando cmake falla en el panel de build, marca en rojo la línea del CMakeLists que rompió la compilación",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": ["ya está implementad", "gfortran"]
+      }
+    },
+    {
+      "id": "20_mixed_english_spanish",
+      "kind": "existe",
+      "difficulty": "media",
+      "style": "mixto",
+      "prompt": "where is the overview ruler that shows diagnostics next to the scrollbar? archivo y función pls",
+      "gold": {
+        "symbols_any": ["overview_ruler", "OverviewRuler"]
+      }
+    }
+  ]
+}

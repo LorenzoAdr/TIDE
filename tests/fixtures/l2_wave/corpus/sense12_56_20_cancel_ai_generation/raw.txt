@@ -1,0 +1,22 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed works:
+1.  **T1**: Searched for Escape key capture. Result: `ai trace escape` is string escaping, not key input. Failed to find the trigger.
+2.  **T2**: Searched for cleaning the partially written file. Result: Found `clear pending insert`, `cancel level1`, `cancel current`, `cancel all`. This looks like the mechanism to clean up.
+3.  **T3**: Searched for Escape/click capture to invoke cancellation. Result: Found `handle ai console keys`, `cancel current`, `handle console panel mouse`, `handle user input`. This looks like the trigger mechanism.
+
+The user's claim has two parts:
+1.  Trigger: Press Escape or click outside.
+2.  Effect: Cancel generation cleanly (no half-written file).
+
+T3 found the trigger (`handle ai console keys`, `handle console panel mouse`).
+T2 found the effect (`clear pending insert`, `cancel current`).
+
+The "entre abiertas" section shows connections:
+-   `T2 => T3
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "T3 encontró el disparo (handle ai console keys, handle console panel mouse) y T2 encontró el efecto (clear pending insert, cancel current). El pack une ambos polos: el controlador de IA gestiona la entrada del usuario y limpia la inserción pendiente al cancelar."
+}

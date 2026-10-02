@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el editor ya soporta marcar líneas rojas (T1: line gutter marker, diagnostics on line), pero no existe un mecanismo que parsee los errores de compilación de la consola para extraer la línea del error (T2: no se encontró el parser de output de compilador). la funcionalidad solicitada no está implementada."
+}

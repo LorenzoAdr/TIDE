@@ -1,0 +1,181 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape en el trace; necesito el locus que detecta el gesto del usuario para iniciar la cancelación"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 falló en la consola; el pack apunta a 'handle ai console keys' y 'on mouse click' como barrios alternativos para el trigger de cancelación"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "la caza anterior falló en la consola; el pack abre 'handle ai console keys' y 'on mouse click' como barrios distintos para el trigger de cancelación"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "la caza anterior falló en la consola; el pack apunta a handle ai console keys y handle key event como barrios alternativos para el trigger de cancelación"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 5,
+      "why": "la caza anterior falló en la consola; el pack abre 'handle ai console keys' y 'on mouse click' como barrios distintos para el trigger de cancelación"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 6,
+      "why": "la caza anterior falló en la consola; el pack apunta a handle ai console keys y handle key event como nuevos loci para el trigger de cancelación"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 7,
+      "why": "la caza anterior falló en la consola; el pack abre 'handle ai console keys' y 'on mouse click' como barrios distintos para el trigger de cancelación"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 8,
+      "why": "T1 falló en la consola; el pack abre 'handle ai console keys' y 'on mouse click' como barrios distintos. Busco el trigger UI real, no el parser de texto."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 9,
+      "why": "la caza anterior falló en la consola; el pack apunta a handle ai console keys y handle key event como nuevos loci para el trigger de cancelación"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 10,
+      "why": "la caza anterior falló en la consola; el pack abre 'handle ai console keys' y 'on mouse click' como barrios distintos para el trigger de cancelación"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

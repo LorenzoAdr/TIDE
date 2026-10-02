@@ -1,0 +1,134 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera cuando la IA está generando código",
+      "keep": [
+        "M5",
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código de la IA para evitar dejar el archivo a medias",
+      "keep": [
+        "M3",
+        "M10"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:run_insert_async"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se deshace la escritura parcial cuando se cancela la generación",
+      "keep": [
+        "M7",
+        "M12"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/level2_session.cpp:rollback_pending",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:run_insert_async",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:handle_route"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera cuando la IA está generando código",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera cuando la IA está generando código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide cancelar con Escape o clic fuera; M2 huele escape en ai trace, necesito ver el disparador"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código de la IA para evitar dejar el archivo a medias",
+      "consultas": [
+        "dónde se cancela la generación de código de la IA para evitar dejar el archivo a medias"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancelación"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el disparo no se halló; busco el mecanismo de cancelación y limpieza del archivo en el controlador de IA"
+    },
+    {
+      "consulta": "dónde se limpia el archivo o se deshace la escritura parcial cuando se cancela la generación",
+      "consultas": [
+        "dónde se limpia el archivo o se deshace la escritura parcial cuando se cancela la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "rollback"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 confirmó la cancelación lógica pero no leyó el efecto en el archivo; necesito ver si hay rollback o truncado al abortar"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla se refuta en el disparo y se confirma en el efecto: no existe captura de Escape ni clic fuera para cancelar (T1, T2); la cancelación es textual vía comando cancel. El efecto de limpieza sí existe: al cancelar, el hilo de inserción detecta la bandera y ejecuta rollback pending que restaura el contenido previo del archivo (T3)."
+    }
+  ],
+  "why": "el ancla se refuta en el disparo y se confirma en el efecto: no existe captura de Escape ni clic fuera para cancelar (T1, T2); la cancelación es textual vía comando cancel. El efecto de limpieza sí existe: al cancelar, el hilo de inserción detecta la bandera y ejecuta rollback pending que restaura el contenido previo del archivo (T3).",
+  "zooms": []
+}

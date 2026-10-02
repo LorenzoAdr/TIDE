@@ -1,0 +1,136 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación con una línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico error",
+        "parseo consola"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con marcas visuales en el editor; busco barrios de decoración y parseo"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación con una línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación con una línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el usuario quiere ver el efecto visual (línea roja) en el editor; M11 huele parseo de errores pero no el dibujo; busco el barrio de decoración"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 encontró el mecanismo de la línea roja (gutter marker), pero no el origen. Necesito cazar el puente: qué código detecta los errores en la consola y los envía al editor."
+    },
+    {
+      "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor",
+      "consultas": [
+        "dónde se crea el marcador de diagnóstico en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "line gutter marker"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 leyó el objeto pero no el disparo; busco la creación del marcador para inyectar la lógica de la consola"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el sistema no lee la consola para marcar el editor; los marcadores del margen provienen de los diagnostics del editor (LSP), no del texto de la consola"
+    }
+  ],
+  "why": "el sistema no lee la consola para marcar el editor; los marcadores del margen provienen de los diagnostics del editor (LSP), no del texto de la consola",
+  "zooms": []
+}

@@ -1,0 +1,236 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ai/level2_session.cpp:save_state"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M8",
+        "M10"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/application.cpp:apply_connection_and_start",
+        "src/app/recent_projects.cpp:load"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay un único mecanismo que restaura el estado completo del editor al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda el estado del editor al cerrar el proyecto",
+      "consultas": [
+        "dónde se guarda el estado del editor al cerrar el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 tiene 'editor state' y 'CursorPos'; busco el mecanismo de persistencia (save/restore) para recordar la posición del cursor y archivos abiertos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide tres cosas distintas (cursor, archivos, paneles). T1 falló buscando el guardado al cerrar. Cambio de polo: busco la restauración al abrir. Atomizo en tres cazas independientes para no perder el hilo si una falla."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 no afirma el disparo; 'restore workspace session' es el mecanismo de sesión, no la restauración del cursor. salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "el pack no nombra el mecanismo de restauración del estado UI (cursor, paneles, archivos) al abrir el proyecto; lo leído son disparos de sesión IA o reconexión LSP, no el guardado/restaurado del layout del editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "control: do no legal ahora (no_pasar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el mecanismo de restauración del workspace (restore workspace session, reopen workspace documents) se lee en los trabajos 2 y 3, pero no se confirma la persistencia de la posición del cursor ni de los paneles laterales (trabajo 1 no halló guardado de estado del editor)."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "control: do no legal ahora (no_pasar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "el mecanismo de restauración se apoya en restore workspace session y reopen workspace documents para los archivos; no se halló persistencia de la posición del cursor ni de la visibilidad de los paneles laterales"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "el guardado de la sesión de IA no persiste el estado UI del editor; el mecanismo de restauración de archivos no restaura la posición del cursor ni la visibilidad de paneles"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 10,
+      "why": "el guardado del estado del editor al cerrar el proyecto no se encontró; lo leído es el guardado del estado de la sesión de IA, que no persiste el estado UI del editor"
+    }
+  ],
+  "why": "el guardado del estado del editor al cerrar el proyecto no se encontró; lo leído es el guardado del estado de la sesión de IA, que no persiste el estado UI del editor",
+  "zooms": []
+}

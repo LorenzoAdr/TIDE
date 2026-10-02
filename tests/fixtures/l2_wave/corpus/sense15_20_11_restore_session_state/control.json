@@ -1,0 +1,138 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor del editor al cerrar el proyecto",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la lista de archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:restore_workspace_session"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "editor state",
+        "main layout",
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición, archivos y paneles; el pack huele estado del editor y layout"
+    },
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al cerrar y abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack nombra editor state y cursor pos; busco el mecanismo de persistencia y restauración"
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor del editor al cerrar el proyecto",
+      "consultas": [
+        "dónde se guarda la posición del cursor del editor al cerrar el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar la posición del cursor; M1 huele el estado del editor y su cursor; un hijo cierra si hay persistencia de esa coordenada"
+    },
+    {
+      "consulta": "dónde se restaura la lista de archivos abiertos al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la lista de archivos abiertos al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el estado general no se encontró; busco el polo de los archivos abiertos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "la restauración de archivos abiertos se confirma en restore workspace session; la posición del cursor se resetea (reset to single cursor) en lugar de restaurarse; no hay mecanismo para recordar el estado de los paneles laterales"
+    }
+  ],
+  "why": "la restauración de archivos abiertos se confirma en restore workspace session; la posición del cursor se resetea (reset to single cursor) en lugar de restaurarse; no hay mecanismo para recordar el estado de los paneles laterales",
+  "zooms": []
+}

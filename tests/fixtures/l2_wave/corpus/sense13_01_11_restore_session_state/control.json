@@ -1,0 +1,207 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto",
+      "keep": [
+        "M3",
+        "M10"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:close",
+        "src/editor/editor_state.cpp:set_pos",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1",
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/context_menu.cpp:context_menu_open_editor_background",
+        "src/ui/context_menu.cpp:context_menu_open_editor_symbol",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:open_file_at"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar y restaurar la posición del cursor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto",
+      "consultas": [
+        "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles; M1 huele editor state y CursorPos, un buen punto de partida para rastrear la persistencia de sesión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla tiene tres polos (cursor, archivos, paneles) y dos momentos (cerrar, abrir). T1 falló en encontrar un mecanismo general. Rompo en 6 cazas independientes para localizar cada polo en cada momento. El pack tiene M1 (editor state), M5 (editor panel), M2 (main layout) que pueden contener estos mecanismos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "archivo",
+        "panel lateral",
+        "cursor"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "la caza general falló; busco barrios de persistencia por componente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide tres cosas distintas (cursor, archivos, paneles) y dos momentos (guardar al cerrar, restaurar al abrir). Atomizo en 6 localizadores independientes para que cada hijo cierre su trozo sin depender de los demás. El puente verifica si hay un mecanismo unificador o si son independientes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 5,
+      "why": "el estado general no se encontró; busco el cursor por partes"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir el editor"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "open file at"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "T3 cerró con el barrio de apertura; el hijo sigue el hilo de open file at para ver si restaura posición"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "no hay mecanismo de persistencia de la posición del cursor al cerrar el editor; lo leído muestra que close solo limpia estado UI y reset to single cursor solo establece posición en memoria volátil"
+    }
+  ],
+  "why": "no hay mecanismo de persistencia de la posición del cursor al cerrar el editor; lo leído muestra que close solo limpia estado UI y reset to single cursor solo establece posición en memoria volátil",
+  "zooms": []
+}

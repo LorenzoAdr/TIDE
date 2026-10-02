@@ -1,0 +1,16 @@
+The user wants to know if the application remembers the cursor position, open files, and side panel visibility when reopening a project.
+
+I have three completed jobs:
+1.  **T1**: Investigated saving/restoring cursor position and open files.
+    *   **Result**: Found `Workspace Session` saves/restores open files (tabs) and active tab path. Confirmed it does *not* save/restore cursor position. `Tab` structure lacks cursor position fields.
+2.  **T2**: Investigated saving/restoring editor cursor position specifically.
+    *   **Result**: Confirmed `Workspace Session` does not have cursor position fields. `reset to single cursor` is a reset effect, not session restoration. No mechanism found for saving/restoring cursor position.
+3.  **T3**: Investigated saving/restoring side panel visibility.
+    *   **Result**: "No object found". The child closed this question saying there is no object.
+
+The anchor has three parts:
+1.  Cursor position: Refuted (T1, T2).
+2.  Open files: Confirmed (T1).
+3.  Side panel visibility: Refuted (T3 - "no object").
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla se confirma parcialmente: se recuerdan los archivos abiertos (Workspace Session), pero se refuta la posición del cursor (no se serializa en Tab ni Workspace Session) y la visibilidad de paneles laterales (no hay objeto de persistencia)."}

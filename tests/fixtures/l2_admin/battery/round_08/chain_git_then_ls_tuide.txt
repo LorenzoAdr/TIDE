@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"estado git","spawn":{"tipo":"git","brief":"status","arg":"status"}}
+{"action":"admin_v1","do":"spawn","why":"ver .tuide","spawn":{"tipo":"shell","brief":"ls tuide","arg":"ls .tuide"}}
+{"action":"admin_v1","do":"cerrar","why":"git+ls","reply":"git status quedó en el notebook; ls .tuide muestra la carpeta ai entre otras entradas."}

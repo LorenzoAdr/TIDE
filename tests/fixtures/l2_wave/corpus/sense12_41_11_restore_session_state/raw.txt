@@ -1,0 +1,16 @@
+The user wants to restore the cursor position, open files, and visible/closed side panels when reopening a project.
+The current plan has 3 phases:
+A: locator: dónde se restaura la selección del cursor al abrir el editor
+B: locator: dónde se restauran los archivos abiertos al abrir el proyecto
+C: locator: dónde se restauran los paneles laterales visibles al abrir el proyecto
+
+We are at phase A.
+Work 4 (T4) just closed. It found `open file at impl` calls `reset to single cursor` which collapses selection and sets position. It explicitly
+---- content ----
+```json
+{
+  "action": "control_v1",
+  "do": "pasar",
+  "why": "el Cerrado afirma el objeto de esta fase"
+}
+```

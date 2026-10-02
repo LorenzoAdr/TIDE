@@ -1,0 +1,194 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo parcialmente escrito al cancelar la generación",
+      "keep": [
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para invocar la cancelación de la generación",
+      "keep": [
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ui/console_panel.cpp:handle_console_panel_mouse",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos efectos distintos: capturar el gesto (Escape/clic) y limpiar el estado (archivo a medias). M2 huele el Escape, M8 huele la cancelación, pero falta ver cómo se une la limpieza del archivo. Rompo en dos localizadores y un puente para asegurar que el gesto dispara la limpieza."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para invocar la cancelación de la generación",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para invocar la cancelación de la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle user input"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "la fase B cerró el mecanismo de limpieza; ahora busco el disparador (Escape/clic) que lo invoca, siguiendo el port hacia handle user input"
+    },
+    {
+      "consulta": "hay camino handle ai console keys y clear pending insert",
+      "consultas": [
+        "hay camino handle ai console keys y clear pending insert"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "cancel current"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T3 tiene el disparo (tecla/clic) y T2 el efecto (limpieza); necesito unirlos para confirmar que la cancelación limpia ocurre"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo de cancelación se activa por handle ai console keys o handle console panel mouse, invocando cancel current; la limpieza del archivo a medias se gestiona mediante clear pending insert"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el pack une el disparo (tecla Escape o clic fuera) con la limpieza: handle ai console keys y handle console panel mouse invocan cancel current, que a su vez ejecuta clear pending insert para no dejar el archivo a medias"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el mecanismo de cancelación se invoca desde handle ai console keys y handle console panel mouse, y limpia el archivo parcialmente escrito con clear pending insert y cancel current"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "el pack une el disparo (handle ai console keys, handle console panel mouse) con la limpieza (clear pending insert, cancel current); el mecanismo de cancelación limpia está presente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "el pack une la captura de Escape/clic (handle ai console keys, handle console panel mouse) con la cancelación (cancel current) y la limpieza del archivo (clear pending insert); el mecanismo de cancelación limpia está presente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 10,
+      "why": "T3 encontró el disparo (handle ai console keys, handle console panel mouse) y T2 encontró el efecto (clear pending insert, cancel current). El pack une ambos polos: el controlador de IA gestiona la entrada del usuario y limpia la inserción pendiente al cancelar."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

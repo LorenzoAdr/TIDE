@@ -137,8 +137,40 @@ bool names_match(const std::string& a, const std::string& b) {
   return ascii_lower(a) == ascii_lower(b);
 }
 
+int symbol_span_lines(const SymbolInfo& sym) {
+  const int start = std::max(1, sym.line);
+  const int end = sym.end_line > 0 ? sym.end_line : start;
+  return std::max(0, end - start);
+}
+
+bool symbol_span_has_open_brace(const std::string& source, const SymbolInfo& sym) {
+  if (source.empty() || sym.line <= 0) {
+    return false;
+  }
+  const int start = std::max(1, sym.line);
+  const int end = sym.end_line > 0 ? sym.end_line : start;
+  int n = 1;
+  std::size_t i = 0;
+  while (i < source.size() && n < start) {
+    if (source[i] == '\n') {
+      ++n;
+    }
+    ++i;
+  }
+  while (i < source.size() && n <= end) {
+    if (source[i] == '{') {
+      return true;
+    }
+    if (source[i] == '\n') {
+      ++n;
+    }
+    ++i;
+  }
+  return false;
+}
+
 const SymbolInfo* pick_symbol(const std::vector<SymbolInfo>& syms, const std::string& want_name,
-                              int line_hint) {
+                              int line_hint, const std::string& source) {
   const SymbolInfo* best = nullptr;
   int best_score = -1;
   for (const auto& sym : syms) {
@@ -147,6 +179,11 @@ const SymbolInfo* pick_symbol(const std::vector<SymbolInfo>& syms, const std::st
       continue;
     }
     int score = kind_priority(sym.kind);
+    // Prefer a definition (body) over a same-name forward declaration.
+    score += std::min(40, symbol_span_lines(sym));
+    if (symbol_span_has_open_brace(source, sym)) {
+      score += 60;
+    }
     if (line_hint > 0 && sym.line > 0) {
       const int dist = std::abs(sym.line - line_hint);
       score += std::max(0, 200 - dist);
@@ -350,7 +387,7 @@ GetCodeOfResult get_code_of(const GetCodeOfRequest& req) {
     ts_tree_delete(tree);
   }
 
-  const SymbolInfo* picked = pick_symbol(syms, req.symbol, req.line);
+  const SymbolInfo* picked = pick_symbol(syms, req.symbol, req.line, source);
   if (picked != nullptr) {
     out.name = symbol_insert_name(picked->name);
     out.kind = picked->kind;
@@ -513,7 +550,7 @@ GetCodeOfResult get_code_of(const GetCodeOfRequest& req) {
   return out;
 }
 
-std::string format_get_code_of_result(const GetCodeOfResult& got, const std::string& display_path) {
+std::string format_get_code_of_header(const GetCodeOfResult& got, const std::string& display_path) {
   const std::string path = !display_path.empty() ? display_path : got.path;
   std::ostringstream out;
   // Always show the span actually sent when available (line-windows are not full symbols).
@@ -556,47 +593,12 @@ std::string format_get_code_of_result(const GetCodeOfResult& got, const std::str
     out << "refetch: get_code_of `" << hint << "` (o `#head`/`#mid`/`#tail` / `path:A-B`)\n";
     out << "note: cuerpo incompleto — usa refetch; no inventes el código omitido.\n";
   }
-  out << got.text;
   return out.str();
 }
 
-namespace {
-
-std::string fence_lang_for_path(const std::string& path) {
-  const auto dot = path.find_last_of('.');
-  if (dot == std::string::npos) {
-    return {};
-  }
-  const std::string ext = path.substr(dot + 1);
-  if (ext == "hpp" || ext == "h" || ext == "hh" || ext == "cpp" || ext == "cc" || ext == "cxx" ||
-      ext == "c") {
-    return "cpp";
-  }
-  if (ext == "py") {
-    return "python";
-  }
-  if (ext == "rs") {
-    return "rust";
-  }
-  if (ext == "go") {
-    return "go";
-  }
-  if (ext == "sh" || ext == "bash") {
-    return "bash";
-  }
-  if (ext == "js" || ext == "mjs" || ext == "cjs") {
-    return "javascript";
-  }
-  if (ext == "ts" || ext == "tsx") {
-    return "typescript";
-  }
-  if (ext == "cmake" || path.find("CMakeLists") != std::string::npos) {
-    return "cmake";
-  }
-  return {};
+std::string format_get_code_of_result(const GetCodeOfResult& got, const std::string& display_path) {
+  return format_get_code_of_header(got, display_path) + got.text;
 }
-
-}  // namespace
 
 std::string dump_context_last_md(const std::string& workspace_root, const std::string& query,
                                  const RepoMap& map, std::size_t max_n, std::string* err_out,

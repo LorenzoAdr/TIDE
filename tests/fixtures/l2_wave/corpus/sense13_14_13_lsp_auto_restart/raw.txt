@@ -1,0 +1,11 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have three completed jobs (T1, T2, T3).
+T1 looked for detection of crash/no-response triggering restart. Found `status text`, `ready`, `start completion server`, `ensure completion server`, `health ok`.
+T2 looked for scheduling the debounced restart. Found `schedule debounced lsp restart`, `restart lsp for workspace`.
+T3 looked for detection of crash/no-response triggering restart (similar to T1 but different keep). Found `on transport reader eof`, `schedule debounced lsp restart`, `completion wait timeout ms`, `parse wait timeout ms`, `restart lsp for workspace`. T3 explicitly states it did *not* find the mechanism for detecting non-response/health check timeout that triggers the restart, only timeouts for waiting for responses (completions/hover) and the restart function itself. `on transport reader eof` only handles EOF.
+
+The anchor claim is: "if the LSP server process crashes or stops responding, the application automatically detects it and restarts it without user intervention".
+The investigation so far has found:
+- How to restart (`restart lsp for workspace`,
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de detección automática de caída o no-respuesta del LSP no existe en el código leído; solo hay reinicio manual o por EOF, sin health check ni timeout de inactividad que dispare el reinicio"}

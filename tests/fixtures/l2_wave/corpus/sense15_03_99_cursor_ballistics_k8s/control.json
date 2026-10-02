@@ -1,0 +1,79 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "cursor",
+        "blink",
+        "kubernetes",
+        "quantum"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide mecanismos muy específicos (balística, k8s, cuántico) que no aparecen en el pack actual; necesito ver si existen barrios que los nombren"
+    },
+    {
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea",
+      "consultas": [
+        "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cursor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide un mecanismo muy específico (trayectoria balística, kubernetes, parpadeo); el bosquejo huele cursor y blink en ui/terminal; un hijo busca el cálculo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T1 refuta el primer polo: no hay cálculo de trayectoria balística ni sincronización con Kubernetes. sin el objeto, no hay física que persistir en el índice vectorial cuántico. el claim entero cae."
+    }
+  ],
+  "why": "el Cerrado de T1 refuta el primer polo: no hay cálculo de trayectoria balística ni sincronización con Kubernetes. sin el objeto, no hay física que persistir en el índice vectorial cuántico. el claim entero cae.",
+  "zooms": []
+}

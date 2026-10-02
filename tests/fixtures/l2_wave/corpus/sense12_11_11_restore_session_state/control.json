@@ -1,0 +1,161 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:load_buffer_from_disk",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino guardar y restaurar la posición del cursor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide persistencia de estado (cursor, archivos, paneles); M1 (editor state), M5 (editor panel) y M6 (panel) son los barrios candidatos para leer el mecanismo de guardado/carga de la sesión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide recordar cursor y paneles; el pack muestra M1 (cursor) y M5/M6 (paneles) pero sin flujo de persistencia; necesito localizar los puntos de guardado y carga por separado para luego ver si hay un coordinador"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar posición; M1 huele editor state pero no el ciclo de persistencia; separo guardar y restaurar para cerrar el mecanismo de estado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado solo confirma la estructura de datos (Cursor Pos), no el mecanismo de persistencia al cerrar; salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 confirma que la restauración fuerza 0,0 si no hay coordenadas; el fallo está en la falta de persistencia (T1 vacío). Salto a la siguiente caza del plan: archivos abiertos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el claim se refuta: T2 confirma que la restauración del cursor es un reset a 0,0 (o posición por defecto) al cargar el buffer, sin mecanismo de persistencia de la posición anterior detectado en el flujo de apertura. El ancla pedía recordar la posición exacta; el código leído la pierde."
+    }
+  ],
+  "why": "el claim se refuta: T2 confirma que la restauración del cursor es un reset a 0,0 (o posición por defecto) al cargar el buffer, sin mecanismo de persistencia de la posición anterior detectado en el flujo de apertura. El ancla pedía recordar la posición exacta; el código leído la pierde.",
+  "zooms": []
+}

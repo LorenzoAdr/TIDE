@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"buscar","spawn":{"tipo":"explore","brief":"sesion"}}
+{"action":"admin_v1","do":"spawn","why":"reintentar","spawn":{"tipo":"explore","brief":"otra"}}
+{"action":"admin_v1","do":"cerrar","why":"rechazo re-explore","reply":"Stub: un explore basta."}

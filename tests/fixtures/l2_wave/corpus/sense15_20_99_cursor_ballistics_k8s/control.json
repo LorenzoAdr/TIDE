@@ -1,0 +1,140 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 2,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea",
+      "keep": [
+        "M1",
+        "M10"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor",
+        "índice vectorial",
+        "parpadeo"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide física de cursores y persistencia cuántica; busco barrios de movimiento o índices para ver si existe el mecanismo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor",
+        "índice vectorial",
+        "parpadeo"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla menciona tres fenómenos distintos (trayectoria, persistencia, evento de parpadeo); necesito ver si el pack los agrupa en un barrio o si son islas separadas para decidir si rompo en un plan o busco un solo módulo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "movimiento cursor",
+        "índice vectorial",
+        "parpadeo"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla menciona tres fenómenos distintos; necesito ver si el pack los agrupa en un barrio o si son independientes"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "movimiento cursor",
+        "índice vectorial",
+        "parpadeo"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla menciona física de cursores, sincronización con cluster y persistencia en índice vectorial; busco si estos conceptos existen como módulos reales o son metáforas de funcionalidades existentes"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "movimiento cursor",
+        "índice vectorial",
+        "parpadeo"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla menciona tres fenómenos distintos (trayectoria, persistencia, trigger). necesito ver si el pack los agrupa en un barrio o si son islas separadas para decidir si rompo en un plan o busco un solo módulo maestro."
+    },
+    {
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea",
+      "consultas": [
+        "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 6,
+      "why": "el ancla pide localizar el módulo que calcula la trayectoria balística de los cursores; el pack no nombra este mecanismo, así que un explorador busca el barrio donde ocurre este fenómeno"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 7,
+      "why": "el Cerrado de T1 niega la existencia de la trayectoria balística y la sincronización con Kubernetes; al no existir el objeto físico, no hay persistencia en índice vectorial cuántico; el pack muestra un editor local sin esos mecanismos"
+    }
+  ],
+  "why": "el Cerrado de T1 niega la existencia de la trayectoria balística y la sincronización con Kubernetes; al no existir el objeto físico, no hay persistencia en índice vectorial cuántico; el pack muestra un editor local sin esos mecanismos",
+  "zooms": []
+}

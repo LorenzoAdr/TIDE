@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"whitelist launch","spawn":{"tipo":"shell","brief":"launch","arg":"launch"}}
+{"action":"admin_v1","do":"cerrar","why":"lanzo","reply":"Task launch ejecutada."}

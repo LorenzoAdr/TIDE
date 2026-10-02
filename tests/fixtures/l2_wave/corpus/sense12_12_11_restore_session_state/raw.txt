@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"no_pasar","why":"el Cerrado de T4 niega el objeto (no hay mecanismo de guardado de paneles); salto a la siguiente caza del plan (restauración)"}

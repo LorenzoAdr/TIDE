@@ -1,0 +1,9 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have already performed 3 explorations (T1, T2, T3) looking for where the LSP server crash/non-response is detected and the restart is triggered.
+T3 concluded that the current code only handles restart after installation (`on lsp missing install`) or environment changes (`process build environment updates`), but does *not* detect a crash or timeout of the `clangd` process.
+The user's request is to *add* this functionality ("necesito que...").
+Since
+---- content ----
+```json
+{"action":"control_v1","do":"cerrar","why":"el pack confirma que no existe detección automática de caída ni timeout del LSP; el reinicio actual es manual o tras cambios de entorno. el ancla pide añadir la funcionalidad, no encontrarla"}
+```

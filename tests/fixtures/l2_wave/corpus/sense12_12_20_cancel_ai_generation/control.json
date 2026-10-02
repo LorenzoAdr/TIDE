@@ -1,0 +1,80 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape en el trace; necesito el locus que decide abortar la generación"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 falló en el parser; el pack huele M5 (console panel) y M7 (editor panel) como barrios de eventos UI; busco el listener real"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide cancelar con Escape o clic fuera; la caza T1 leyó que solo existe un parser de texto para comandos literales, sin manejo de eventos de teclado ni ratón para este fin. No hay objeto que capture esos gestos para cancelar la generación."
+    }
+  ],
+  "why": "el ancla pide cancelar con Escape o clic fuera; la caza T1 leyó que solo existe un parser de texto para comandos literales, sin manejo de eventos de teclado ni ratón para este fin. No hay objeto que capture esos gestos para cancelar la generación.",
+  "zooms": []
+}

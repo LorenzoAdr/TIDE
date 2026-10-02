@@ -1,0 +1,14 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3) that investigated different aspects of this claim:
+1.  **T1**: Where is the crash/non-response detected?
+    *   Read: `on lsp notification`, `spawn language server`.
+    *   Result: This seems to be about spawning or notifications, not necessarily the specific crash detection mechanism for a hung process.
+2.  **T2**: Where is the restart programmed when a failure is detected?
+    *   Read: `restart lsp for workspace`, `on lsp missing install`.
+    *   Result: `restart lsp for workspace` is a function, but `on lsp missing install` suggests it might be triggered by missing installation, not necessarily a crash/hang.
+3.  **T3**: Where is the crash/non-response detected AND the restart triggered?
+    *   Read: `completion wait timeout ms`, `parse wait timeout ms`, `schedule debounced lsp restart`, `on lsp notification`, `restart lsp for workspace`, `notify lsp status`, `set lsp status callback`.
+   
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no nombra un mecanismo que detecte la caída o falta de respuesta del LSP y lo reinicie automáticamente; los nombres leídos (restart lsp for workspace, schedule debounced lsp restart) no confirman el disparo automático ante un fallo del proceso"}

@@ -1,0 +1,15 @@
+The user wants to find two things:
+1. The module calculating ballistic cursor trajectory synced with Kubernetes on blink.
+2. Where that physics is persisted in a quantum vector index.
+
+I have two completed jobs (T1 and T2) that investigated these specific claims.
+T1 result: "no encontré el mecanismo... lo leído es un editor de texto local... sin rastro de física de cursores, detección de parpadeo o integración con Kubernetes."
+T2 result: "no encontré el mecanismo... lo leído es un editor de texto local... sin indicios de índices vectoriales ni
+---- content ----
+```json
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pedía dos objetos (trayectoria balística sincronizada con Kubernetes y persistencia en índice vectorial cuántico). T1 y T2 cerraron que no hay objeto: el sistema es un editor de texto local sin física de cursores, ni integración con Kubernetes, ni índices vectoriales cuánticos. El claim se refuta."
+}
+```

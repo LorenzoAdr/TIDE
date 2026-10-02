@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack no contiene mecanismo de parseo de errores de compilación (T1 refuta: solo linker); T3/T4 muestran marcadores genéricos sin vínculo a consola; sin camino entre polos; claim refutado por ausencia de objeto"}

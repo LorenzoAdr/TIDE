@@ -1,0 +1,18 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have explored:
+1.  T1: Detection of crash/no response and scheduling restart -> No object found.
+2.  T2: Where the debounced restart is scheduled -> Found `schedule debounced lsp restart`, `restart lsp for workspace`.
+3.  T3: What event triggers the scheduling -> Found `wait until healthy`, `schedule debounced lsp restart`.
+
+The "Abierto" section of T3 mentions `start server`.
+The "entre abiertas" shows T2 and T3 share `schedule debounced lsp restart`.
+T3's "extra" mentions `ensure ready` and `start server`.
+
+The user's claim is about *automatic detection* and *restart*.
+T1 failed to find a detection mechanism for "crash/no response".
+T2 and T3 found the restart mechanism (`schedule debounced lsp restart`), but T3's trigger was `wait until healthy`.
+`wait until healthy` sounds like a startup check, not necessarily a crash detection during runtime.
+However, T3's "Abierto" has `start server`.
+The pack M5
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no muestra un mecanismo de detección automática de caídas o falta de respuesta del LSP en tiempo de ejecución; solo se lee un reinicio diferido tras esperar salud al inicio"}

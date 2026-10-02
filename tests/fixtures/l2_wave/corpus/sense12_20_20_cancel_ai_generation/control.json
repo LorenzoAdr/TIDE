@@ -1,0 +1,260 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca la cancelación del agente de IA al recibir una señal de interrupción",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M5",
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ui/console_panel.cpp:Event",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se revierte la inserción pendiente al cancelar la generación de IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 4,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se limpia el archivo o se revierte la inserción pendiente al cancelar la generación de IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino detener la generación y limpiar el archivo a medias",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 y M3 son los únicos que mencionan 'escape' y 'session'; necesito confirmar si ahí se inicia la cancelación o si es otro barrio"
+    },
+    {
+      "consulta": "dónde se invoca la cancelación del agente de IA al recibir una señal de interrupción",
+      "consultas": [
+        "dónde se invoca la cancelación del agente de IA al recibir una señal de interrupción"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai controller"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 descartó la captura de UI; el pack une M8 (ai controller) con M6 (level1 agent) vía cancel level1. Busco el mecanismo de cancelación en el controlador, no en el teclado."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 fallaron en M2 y M8; el pack señala M7 (editor panel) como barrio de UI; busco el handler de teclado/ratón que dispara la cancelación"
+    },
+    {
+      "consulta": "hay camino la detección de Escape clic fuera y la limpieza del archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T3 leyó el flujo de cancelación (handle ai console keys -> cancel current) pero no el trigger UI ni el efecto de limpieza. T1/T2 refutaron la captura directa en esos barrios. Necesito localizar el trigger UI (A) y el efecto de limpieza (B) por separado, luego unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "T3 cerró el trigger (handle ai console keys -> cancel current). Falta el efecto: cómo se evita dejar el archivo a medias. El pack muestra 'clear pending insert' y 'cancel level1'. Necesito confirmar si la cancelación limpia el estado de inserción (A) y detiene el agente (B), y si están conectados (P)."
+    },
+    {
+      "consulta": "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación",
+      "consultas": [
+        "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "cancel all"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 6,
+      "why": "T4 cerró la limpieza (clear pending insert). El pack une T2->T4 vía cancel current. Falta confirmar que la señal de cancelación (desde handle ai console keys o similar) llega a detener el agente (cancel level1/cancel all) para completar el claim de cancelación limpia. T2 falló buscando el trigger UI, pero el flujo de cancelación existe; necesito ver el efecto de parada del agente."
+    },
+    {
+      "consulta": "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación",
+      "consultas": [
+        "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 7,
+      "why": "T4 cerró la limpieza (clear pending insert). Falta confirmar la parada del agente. T2=>T4 une cancel current con clear pending insert, pero T2 no halló el trigger UI. Busco el efecto de la cancelación en el agente (cancel level1) para cerrar el polo 'detener'."
+    },
+    {
+      "consulta": "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación",
+      "consultas": [
+        "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "cancel all"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T4 cerró la limpieza (clear pending insert). Falta confirmar la parada del agente. El pack une cancel current -> cancel all -> cancel level1. Busco el efecto de parada en ese flujo."
+    },
+    {
+      "consulta": "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación",
+      "consultas": [
+        "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "T4 cerró la limpieza (clear pending insert). Falta confirmar la parada del agente. El pack une cancel current -> cancel level1. T2 falló buscando el trigger UI, pero el mecanismo de parada existe en el controlador."
+    },
+    {
+      "consulta": "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación",
+      "consultas": [
+        "dónde se detiene el proceso de generación de IA al recibir la señal de cancelación"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 10,
+      "why": "T4 cerró la limpieza (clear pending insert). Falta confirmar la detención del agente. T2 leyó cancel level1 pero no el efecto de parada; T2=>T4 une cancel current con clear pending insert, pero necesitamos el locus donde cancel level1 detiene el trabajo activo para asegurar que no se deja el archivo a medias por escritura concurrente."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

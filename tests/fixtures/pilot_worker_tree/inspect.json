@@ -1,0 +1,19 @@
+{
+  "zones": [
+    {
+      "id": "L1",
+      "owns": "mess",
+      "primary_stems": ["mess"],
+      "representatives": [
+        { "target": "src/mess.cpp:set_busy" }
+      ],
+      "edges": [
+        {
+          "from": "src/mess.cpp:set_busy",
+          "to": "src/mess.cpp:tick",
+          "kind": "call"
+        }
+      ]
+    }
+  ]
+}

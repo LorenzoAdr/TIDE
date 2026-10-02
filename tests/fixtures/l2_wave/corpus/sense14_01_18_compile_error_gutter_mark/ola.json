@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el sistema ya pinta líneas rojas en el margen para diagnósticos (T3: apply lsp diagnostics, line gutter marker), pero no hay mecanismo que lea errores crudos del shell y los convierta en esas marcas (T1: solo parser de linker para panel de símbolos; T2: parse gfortran stderr aislado). el ancla pide una integración que no existe en el flujo actual."
+}

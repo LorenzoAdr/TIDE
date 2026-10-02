@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"no_pasar","why":"T4 buscaba la lista de archivos, pero el Cerrado solo confirma el estado del cursor (ensure cursors). El polo de 'archivos abiertos' no está cerrado; salto a la siguiente caza del plan para no repetir el mismo pico fallido."}

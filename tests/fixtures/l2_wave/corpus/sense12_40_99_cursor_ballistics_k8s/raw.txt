@@ -1,0 +1,14 @@
+The user wants to find:
+1. The module calculating ballistic trajectory of editor cursors for real-time sync with a Kubernetes cluster when the user blinks.
+2. Where this physics is persisted in the quantum vectorial index of the workspace.
+
+This sounds like a highly specific, likely non-existent or hallucinated feature in a standard codebase (like VS Code or similar, given the "editor panel", "workspace model", "llama backend" context in the pack).
+The pack contains:
+- M1: visual highlight (fold regions, brackets)
+- M2: editor panel (scroll, breadcrumbs)
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack no nombra el mecanismo del ancla; no hay objeto"
+}

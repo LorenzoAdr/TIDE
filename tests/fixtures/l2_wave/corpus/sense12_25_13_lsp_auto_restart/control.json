@@ -1,0 +1,124 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o deja de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:ensure_backend_started"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se llama a reiniciar el servidor de lenguaje LSP tras detectar que se ha caído o dejado de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:ensure_backend_started"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o deja de responder",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP cuando se cae o deja de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene pistas claras de reinicio (restart lsp for workspace, schedule debounced lsp restart); hay que ver si ya detecta caídas o si hay que añadirlo"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ensure backend started"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el reinicio; ahora busco la detección de la caída para cerrar el ciclo automático"
+    },
+    {
+      "consulta": "dónde se llama a reiniciar el servidor de lenguaje LSP tras detectar que se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se llama a reiniciar el servidor de lenguaje LSP tras detectar que se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ensure backend started"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró la detección (ensure backend started). T1 cerró el reinicio. El pack une T1 y T2 vía ensure backend started. Ahora tiro del hilo: quién llama al reinicio desde la detección."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección y reinicio automático está confirmado: lsp missing install detecta la caída y dispara restart lsp for workspace sin intervención del usuario"
+    }
+  ],
+  "why": "el mecanismo de detección y reinicio automático está confirmado: lsp missing install detecta la caída y dispara restart lsp for workspace sin intervención del usuario",
+  "zooms": []
+}

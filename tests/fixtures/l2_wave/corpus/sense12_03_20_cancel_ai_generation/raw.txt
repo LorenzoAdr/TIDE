@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el mecanismo está completo: Escape se captura y limpia la inserción pendiente antes de escribir; el clic fuera no está implementado, pero la cancelación por teclado cumple el requisito de limpieza sin dejar el archivo a medias"}

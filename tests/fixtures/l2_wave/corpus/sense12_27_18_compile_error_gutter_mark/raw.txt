@@ -1,0 +1,11 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor.
+T1 found where the red line is drawn (editor panel, line gutter marker).
+T2 looked for where compilation errors are read from the console to mark them in the editor, but found no mechanism. It confirmed the editor uses LSP diagnostics, and the binary symbols panel only scans linker errors. There is no bridge converting gcc/clang output to editor diagnostics.
+
+The anchor claim is: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack y los trabajos leídos confirman que no existe un mecanismo que convierta la salida de compilación de la consola en diagnostics para el editor; el editor usa LSP y el panel de símbolos solo escanea errores de linker. no hay objeto que marcar."
+}

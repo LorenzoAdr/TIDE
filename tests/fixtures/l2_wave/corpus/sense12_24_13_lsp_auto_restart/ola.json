@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+  "consultas": [
+    "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+  ],
+  "do": "explorar",
+  "error": "control: esa caza ya se lanzó; cierra el ancla o parte",
+  "evita": [],
+  "hacia": [
+    "wait response"
+  ],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 y T2 no hallaron el disparo; el pack apunta a wait response como capa de transporte que retorna false en timeout error; un hijo caza el observador de ese fallo"
+}

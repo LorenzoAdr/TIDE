@@ -1,0 +1,25 @@
+Al despertar: orquestador autónomo ~15 h — post G.
+Sense16 en STOP. Responde en español. Sé breve.
+
+Sentinel: `AGENT_LOOP_WAKE_v215h`
+Base: `/home/lorenzo/workspace/TIDE/.tuide/ai/l2_wave/v2_night`
+
+## Estado
+
+```
+keep_s0 (BD no adoptado)
+G N=5 RECHAZADA (0.04 ≪ S0 0.44) → REVERT_G (few-shots S0)
+phase=idle_g; no más N=5 T2; no E/F; no C; no sense16
+```
+
+## Tick
+
+0. `meta/STOP` si falta.
+1. Confirma `G/DONE` + `REVERT_G` + `DECISION_G.json`.
+2. No lances colas T2.
+3. Heartbeat SIEMPRE:
+   ```
+   ./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_v215h \
+     'Lee y ejecuta tools/l2_wave/v2_15h_tick_prompt.txt (noche 15h autónomo).'
+   ```
+   notify_on_output `AGENT_LOOP_WAKE_v215h`.

@@ -1,0 +1,108 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen izquierdo del editor",
+      "keep": [
+        "M11",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/editor/editor_render.cpp:RenderEditorLine",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/editor/editor_render.cpp:apply_decoration"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se leen los errores de compilación de la salida de la consola",
+      "keep": [],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error parsing",
+        "editor decoration",
+        "console output"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el usuario quiere añadir una línea roja en el margen; busco dónde se aplican las decoraciones de error actuales para replicar el patrón"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la salida de la consola",
+      "consultas": [
+        "dónde se leen los errores de compilación de la salida de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "shell output"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el margen; ahora busco el origen: el parser de la consola"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el sistema actual no lee los errores de la consola para marcarlos en el editor; T2 cerró que no hay objeto que haga ese puente. el ancla pide un comportamiento que no existe en el código leído."
+    }
+  ],
+  "why": "el sistema actual no lee los errores de la consola para marcarlos en el editor; T2 cerró que no hay objeto que haga ese puente. el ancla pide un comportamiento que no existe en el código leído.",
+  "zooms": []
+}

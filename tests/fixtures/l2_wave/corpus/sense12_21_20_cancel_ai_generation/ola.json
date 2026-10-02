@@ -1,0 +1,20 @@
+{
+  "consulta": "quién invoca la restauración del archivo al cancelar la generación de la IA",
+  "consultas": [
+    "quién invoca la restauración del archivo al cancelar la generación de la IA"
+  ],
+  "do": "explorar",
+  "error": "control: do no legal ahora (explorar)",
+  "evita": [],
+  "hacia": [
+    "handle route"
+  ],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T4 leyó los símbolos pero no el invocador; el pack une cancel current con handle route. Necesito confirmar si el flujo de cancelación dispara rollback pending."
+}

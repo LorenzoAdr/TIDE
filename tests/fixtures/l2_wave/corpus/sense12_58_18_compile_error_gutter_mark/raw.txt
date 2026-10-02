@@ -1,0 +1,17 @@
+The user wants to mark compilation errors from the console with a red line in the editor's left margin.
+I have two completed tasks:
+T1: Found where red lines are drawn in the editor margin (`line gutter marker`, `diagnostics on line`, `line diagnostic marker from map`). This confirms the "effect" side of the claim (drawing the red line).
+T2: Tried to find where compilation errors are parsed from the console to get the error line. The result was negative: it found Tree-sitter parsing functions (`parse file`, `parse sync`) which are for source code ASTs, not compiler output. The closed status explicitly says "no encontré el mecanismo de parsing de errores de compilación de la consola".
+
+The claim is: "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error".
+This implies a feature request or a missing feature. The user wants this behavior.
+T1 shows that the editor *can* draw red lines (via diagnostics).
+T2 shows that there is *no* mechanism currently parsing console output for compilation errors to extract line numbers.
+
+
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el editor ya soporta marcar líneas rojas (T1: line gutter marker, diagnostics on line), pero no existe un mecanismo que parsee los errores de compilación de la consola para extraer la línea del error (T2: no se encontró el parser de output de compilador). la funcionalidad solicitada no está implementada."
+}

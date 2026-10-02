@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se serializa el estado del editor (posición del cursor, archivos abiertos) al cerrar la sesión o el proyecto","why":"T1 refutó la persistencia en el cierre del editor individual; el claim requiere guardar el estado global del proyecto. Busco el mecanismo de escritura a disco del layout y la sesión."}

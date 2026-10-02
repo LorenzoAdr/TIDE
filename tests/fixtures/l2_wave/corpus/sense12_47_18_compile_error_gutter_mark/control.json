@@ -1,0 +1,90 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/editor/editor_folds.cpp:fold_gutter_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para crear marcadores en el editor",
+      "keep": [
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el usuario quiere marcar errores con una línea roja; necesito encontrar el mecanismo que pinta esa decoración en el editor para luego conectarlo a los errores de la consola"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para crear marcadores en el editor",
+      "consultas": [
+        "dónde se extraen los errores de compilación del texto de la consola para crear marcadores en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parseo de errores"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el pintado del margen; ahora busco el origen: cómo se leen los errores de la consola y se convierten en marcadores para el editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el mecanismo de extraer errores de la consola para pintar marcadores no existe; el pack no lo nombra y T2 cerró sin objeto. el claim se refuta: no hay código que hacer ese puente hoy."
+    }
+  ],
+  "why": "el mecanismo de extraer errores de la consola para pintar marcadores no existe; el pack no lo nombra y T2 cerró sin objeto. el claim se refuta: no hay código que hacer ese puente hoy.",
+  "zooms": []
+}

@@ -1,0 +1,20 @@
+The user wants to know if pressing Escape or clicking outside cancels the AI code generation cleanly without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Looked for Escape/click capture. Result: Not found. `ai trace escape` is string escaping, not UI events.
+2.  **T2**: Looked for cancellation mechanism. Result: Found `cancel current` triggered by text command "cancel". It sets `agent cancel` and calls `cancel all`. No Escape/click capture found here either.
+3.  **T3**: Looked for file cleanup/rollback. Result: Found `rollback pending` called by `run insert async` when it detects `agent cancel`. It restores previous content `p before` and writes it back.
+
+The user's claim has two parts:
+1.  **Trigger**: Pressing Escape or clicking outside.
+2.  **Effect**: Clean cancellation without half-written files.
+
+Current status:
+-   **Trigger**: Refuted. T1 and T2 explicitly state there is no capture of Escape or click outside. The cancellation is textual ("cancel" command).
+-   **Effect**: Confirmed (for the textual trigger).
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el ancla se refuta en el disparo y se confirma en el efecto: no existe captura de Escape ni clic fuera para cancelar (T1, T2); la cancelación es textual vía comando cancel. El efecto de limpieza sí existe: al cancelar, el hilo de inserción detecta la bandera y ejecuta rollback pending que restaura el contenido previo del archivo (T3)."
+}

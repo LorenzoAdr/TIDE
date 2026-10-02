@@ -1,0 +1,14 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed works:
+1.  **T1**: Found `restart lsp for workspace`, `schedule debounced lsp restart`, `on lsp missing install`, `run`.
+2.  **T2**: Found `ensure backend started`.
+3.  **T3**: Found the connection: `lsp missing install` is called from `run`, which invokes `restart lsp for workspace`. The effect is reconfiguration of the provider and reopening documents.
+
+The user
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de detección y reinicio automático está confirmado: lsp missing install detecta la caída y dispara restart lsp for workspace sin intervención del usuario"
+}

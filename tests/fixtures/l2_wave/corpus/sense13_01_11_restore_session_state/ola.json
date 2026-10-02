@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "no hay mecanismo de persistencia de la posición del cursor al cerrar el editor; lo leído muestra que close solo limpia estado UI y reset to single cursor solo establece posición en memoria volátil"
+}

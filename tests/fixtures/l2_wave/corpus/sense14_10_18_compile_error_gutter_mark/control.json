@@ -1,0 +1,212 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:Event"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M1",
+        "M12"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:make_terminal_panel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:git_line_changed",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error",
+        "evita": [
+          "click en marcador"
+        ],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino leer los errores de la consola y pintar la línea roja en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "línea roja margen",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir dos fenómenos: errores en consola y decoración en editor. necesito ver si el pack ya tiene barrios para parsear errores y pintar líneas, o si hay que ampliar fichas."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos polos distintos: la fuente (errores en consola) y el efecto (línea roja en margen). necesito localizar ambos mecanismos por separado para luego ver si están conectados o si falta el puente."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error",
+      "consultas": [],
+      "do": "revisar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el hijo leyó el click, no la pintura; busco el efecto visual, no la interacción"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor para marcar un error"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "T3 cerró el mecanismo de decisión del carácter, pero no la función que ejecuta la pintura gráfica en el margen. El pack apunta a paint gutter / draw gutter / render gutter. Busco el efecto visual."
+    },
+    {
+      "consulta": "dónde se pinta el margen del editor con los caracteres de estado de línea",
+      "consultas": [
+        "dónde se pinta el margen del editor con los caracteres de estado de línea"
+      ],
+      "do": "explorar",
+      "error": "control: evita es un concepto de 1–3 palabras, no id ni path",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T3 encontró la decisión del carácter pero no la pintura gráfica. El pack apunta a paint gutter / draw gutter / render gutter. Busco el efecto visual real."
+    },
+    {
+      "consulta": "dónde se ejecuta la pintura gráfica del margen izquierdo del editor para dibujar el carácter del marcador",
+      "consultas": [
+        "dónde se ejecuta la pintura gráfica del margen izquierdo del editor para dibujar el carácter del marcador"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "paint gutter"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "T3 encontró la decisión del carácter pero no la ejecución gráfica. El pack apunta a paint gutter. Busco el dibujo real para inyectar la línea roja."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el mecanismo de decisión del marcador (line gutter marker) se lee, pero no hay camino desde la consola inferior hacia el margen del editor; el pack no une ambos polos y los exploradores agotados no hallaron el puente"
+    }
+  ],
+  "why": "el mecanismo de decisión del marcador (line gutter marker) se lee, pero no hay camino desde la consola inferior hacia el margen del editor; el pack no une ambos polos y los exploradores agotados no hallaron el puente",
+  "zooms": []
+}

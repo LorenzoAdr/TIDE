@@ -1,0 +1,191 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:ensure_backend_started"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:ensure_python_lsp_async",
+        "src/symbols/lsp_symbol_provider.cpp:finish_python_lsp_start_locked"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se reinicia el servidor LSP automáticamente tras detectar una caída",
+        "evita": [],
+        "hacia": [
+          "reinicio"
+        ],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino detectar la caída y reiniciar el servidor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene la lógica de reinicio (restart lsp for workspace), pero falta el disparador de detección de fallo. Busco el mecanismo que observa el estado del servidor y llama a M5."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ensure backend started"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el reinicio; ahora busco la detección de caída/fallo que lo dispara, siguiendo el hilo de ensure backend started"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack une a on lsp missing install; el hijo caza el disparo de detección"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "separar la detección del reinicio para confirmar si el flujo es automático"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 5,
+      "why": "T1, T2 y T4 leen el mismo objeto (restart lsp for workspace). T3 lee otro barrio (notify lsp status). Repetir la misma consulta no avanzará; salto a la siguiente caza del plan."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

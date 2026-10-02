@@ -1,0 +1,140 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pintan las marcas en el margen izquierdo del editor",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/visual_highlight.cpp:build_git_marks_snapshot",
+        "src/ui/editor_panel.hpp",
+        "src/ui/editor_panel.cpp:clear_editor_line_paint_caches",
+        "src/editor/visual_highlight.cpp:compute"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M11",
+        "M3",
+        "M10"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M11 escanea errores de compilación; M3/M10 manejan resaltado visual. Necesito ver si M11 emite marcadores y si M3/M10 los pintan en el margen."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "dos mecanismos distintos: el pintor de marcas y el analizador de errores. hay que ver si ya hay un puente o hay que crearlo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "la caza confirma el mecanismo de pintura en el margen; avanzo a la siguiente fase del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado de T2 niega el objeto de la fase B; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 falló en el parsing de compilación (solo linker). T1 solo vio git. Necesito el objeto que captura los errores de compilación de la consola para luego unirlo al margen."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "no existe mecanismo que lea errores de compilación de la consola ni los marque en el margen; el sistema solo pinta marcas de git y parsea errores de linker, por lo que la funcionalidad solicitada no está implementada"
+    }
+  ],
+  "why": "no existe mecanismo que lea errores de compilación de la consola ni los marque en el margen; el sistema solo pinta marcas de git y parsea errores de linker, por lo que la funcionalidad solicitada no está implementada",
+  "zooms": []
+}

@@ -1,0 +1,11 @@
+The user wants to restore the cursor position, open files, and side panel visibility when reopening a project.
+I have a plan with 4 phases:
+1. [paso] A: save cursor pos (Done, T1)
+2. [fallo] B: restore cursor pos (Done, T2 - failed to find restoration of cursor pos, only tabs)
+3. [en_curso] C: save side panel state (Done, T3 - read "1043", likely a line number or id, but the closed message just says "leído: 1043". This is ambiguous. Let's look at the context. T3 was "dónde se guarda el estado de los paneles laterales al cerrar el proyecto". The closed message is just "leído: 1043". This is very sparse. It might be a line number in a file, or an ID. Given the previous T1/T2 read "Cursor Pos, save workspace session...", T3 reading "1043" is suspicious. It might be a line number where something happens, or a specific ID. However, the prompt says "La última caza cerró. El siguiente tiro es un
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "T3 no confirma el mecanismo de guardado de paneles; salto a la restauración de paneles (fase D) para completar el mapa de estado"
+}

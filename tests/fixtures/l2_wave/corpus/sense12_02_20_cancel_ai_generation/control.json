@@ -1,0 +1,122 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para cancelar la generación de código de la IA",
+      "keep": [
+        "M2",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para cancelar la generación de código de la IA",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para cancelar la generación de código de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 y M3 son los únicos con 'escape' en el pack; M2 es el rastro, M3 la sesión. Necesito ver si el evento de UI (Escape/clic) llega a M3 para invocar la cancelación."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 refutó que exista un interceptor único; hay que cazar por separado el trigger (Escape/clic) y el efecto (limpieza). Si no hay camino, el ancla se refuta o se parte."
+    },
+    {
+      "consulta": "dónde se llama a la cancelación de la IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se llama a la cancelación de la IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 refutó la interceptación directa; busco el puente entre el evento UI y el comando de cancelación ya conocido"
+    },
+    {
+      "consulta": "dónde se llama a la cancelación de la IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se llama a la cancelación de la IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "la caza anterior descartó la interceptación directa; ahora busco el puente: qué manejador de eventos (teclado/mouse) invoca la lógica de cancelación (cancel level1/clear pending insert)"
+    },
+    {
+      "consulta": "dónde se llama a la cancelación de la IA al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se llama a la cancelación de la IA al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 5,
+      "why": "la caza anterior descartó la interceptación directa; ahora busco el puente: qué manejador de eventos (teclado/mouse) invoca la lógica de cancelación (cancel level1/clear pending insert)"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 6,
+      "why": "el Cerrado de T1 refuta la existencia del mecanismo de cancelación por Escape o clic fuera; solo existe cancelación por texto. El ancla pide un comportamiento que no está implementado, por lo que el claim se cierra por refutación del disparador."
+    }
+  ],
+  "why": "el Cerrado de T1 refuta la existencia del mecanismo de cancelación por Escape o clic fuera; solo existe cancelación por texto. El ancla pide un comportamiento que no está implementado, por lo que el claim se cierra por refutación del disparador.",
+  "zooms": []
+}

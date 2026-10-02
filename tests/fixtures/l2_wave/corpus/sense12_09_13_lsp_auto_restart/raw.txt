@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"T1 y T2 confirman que existe el mecanismo de detección (process alive) y reinicio automático (restart lsp for workspace) en la aplicación. El claim del usuario se cumple con lo leído."}

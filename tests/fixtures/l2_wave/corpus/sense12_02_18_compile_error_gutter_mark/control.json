@@ -1,0 +1,252 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen la línea y columna de los errores de compilación del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta el indicador de error en el margen del editor al recibir un diagnóstico",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor al recibir un error",
+      "keep": [
+        "M1"
+      ],
+      "n": 4,
+      "proposes": 6,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:line_gutter_marker"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor al recibir un error",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación de la consola para generar diagnósticos",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parseo de errores de consola y la creación del marcador en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los adornos visuales; M11 (binary symbols panel) huele a parsing de errores de compilación. Necesito ver si M3 gestiona los 'marks' del margen y si M11 expone los errores para que M3 los pinte."
+    },
+    {
+      "consulta": "dónde se extraen la línea y el archivo de los errores de compilación del texto de la consola",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el pack no une la consola con el editor; M11 huele el análisis de errores pero no el efecto visual; M3 huele marcas visuales pero no el origen de compilación; necesito cerrar ambos polos y luego unirlos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack muestra M11 (consola/errores) y M3 (visual highlight) pero sin conexión; necesito leer ambos polos para ver si existe el arco o si hay que construirlo"
+    },
+    {
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+      "consultas": [
+        "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "la fase A falló (no hay extractor directo); necesito cerrar la fase B (el efecto visual) para luego buscar el puente o refutar el claim si no existe mecanismo de unión"
+    },
+    {
+      "consulta": "dónde se pinta el indicador de error en el margen del editor al recibir un diagnóstico",
+      "consultas": [
+        "dónde se pinta el indicador de error en el margen del editor al recibir un diagnóstico"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "paint margin"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 falló buscando la pintura genérica; el pack sugiere 'paint margin'. Busco el efecto visual concreto (línea roja) vinculado a la llegada de datos de error, no la extracción de la consola."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T1 y T2 fallaron por falta de objeto específico; T3 encontró el marcador pero no el trigger. Necesito localizar la creación del marcador (A) y la fuente de datos (B) por separado para luego unirlos."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la consola para generar diagnósticos",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la consola para generar diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "consola"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 7,
+      "why": "T4 cerró el lado del editor (pintura). Falta el lado de la consola: cómo se convierten los logs en diagnósticos que alimenten el mapa leído en T4. M11 huele a parseo de shell."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la consola para generar diagnósticos",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la consola para generar diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnósticos"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T4 cerró el lado del editor (pintura). Falta el lado de la consola: cómo se convierten los errores de texto en diagnósticos que el editor pueda leer. T1 falló buscando extracción directa; ahora busco la generación del objeto diagnóstico desde la consola."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la consola para generar diagnósticos",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la consola para generar diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "T4 cerró el lado del editor (pintura). Falta el lado de la consola: cómo se convierten los logs en diagnósticos que alimenten el mapa leído en T4."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la consola para generar diagnósticos",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la consola para generar diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnósticos"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 10,
+      "why": "T4 cerró el lado del editor (pintura). Falta el lado de la consola: cómo se convierten los logs en diagnósticos que alimenten el mapa leído en T4."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

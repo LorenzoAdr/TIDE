@@ -1,0 +1,8 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current state:
+- T1: Looked for Escape key capture during generation. Result: No object found (found JSON escape function instead).
+- T2: Looked for code generation cancellation and file cleaning. Result: Found `cancel current` -> `cancel all` (stops agent) and `clear session` -> `clear ai session` -> `remove all` (deletes L2 session dir).
+- T3: Looked for cancellation by Escape or click outside. Result: No object
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de cancelación y limpieza existe (cancel current, clear session), pero no se activa por Escape ni clic fuera; el pack no une esos eventos a la cancelación"}

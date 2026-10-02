@@ -1,0 +1,220 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input",
+        "src/ai/ai_controller.cpp:run_insert_async"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se limpia el archivo o se deshace la inserción parcial al cancelar la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino cancelar la generación y limpiar el archivo a medias",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos efectos: cancelar la generación y limpiar el archivo. Son dos polos distintos que pueden estar en módulos diferentes (UI vs controlador de IA). Rompo en dos localizadores y un puente para verificar la conexión."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró que no hay objeto para la captura de Escape/clic fuera en el barrio rastreado. Salto a la siguiente caza del plan."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 falló en M2 (ai trace); M7 (editor panel) es el barrio de la UI donde ocurren los clics y teclas. T2 confirmó la limpieza (clear pending insert), pero falta el disparador UI para completar el claim del usuario."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 falló en M2 (ai trace); M7 (editor panel) es el barrio de la UI donde ocurren los eventos de teclado y ratón. El hijo debe buscar el handler de Escape o click outside en el editor."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 falló en M2 (ai trace). El pack sugiere M7 (editor panel) como barrio de UI. T2 confirmó la limpieza (clear pending insert), pero falta el disparador (Escape/clic). M7 tiene nucleus 'scroll' y peek 'handle breadcrumb click', sugiriendo manejo de eventos. Exploro M7 para encontrar el handler de Escape/clic que invoque la cancelación."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 falló en M2 (ai trace); M7 (editor panel) es el barrio de la UI donde se capturan eventos de teclado y ratón"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "T1 falló en M2 (ai trace); M7 (editor panel) es el barrio de la UI donde ocurren los eventos de teclado y ratón. El hijo debe buscar el handler de Escape o click outside en el editor."
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 9,
+      "why": "el barrio de la IA (M2) no tiene el trigger; el editor (M7) es el barrio de la UI y los eventos de teclado/ratón"
+    },
+    {
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 10,
+      "why": "T1 falló en M2 (ai trace). M7 (editor panel) es el barrio de la UI del editor donde ocurre la generación y donde se capturan eventos de teclado/ratón. Necesito encontrar el handler de Escape/clic fuera en el panel del editor para conectarlo con la cancelación."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

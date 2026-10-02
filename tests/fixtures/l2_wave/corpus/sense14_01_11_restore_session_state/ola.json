@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "la restauración de archivos abiertos se confirma (save/load en .tuide session.json), pero la posición del cursor no se halló (T1 falló) y la visibilidad de paneles laterales no existe (T3 vacío); el claim se refuta parcialmente"
+}

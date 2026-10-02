@@ -1,0 +1,142 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:diagnostic_severity_color",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:line_gutter_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/editor_panel.cpp:sync_diagnostic_cache"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M10"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "visual highlight es el barrio de marcas en el margen; M10 tiene apply visual highlight. Necesito ver si ya hay un mecanismo de 'error' o 'diagnostics' en el pack."
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el usuario quiere ver la línea roja; busco el mecanismo que pinta el margen"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el mecanismo de marcado en el margen; ahora busco el origen: la lectura de errores de la consola que debería activar ese marcado"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 cerró que el flujo actual es LSP. Para cumplir el ancla (errores de consola), necesito encontrar dónde se parsea la salida de la consola o dónde se inyectan los datos de la consola en el sistema de diagnostics. El pack no tiene un port directo a 'console parser', pero T2 mencionó 'cached file diagnostics' y 'ISymbol Provider'. Si no hay un parser de consola, debo buscar dónde se podría añadir o si existe un 'console diagnostics provider' oculto. La consulta busca el origen de los datos de la consola."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el sistema no lee errores de la consola para marcarlos en el margen; usa el LSP vía ISymbol Provider. no hay mecanismo de lectura de consola para este efecto."
+    }
+  ],
+  "why": "el sistema no lee errores de la consola para marcarlos en el margen; usa el LSP vía ISymbol Provider. no hay mecanismo de lectura de consola para este efecto.",
+  "zooms": []
+}

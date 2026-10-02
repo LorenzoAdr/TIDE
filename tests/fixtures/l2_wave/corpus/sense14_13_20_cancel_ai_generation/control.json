@@ -1,0 +1,164 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de código",
+      "keep": [
+        "M5",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo parcialmente escrito al cancelar la generación",
+      "keep": [
+        "M4",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de código",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se limpia el archivo parcialmente escrito al cancelar la generación",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino capturar la interrupción y limpiar el archivo a medias",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla tiene dos polos: el disparo (Escape/clic fuera) y el efecto (limpieza del archivo). Se cazan por separado y luego se une el flujo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 niega que lo leído fuera el disparo; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de código",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "ai trace"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "el locator A falló; el pack huele ai trace escape y console panel handle ai console keys como barrios de captura de interrupción"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de código",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para interrumpir la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "ai trace"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "el pack huele ai trace escape en M2; el hijo de A falló en M5/M7, pruebo el barrio del trace"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el pack no une la captura de Escape/clic fuera con la limpieza del archivo; las cazas de locator fallaron y el puente no tiene polos confirmados. el claim se refuta: no hay camino visible entre el gesto del usuario y la limpieza limpia del archivo a medias."
+    }
+  ],
+  "why": "el pack no une la captura de Escape/clic fuera con la limpieza del archivo; las cazas de locator fallaron y el puente no tiene polos confirmados. el claim se refuta: no hay camino visible entre el gesto del usuario y la limpieza limpia del archivo a medias.",
+  "zooms": []
+}

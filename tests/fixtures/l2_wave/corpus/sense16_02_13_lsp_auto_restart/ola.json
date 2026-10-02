@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "la aplicación detecta la caída del servidor de lenguaje mediante waitpid y la falta de respuesta mediante health ok en un bucle con timeout (wait until healthy). Sin embargo, no se ha encontrado lógica explícita de reinicio automático en estos cuerpos; solo verificación y reporte de estado. El mecanismo de reinicio automático no está presente en el código leído."
+}

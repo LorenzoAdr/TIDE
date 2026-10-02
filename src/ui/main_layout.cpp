@@ -52,12 +52,12 @@ int64_t steady_now_ms() {
 }
 
 Component MakeCachedPanelRender(MainLayoutState* layout_state, UiPanelId panel, Component inner) {
-  return Renderer(std::move(inner), [=] {
+  return Renderer(inner, [layout_state, panel, inner] {
     if (layout_state == nullptr) {
       return inner->Render();
     }
     return layout_state->panel_render_cache.render(
-        panel, theme::colors_revision(), [=] { return inner->Render(); });
+        panel, theme::colors_revision(), [inner] { return inner->Render(); });
   });
 }
 
@@ -161,19 +161,23 @@ struct FocusSyncState {
 };
 
 void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState* focus,
-                      MainLayoutState* layout_state) {
+                      MainLayoutState* layout_state, bool force) {
   if (sync == nullptr || focus == nullptr) {
     return;
   }
 
   const AppMode mode = app_mode != nullptr ? *app_mode : AppMode::kNormal;
-  if (sync->initialized && sync->region == focus->region && sync->mode == mode) {
+  const bool region_unchanged =
+      sync->initialized && sync->region == focus->region && sync->mode == mode;
+  if (region_unchanged && !force) {
     return;
   }
 
-  sync->initialized = true;
-  sync->region = focus->region;
-  sync->mode = mode;
+  if (!region_unchanged) {
+    sync->initialized = true;
+    sync->region = focus->region;
+    sync->mode = mode;
+  }
 
   if (layout_state == nullptr) {
     return;
@@ -195,11 +199,12 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
       return;
     }
     if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
-        layout_state->console_tabs.selected_tab == ConsolePanelTabs::kApp ||
-        layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCoreAnalyzer) {
+        layout_state->console_tabs.selected_tab == ConsolePanelTabs::kApp) {
       if (!is_terminal_filter_focus(layout_state->text_input_focus)) {
-        layout_state->text_input_focus = TextInputFocus::Console;
+        layout_state->text_input_focus = TextInputFocus::None;
       }
+    } else if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCoreAnalyzer) {
+      layout_state->text_input_focus = TextInputFocus::Console;
     }
     return;
   }
@@ -588,7 +593,7 @@ Component MakeHSplitTop(Component main, Component back, int* main_size,
 
 Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
   return CatchEvent(
-      Renderer(std::move(child), [child = child] { return child->Render(); }),
+      Renderer(child, [child] { return child->Render(); }),
       [layout_state](Event event) {
         if (layout_state == nullptr) {
           return false;
@@ -1093,7 +1098,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
           return false;
         }
 
-        sync_panel_focus(focus_sync.get(), app_mode, focus, layout_state);
+        sync_panel_focus(focus_sync.get(), app_mode, focus, layout_state,
+                         layout_state != nullptr && layout_state->focus_sync_needed);
         if (layout_state != nullptr) {
           layout_state->focus_sync_needed = false;
         }

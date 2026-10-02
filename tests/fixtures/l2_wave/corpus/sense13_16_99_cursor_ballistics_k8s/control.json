@@ -1,0 +1,105 @@
+{
+  "agujas": [
+    "ai",
+    "app",
+    "editor",
+    "indexer"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria balística de los cursores para sincronizarlos con un cluster cuando el usuario parpadea",
+      "keep": [
+        "M6",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/editor/cursor_history.cpp:record_jump",
+        "src/ui/cursor_blink.cpp:show"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "ai",
+        "app",
+        "editor",
+        "indexer"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla menciona cursores, sincronización, parpadeo y persistencia; necesito ver qué barrios cubren la lógica de edición, la aplicación y el indexado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "editor",
+        "ai"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla menciona cursores del editor y sincronización con IA/cluster; zoom a editor y ai para ver stems"
+    },
+    {
+      "consulta": "dónde se calcula la trayectoria balística de los cursores para sincronizarlos con un cluster cuando el usuario parpadea",
+      "consultas": [
+        "dónde se calcula la trayectoria balística de los cursores para sincronizarlos con un cluster cuando el usuario parpadea"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cursor_history"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide el cálculo de física de cursores y su trigger (parpadeo); el barrio editor tiene cursor_history y text_ops, el punto más cercano a la mecánica del cursor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla describe mecanismos inexistentes en el plano: no hay cálculo de trayectoria balística ni índice vectorial cuántico; el pack solo muestra historial de cursores e índices de código estándar"
+    }
+  ],
+  "why": "el ancla describe mecanismos inexistentes en el plano: no hay cálculo de trayectoria balística ni índice vectorial cuántico; el pack solo muestra historial de cursores e índices de código estándar",
+  "zooms": [
+    "editor",
+    "ai"
+  ]
+}

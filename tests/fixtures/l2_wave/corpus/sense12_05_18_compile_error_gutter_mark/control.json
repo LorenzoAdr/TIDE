@@ -1,0 +1,244 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen la línea y el número de columna de los errores de compilación del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja una línea roja en el margen izquierdo del editor para marcar un error",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crea el objeto de diagnóstico que contiene la línea y columna del error para que el editor lo pinte",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.hpp",
+        "src/ui/editor_panel.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer línea y columna",
+      "keep": [
+        "M11"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer línea y columna",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crean los objetos de diagnóstico a partir de los errores parseados",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parser de errores de la consola y la creación de diagnósticos del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) tiene un ejemplo de escaneo de errores. Necesito ver si M3 expone la API para dibujar líneas rojas y si M11 revela cómo se parsean los errores de compilación."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no une la consola con el editor; M11 huele el parseo de errores pero no el efecto visual; M3 huele highlights pero no el trigger de compilación; necesito localizar ambos polos y luego verificar si están conectados"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se crea el objeto de diagnóstico que contiene la línea y columna del error para que el editor lo pinte",
+      "consultas": [
+        "dónde se crea el objeto de diagnóstico que contiene la línea y columna del error para que el editor lo pinte"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnostics on line"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 confirmó el pintor (diagnostics). T1 falló en el parser de linker. El hueco es la creación del dato diagnóstico desde la consola. Busco el puente que llena ese objeto diagnóstico con coordenadas reales."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 falló porque buscó en el escáner de linker; necesito el parser de compilación real. T2/T3 encontraron el pintor pero no la fuente. Rompo en: encontrar el parser (A), encontrar la creación del diagnóstico (B), y unirlos (P)."
+    },
+    {
+      "consulta": "dónde se suscribe el editor a los errores de compilación para recibir las coordenadas de línea y columna",
+      "consultas": [
+        "dónde se suscribe el editor a los errores de compilación para recibir las coordenadas de línea y columna"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 6,
+      "why": "T4 cerró que no hay parser en la consola; T2/T3 confirmaron el pintor. Falta el puente: quién inyecta los diagnósticos en el editor. Busco la suscripción o el emisor, no el parser."
+    },
+    {
+      "consulta": "dónde se suscribe el editor a los errores de compilación para pintar la línea roja en el margen",
+      "consultas": [
+        "dónde se suscribe el editor a los errores de compilación para pintar la línea roja en el margen"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 7,
+      "why": "T2/T3 leyeron el pintor, T1/T4 refutaron el parser de consola. Falta el puente: quién inyecta los errores en el sistema de diagnósticos del editor"
+    },
+    {
+      "consulta": "dónde se suscribe el editor a los errores de compilación para pintar la línea roja en el margen",
+      "consultas": [
+        "dónde se suscribe el editor a los errores de compilación para pintar la línea roja en el margen"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T2 y T3 leyeron el pintor y el objeto, pero no el suscriptor. T1/T4 refutaron el parser de consola. Falta el puente: quién inyecta los diagnósticos en el editor."
+    },
+    {
+      "consulta": "dónde se suscribe el editor a los errores de compilación para recibir las coordenadas de línea y columna",
+      "consultas": [
+        "dónde se suscribe el editor a los errores de compilación para recibir las coordenadas de línea y columna"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "T4 cerró que no hay parser en la consola; T2/T3 muestran el pintor. Falta el puente: quién inyecta los diagnósticos en el editor. Busco la suscripción o el emisor de los errores de compilación hacia el editor."
+    },
+    {
+      "consulta": "dónde se suscribe el editor a los errores de compilación para pintar la línea roja en el margen",
+      "consultas": [
+        "dónde se suscribe el editor a los errores de compilación para pintar la línea roja en el margen"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 10,
+      "why": "T2 y T3 leyeron el pintor, pero falta el suscriptor que conecta la consola con el editor. T1/T4 refutaron el parser en la consola; busco el puente de suscripción o el emisor de diagnósticos."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

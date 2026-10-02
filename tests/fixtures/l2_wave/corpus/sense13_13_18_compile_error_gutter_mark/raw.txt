@@ -1,0 +1,14 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have three completed jobs:
+T1: Asked where compilation errors are read from the console text to mark them in the editor.
+Result: `rebuild diagnostics by line if changed`, `rebuild diagnostics by line`, `apply lsp diagnostics to panel`, `push active file diagnostics from cache`.
+T2: Asked where compilation errors are analyzed from the console text to create markers in the editor.
+Result: No object found.
+T3: Asked where the red line decoration is created in the left margin of the editor to mark errors.
+Result: `apply lsp diagnostics to panel`, `push active file diagnostics from cache`, `rebuild diagnostics by line if changed`, `rebuild diagnostics by line`, `line gutter marker`, `fold gutter marker`, `line diagnostic marker from map`.
+
+The "exam" section says:
+T1 closed: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo."
+T2 closed: "El hijo cerró esta pregunta: no hay objeto
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"los exploradores no hallaron el mecanismo que une la consola con el margen; el pack muestra que el sistema usa LSP para diagnostics, no un parser de texto de consola para pintar líneas rojas"}

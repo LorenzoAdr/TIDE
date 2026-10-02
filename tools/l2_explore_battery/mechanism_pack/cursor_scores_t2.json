@@ -1,0 +1,86 @@
+{
+  "round": "t2",
+  "rows": [
+    {
+      "id": "01_settings_about_tab",
+      "story_clarity": 3,
+      "falsifiability": 3,
+      "noise": 3,
+      "ports_useful": 3,
+      "verdict": "keep_knobs",
+      "notes": "M1 mechanism shows apply_app_settings write(selected_tab); effect→gdb_launcher is weak but slots are explicit and rejectable."
+    },
+    {
+      "id": "04_ai_thinking_status_bar",
+      "story_clarity": 4,
+      "falsifiability": 4,
+      "noise": 2,
+      "ports_useful": 4,
+      "verdict": "keep_knobs",
+      "notes": "M3 trigger=enter_ctrl, state=write(label), ports to M5; clear busy_strip story without inventing."
+    },
+    {
+      "id": "07_ai_compile_task",
+      "story_clarity": 3,
+      "falsifiability": 3,
+      "noise": 3,
+      "ports_useful": 2,
+      "verdict": "tune",
+      "notes": "Trap stems appear in mechanism/ports; story partially readable but polluted."
+    },
+    {
+      "id": "17_ai_spinner_stuck",
+      "story_clarity": 4,
+      "falsifiability": 4,
+      "noise": 2,
+      "ports_useful": 3,
+      "verdict": "keep_knobs",
+      "notes": "Busy-strip nucleus packs a coherent trigger/state/effect; trap flag noted by auto scorer."
+    },
+    {
+      "id": "20_cancel_ai_generation",
+      "story_clarity": 2,
+      "falsifiability": 3,
+      "noise": 4,
+      "ports_useful": 2,
+      "verdict": "tune",
+      "notes": "Gold level2_autonomous_loop/ai_controller mostly absent from mechanism; busy_strip dominates — pack cannot invent missing nucleus."
+    },
+    {
+      "id": "02_split_resize_behavior",
+      "story_clarity": 2,
+      "falsifiability": 2,
+      "noise": 3,
+      "ports_useful": 1,
+      "verdict": "keep_knobs",
+      "notes": "Story cover miss is upstream recall (no gold in pack), not ranking; further knob churn unlikely to help."
+    },
+    {
+      "id": "11_restore_session_state",
+      "story_clarity": 3,
+      "falsifiability": 3,
+      "noise": 3,
+      "ports_useful": 3,
+      "verdict": "keep_knobs",
+      "notes": "Partial mechanism; trap_in_mechanism from auto score — acceptable at equilibrium."
+    },
+    {
+      "id": "19_git_diff_gutter",
+      "story_clarity": 4,
+      "falsifiability": 4,
+      "noise": 2,
+      "ports_useful": 3,
+      "verdict": "keep_knobs",
+      "notes": "Mechanism slots readable; ports present when bridges exist."
+    }
+  ],
+  "summary": {
+    "mean_story_clarity": 3.125,
+    "mean_falsifiability": 3.25,
+    "mean_noise": 2.75,
+    "mean_ports_useful": 2.625,
+    "tune_count": 2,
+    "keep_count": 6,
+    "worst3": ["20_cancel_ai_generation", "02_split_resize_behavior", "07_ai_compile_task"]
+  }
+}

@@ -1,0 +1,13 @@
+The user wants to mark compilation errors from the console with a red line in the left margin of the editor.
+I have three completed tasks:
+1.  **T1**: Asked where compilation errors are marked in the editor margin. Found `mark visual highlight inputs dirty`, `lsp sync pending`.
+2.  **T2**: Asked where compilation errors are read from the console text to mark them. Found `parse gcc style`, `parse msvc style`, `problems visible terminal lines`, `terminal row link`, `find compiler location`.
+3.  **T3**: Asked where errors read from the console are applied to the editor's visual highlight system. Found `diagnostics for editor line`, `diagnostics on line`, `problems visible terminal lines`, `Make Console Panel`, `visual highlight config from settings`, `compute`.
+
+The "entre abiertas" section shows:
+-   T2 => T3: `Make Console Panel → handle console panel mouse → terminal link at cell → terminal row link → find compiler location → parse gcc style` (This seems to be a path connecting the console parsing to the terminal row link).
+-   T2 => T3: `mismo objeto: problems visible terminal lines`.
+
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el sistema lee los errores de la consola (parse gcc/msvc style) y los aplica al editor (diagnostics for editor line, visual highlight config); el mecanismo de marcado ya existe"}

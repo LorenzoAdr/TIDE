@@ -1,0 +1,123 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_transport.cpp:wait_response",
+        "src/lsp/lsp_transport.cpp:reader_loop"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor LSP tras un fallo",
+      "keep": [
+        "M6",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_transport.cpp:wait_response",
+        "src/lsp/lsp_transport.cpp:reader_loop",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "qué hace el handler de fin de lectura del transporte para iniciar el reinicio del servidor",
+      "keep": [
+        "M1",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:spawn_language_server",
+        "src/lsp/lsp_client.cpp:start"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: detectar el fallo y reiniciar. M5 sugiere reinicio, pero falta la detección. Separo para cazar el detector y el ejecutor."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "qué hace el handler de fin de lectura del transporte para iniciar el reinicio del servidor",
+      "consultas": [
+        "qué hace el handler de fin de lectura del transporte para iniciar el reinicio del servidor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "transport reader eof"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 encontró la detección (EOF) y T2 el reinicio, pero falta el puente. Necesito ver si el handler de EOF dispara el reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "la aplicación detecta la caída del LSP (EOF en reader loop) y el no-respuesta (timeout en wait response), pero el handler de fin de lectura solo limpia el estado y no dispara el reinicio. el mecanismo de reinicio existe en application (schedule debounced lsp restart), pero no hay camino trazado que conecte la detección de fallo al disparo del reinicio; el claim de reinicio automático tras caída queda refutado por la falta de enlace."
+    }
+  ],
+  "why": "la aplicación detecta la caída del LSP (EOF en reader loop) y el no-respuesta (timeout en wait response), pero el handler de fin de lectura solo limpia el estado y no dispara el reinicio. el mecanismo de reinicio existe en application (schedule debounced lsp restart), pero no hay camino trazado que conecte la detección de fallo al disparo del reinicio; el claim de reinicio automático tras caída queda refutado por la falta de enlace.",
+  "zooms": []
+}

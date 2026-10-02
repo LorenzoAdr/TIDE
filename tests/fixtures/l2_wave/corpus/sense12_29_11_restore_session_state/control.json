@@ -1,0 +1,163 @@
+{
+  "agujas": [
+    "app",
+    "editor",
+    "ui",
+    "workspace"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos y la posición del cursor al volver a abrir un proyecto",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file",
+        "src/app/workspace_model.cpp:open_file_impl",
+        "src/app/workspace_model.cpp:open_new_tab_from_disk"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al volver a abrir un proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file_impl"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado de la sesión de trabajo para restaurar archivos, cursor y paneles",
+      "keep": [
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file_impl",
+        "src/app/workspace_model.cpp:open_file",
+        "src/app/workspace_model.cpp:open_new_tab_from_disk"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "app",
+        "editor",
+        "ui",
+        "workspace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar posición del cursor, archivos abiertos y paneles laterales al abrir un proyecto; busco barrios que manejen sesión, layout y estado del editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "app"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "workspace_session huele a persistencia del estado del proyecto"
+    },
+    {
+      "consulta": "dónde se restauran los archivos abiertos y la posición del cursor al volver a abrir un proyecto",
+      "consultas": [
+        "dónde se restauran los archivos abiertos y la posición del cursor al volver a abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "sesión"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "workspace_model menciona active_tab y cursor_history; busco el mecanismo de restauración de sesión"
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al volver a abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al volver a abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 cubre archivos y cursor; falta el estado de los paneles laterales (visible/cerrado). El pack sugiere Application/set workspace como siguiente paso."
+    },
+    {
+      "consulta": "dónde se guarda el estado de la sesión de trabajo para restaurar archivos, cursor y paneles",
+      "consultas": [
+        "dónde se guarda el estado de la sesión de trabajo para restaurar archivos, cursor y paneles"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "guardar"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 y T2 leen la restauración; el pack une a Application y set workspace. Necesito ver dónde se persiste el estado para confirmar que se guarda todo lo pedido."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de restauración de archivos, cursor y paneles al reabrir un proyecto es restore workspace session, que delega en open file impl para la lógica de apertura y estado"
+    }
+  ],
+  "why": "el mecanismo de restauración de archivos, cursor y paneles al reabrir un proyecto es restore workspace session, que delega en open file impl para la lógica de apertura y estado",
+  "zooms": [
+    "app"
+  ]
+}

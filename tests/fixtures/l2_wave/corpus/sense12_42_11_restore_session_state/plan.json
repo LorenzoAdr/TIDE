@@ -1,0 +1,51 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/app_settings.cpp:save"
+      ],
+      "consulta": "dónde se guarda la posición del cursor al cerrar el proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se restaura la posición del cursor al abrir el proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "C",
+      "kind": "locator",
+      "need": [],
+      "status": "fallo"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se restaura el estado de los paneles laterales al abrir el proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "D",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    }
+  ],
+  "modo": "romper"
+}

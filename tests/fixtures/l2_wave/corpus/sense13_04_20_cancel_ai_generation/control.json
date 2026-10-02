@@ -1,0 +1,237 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 3,
+      "visto": [
+        "src/ui/editor_panel.cpp:handle_editor_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código para evitar dejar el archivo a medias",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:tasks_.cancel",
+        "src/ai/ai_controller.cpp:clear_pending_insert"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [
+          "src/ai/ai_controller.cpp:cancel_level1",
+          "src/ai/ai_controller.cpp:cancel_all",
+          "src/ai/ai_controller.cpp:tasks_.cancel",
+          "src/ai/ai_controller.cpp:clear_pending_insert"
+        ],
+        "consulta": "dónde se cancela la generación de código para evitar dejar el archivo a medias",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino capturar la interrupción y cancelar la generación",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla une un gesto (Escape/clic) con un efecto (cancelación limpia); busco ambos polos por separado y luego el arco"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T2 afirma el objeto de la fase B: cancel level1, cancel all, tasks cancel, clear pending insert son los mecanismos que cancelan la generación y limpian el archivo a medias"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "handle editor keys"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "el disparo no está en el escape del editor; el pack apunta a handle editor keys como el barrio de los atajos"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "handle editor keys"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "el mapeo anterior falló; el pack apunta a handle editor keys como extra de T1 para reintentar la captura del disparo"
+    },
+    {
+      "consulta": "dónde se cancela la generación de código para evitar dejar el archivo a medias",
+      "consultas": [
+        "dónde se cancela la generación de código para evitar dejar el archivo a medias"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 leyó el mecanismo de cancelación (cancel level1, clear pending insert) pero no lo cerró; necesito confirmar si este es el efecto deseado (limpieza sin dejar archivo a medias)"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "handle editor keys"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "la caza anterior falló en handle editor escape; el pack apunta a handle editor keys como el barrio correcto para capturar la interrupción"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "handle editor keys"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "el mapeo anterior falló; el pack apunta a handle editor keys como el siguiente barrio para la captura de la interrupción"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "handle editor keys"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 9,
+      "why": "el mapeo anterior falló; el pack apunta a handle editor keys como el siguiente barrio para la captura de la interrupción"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para interrumpir la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "handle editor keys"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 10,
+      "why": "el mapeo anterior falló; el pack apunta a handle editor keys como el barrio correcto para la captura de la interrupción"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

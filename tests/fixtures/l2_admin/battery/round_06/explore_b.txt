@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"modulo sesion","spawn":{"tipo":"explore","brief":"reset sesion"}}
+{"action":"admin_v1","do":"cerrar","why":"un explore basta","reply":"Explore stub no concluyente; falta cablear wave."}

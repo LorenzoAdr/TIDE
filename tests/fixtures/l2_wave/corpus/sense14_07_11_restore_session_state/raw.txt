@@ -1,0 +1,16 @@
+The user wants to know if the application remembers the cursor position, open files, and visible/closed side panels when reopening a project.
+
+I have three completed jobs:
+1.  **T1**: Asked about saving/restoring editor state (cursor, files, panels) on close/open.
+    *   *Result*: Read `process pending workspace load`, `set workspace`, `resolve workspace for anchor`. The child closed saying "not the trigger".
+2.  **T2**: Asked about restoring cursor position.
+    *   *Result*: "No object found". Closed.
+3.  **T3**: Asked about restoring open files and visible panels during workspace bootstrap.
+    *   *Result*: Read `process pending workspace load`, `set workspace`, `resolve workspace for anchor`, `reopen workspace documents`, `reload stale tabs from disk`.
+    *   *Child's conclusion*: "set workspace clears tabs and saves session but doesn't restore them; reopen workspace documents only notifies LSP without opening files".
+    *   *Open items*: `run custom event drain`, `load workspace session`, `restore workspace layout`.
+
+Analysis:
+The user's claim is about *remembering* state (cursor, files,
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de restauración no existe: set workspace limpia pestañas y reopen workspace documents solo notifica al LSP sin abrir archivos; no hay objeto que recuerde la posición del cursor ni los paneles"}

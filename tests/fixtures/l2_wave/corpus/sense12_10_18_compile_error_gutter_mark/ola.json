@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se convierte el texto de la consola en diagnostics para el editor",
+  "consultas": [
+    "dónde se convierte el texto de la consola en diagnostics para el editor"
+  ],
+  "do": "explorar",
+  "error": "control: do no legal ahora (explorar)",
+  "evita": [],
+  "hacia": [
+    "diagnostics"
+  ],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T4 leyó diagnostics for editor line pero no el origen; T3 falló en M11; necesito el puente que transforma la salida de la consola en el objeto que T1 consume"
+}

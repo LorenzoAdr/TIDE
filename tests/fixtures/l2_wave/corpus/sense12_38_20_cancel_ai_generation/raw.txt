@@ -1,0 +1,34 @@
+The user wants to cancel AI code generation by pressing Escape or clicking outside, ensuring the file is not left half-written.
+
+Current state:
+- T1 (Capture Escape/click): Failed. Found that cancellation is currently done via text input ("cancel", etc.) in `is cancel input` and `handle user input`. `ai trace escape` is a string util, not event handling.
+- T2 (Clean up file): Found `clear pending insert` which resets `pending insert` and `insert anchor`, called by `cancel current`.
+- T3 (Keyboard event processing): Failed. Found ANSI escape sequence
+---- content ----
+{
+  "action": "control_v1",
+  "do": "plan",
+  "modo": "romper",
+  "fases": [
+    {
+      "id": "A",
+      "kind": "locator",
+      "consulta": "dónde se detecta la tecla Escape o el clic fuera para invocar la cancelación de la IA"
+    },
+    {
+      "id": "B",
+      "kind": "locator",
+      "consulta": "dónde se invoca la limpieza del archivo al cancelar la generación de la IA"
+    },
+    {
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "consulta": "hay camino entre la detección de Escape/clic fuera y la limpieza del archivo"
+    }
+  ],
+  "why": "T1 y T3 fallaron en encontrar la captura de Escape/clic; T2 encontró la limpieza. Necesito localizar dónde se captura el evento de UI (Escape/clic) y dónde se invoca la limpieza, luego verificar si hay camino entre ambos para cumplir el claim del usuario."
+}

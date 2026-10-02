@@ -1,0 +1,17 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 asked: where are compilation errors marked in the editor margin?
+T1 closed: didn't find gutter marking mechanism; found line content decorations (underline/color) via `collect diagnostic decorations` and `apply decoration`, but no gutter logic.
+
+T2 asked: where are marks painted in the left margin of the editor for diagnostics?
+T2 closed: found the mechanism: `line gutter marker` decides character/W based on `line diagnostic marker from map`, which queries `diagnostics for editor line`; painting happens in `Make Editor Panel` render loop.
+
+T3 asked: where are compilation errors extracted from the bottom console text?
+T3 closed: no object found.
+
+Current state:
+- We know how the gutter marks are painted (`line gutter marker`, `Make Editor Panel`).
+- We know they rely on `diagnostics for editor line` / `line diagnostic marker from map`.
+- We know T3 found *no object* for extracting errors from the console text. This implies the current system does *not* parse the console text to extract errors, or at
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack no une la consola inferior con el margen del editor; T3 cerró que no hay objeto que extraiga errores del texto de la consola. el mecanismo de marcado en el margen (T2) depende de diagnósticos de lsp, no de parsing de consola. sin extractor, no hay camino para pintar la línea roja desde la consola."}

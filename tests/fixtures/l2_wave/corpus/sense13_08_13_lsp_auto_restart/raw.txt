@@ -1,0 +1,10 @@
+The user wants to implement an automatic restart of the LSP server if it crashes or becomes unresponsive.
+I have 3 completed jobs (T1, T2, T3).
+T1 looked for detection of crash/no response to trigger restart. Found EOF handling and manual restart, but no timeout/heartbeat detection.
+T2 looked for timeout/heartbeat detection. Found `wait response`, `reader loop`, `schedule debounced lsp restart`, `restart lsp for workspace`.
+T3 looked for automatic restart after crash detection. Found `start`, `stop`, `on transport reader eof`, `restart lsp for workspace`.
+
+The "Cerrado" sections for T1, T2, T3 all say "ESA pregunta no se relanza... no encontré la detección automática...".
+T2 mentions `schedule debounced lsp restart` and `restart lsp for workspace` in "leído", but the "Cerrado" says "ESA pregunta no se relanza...". Wait, T2's "Cerrado" just repeats the standard text and lists "leído: wait response, reader loop, schedule debounced lsp restart, restart lsp for workspace". It doesn't explicitly say it found the mechanism or not, but
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"las tres cazas confirman que no existe detección automática de caída ni timeout/heartbeat, ni reinicio automático tras ello; solo hay manejo de EOF y reinicio manual"}

@@ -1,0 +1,4 @@
+{"action":"admin_v1","do":"spawn","why":"listar docs/ai","spawn":{"tipo":"shell","brief":"ls docs","arg":"ls docs/ai"}}
+{"action":"admin_v1","do":"spawn","why":"head admin md","spawn":{"tipo":"shell","brief":"head admin","arg":"head -8 docs/ai/l2-admin.md"}}
+{"action":"admin_v1","do":"spawn","why":"head battery md","spawn":{"tipo":"shell","brief":"head batt","arg":"head -8 docs/ai/l2-admin-battery.md"}}
+{"action":"admin_v1","do":"cerrar","why":"dos heads","reply":"l2-admin.md cubre el Administrador LLM único; l2-admin-battery.md cubre la battery/harness y el notebook."}

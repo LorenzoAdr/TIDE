@@ -1,0 +1,230 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para extraer la línea del error",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:handle_git_gutter_click",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:git_line_changed",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta el color de fondo del marcador en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extrae la línea del error del texto de la consola",
+      "keep": [
+        "M7"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:terminal_selected_text",
+        "src/ui/console_panel.cpp:select_console_line_at"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se extrae la línea del error del texto de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino extraer la línea del error y crear el marcador en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M3"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 (editor panel) y M3 (visual highlight) son los barrios candidatos para el margen y la pintura, pero sus stems son genéricos. Necesito ver si hay fichas de 'diagnostics', 'squiggles' o 'gutter' para localizar el mecanismo de renderizado de errores."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla une dos fenómenos distintos (leer error vs pintar margen); el pack no muestra el arco; se cazan los polos y luego se verifica el puente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado solo nombra el barrio (console panel) sin confirmar el mecanismo de extracción de la línea; salto a la siguiente caza para cerrar el dibujo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 no halló el pintor; salto a la siguiente caza del plan (puente)"
+    },
+    {
+      "consulta": "dónde se pinta el color de fondo del marcador en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se pinta el color de fondo del marcador en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "paint gutter"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 falló buscando el dibujante; el pack apunta a 'paint gutter'. Necesito el efecto visual (pintar rojo) para luego unir con la causa (error)."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T1 y T2/T3 son polos leídos sin camino. Necesito localizar el origen (parseo) y el destino (creación del marcador) para ver si falta el puente que une ambos."
+    },
+    {
+      "consulta": "dónde se parsea la salida del compilador para extraer el número de línea del error",
+      "consultas": [
+        "dónde se parsea la salida del compilador para extraer el número de línea del error"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 7,
+      "why": "T4 leyó selección, no parsing. Necesito el extractor de errores (regex/AST) para tener la línea exacta y poder unirla al marcador del gutter"
+    },
+    {
+      "consulta": "dónde se parsea la salida del compilador para extraer el número de línea del error",
+      "consultas": [
+        "dónde se parsea la salida del compilador para extraer el número de línea del error"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T4 falló buscando selección; el mecanismo es un parser de errores (diagnostics), no UI. Busco la extracción de datos del texto plano."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 9,
+      "why": "el pack no une la consola con el margen del editor; las fichas leídas son de selección de texto y renderizado de git, no de diagnóstico de compilación. sin camino entre polos leídos cierra el ancla"
+    }
+  ],
+  "why": "el pack no une la consola con el margen del editor; las fichas leídas son de selección de texto y renderizado de git, no de diagnóstico de compilación. sin camino entre polos leídos cierra el ancla",
+  "zooms": []
+}

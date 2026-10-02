@@ -1,0 +1,15 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have 3 completed works (T1, T2, T3).
+T1 found `schedule debounced lsp restart`.
+T2 looked for the trigger for `schedule debounced lsp restart` in `M6` (embedding backend/llama backend) and found `on transport reader eof` which cleans PID but doesn't call the restart scheduler.
+T3 looked for callers of `schedule debounced lsp restart` in `M1` and found `apply workspace settings`, `setup build environment watching`.
+
+The pack shows `M5` (application) owns `pending lsp restart`, `last lsp environment fingerprint` and has `restart lsp for workspace`, `schedule debounced lsp restart`.
+`M7` (same as M5) peeks `restart lsp for workspace`.
+`T3` found `restart lsp for workspace` in `extra`.
+
+The user's claim is about *automatic detection* of crash/unresponsiveness and *restart*.
+T2 refuted that `on transport reader eof` triggers the restart.
+T3 found `schedule debounced lsp restart` is called by `apply workspace
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático al detectar caída no se encuentra en los barrios leídos; el EOF limpia el PID pero no dispara el reinicio, y los callers visibles son configuración y entorno, no detección de fallo"}

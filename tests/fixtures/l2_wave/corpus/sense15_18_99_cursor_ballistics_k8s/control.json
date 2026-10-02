@@ -1,0 +1,50 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": false,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [],
+  "jobs_run": 0,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor",
+        "índice vectorial",
+        "parpadeo usuario"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide mecanismos muy específicos (trayectoria balística, parpadeo, índice cuántico) que no aparecen en los stems actuales; necesito ver si existe algún barrio relacionado con movimiento de cursor, índices o eventos de usuario antes de lanzar una caza concreta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no nombra ni un solo olor de trayectoria balística, parpadeo, kubernetes ni índice cuántico; el barrio concentra editor, workspace y llama, pero no hay mecanismo que responda al claim"
+    }
+  ],
+  "why": "el pack no nombra ni un solo olor de trayectoria balística, parpadeo, kubernetes ni índice cuántico; el barrio concentra editor, workspace y llama, pero no hay mecanismo que responda al claim",
+  "zooms": []
+}

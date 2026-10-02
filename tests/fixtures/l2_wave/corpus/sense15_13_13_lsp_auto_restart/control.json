@@ -1,0 +1,133 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M5",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/llama_backend.cpp:ensure_completion_server",
+        "src/ai/llama_backend.cpp:ensure_ready",
+        "src/ai/llama_backend.cpp:start_completion_server",
+        "src/ai/llama_backend.cpp:ready",
+        "src/ai/llama_backend.cpp:health_ok",
+        "src/ai/llama_backend.cpp:stop_owned_unlocked",
+        "src/ai/llama_backend.cpp:stop_listener_on_port"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se programa el reinicio diferido del servidor de lenguaje cuando se detecta que se ha caído",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/llama_backend.cpp:ensure_completion_server",
+        "src/ai/llama_backend.cpp:ensure_ready",
+        "src/ai/llama_backend.cpp:start_completion_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje cuando el probe de salud falla o el proceso se cae",
+      "keep": [
+        "M10",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/symbols/lsp_symbol_provider.cpp:clangd_index_healthy",
+        "src/symbols/lsp_symbol_provider.cpp:client_latest_completion_id"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio; necesito ver qué dispara ese reinicio automáticamente"
+    },
+    {
+      "consulta": "dónde se programa el reinicio diferido del servidor de lenguaje cuando se detecta que se ha caído",
+      "consultas": [
+        "dónde se programa el reinicio diferido del servidor de lenguaje cuando se detecta que se ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio diferido"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección y el disparo inmediato; el pack muestra schedule debounced lsp restart en M5/M7, necesito ver si ese mecanismo existe y cómo se activa tras la caída"
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje cuando el probe de salud falla o el proceso se cae",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje cuando el probe de salud falla o el proceso se cae"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio automático"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 confirmó la detección y el disparo, pero necesito ver el flujo completo de reinicio automático para asegurar que no requiere intervención del usuario y que cubre caída/no-respuesta."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide reinicio automático del LSP (servidor de lenguaje). T1 encontró un mecanismo de detección y reinicio automático (health ok probe, restart en start completion server), pero es para el 'completion server' (backend de IA/LLM), no para el LSP de edición de código. T2 y T3 confirmaron que el flujo de reinicio automático está acoplado a este completion server. No hay evidencia en el pack de un mecanismo similar para el LSP de edición (clangd, etc.). El mecanismo de reinicio automático existe para el servidor de completado, pero no se ha encontrado para el LSP de lenguaje."
+    }
+  ],
+  "why": "el ancla pide reinicio automático del LSP (servidor de lenguaje). T1 encontró un mecanismo de detección y reinicio automático (health ok probe, restart en start completion server), pero es para el 'completion server' (backend de IA/LLM), no para el LSP de edición de código. T2 y T3 confirmaron que el flujo de reinicio automático está acoplado a este completion server. No hay evidencia en el pack de un mecanismo similar para el LSP de edición (clangd, etc.). El mecanismo de reinicio automático existe para el servidor de completado, pero no se ha encontrado para el LSP de lenguaje.",
+  "zooms": []
+}

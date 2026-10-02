@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de detección y reinicio automático del LSP está confirmado: el bucle principal (run) y la instalación disparan restart lsp for workspace, que inicia el backend. El usuario no necesita intervenir."}

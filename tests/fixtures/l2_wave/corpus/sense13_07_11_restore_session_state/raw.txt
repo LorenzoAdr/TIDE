@@ -1,0 +1,13 @@
+The user wants to know if the application remembers the cursor position, open files, and visible/closed side panels when reopening a previously opened project.
+
+I have three completed jobs:
+1.  **T1**: Asked about editor state save/restore. Result: Read `editor state cpp`, `editor state hpp`. No specific mechanism found or confirmed for the *whole* state, just files read.
+2.  **T2**: Asked about cursor position save/restore. Result: "No hay objeto" (No object found). This implies the cursor position is likely *not* saved/restored in the way expected, or at least not in the places looked.
+3.  **T3**: Asked about open files list save/restore. Result: Found mechanism. `recent projects json` saves `recent.paths` via `save`/`remember` and restores via `load`.
+
+The user's claim has three parts:
+1.  Cursor position (Refuted by T2: "no hay objeto").
+2.  Open files (Confirmed by T3: `recent projects json` mechanism).
+3.  Side panels visible/closed (Not explicitly investigated yet, but T1 looked at "editor state" generally
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la posición del cursor no se guarda (T2: no hay objeto); la lista de archivos abiertos sí se restaura vía JSON (T3); los paneles laterales no se mencionan en el mecanismo de estado leído"}

@@ -1,0 +1,132 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al volver a abrir un proyecto",
+      "keep": [
+        "M1",
+        "M4"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:save_workspace_session",
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:flush_active_tab",
+        "src/app/workspace_model.cpp:open_file",
+        "src/app/app_settings.cpp:save",
+        "src/app/workspace_model.cpp:open_file_impl",
+        "src/app/workspace_model.cpp:switch_to_tab"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "qué datos de la sesión se guardan y restauran al abrir un proyecto cursor, archivos, paneles",
+      "keep": [
+        "M10",
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/app/workspace_session.cpp:save",
+        "src/app/recent_projects.cpp:remember",
+        "src/app/workspace_session.cpp:load",
+        "src/app/workspace_session.hpp",
+        "src/app/recent_projects.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al cargar la sesión",
+      "keep": [
+        "M6",
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/workspace_session.cpp:load"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor y los archivos abiertos al volver a abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor y los archivos abiertos al volver a abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 owns editor state y peeks CursorPos; es el barrio más directo para el estado del editor al reabrir"
+    },
+    {
+      "consulta": "qué datos de la sesión se guardan y restauran al abrir un proyecto cursor, archivos, paneles",
+      "consultas": [
+        "qué datos de la sesión se guardan y restauran al abrir un proyecto cursor, archivos, paneles"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "workspace session"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el mecanismo de sesión; ahora necesito confirmar si incluye los detalles específicos del ancla (cursor, paneles)"
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al cargar la sesión",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al cargar la sesión"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 confirmó que se guardan pestañas y pestaña activa, pero no mencionó paneles laterales. El ancla pide recordar si tenía algún panel lateral visible o cerrado. Hay que cazar la restauración del layout de paneles."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pedía cursor, archivos y paneles. T2 confirma archivos (pestañas) y T3 refuta paneles. El pack no une cursor a un mecanismo de restauración distinto al de archivos; sin camino entre polos leídos cierra el ancla"
+    }
+  ],
+  "why": "el ancla pedía cursor, archivos y paneles. T2 confirma archivos (pestañas) y T3 refuta paneles. El pack no une cursor a un mecanismo de restauración distinto al de archivos; sin camino entre polos leídos cierra el ancla",
+  "zooms": []
+}

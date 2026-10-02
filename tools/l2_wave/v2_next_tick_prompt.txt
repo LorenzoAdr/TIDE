@@ -1,0 +1,32 @@
+Al despertar: post-15h — A5 smoke (H diferido: sin T0 externo).
+Sense16 en STOP. Responde en español. Sé breve.
+
+Sentinel: `AGENT_LOOP_WAKE_v2next`
+Base: `/home/lorenzo/workspace/TIDE/.tuide/ai/l2_wave/v2_night`
+
+## Estado
+
+```
+keep_s0; G revertida
+H: DIFERIDO (no modelo externo por ahora)
+EF_DIAGNOSIS: E=candidate; F=not yet — no implementar E hasta A5 smoke DONE
+A5_SMOKE N=1 (5 train) en curso o DONE
+NO held-out. NO API T0. NO sense16. NO C.
+```
+
+## Tick
+
+0. `meta/STOP` si falta.
+1. **A5_SMOKE**
+   - Si no DONE: queue.pid vivo? Si muerta →
+     `./tools/l2_wave/run_a5_smoke.sh 1 .tuide/ai/l2_wave/v2_night/A5_SMOKE`
+   - Si viva: no dupliques.
+   - Si DONE: lee `A5_SMOKE_summary.json`; anota; phase=`post_a5`.
+     Solo entonces valorar E (dumps) vs seguir en S0.
+2. No pidas ni configures API externa / T0.
+3. Heartbeat:
+   ```
+   ./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_v2next \
+     'Lee y ejecuta tools/l2_wave/v2_next_tick_prompt.txt (post-15h: A5 smoke).'
+   ```
+   notify_on_output `AGENT_LOOP_WAKE_v2next`.

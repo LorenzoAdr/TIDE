@@ -1,0 +1,135 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape en el panel de consola para cancelar la generación",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:has_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta la tecla Escape en el manejo de teclas de la consola para cancelar",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 7,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ui/console_panel.cpp:3060-3100"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escape"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el usuario menciona Escape y clic fuera como disparadores; M2 tiene 'escape' en peek y M8 gestiona la cancelación; necesito ver cómo se inicia la cancelación"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape en el panel de consola para cancelar la generación",
+      "consultas": [
+        "dónde se captura la tecla Escape en el panel de consola para cancelar la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "M2 falló; M5 (console panel) tiene 'handle ai console keys' en el pack, candidato fuerte para el trigger de Escape"
+    },
+    {
+      "consulta": "dónde se detecta la tecla Escape en el manejo de teclas de la consola para cancelar",
+      "consultas": [
+        "dónde se detecta la tecla Escape en el manejo de teclas de la consola para cancelar"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ai console keys"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 encontró el handler de teclas; verifico si mapea Escape a cancelar"
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de código",
+      "consultas": [
+        "dónde se limpia el archivo a medias al cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T3 cerró la captura de Escape; el pack apunta a clear pending insert. Falta verificar que la cancelación limpia el archivo a medias."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de captura de Escape en la consola llama a clear pending insert en el controlador de IA, cancelando la generación"
+    }
+  ],
+  "why": "el mecanismo de captura de Escape en la consola llama a clear pending insert en el controlador de IA, cancelando la generación",
+  "zooms": []
+}

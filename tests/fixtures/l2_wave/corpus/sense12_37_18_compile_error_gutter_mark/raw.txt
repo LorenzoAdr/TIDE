@@ -1,0 +1,11 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1: Asked where the red line is painted. Read `editor panel cpp/hpp`.
+- T2: Asked where compilation errors are read from the console to mark them. Read `editor panel`, `diagnostic severity tr`, `diagnostics on line`, `scan shell output for linker errors`. Conclusion: No mechanism found that reads compilation errors from the console and marks them in the editor. Found a linker error scanner for binary symbols and an
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "no hay mecanismo que lea errores de compilación de la consola y los marque en el editor; el sistema de diagnóstico consume datos estructurados de LSP, no texto de consola"
+}

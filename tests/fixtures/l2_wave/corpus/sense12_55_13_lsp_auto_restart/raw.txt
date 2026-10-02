@@ -1,0 +1,14 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have two completed works:
+T1: Looked for detection of LSP crash/non-response to trigger restart. Found `on transport reader eof`, `start`, `restart lsp for workspace`, `schedule debounced lsp restart`.
+T2: Looked for the restart mechanism after detecting crash/non-response. Found `restart lsp for workspace`, `on lsp missing install`, `stop`, `start`.
+T2's closed statement says: "no encontré el mecanismo de reinicio automático tras caída no-respuesta; lo leído es reinicio tras instalación de toolpack on lsp missing install y detección de EOF pasiva on transport reader eof que no dispara reinicio".
+This implies that the current code does *not* have the automatic restart mechanism for crash/non-response. It only has restart on missing install and passive EOF detection that doesn't trigger restart.
+The anchor claim is: "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada".
+Since T2 explicitly states that the mechanism for
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de detección y reinicio automático tras caída o no-respuesta no existe en el código actual; solo hay reinicio tras instalación y detección pasiva de EOF sin reinicio. el claim se refuta."
+}

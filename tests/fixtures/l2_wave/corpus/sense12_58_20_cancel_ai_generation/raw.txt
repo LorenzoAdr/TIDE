@@ -1,0 +1,14 @@
+The user wants to know how to cleanly cancel AI code generation when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed works:
+1.  **T1**: Searched for "where Escape key is captured to cancel AI generation". Result: Not found (found string escape function instead).
+2.  **T2**: Searched for "where AI generation is cancelled when user presses Escape". Result: Found `cancel current`, `cancel level1`, `handle user input`, `is cancel input`.
+3.  **T3**: Searched for "where the half-written file is cleaned up when cancelling AI generation". Result: Found `clear pending insert` called from `cancel current` when `pending insert` is true and no busy task, resetting `pending insert` and `insert anchor`. `cancel all` delegates to `cancel level1` and `tasks cancel`.
+
+The user's claim has two parts:
+1.  Cancel generation cleanly (T2 found `cancel current`/`cancel level1`/`tasks cancel`).
+2.  Don't leave the file half-written (T3 found `clear pending insert` handles the buffer cleanup).
+
+The "Escape key
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la generación se cancela con cancel current y cancel level1; el archivo a medias se limpia con clear pending insert que resetea el buffer pendiente"}

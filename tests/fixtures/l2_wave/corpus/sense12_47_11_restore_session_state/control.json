@@ -1,0 +1,109 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/main_layout.cpp:MakeMainLayout"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "El ancla pide recordar tres estados distintos (cursor, archivos, paneles) al reabrir un proyecto. El pack muestra M1 (editor state) para cursor, M5/M6 (paneles) para visibilidad, pero no hay un mecanismo claro de 'restaurar sesión' unificado. Rompo en tres localizadores independientes para buscar dónde se lee/escribe cada estado al abrir el proyecto."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega el objeto en M1; salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "layout"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 fallaron; el pack tiene M2 (main layout) y M5/M6 (panel) que pueden guardar/restaurar el estado de la UI"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack no nombra un mecanismo de restauración de sesión; las cazas en editor state y main layout no hallaron el disparo; sin camino entre polos leídos"
+    }
+  ],
+  "why": "el pack no nombra un mecanismo de restauración de sesión; las cazas en editor state y main layout no hallaron el disparo; sin camino entre polos leídos",
+  "zooms": []
+}

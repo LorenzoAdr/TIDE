@@ -1,0 +1,11 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have already investigated:
+1.  **T1**: Found `restart lsp for workspace` and `schedule debounced lsp restart`. This confirms the restart mechanism exists.
+2.  **T2**: Looked for the detection trigger. Found `on lsp missing install` and `schedule debounced lsp restart` (triggered by env changes), but explicitly stated "no hay código que detecte un crash activo del proceso LSP".
+3.  **T3**: Looked for "dónde
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack y los trabajos leídos confirman que existe el mecanismo de reinicio (restart lsp for workspace), pero no existe la detección automática de caída o falta de respuesta del proceso LSP. la aplicación solo reinicia tras cambios de entorno o instalación, no por crash."
+}

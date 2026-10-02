@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"las tres cazas confirman que no existe un mecanismo de detección automática de caída o falta de respuesta del LSP que dispare el reinicio. T2 encontró triggers por cambio de entorno, no por fallo del proceso; T3 no halló objeto. El claim se refuta: la aplicación no reinicia el LSP automáticamente ante fallos."}

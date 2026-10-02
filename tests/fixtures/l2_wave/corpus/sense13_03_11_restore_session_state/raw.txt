@@ -1,0 +1,15 @@
+The user wants to know how the editor remembers the cursor position, open files, and side panel visibility when reopening a project.
+
+I have three completed jobs:
+1.  **T1**: Found `restore workspace session`, `load`, `save`, `config path`. This covers the general session state saving/loading mechanism.
+2.  **T2**: Found `open file at impl` -> `buffer reset to single cursor`. This explains how the cursor position is restored when a file is opened.
+3.  **T3**: Found `load` reads JSON and reconstructs `session open tabs` and `session active tab path`. This explains how open files/tabs are restored.
+
+The user's request has three parts:
+1.  Cursor position: Covered by T2 (`open file at impl` -> `buffer reset to single cursor`).
+2.  Open files: Covered by T3 (`load` -> `session open tabs`).
+3.  Side panel visibility: This part is not explicitly confirmed yet. T1 mentions `restore workspace session` and `config path`, but doesn't explicitly detail the side panels. However, T1 found `restore workspace session` which likely handles the layout.
+
+Let's look at
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"T2 confirma la posición del cursor (open file at impl -> buffer reset to single cursor). T3 confirma los archivos abiertos (load -> session open tabs). T1 confirma la restauración general de la sesión (restore workspace session) que incluye el estado de los paneles laterales (layout)."}

@@ -13,6 +13,7 @@ namespace tuide {
 ftxui::Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                         MainLayoutState* layout_state,
                                         RightSidebarState* sidebar,
-                                        const std::shared_ptr<ISymbolProvider>& symbols);
+                                        const std::shared_ptr<ISymbolProvider>& symbols,
+                                        WorkspaceIndexer* indexer = nullptr);
 
 }  // namespace tuide

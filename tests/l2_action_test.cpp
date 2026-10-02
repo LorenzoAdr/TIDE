@@ -138,6 +138,63 @@ int main() {
     expect(a.hunks[0].replace.find("always_true") != std::string::npos, "keeps always_true replace");
   }
 
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"a_judge","verdicts":[{"target":"src/a.cpp:Foo#tail","verdict":"useful",
+        "anchor":"src/a.cpp:90","stem":"a","role":"primary","why":"gate"}],"done":false})");
+    expect(a.kind == L2ActionKind::AJudge, "a_judge kind");
+    expect(a.a_verdicts.size() == 1 && a.a_verdicts[0].stem == "a", "a_judge verdict");
+    expect(!a.a_turn_done, "a_judge done false");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"a_done","loci":[{"stem":"wake","anchor":"src/ui/wake.cpp:tick","role":"primary",
+        "why":"policy"}],"summary":"locked"})");
+    expect(a.kind == L2ActionKind::ADone, "a_done kind");
+    expect(a.a_loci.size() == 1 && a.a_loci[0].anchor == "src/ui/wake.cpp:tick", "a_done locus");
+    expect(a.summary == "locked", "a_done summary");
+  }
+  {
+    const auto a = parse_l2_action(R"({"action":"a_done","loci":[]})");
+    expect(a.kind == L2ActionKind::Error, "a_done empty loci");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"f1_done","loci":[{"stem":"ai_controller","anchor":"src/ai/ai_controller.cpp:set_busy",)"
+        R"("role":"primary","why":"control"}],"summary":"busy control"})");
+    expect(a.kind == L2ActionKind::F1Done, "f1_done kind");
+    expect(a.a_loci.size() == 1, "f1_done locus");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"anchor_miss_v1","reason":"no_symptom_edge","retrieval_needed":true,)"
+        R"("candidates":["src/x.cpp:foo"],"why":"exhausted"})");
+    expect(a.kind == L2ActionKind::AnchorMiss, "anchor_miss kind");
+    expect(a.f1_retrieval_needed, "anchor_miss retrieval");
+    expect(a.f1_failure_candidates.size() == 1, "anchor_miss candidates");
+  }
+  {
+    // Coerce verdict-as-action (7B common in A1 dataflow).
+    const auto a = parse_l2_action(
+        R"({"action":"reject","target":"src/ui/busy_strip.cpp:spinner_busy_set","why":"no"})");
+    expect(a.kind == L2ActionKind::AJudge, "reject→a_judge");
+    expect(a.a_verdicts.size() == 1 && a.a_verdicts[0].verdict == tuide::AVerdictKind::Reject,
+           "reject verdict");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"interesting","target":"S1","why":"caller sets busy"})");
+    expect(a.kind == L2ActionKind::ATrailJudge, "interesting→a_trail_judge");
+    expect(a.a_verdicts.size() == 1 &&
+               a.a_verdicts[0].verdict == tuide::AVerdictKind::Interesting,
+           "interesting verdict");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"verdicts":[{"target":"src/a.cpp:Foo","verdict":"expand","expand_with":"trail"}]})");
+    expect(a.kind == L2ActionKind::AJudge, "empty action+verdicts→a_judge");
+  }
+
   if (failures) {
     std::cerr << failures << " failure(s)\n";
     return 1;

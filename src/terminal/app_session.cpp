@@ -10,16 +10,22 @@
 #include "util/child_process_guard.hpp"
 #include "util/thread_name.hpp"
 
-#if defined(__unix__) || defined(__linux__)
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
 #include <fcntl.h>
 #include <poll.h>
-#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#if defined(__linux__)
+#ifdef __linux__
 #include <pty.h>
+#include <sys/eventfd.h>
+#elif defined(__APPLE__)
+#include <util.h>
 #endif
+#endif
+
+#if defined(__APPLE__) || defined(__linux__)
+#define TUIDE_HAS_PTY 1
 #endif
 
 namespace tuide {
@@ -37,7 +43,7 @@ bool AppSession::has_live_pty() const {
 pid_t AppSession::child_pid() const { return child_pid_.load(std::memory_order_acquire); }
 
 void AppSession::apply_winsize() {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   const int master = master_fd_.load(std::memory_order_acquire);
   if (master < 0) {
     return;
@@ -73,7 +79,7 @@ void AppSession::ensure_emulator(int cols, int rows) {
 }
 
 void AppSession::ensure_wake_fd() {
-#if defined(__linux__)
+#ifdef __linux__
   if (wake_fd_.load(std::memory_order_acquire) >= 0) {
     return;
   }
@@ -85,7 +91,7 @@ void AppSession::ensure_wake_fd() {
 }
 
 void AppSession::signal_reader_wake() {
-#if defined(__linux__)
+#ifdef __linux__
   const int fd = wake_fd_.load(std::memory_order_acquire);
   if (fd < 0) {
     return;
@@ -96,7 +102,7 @@ void AppSession::signal_reader_wake() {
 }
 
 void AppSession::drain_wake_fd() {
-#if defined(__linux__)
+#ifdef __linux__
   const int fd = wake_fd_.load(std::memory_order_acquire);
   if (fd < 0) {
     return;
@@ -108,7 +114,7 @@ void AppSession::drain_wake_fd() {
 }
 
 std::string AppSession::open_host_pty(int cols, int rows) {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   stop();
   stop_requested_.store(false, std::memory_order_release);
   cols_ = std::max(1, cols);
@@ -157,7 +163,7 @@ std::string AppSession::open_host_pty(int cols, int rows) {
 
 int AppSession::start_command(const std::string& cwd, const std::vector<std::string>& args,
                               const std::map<std::string, std::string>& env, int cols, int rows) {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   if (args.empty() || args.front().empty()) {
     return -1;
   }
@@ -233,7 +239,7 @@ int AppSession::start_command(const std::string& cwd, const std::vector<std::str
 }
 
 void AppSession::stop() {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   // Never clear output_notify_: open_host_pty/start_command call stop() on every
   // launch, and the callback is only wired once from MakeConsolePanel.
   stop_requested_.store(true, std::memory_order_release);
@@ -338,7 +344,7 @@ void AppSession::resize(int cols, int rows) {
 }
 
 void AppSession::write_raw(const std::string& data) {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   const int master = master_fd_.load(std::memory_order_acquire);
   if (!has_live_pty() || master < 0 || data.empty()) {
     return;
@@ -364,7 +370,7 @@ void AppSession::write_raw(const std::string& data) {
 }
 
 void AppSession::send_interrupt() {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   write_raw("\x03");
 #endif
 }
@@ -406,7 +412,7 @@ void AppSession::on_pty_bytes(const char* data, std::size_t len) {
 }
 
 void AppSession::reader_loop() {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   std::vector<char> buffer(4096);
   while (!stop_requested_.load(std::memory_order_acquire)) {
     const int master = master_fd_.load(std::memory_order_acquire);

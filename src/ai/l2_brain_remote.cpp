@@ -1,4 +1,7 @@
 #include "ai/l2_brain.hpp"
+#include "ai/action_json.hpp"
+#include "ai/llama_backend.hpp"
+#include "ai/llama_net.hpp"
 
 #include <array>
 #include <cstdio>
@@ -46,6 +49,11 @@ std::string resolve_api_key(const AiLevel2Settings& cfg) {
       return env;
     }
   }
+  if (const char* env = std::getenv("DEEPSEEK_API_KEY")) {
+    if (env[0] != '\0') {
+      return env;
+    }
+  }
   if (const char* env = std::getenv("OPENAI_API_KEY")) {
     if (env[0] != '\0') {
       return env;
@@ -54,62 +62,18 @@ std::string resolve_api_key(const AiLevel2Settings& cfg) {
   return {};
 }
 
-// Prefer last {"action":…} object in noisy responses.
-std::string extract_action_json(const std::string& raw) {
-  std::size_t search = 0;
-  std::string best;
-  while (search < raw.size()) {
-    const auto start = raw.find("{\"action\"", search);
-    if (start == std::string::npos) {
-      break;
-    }
-    int depth = 0;
-    bool in_string = false;
-    bool escape = false;
-    for (std::size_t i = start; i < raw.size(); ++i) {
-      const char c = raw[i];
-      if (in_string) {
-        if (escape) {
-          escape = false;
-        } else if (c == '\\') {
-          escape = true;
-        } else if (c == '"') {
-          in_string = false;
-        }
-        continue;
-      }
-      if (c == '"') {
-        in_string = true;
-        continue;
-      }
-      if (c == '{') {
-        ++depth;
-      } else if (c == '}') {
-        --depth;
-        if (depth == 0) {
-          best = raw.substr(start, i - start + 1);
-          break;
-        }
-      }
-    }
-    search = start + 1;
-  }
-  if (!best.empty()) {
-    return best;
-  }
-  const auto brace = raw.find('{');
-  if (brace == std::string::npos) {
-    return raw;
-  }
-  return raw.substr(brace);
-}
-
 }  // namespace
 
 bool RemoteL2Brain::ensure_ready(const AiSettings& settings,
                                  const std::function<void(const std::string&)>& on_progress,
                                  std::string* error) {
   cfg_ = settings.level2;
+  {
+    AiSettings overlay;
+    overlay.level2 = cfg_;
+    apply_ai_runtime_env(&overlay);
+    cfg_ = overlay.level2;
+  }
   cfg_.api_base = trim_trailing_slash(cfg_.api_base);
   if (cfg_.api_base.empty()) {
     if (error) {
@@ -139,15 +103,14 @@ L2BrainResult RemoteL2Brain::propose(const L2BrainRequest& req, std::atomic<bool
     return out;
   }
 
-  nlohmann::json body = {
-      {"model", cfg_.api_model},
-      {"temperature", req.temperature},
-      {"max_tokens", req.max_tokens},
-      {"messages",
-       nlohmann::json::array(
-           {{{"role", "system"}, {"content", req.system_prompt}},
-            {{"role", "user"}, {"content", req.user_prompt}}})},
-  };
+  LlamaCompletionRequest creq;
+  creq.system_prompt = req.system_prompt;
+  creq.user_prompt = req.user_prompt;
+  creq.max_tokens = req.max_tokens;
+  creq.temperature = req.temperature;
+  creq.enable_thinking = req.enable_thinking;
+  creq.reasoning_budget = req.reasoning_budget;
+  nlohmann::json body = build_chat_completions_body(creq, cfg_.api_model, req.user_prompt, false);
 
   const fs::path tmp_dir = fs::temp_directory_path() / "tuide_l2_remote";
   std::error_code ec;
@@ -159,7 +122,12 @@ L2BrainResult RemoteL2Brain::propose(const L2BrainRequest& req, std::atomic<bool
       out.error = "no se pudo escribir payload temporal";
       return out;
     }
-    outf << body.dump();
+    try {
+      outf << body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    } catch (const std::exception& ex) {
+      out.error = std::string("json dump remote: ") + ex.what();
+      return out;
+    }
   }
 
   const std::string url = cfg_.api_base + "/chat/completions";
@@ -197,33 +165,22 @@ L2BrainResult RemoteL2Brain::propose(const L2BrainRequest& req, std::atomic<bool
     return out;
   }
 
-  try {
-    const auto j = nlohmann::json::parse(raw.str());
-    if (j.contains("error")) {
-      out.error = j["error"].dump();
-      return out;
-    }
-    std::string content;
-    if (j.contains("choices") && j["choices"].is_array() && !j["choices"].empty()) {
-      const auto& c0 = j["choices"][0];
-      if (c0.contains("message") && c0["message"].contains("content") &&
-          c0["message"]["content"].is_string()) {
-        content = c0["message"]["content"].get<std::string>();
-      } else if (c0.contains("text") && c0["text"].is_string()) {
-        content = c0["text"].get<std::string>();
-      }
-    }
-    if (content.empty()) {
-      out.error = "respuesta remote sin content";
-      return out;
-    }
-    out.ok = true;
-    out.text = extract_action_json(content);
-    return out;
-  } catch (const std::exception& ex) {
-    out.error = std::string("parse remote: ") + ex.what() + " raw=" + raw.str().substr(0, 400);
+  std::string content;
+  std::string perr;
+  std::string trace;
+  if (!parse_llama_chat_completion(raw.str(), &content, &perr, &trace)) {
+    out.error = perr.empty() ? "respuesta remote sin content" : perr;
     return out;
   }
+  if (content.empty()) {
+    out.error = "respuesta remote sin content";
+    return out;
+  }
+  out.ok = true;
+  out.raw = trace.empty() ? content : trace;
+  const std::string extracted = extract_action_json(content);
+  out.text = extracted.empty() ? content : extracted;
+  return out;
 }
 
 std::unique_ptr<L2Brain> make_l2_brain(const std::string& mode, LlamaBackend* shared_backend) {

@@ -1,0 +1,22 @@
+Al despertar: noche/plan piloto v2 (A4 + S0). Sense16 en STOP — no lances r09 ni palancas de gate.
+
+Sentinel: `AGENT_LOOP_WAKE_v2night`.
+Base: `/home/lorenzo/workspace/TIDE/.tuide/ai/l2_wave/v2_night`
+Responde en español. Sé breve.
+
+## Tick
+
+0. Si no existe `meta/STOP`, créalo.
+1. Estado:
+   - A4: `v2_night/A4/DONE` ¿sí?
+   - S0: `v2_night/S0/DONE` o `queue.pid` vivo / cuántos `rep_*/DONE`
+2. Si A4 DONE y S0 no vive ni DONE:
+   `./tools/l2_wave/run_s0_baseline.sh 5 .tuide/ai/l2_wave/v2_night/S0`
+3. Si S0 cola viva: no dupliques.
+4. Si S0 DONE: corre `compare_a4_s0.py` → `S0_vs_A4.json`; anota en NIGHT_STATUS.
+5. Heartbeat: rearmar SIEMPRE
+   `./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_v2night 'Lee y ejecuta tools/l2_wave/night_v2_tick_prompt.txt (noche plan A).'`
+   notify_on_output `AGENT_LOOP_WAKE_v2night`.
+6. No edites más flags salvo bugs de S0.
+
+Manual: Mac `caffeinate -dims`; no matar cola S0.

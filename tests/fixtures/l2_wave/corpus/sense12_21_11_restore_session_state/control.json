@@ -1,0 +1,232 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:load_buffer_from_lines",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se restaura la lista de archivos abiertos al reabrir el proyecto",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ui/main_layout.cpp:save_state",
+        "src/ui/main_layout.cpp:load_state",
+        "src/ui/main_layout.hpp"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda el estado de los paneles laterales al cerrar el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide persistencia de estado (cursor, archivos, paneles); M1/M5/M6 son los únicos que tocan editor/layout/panel, pero sus gaps indican falta de trigger/state; necesito ver si hay serialización o restauración en esos barrios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide tres estados distintos (cursor, archivos, paneles). El pack muestra fragmentos (M1 cursor, M5 panel) pero no el ciclo de vida. Se necesitan 6 localizadores para ver si existe persistencia y restauración en cada dimensión, y luego un puente para ver si hay un coordinador o son independientes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide recordar posición; M1 tiene el estado pero no el ciclo; separo guardar y restaurar para ver si existe el arco"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado solo confirma la estructura de datos (Cursor Pos), no el mecanismo de persistencia al cerrar; salto a la siguiente caza del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 confirma el mecanismo de restauración del cursor (reset to single cursor -> set pos). El polo 'restaurar' está cerrado. El ancla tiene 3 polos (cursor, archivos, paneles). El cursor es solo uno. No cierro el claim global aún, pero paso la puerta de esta fase para abordar los siguientes polos o componer."
+    },
+    {
+      "consulta": "dónde se restaura la lista de archivos abiertos al reabrir el proyecto",
+      "consultas": [
+        "dónde se restaura la lista de archivos abiertos al reabrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el cursor se confirma; el ancla pide también los archivos abiertos. M2 (main layout) es el barrio del estado de la ventana."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el ancla pide recordar paneles laterales. T3 cerró archivos (no hay objeto). Falta el mecanismo de persistencia/restauración de la UI de paneles. Dos loci distintos (guardar vs restaurar)."
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "load state"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T4 leyó el guardado (save state) en main layout. El pack muestra 'load state' como extra de T4. Necesito confirmar si la restauración (efecto) ocurre ahí para cerrar el polo de paneles."
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "restauración"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "T4 leyó el guardado (save state); falta leer la restauración (load state) para cerrar el polo de paneles. El pack apunta a main layout hpp donde ocurre la carga."
+    },
+    {
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto",
+      "consultas": [
+        "dónde se restaura la visibilidad de los paneles laterales al abrir el proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "restaurar"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 10,
+      "why": "T4 leyó el guardado (save state); falta leer la restauración (load state) para cerrar el polo de paneles. El pack apunta a main layout hpp."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

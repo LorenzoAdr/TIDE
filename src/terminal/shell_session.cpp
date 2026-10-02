@@ -17,15 +17,21 @@
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 #include <algorithm>
-#if defined(__unix__) || defined(__linux__)
+#if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-#if defined(__linux__)
+#ifdef __linux__
 #include <pty.h>
+#elif defined(__APPLE__)
+#include <util.h>
 #endif
+#endif
+
+#if defined(__linux__) || defined(__APPLE__)
+#define TUIDE_HAS_PTY 1
 #endif
 
 namespace tuide {
@@ -130,7 +136,7 @@ void ShellSession::clear_failed() {
 }
 
 void ShellSession::apply_winsize() {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   const int master = master_fd_.load(std::memory_order_acquire);
   if (master < 0) {
     return;
@@ -152,13 +158,13 @@ void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int 
     shell_debug_log("request_start blocked: already running or starting");
     return;
   }
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   if (master_fd_.load(std::memory_order_acquire) >= 0 ||
       child_pid_.load(std::memory_order_acquire) > 0) {
     stop();
   }
 #endif
-#if !defined(__linux__)
+#if !defined(TUIDE_HAS_PTY)
   start_failed_.store(true, std::memory_order_release);
   return;
 #else
@@ -187,7 +193,7 @@ void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int 
 }
 
 void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   const std::string init_script = write_terminal_init_script(config);
   const std::string shell_bin = config.uses_docker()
                                     ? detect_container_shell(config.docker_container)
@@ -332,7 +338,7 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
 }
 
 void ShellSession::stop() {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   stop_requested_.store(true, std::memory_order_release);
   start_in_progress_.store(false, std::memory_order_release);
 
@@ -424,7 +430,7 @@ void ShellSession::resize(int cols, int rows) {
 }
 
 void ShellSession::write_raw(const std::string& data) {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   const int master = master_fd_.load(std::memory_order_acquire);
   if (!running() || master < 0 || data.empty()) {
     return;
@@ -459,7 +465,7 @@ void ShellSession::write_line(const std::string& line) {
 }
 
 void ShellSession::send_interrupt() {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   write_raw("\x03");
 #endif
 }
@@ -504,7 +510,7 @@ void ShellSession::on_pty_bytes(const char* data, std::size_t len) {
 }
 
 void ShellSession::reader_loop() {
-#if defined(__linux__)
+#if defined(TUIDE_HAS_PTY)
   std::vector<char> buffer(4096);
   while (!stop_requested_.load(std::memory_order_acquire)) {
     const int master = master_fd_.load(std::memory_order_acquire);

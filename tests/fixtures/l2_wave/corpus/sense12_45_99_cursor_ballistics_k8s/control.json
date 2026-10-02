@@ -1,0 +1,74 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:multi_cursor_active",
+        "src/editor/editor_state.cpp:exit_multi_cursor_mode"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real",
+      "consultas": [
+        "dónde se calcula la trayectoria de los cursores del editor para sincronizarlos en tiempo real"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el usuario pide localizar el módulo de cálculo de trayectoria balística de cursores; el pack no nombra el mecanismo, pero M2 (editor panel) y M4 (application) son barrios candidatos para lógica de cursores y sincronización"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el pack no contiene módulos de trayectoria balística, sincronización con Kubernetes ni índices vectoriales cuánticos; T1 refutó el cálculo en el editor; el resto del atlas (workspace, ai, console) no sugiere el fenómeno"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de T1 niega el cálculo de trayectoria y la sincronización; no hay objeto en el pack que soporte el claim de física balística ni índice cuántico"
+    }
+  ],
+  "why": "el Cerrado de T1 niega el cálculo de trayectoria y la sincronización; no hay objeto en el pack que soporte el claim de física balística ni índice cuántico",
+  "zooms": []
+}

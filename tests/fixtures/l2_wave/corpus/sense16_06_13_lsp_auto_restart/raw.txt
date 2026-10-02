@@ -1,0 +1,16 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have two completed jobs (T1 and T2) that investigated the detection and restart mechanisms.
+Both T1 and T2 concluded that there is *no* existing mechanism for automatic crash detection triggering a restart.
+T1 found `on transport reader eof` sets `ready false` but doesn't trigger restart. `restart lsp for workspace` is called by `run` (start) and `lsp missing install`.
+T2 found similar: `on transport reader eof` sets `ready false` and `child pid -1` without calling `start`. `restart lsp for workspace` is only invoked by `run` and `on lsp missing install`.
+
+The anchor claim is: "if the LSP server process crashes or stops responding, the application automatically detects it and restarts it without user intervention".
+The investigation so far refutes the "detects and restarts" part for crashes/unresponsiveness. It seems the current behavior is just marking it as not ready or requiring manual intervention/installation checks.
+
+However, the user's request is "necesito que..." (I need that...). This implies a feature
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack y los trabajos leídos confirman que no existe el mecanismo de detección automática de caída ni reinicio tras crash; el ancla pide una funcionalidad que no está implementada"
+}

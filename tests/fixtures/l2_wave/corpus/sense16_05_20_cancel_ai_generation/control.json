@@ -1,0 +1,151 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código al pulsar Escape o hacer clic fuera",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/symbols/symbol_provider.hpp:cancel_completion_fetch",
+        "src/ui/editor_panel.cpp:cancel_live_lsp_on_cursor_move",
+        "src/ui/editor_panel.cpp:handle_completion_keys",
+        "src/ui/editor_panel.cpp:handle_editor_keys"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo para no dejarlo a medias tras cancelar la generación",
+      "keep": [
+        "M5",
+        "M9"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/debug_launch_modal.cpp:is_generation",
+        "src/ui/debug_launch_modal.cpp:open",
+        "src/app/application.cpp:cancel_debug_launch"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se revierte la escritura del archivo cuando se cancela la generación de código",
+      "keep": [
+        "M5",
+        "M12"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:begin_insert_at",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:run_insert_async",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "dos polos distintos: el disparo de cancelación y el efecto de limpieza del archivo. Se cazan por separado y luego se une el arco."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "dónde se borra el archivo temporal de generación de código al cancelar la IA",
+      "consultas": [
+        "dónde se borra el archivo temporal de generación de código al cancelar la IA"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "el hijo anterior falló en el debug; busco la limpieza del archivo en el flujo de cancelación de la IA"
+    },
+    {
+      "consulta": "dónde se revierte la escritura del archivo cuando se cancela la generación de código",
+      "consultas": [
+        "dónde se revierte la escritura del archivo cuando se cancela la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reversión"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el tiro anterior falló buscando limpieza explícita; busco la reversión del estado de escritura en el controlador de IA"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla se confirma parcialmente: la pulsación de Escape cancela la generación (handle completion keys -> completion close) y el sistema cuenta con mecanismos para limpiar la inserción pendiente (clear pending insert, cancel level1), aunque no se detectó el disparo por clic fuera."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: un leído no cierra el ancla; no refuta el existe",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el sistema cancela la generación al pulsar Escape (handle completion keys -> completion close), pero no se encontró el mecanismo que limpia o revierte el archivo para evitar dejarlo a medias; el mapeo de limpieza no existe en el pack"
+    }
+  ],
+  "why": "control: un leído no cierra el ancla; no refuta el existe",
+  "zooms": []
+}

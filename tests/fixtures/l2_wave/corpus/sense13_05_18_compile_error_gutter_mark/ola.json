@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no contiene el mecanismo: la consola no parsea errores de compilación y el editor no renderiza líneas rojas en el margen para diagnósticos; la funcionalidad no existe en el código leído"
+}

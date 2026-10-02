@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+T1 found the mechanism for marking the margin: `line gutter marker` uses `line diagnostic marker from map` which reads `diagnostics for editor line` from a map filled by `push active file diagnostics from cache` from the LSP diagnostics cache.
+T2 looked for extracting errors from the console text but found `Make Diagnostics Panel`, `build rows`, `diagnostics for translation unit`, `Make Console Panel`.
+T3 looked for parsing compilation errors from console text to generate diagnostics but found `parse diagnostic` which parses structured JSON from LSP, not plain text from stdout/stderr.
+
+The user's request implies a feature that doesn't seem to exist yet: parsing plain text compilation errors from the console and converting them into diagnostics that the editor can display in the margin.
+T1 shows how diagnostics are displayed in the margin (via LSP).
+T3 explicitly states that the current parsing mechanism (`parse diagnostic`) is for LSP JSON, not console text.
+T2 didn't find the extraction mechanism either.
+
+The claim is: "quiero que los errores de
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el margen rojo se pinta desde diagnostics del LSP (line gutter marker lee diagnostics for editor line); no hay mecanismo que parsee texto plano de la consola para generar esos diagnostics (parse diagnostic solo maneja JSON de LSP). el ancla pide una funcionalidad que no existe en el código actual."
+}

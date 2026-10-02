@@ -1,0 +1,135 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp",
+        "src/editor/helix/helix_state.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+      "keep": [
+        "M5",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:save",
+        "src/app/recent_projects.cpp:remember"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la lista de archivos abiertos al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al cerrar y abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 tiene 'editor state CursorPos', el punto de partida para la persistencia del cursor."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cubrió el cursor. Quedan dos polos independientes del ancla: archivos abiertos y paneles laterales. Se cazan por separado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack no nombra el mecanismo de persistencia de archivos abiertos ni paneles; el cursor se lee en editor state pero no hay camino a la restauración completa del workspace"
+    }
+  ],
+  "why": "el pack no nombra el mecanismo de persistencia de archivos abiertos ni paneles; el cursor se lee en editor state pero no hay camino a la restauración completa del workspace",
+  "zooms": []
+}

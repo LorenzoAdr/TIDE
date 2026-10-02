@@ -13,10 +13,21 @@ std::string& editor_clipboard() {
 
 void publish_clipboard_text(const std::string& text) {
   editor_clipboard() = text;
-  set_system_clipboard(text);
+  set_system_clipboard_async(text);
 }
 
 std::string read_clipboard_for_paste() {
+  // Keep the cache warm for the next paste without blocking this keystroke.
+  refresh_system_clipboard_cache_async();
+  if (system_clipboard_cache_ready()) {
+    const std::string cached = peek_system_clipboard_cache();
+    if (!cached.empty()) {
+      editor_clipboard() = cached;
+      return cached;
+    }
+    return editor_clipboard();
+  }
+  // Cold start only: one sync read so the first paste after launch still works.
   const std::string system = get_system_clipboard();
   if (!system.empty()) {
     editor_clipboard() = system;

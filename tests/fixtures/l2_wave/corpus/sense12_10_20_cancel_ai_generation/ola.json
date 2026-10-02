@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "la caza de captura de Escape/clic falló (no hay objeto); el pack muestra cancelación por texto (is cancel input) y efecto en cancel level1, pero no el trigger UI pedido; sin mecanismo de captura, el claim de cancelar con Escape/clic se refuta"
+}

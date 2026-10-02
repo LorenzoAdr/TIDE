@@ -1,0 +1,181 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape en el trace; necesito el locus que decide el OFF del trigger"
+    },
+    {
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "consultas": [
+        "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "T1 cerró que no hay captura en el flujo de texto; el pack abre 'handle ai console keys' y 'handle key event' como barrios distintos para el input físico"
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 cerró que no hay captura de Escape/clic; el sistema usa texto. Necesito encontrar el listener real de UI (teclado/ratón) que falta o que dispara la cancelación, distinto del procesador de texto leído."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 cerró que no hay captura en el flujo de texto; el pack muestra M7 (editor panel) y M5 (console panel) con handlers de teclado/ratón. Busco el listener global o de panel que detecte Escape/clic fuera como evento UI, no como input de chat."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 cerró que no hay captura en el flujo de texto; el pack muestra M7 (editor panel) y M5 (console panel) con handlers de eventos. Busco el listener de UI que dispara la cancelación, no el procesador de input."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 cerró que no hay captura de UI; el pack huele editor panel y console panel como barrios de eventos. Busco el listener real que dispara la cancelación, no el procesador de texto."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 cerró que no hay captura de Escape/clic en el flujo de texto; el pack muestra M7 (editor panel) y M5 (console panel) con handlers de teclado/ratón. Busco el listener de UI que detecte el gesto físico, no el comando semántico."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 8,
+      "why": "T1 cerró que no hay captura en el flujo de texto; el pack muestra M7 (editor panel) y M5 (console panel) con handlers de eventos. Busco el listener de UI que dispara la cancelación, no el procesador de input."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 9,
+      "why": "T1 cerró que no hay captura en el flujo de texto; el pack muestra M7 (editor panel) y M5 (console panel) con handlers de eventos. Busco el listener de UI que dispara la cancelación, no el procesador de input."
+    },
+    {
+      "consulta": "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código",
+      "consultas": [
+        "dónde se intercepta la tecla Escape o el clic fuera para abortar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 10,
+      "why": "T1 cerró que no hay captura en el flujo de texto; el pack muestra M7 (editor panel) y M5 (console panel) con handlers de eventos. Busco el listener de UI que dispara la cancelación, no el procesador de input."
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

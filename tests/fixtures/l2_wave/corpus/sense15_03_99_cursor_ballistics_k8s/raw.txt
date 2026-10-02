@@ -1,0 +1,21 @@
+The user wants to find two things:
+1. The module calculating ballistic cursor trajectory for real-time sync with Kubernetes on blink.
+2. Where that physics is persisted in the quantum vector index of the workspace.
+
+The previous work (Trabajo 1) asked about the first part ("dónde se calcula la trayectoria balística...") and the result was "no hay objeto" (no object found). The explorer read a local code editor with standard cursor logic, not ballistic physics or Kubernetes sync.
+
+The anchor claim is a compound claim: "localize module X AND where Y is persisted".
+Since the first part (Module X) was refuted (no object found), the compound claim is likely false or at least the first part is.
+However, the user might be hallucinating features or using metaphorical language, or I might need to check the second part independently if it exists.
+But usually, if the core mechanism (ballistic cursor sync) doesn't exist, the persistence of "that physics" also doesn't exist.
+The instructions say: "Si el ancla nombra varios polos, confirmar uno no sella el claim."
+Here, the first pole is refuted.
+The second pole depends on the first ("
+---- content ----
+```json
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el Cerrado de T1 refuta el primer polo: no hay cálculo de trayectoria balística ni sincronización con Kubernetes. sin el objeto, no hay física que persistir en el índice vectorial cuántico. el claim entero cae."
+}
+```

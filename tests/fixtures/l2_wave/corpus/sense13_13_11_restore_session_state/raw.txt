@@ -1,0 +1,20 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar panel states when reopening a project.
+I have three completed jobs (T1, T2, T3) corresponding to these three aspects.
+
+T1 (Cursor position): Read `editor text hpp`, `text input style hpp`. The closed status says "ESA pregunta no se relanza... leído: editor text hpp, text input style hpp". It implies the mechanism wasn't found in these files or the files read didn't contain the persistence logic. The prompt says "Lo leído no era el disparo".
+T2 (Open files): Read `load, save, reopen workspace documents`. The closed status says "no encontré el mecanismo... lo leído es la lista de proyectos recientes... y una función de reapertura... sin persistencia propia".
+T3 (Sidebar panels): Read nothing. Closed status says "no hay objeto".
+
+The "control_opened_v1" section shows:
+T1 => T2 sin camino
+T1 => T3 sin camino
+T2 => T3 sin camino
+
+The "examen" section summarizes the closed status of each.
+T1: "Lo leído no era el disparo."
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "las tres búsquedas (cursor, archivos, paneles) no hallaron el mecanismo de persistencia al reabrir; el mapa no une los polos leídos y no hay camino entre ellos"
+}

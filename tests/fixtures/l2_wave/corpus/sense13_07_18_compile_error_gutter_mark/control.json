@@ -1,0 +1,144 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibujan las marcas en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/editor/editor_folds.cpp:fold_gutter_marker",
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:git_line_changed"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "keep": [
+        "M2",
+        "M4"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/lsp/diagnostics.cpp:diagnostics_for_translation_unit",
+        "src/util/compiler_location.cpp:parse_gcc_style",
+        "src/ui/console_panel.cpp:terminal_row_link",
+        "src/util/compiler_location.cpp:find_compiler_location",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/console_panel.cpp:render_terminal_styled",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/console_panel.cpp:open_terminal_link"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se parsean los errores de compilación de la consola para extraer la ubicación",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "diagnóstico error",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con marcas visuales en el editor; busco barrios de decoración y diagnóstico"
+    },
+    {
+      "consulta": "dónde se dibujan las marcas en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se dibujan las marcas en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar el margen; M3 huele visual highlight y git marks, que suelen vivir ahí"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "binary symbols panel"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "M11 huele a escaneo de errores de shell; necesito ver si ya existe el puente o dónde inyectar la señal al margen"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la consola para extraer la ubicación",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la consola para extraer la ubicación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parse gcc style"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 refutó que exista un mecanismo que escriba en el editor; necesito encontrar el punto donde se leen los errores para inyectar la marca"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el sistema actual no une la consola con el margen: la consola parsea solo para navegación y el margen lee de LSP; no hay mecanismo que escriba errores de consola en el estado de diagnósticos del editor"
+    }
+  ],
+  "why": "el sistema actual no une la consola con el margen: la consola parsea solo para navegación y el margen lee de LSP; no hay mecanismo que escriba errores de consola en el estado de diagnósticos del editor",
+  "zooms": []
+}

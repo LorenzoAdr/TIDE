@@ -1,0 +1,7 @@
+Al despertar: batería BD (legacy). **Redirige al orquestador 15 h.**
+
+Sentinel preferido: `AGENT_LOOP_WAKE_v215h`.
+Ejecuta: `tools/l2_wave/v2_15h_tick_prompt.txt` (no este archivo).
+
+Heartbeat:
+`./tools/l2_wave/sense_heartbeat.sh 1500 AGENT_LOOP_WAKE_v215h 'Lee y ejecuta tools/l2_wave/v2_15h_tick_prompt.txt (noche 15h autónomo).'`

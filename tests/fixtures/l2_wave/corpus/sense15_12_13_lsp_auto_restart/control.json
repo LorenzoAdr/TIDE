@@ -1,0 +1,140 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno",
+      "keep": [
+        "M4",
+        "M6"
+      ],
+      "n": 1,
+      "proposes": 6,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/app/application.cpp:apply_workspace_settings",
+        "src/app/application.cpp:setup_build_environment_watching",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP deja de responder o se congela y se dispara el reinicio",
+      "keep": [
+        "M3",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:completion_wait_timeout_ms",
+        "src/lsp/lsp_client.cpp:parse_wait_timeout_ms",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP cuando se cae o se reinicia el entorno"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "aplicación"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'restart lsp for workspace' y 'schedule debounced lsp restart'; es el núcleo del reinicio"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP deja de responder o se congela y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP deja de responder o se congela y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "timeout"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 confirmó la detección de caída (EOF), pero falta verificar si hay detección de congelación (hang) o timeout para cumplir con 'deja de responder'"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla pide detectar caída o no respuesta y reiniciar. T1 confirma que la caída (EOF) ya dispara el reinicio. T2 refuta que exista detección de no respuesta (congelación). El mecanismo de reinicio existe, pero la detección de congelación no. Cierro el claim: la caída se maneja, la congelación no."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide detectar caída o no respuesta y reiniciar. T1 confirma que la caída (EOF) dispara el reinicio. T2 refuta que exista detección de no respuesta (watchdog) que dispare reinicio. El mecanismo de reinicio existe, pero la detección de congelación no. Cierra el claim: se reinicia al caer, pero no al congelarse."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo de reinicio automático existe y se activa al detectar la caída del proceso (transport reader eof) mediante restart lsp for workspace; no se encontró un watchdog para congelaciones, pero el claim de reinicio tras caída se confirma"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de reinicio existe y se dispara ante caída física (EOF), pero no hay detección automática de congelación (watchdog) que dispare el reinicio; el usuario pide una funcionalidad que no está implementada"
+    }
+  ],
+  "why": "el mecanismo de reinicio existe y se dispara ante caída física (EOF), pero no hay detección automática de congelación (watchdog) que dispare el reinicio; el usuario pide una funcionalidad que no está implementada",
+  "zooms": []
+}

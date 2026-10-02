@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no nombra el mecanismo de parsing de errores de compilación desde la consola inferior ni el puente hacia el margen del editor; el panel de diagnósticos consume exclusivamente LSP, y las búsquedas de parsing de texto plano retornaron 0 hits. sin camino entre polos leídos cierra el ancla."
+}

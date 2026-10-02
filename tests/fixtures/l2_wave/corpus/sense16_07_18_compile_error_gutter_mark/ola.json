@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mapeo de creación de la decoración de error en el margen al recibir un diagnóstico no se encontró; el pack muestra la sincronización del cache y la invalidación de la vista, pero no el código que instancia la decoración visual en el gutter. el ancla pide marcar errores de la consola con una línea roja en el margen; se leyó el objeto visual (T1) y la gestión de datos (T2, T3), pero no el disparo que une la detección de errores de consola con la creación de la decoración en el margen. el hueco es la creación de la decoración visual a partir de los datos de diagnóstico."
+}

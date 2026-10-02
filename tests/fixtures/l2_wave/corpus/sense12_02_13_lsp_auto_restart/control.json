@@ -1,0 +1,118 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "quién llama a schedule debounced lsp restart cuando el servidor LSP deja de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se invoca lsp missing install cuando falta el servidor LSP",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/util/lsp_missing_prompt.cpp:lsp_missing_prompt_for_status_key",
+        "src/app/application.cpp:maybe_show_lsp_missing_toast",
+        "src/app/application.cpp:Application"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart'. Es el punto de anclaje para la lógica de detección y recuperación automática. Un hijo cierra el mecanismo de trigger."
+    },
+    {
+      "consulta": "quién llama a schedule debounced lsp restart cuando el servidor LSP deja de responder",
+      "consultas": [
+        "quién llama a schedule debounced lsp restart cuando el servidor LSP deja de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 confirmó que el mecanismo de reinicio existe (schedule debounced lsp restart). Ahora falta el disparador: qué evento o estado (caída/no respuesta) invoca esa función. El pack sugiere 'on lsp missing install' como vecino."
+    },
+    {
+      "consulta": "dónde se invoca lsp missing install cuando falta el servidor LSP",
+      "consultas": [
+        "dónde se invoca lsp missing install cuando falta el servidor LSP"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1/T2 fallaron en el reinicio directo; el pack señala 'on lsp missing install' como vecino de T1. Es el disparador alternativo para la ausencia del servidor."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "las dos cazas sobre la detección de caída y el disparo automático del reinicio (T1 y T2) cerraron con 'no hay objeto'. El mecanismo de reinicio automático ante fallo de respuesta no existe en el código actual; solo se maneja la ausencia inicial del LSP (T3). El ancla se refuta."
+    }
+  ],
+  "why": "las dos cazas sobre la detección de caída y el disparo automático del reinicio (T1 y T2) cerraron con 'no hay objeto'. El mecanismo de reinicio automático ante fallo de respuesta no existe en el código actual; solo se maneja la ausencia inicial del LSP (T3). El ancla se refuta.",
+  "zooms": []
+}

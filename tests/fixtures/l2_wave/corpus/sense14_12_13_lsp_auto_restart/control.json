@@ -1,0 +1,138 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "keep": [
+        "M3",
+        "M6"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:spawn_language_server",
+        "src/lsp/lsp_client.cpp:did_close",
+        "src/lsp/lsp_transport.cpp:stop",
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_transport.cpp:set_reader_eof_handler",
+        "src/lsp/lsp_transport.cpp:reader_loop"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído",
+      "keep": [
+        "M2",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 7,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:stop",
+        "src/lsp/lsp_client.cpp:spawn_language_server",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde el bucle principal monitorea el estado del cliente LSP y decide reiniciar si no está listo",
+      "keep": [
+        "M2",
+        "M9"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp), pero falta el disparador de la detección de fallo"
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP tras detectar que se ha caído"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección (EOF); ahora busco el mecanismo de reinicio automático para cerrar el claim del ancla"
+    },
+    {
+      "consulta": "dónde el bucle principal monitorea el estado del cliente LSP y decide reiniciar si no está listo",
+      "consultas": [
+        "dónde el bucle principal monitorea el estado del cliente LSP y decide reiniciar si no está listo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "run"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 encontró el disparo (schedule debounced lsp restart) pero el mecanismo de decisión (monitoreo de ready en run) quedó truncado; necesito ver si esa lógica existe y cómo funciona para confirmar el reinicio automático"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el cliente detecta la caída por EOF en el transporte y delega al bucle principal, que monitorea el estado ready y programa un reinicio diferido si el servidor no está listo"
+    }
+  ],
+  "why": "el cliente detecta la caída por EOF en el transporte y delega al bucle principal, que monitorea el estado ready y programa un reinicio diferido si el servidor no está listo",
+  "zooms": []
+}

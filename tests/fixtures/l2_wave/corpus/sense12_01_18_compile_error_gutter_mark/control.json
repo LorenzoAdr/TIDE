@@ -1,0 +1,144 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar un error",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se dibuja la línea roja en el margen del editor para marcar un error",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se extraen los errores de compilación del texto de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino extraer el error de la consola y dibujar la marca en el editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los adornos visuales; M11 (binary symbols panel) huele a parsing de errores. Necesito ver si M3 gestiona los 'marks' de error o si M11 es el productor de datos para pintar la línea roja."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack no une la consola con el editor; M11 huele errores pero no los pinta, M3 pinta pero no lee la consola. Dos polos independientes a cerrar y luego unir."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 cerró el polo de extracción, pero T1 refutó el polo de dibujo (no hay objeto). El pack dice 'sin camino' entre ellos. No puedo cerrar el puente P sin un mecanismo de dibujo válido. Necesito encontrar dónde se dibujan las marcas de error en el margen, ya que la búsqueda anterior falló. Cambio de estrategia: explorar el barrio de 'diagnostics' para encontrar el dibujante real."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 refuta la existencia del mecanismo de dibujo de línea roja en el margen para errores (no hay objeto). T2 confirma la extracción, pero sin camino hacia el editor y sin mecanismo de pintura, el claim de que 'se marquen' es falso en el estado actual. El pack no une T1 y T2."
+    }
+  ],
+  "why": "T1 refuta la existencia del mecanismo de dibujo de línea roja en el margen para errores (no hay objeto). T2 confirma la extracción, pero sin camino hacia el editor y sin mecanismo de pintura, el claim de que 'se marquen' es falso en el estado actual. El pack no une T1 y T2.",
+  "zooms": []
+}

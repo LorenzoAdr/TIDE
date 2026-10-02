@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se parsean los errores de compilación de la consola para generar diagnósticos",
+  "consultas": [
+    "dónde se parsean los errores de compilación de la consola para generar diagnósticos"
+  ],
+  "do": "explorar",
+  "error": "control: do no legal ahora (explorar)",
+  "evita": [],
+  "hacia": [
+    "diagnósticos"
+  ],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T4 cerró el lado del editor (pintura). Falta el lado de la consola: cómo se convierten los logs en diagnósticos que alimenten el mapa leído en T4."
+}

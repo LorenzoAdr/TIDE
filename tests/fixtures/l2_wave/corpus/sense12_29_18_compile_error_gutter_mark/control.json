@@ -1,0 +1,255 @@
+{
+  "agujas": [
+    "lsp",
+    "editor",
+    "ui",
+    "build",
+    "terminal"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/ui/binary_symbols_panel.cpp:tick_binary_symbols_panel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para obtener la línea y el mensaje",
+      "keep": [
+        "M7"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se parsean los errores de compilación del texto de la consola para obtener la línea y el mensaje",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor a partir de un error",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino el parser de errores de la consola y el creador de marcadores del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "lsp",
+        "editor",
+        "ui",
+        "build",
+        "terminal"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla conecta errores de compilación (build/lsp) con la consola (terminal/ui) y el margen del editor (editor/ui); necesito ver qué barrios manejan diagnósticos y renderizado de líneas"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "lsp",
+        "editor"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el barrio lsp tiene stems de diagnostics y lsp_position, y editor tiene editor_buffer_source; ahí es donde se cruzan los errores y el margen"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "dos polos distintos: la fuente del error (consola) y el efecto visual (margen del editor). Necesito localizar ambos y luego unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el escáner de linker no es el lector de errores de compilación; salto a la siguiente caza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 falló (no es el disparo); T2 cerró (line gutter marker). Sigo con el plan: necesito A para unir con B en P."
+    },
+    {
+      "consulta": "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola",
+      "consultas": [
+        "dónde se extraen la línea y el mensaje de los errores de compilación del texto de la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parse compilation errors"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "T1 falló en la lectura genérica; el pack apunta a 'parse compilation errors'. Necesito el extractor de coordenadas para unir con el margen del editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "T1 y T3 fallaron en encontrar el parser de errores de compilación genérico. T2 encontró el dibujo del marcador. Necesito localizar el parser de errores (A) y el creador de marcadores (B) por separado, luego unirlos. El plan rompe el problema en dos localizadores independientes y un puente."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para obtener la línea y el mensaje",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para obtener la línea y el mensaje"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnostics"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "el pack huele el barrio de lsp/diagnostics; un hijo cierra el parser de errores de compilación"
+    },
+    {
+      "consulta": "dónde se crean los marcadores de diagnóstico en el margen del editor a partir de un error de compilación",
+      "consultas": [
+        "dónde se crean los marcadores de diagnóstico en el margen del editor a partir de un error de compilación"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "diagnostics"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "T2 confirmó el dibujo (gutter marker), pero no el origen. T1/T3/T4 fallaron en la consola. El pack tiene 'lsp' y 'diagnostics' (M12, M13, M14). Los errores de compilación suelen llegar vía LSP o un parser de build. Busco el puente entre el error y el marcador."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 10,
+      "why": "el ancla pide unir dos polos: leer errores de compilación de la consola y marcarlos en el margen. T1 falló en encontrar el parser genérico (solo halló linker). T2 halló el dibujo del margen. Necesito localizar el parser de compilación (A) y el creador de marcadores (B) para luego unirlos (P)."
+    }
+  ],
+  "why": "",
+  "zooms": [
+    "lsp",
+    "editor"
+  ]
+}

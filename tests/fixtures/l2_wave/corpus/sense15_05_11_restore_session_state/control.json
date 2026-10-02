@@ -1,0 +1,145 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M7",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp",
+        "src/editor/helix/helix_state.cpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la lista de archivos abiertos al iniciar la sesión",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:reopen_workspace_documents",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:restore_workspace_session"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al iniciar la sesión",
+      "keep": [
+        "M8",
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/editor/editor_state.cpp",
+        "src/editor/helix/helix_state.cpp",
+        "src/app/application.cpp:Application"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/app/application.cpp:reopen_workspace_documents",
+          "src/app/application.cpp:run",
+          "src/app/application.cpp:restore_workspace_session"
+        ],
+        "consulta": "dónde se restaura la lista de archivos abiertos al iniciar la sesión",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al iniciar la sesión",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 tiene 'editor state CursorPos'; es el polo del cursor. Un hijo cierra el guardado/restaurado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 falló en cursor; el ancla tiene 3 polos. Ataco los otros dos (archivos y paneles) que suelen estar en el layout o session state, no solo en el editor state."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "la restauración de archivos abiertos se confirma en restore workspace session; avanzo a la siguiente fase del plan"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "la restauración de archivos abiertos se confirma en restore workspace session; la posición del cursor y la visibilidad de paneles laterales no se encontraron en los archivos leídos (editor state, helix state, Application), por lo que se refutan esos polos del claim."
+    }
+  ],
+  "why": "la restauración de archivos abiertos se confirma en restore workspace session; la posición del cursor y la visibilidad de paneles laterales no se encontraron en los archivos leídos (editor state, helix state, Application), por lo que se refutan esos polos del claim.",
+  "zooms": []
+}

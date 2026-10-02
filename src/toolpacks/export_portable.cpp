@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "toolpacks/catalog.hpp"
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/packaged.hpp"
 #include "toolpacks/paths.hpp"
@@ -282,8 +283,9 @@ ExportResult export_portable(const std::string& source_binary,
     return result;
   }
 
-  const fs::path out_path = output_path.empty() ? fs::path("dist") / "tuide-x86_64.AppImage"
-                                                : fs::path(output_path);
+  const fs::path out_path =
+      output_path.empty() ? fs::path("dist") / ("tuide-" + host_catalog_arch() + ".AppImage")
+                          : fs::path(output_path);
   fs::create_directories(out_path.parent_path(), ec);
   fs::remove(out_path, ec);
 
@@ -300,7 +302,7 @@ ExportResult export_portable(const std::string& source_binary,
         path_value = dir.string() + ":" + path_value;
       }
     }
-    path_prefix = "env ARCH=x86_64 PATH=" + shell_quote(path_value) + " ";
+    path_prefix = "env ARCH=" + host_catalog_arch() + " PATH=" + shell_quote(path_value) + " ";
   }
   report_progress(on_progress, 78, "AppImage");
   const fs::path log_path = work / "appimagetool.log";
@@ -372,7 +374,8 @@ int run_export_cli(int argc, char** argv) {
           << "Si la fuente ya esta empaquetada, la exportacion se bloquea.\n"
           << "\n"
           << "Opciones:\n"
-          << "  -o, --output PATH          Salida (default: dist/tuide-x86_64.AppImage)\n"
+          << "  -o, --output PATH          Salida (default: dist/tuide-"
+          << host_catalog_arch() << ".AppImage)\n"
           << "  --binary PATH              Nucleo fuente (default: este ejecutable)\n"
           << "  --toolpacks id[,id...]     Toolpacks (default: instalados activos)\n"
           << "  --all-installed            Todos los toolpacks activos\n"

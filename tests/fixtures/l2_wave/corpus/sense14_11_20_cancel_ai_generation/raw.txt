@@ -1,0 +1,18 @@
+The user wants to know how to cleanly cancel AI code generation when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Found where Escape/click outside is captured (`handle ai console keys`, `handle console panel mouse`) and that they invoke `clear pending insert`.
+2.  **T2**: Asked where the half-written file is cleaned up. Result: No object found.
+3.  **T3**: Asked what `clear pending insert` does to prevent half-written files. Result: It clears the *intent* state (`pending insert`, `insert anchor`) and notifies UI, preventing "phantom" insertions. It explicitly states there is **no disk rollback** ("no hay rollback de disco").
+
+The anchor claim is: "cancel cleanly without leaving the file half-written".
+T1 confirms the trigger and the call to `clear pending insert`.
+T3 confirms `clear pending insert` prevents *future* insertions (phantom/duplicate) by resetting state, but does *not* clean up a file that is currently being written or has been partially written to disk. It says "no hay rollback de disco".
+
+So, the mechanism to
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el ancla pide cancelar sin dejar el archivo a medias. T1 confirma la captura y la llamada a clear pending insert. T3 confirma que clear pending insert solo limpia el estado de intención y previene inserciones fantasma, pero no hace rollback de disco ni limpia el archivo a medias. T2 confirma que no hay objeto de limpieza de archivo. El mecanismo de cancelación no cumple el requisito de limpieza de archivo a medias."
+}

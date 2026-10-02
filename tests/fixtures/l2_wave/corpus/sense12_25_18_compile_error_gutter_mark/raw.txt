@@ -1,0 +1,14 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+The plan has 3 phases:
+A: locator: where compilation errors from the bottom console are read to add them to editor diagnostics
+B: locator: where compilation errors are marked in the left margin of the editor
+P: bridge: is there a path between reading errors from the console and marking them in the margin (need A B)
+
+Current phase: A (en_curso).
+T4 just closed. T4 asked: "dónde se leen
+---- content ----
+{
+  "action": "control_v1",
+  "do": "no_pasar",
+  "why": "T4 no encontró el mapeo de consola a diagnostics; salto a la siguiente caza del plan"
+}

@@ -1,0 +1,19 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 (detect errors in console output): Closed, no object found.
+- T2 (draw red line in editor margin): Closed, read "Editor Line Hi".
+- T3 (parse compilation errors from terminal output to extract line and message): Closed, found mechanism: `find compiler location` in `compiler location` dispatches to `parse gcc style` and `parse msvc style`. Entry point from UI is `terminal row link` in `console panel`.
+
+The user's claim is about connecting the parsing of errors (T3) to drawing the red line in the editor margin (T2).
+T3 found the parsing mechanism (`find compiler location`, `parse gcc style`, `parse msvc style`, `terminal row link`).
+T2 found the drawing mechanism (`Editor Line Hi`).
+T1 found no object for detecting errors in console output (maybe it's handled by the parsing mechanism in T3).
+
+The pack shows:
+T2 -> Make Editor Panel
+T2 -> make completion overlay
+T3 -> parse positive int
+T
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de parsing de errores (find compiler location, parse gcc style, parse msvc style) extrae ruta, línea y columna; el dibujo del margen (Editor Line Hi) existe pero no hay enlace leído entre el parser y el dibujador; el ancla pide marcar la línea exacta, pero el pack no une el flujo de datos del parser al margen del editor"}

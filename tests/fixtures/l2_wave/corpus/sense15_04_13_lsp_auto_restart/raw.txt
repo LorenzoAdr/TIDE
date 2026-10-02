@@ -1,0 +1,15 @@
+The user wants to automatically detect when the LSP server crashes or stops responding and restart it without user intervention.
+I have three completed jobs (T1, T2, T3).
+T1 looked for detection of LSP crash to trigger restart. Found `on transport reader eof` and `schedule debounced lsp restart`.
+T2 looked for where LSP restarts after crash. Found `restart lsp for workspace` is called externally/reactively (after install, run, config changes), not automatically on crash. `on transport reader eof` only cleans state, doesn't trigger restart.
+T3 looked at `schedule debounced lsp restart` behavior. Found it doesn't trigger on crash; `on transport reader eof` only cleans state.
+
+The accumulated evidence shows:
+- Detection of crash exists (`on transport reader eof` / EOF on stdout pipe).
+- However, this detection *does not* trigger a restart. It only cleans up state (`ready false`, cleans PID).
+- The restart mechanism (`restart lsp for workspace`) is triggered by other events (install, run, config changes), not by the crash detection.
+- There is no automatic restart loop or watcher currently implemented for LSP crashes in the codebase.
+
+
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la detección de caída existe (eof en el pipe del servidor), pero no dispara reinicio automático; solo limpia estado. el reinicio es reactivo a acciones externas (instalación, cambios de config, run). no hay mecanismo de auto-reinicio tras caída en el código leído."}

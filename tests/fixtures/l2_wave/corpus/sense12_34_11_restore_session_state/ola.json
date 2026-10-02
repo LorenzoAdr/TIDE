@@ -1,0 +1,16 @@
+{
+  "consulta": "dónde se guarda la lista de archivos abiertos al cerrar el proyecto",
+  "consultas": [],
+  "do": "plan",
+  "error": "control: consulta sin objeto (no una categoría)",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": "romper"
+  },
+  "why": "el cursor está cerrado; ahora cazo el segundo polo del ancla: los archivos abiertos. rompo en guardar, restaurar y puente para confirmar el mecanismo de persistencia de la sesión de archivos."
+}

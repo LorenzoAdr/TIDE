@@ -1,0 +1,17 @@
+The user wants to mark compilation errors from the console with a red line in the editor's left margin.
+I have three completed works:
+T1: Found where red lines are drawn in the editor margin (`diagnostics for editor line`, `line gutter marker`, etc.).
+T2: Found where errors are read from the console to create editor diagnostics. It says they are read from LSP via `symbols diagnostics for file`, stored in cache, and pushed to the editor.
+T3: Found where compilation errors from the console text are parsed to generate diagnostics (`Make Diagnostics Panel`).
+
+The user's request implies a missing link: the console output (compilation errors) needs to be parsed and converted into diagnostics that the editor can display (red lines).
+T2 says errors come from LSP.
+T3 mentions `Make Diagnostics Panel` but the closed text is just "leído: Make Diagnostics Panel". It doesn't explicitly confirm the parsing mechanism or the link to the editor.
+However, T2 explicitly states: "los errores se leen desde el LSP vía symbols diagnostics for file...". This suggests the current mechanism relies on LSP, not parsing console text directly for the editor markers.
+The user wants
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo actual lee errores del LSP (T2) y los pinta en el margen (T1); no hay parsing de texto de consola para el editor (T3 solo muestra el panel, no el flujo de consola a margen). el ancla pide un flujo que no existe en el código leído."
+}

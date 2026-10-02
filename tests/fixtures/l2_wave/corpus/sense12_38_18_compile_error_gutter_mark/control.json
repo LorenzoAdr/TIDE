@@ -1,0 +1,105 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar errores",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/lsp/diagnostics.cpp:diagnostics_for_translation_unit",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M10"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 y M10 son los únicos que tocan visual highlight; necesito ver si ya hay un mecanismo de marcas en el margen o si hay que crearlo"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor para marcar errores",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores con una línea roja; busco el mecanismo que pinta ese indicador visual en el editor"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola inferior para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parseo"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró que no hay objeto para pintar la línea roja (no existe o no se encuentra). Para añadir la funcionalidad, primero debo encontrar dónde se procesan los errores de la consola para saber qué datos usar para pintar la línea."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 cerró que no hay objeto que pinte la línea roja en el margen; T2 cerró que no hay mecanismo que lea los errores de la consola para marcarlos. El pack no nombra el mecanismo del ancla y las cazas confirmaron la ausencia. Cierro el claim: no hay objeto."
+    }
+  ],
+  "why": "T1 cerró que no hay objeto que pinte la línea roja en el margen; T2 cerró que no hay mecanismo que lea los errores de la consola para marcarlos. El pack no nombra el mecanismo del ancla y las cazas confirmaron la ausencia. Cierro el claim: no hay objeto.",
+  "zooms": []
+}

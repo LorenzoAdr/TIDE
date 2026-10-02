@@ -1,0 +1,167 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la consola inferior",
+      "keep": [
+        "M9",
+        "M10"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/diagnostics_panel.cpp",
+        "src/ui/main_layout.cpp:console_panel_tab_active",
+        "src/ui/console_panel.cpp",
+        "src/ui/diagnostics_panel.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M6",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se extrae la línea del error del texto de la consola",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se extrae la línea del error del texto de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crea el marcador de línea en el margen del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino extraer la línea del error y crear el marcador en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "error compilación",
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide unir errores de consola con línea roja en el editor; busco barrios de decoración y diagnóstico"
+    },
+    {
+      "consulta": "dónde se detectan los errores de compilación en la consola inferior",
+      "consultas": [
+        "dónde se detectan los errores de compilación en la consola inferior"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "consola inferior"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "necesito encontrar el origen de los errores para ver si ya existen o cómo se procesan antes de marcar el margen"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide marcar con línea roja; busco el mecanismo de pintura en el margen para luego conectarlo con los errores"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 no se conectan directamente. Necesito encontrar el punto donde se parsea la línea del error y el punto donde se crea el marcador, y luego ver si hay un camino entre ellos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "no hay código que extraiga la línea del error del texto de la consola; sin extracción, no hay camino para pintar la línea roja en el margen"
+    }
+  ],
+  "why": "no hay código que extraiga la línea del error del texto de la consola; sin extracción, no hay camino para pintar la línea roja en el margen",
+  "zooms": []
+}

@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"buscar símbolo","spawn":{"tipo":"search","brief":"AdminEvidenceItem","arg":"AdminEvidenceItem"}}
+{"action":"admin_v1","do":"cerrar","why":"hits en notebook","reply":"AdminEvidenceItem está en src/ai/l2_admin.hpp (notebook/search)."}

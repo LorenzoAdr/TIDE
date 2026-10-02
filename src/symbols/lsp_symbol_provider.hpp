@@ -20,7 +20,16 @@
 
 namespace tuide {
 
-enum class LspAsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };
+enum class LspAsyncJobKind {
+  DocumentSymbols,
+  SemanticTokens,
+  Hover,
+  Completion,
+  Format,
+  FormatRange,
+  Navigation,
+  Rename,
+};
 
 class LspSymbolProvider : public ISymbolProvider {
  public:
@@ -48,6 +57,10 @@ class LspSymbolProvider : public ISymbolProvider {
   SourceLocation goto_definition(const NavigationParams& params) override;
   SourceLocation goto_declaration(const NavigationParams& params) override;
   SourceLocation goto_implementation(const NavigationParams& params) override;
+  bool navigation_uses_async_fetch() const override;
+  bool request_navigation(const NavigationParams& params, NavigationRequestKind kind,
+                          uint64_t request_id) override;
+  std::optional<NavigationAsyncResult> poll_navigation(uint64_t request_id) override;
 
   bool supports_references() const override;
   bool supports_references(const std::string& path) const override;
@@ -77,9 +90,17 @@ class LspSymbolProvider : public ISymbolProvider {
   bool supports_formatting() const override;
   std::optional<std::string> format_document(const FormatParams& params) override;
   std::optional<std::string> format_range(const FormatRangeParams& params) override;
+  bool formatting_uses_async_fetch() const override;
+  bool request_format(const FormatParams& params, uint64_t request_id) override;
+  bool request_format_range(const FormatRangeParams& params, uint64_t request_id,
+                            int caret_line = 0, int caret_col = 0) override;
+  std::optional<FormatAsyncResult> poll_format(uint64_t request_id) override;
 
   bool supports_rename() const override;
   std::vector<LspFileEdits> rename_symbol(const RenameParams& params) override;
+  bool rename_uses_async_fetch() const override;
+  bool request_rename(const RenameParams& params, uint64_t request_id) override;
+  std::optional<RenameAsyncResult> poll_rename(uint64_t request_id) override;
 
   bool supports_code_actions() const override;
   std::vector<CodeActionItem> code_actions_for_diagnostic(const CodeActionParams& params) override;
@@ -145,7 +166,16 @@ class LspSymbolProvider : public ISymbolProvider {
   void set_lsp_status_callback(std::function<void(const std::string& i18n_key)> callback);
 
  private:
-  enum class AsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };
+  enum class AsyncJobKind {
+    DocumentSymbols,
+    SemanticTokens,
+    Hover,
+    Completion,
+    Format,
+    FormatRange,
+    Navigation,
+    Rename,
+  };
   static LspAsyncJobKind to_public_job_kind(AsyncJobKind kind);
   void notify_async_job_ready(AsyncJobKind kind);
 
@@ -156,6 +186,14 @@ class LspSymbolProvider : public ISymbolProvider {
     HoverParams hover_params;
     std::string completion_key;
     CompletionParams completion_params;
+    uint64_t request_id = 0;
+    FormatParams format_params;
+    FormatRangeParams format_range_params;
+    int format_caret_line = 0;
+    int format_caret_col = 0;
+    NavigationParams navigation_params;
+    NavigationRequestKind navigation_kind = NavigationRequestKind::Definition;
+    RenameParams rename_params;
   };
 
   struct AsyncResult {
@@ -328,12 +366,18 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unordered_set<std::string> inflight_semantic_;
   std::unordered_set<std::string> inflight_hover_;
   std::unordered_set<std::string> inflight_completion_;
+  std::unordered_set<uint64_t> inflight_format_;
+  std::unordered_set<uint64_t> inflight_navigation_;
+  std::unordered_set<uint64_t> inflight_rename_;
   std::unordered_map<std::string, HoverInfo> hover_cache_;
   struct CachedCompletion {
     std::vector<CompletionItem> items;
     int request_id = 0;
   };
   std::unordered_map<std::string, CachedCompletion> completion_cache_;
+  std::unordered_map<uint64_t, FormatAsyncResult> format_results_;
+  std::unordered_map<uint64_t, NavigationAsyncResult> navigation_results_;
+  std::unordered_map<uint64_t, RenameAsyncResult> rename_results_;
   std::unordered_map<std::string, std::string> latest_completion_key_by_path_;
   std::unordered_map<std::string, int64_t> last_completion_document_sync_ms_;
   std::unordered_map<std::string, int64_t> pending_semantic_refresh_;

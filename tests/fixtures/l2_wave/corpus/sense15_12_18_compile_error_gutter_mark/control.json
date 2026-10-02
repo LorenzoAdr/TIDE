@@ -1,0 +1,168 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pintan las marcas de error en el margen del editor",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/editor/editor_render.cpp:collect_diagnostic_decorations",
+        "src/editor/editor_render.cpp:apply_decoration"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para enviarlos al editor",
+      "keep": [
+        "M8",
+        "M3"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se renderiza el marcador del margen izquierdo del editor",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "decoración margen",
+        "parseo errores consola",
+        "diagnóstico editor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla une dos fenómenos: el error en consola y la línea roja en el editor. necesito ver si hay un barrio que pinte decoraciones en el margen y otro que lea la salida de la consola para errores."
+    },
+    {
+      "consulta": "dónde se pintan las marcas de error en el margen del editor",
+      "consultas": [
+        "dónde se pintan las marcas de error en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "decoración margen"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el usuario quiere la línea roja; busco el mecanismo que pinta decoraciones en el margen para ver si ya existe o cómo se invoca"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para enviarlos al editor",
+      "consultas": [
+        "dónde se extraen los errores de compilación del texto de la consola para enviarlos al editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "parseo errores consola"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el pintado en margen; ahora busco el origen: cómo se leen los errores de la consola y se pasan al editor para marcarlos"
+    },
+    {
+      "consulta": "dónde se renderiza el marcador del margen izquierdo del editor",
+      "consultas": [
+        "dónde se renderiza el marcador del margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "line gutter marker"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 abrió line gutter marker; necesito leer el renderizado del gutter para ver si acepta decoraciones de error"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el sistema de decoraciones de diagnóstico pinta subrayados y colores en el texto, pero no gestiona el margen gutter; la extracción de errores de la consola y el renderizado del marcador del margen no tienen objeto en el pack"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el sistema de decoraciones de diagnóstico pinta subrayados y colores en el texto, pero no gestiona el margen gutter; la extracción de errores de la consola y el renderizado del marcador en el margen no tienen objeto en el pack"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el sistema de decoraciones de diagnóstico pinta subrayados y colores en el texto, pero no gestiona el margen izquierdo; el margen se controla en el panel del editor con marcadores de línea, sin conexión leída con los errores de la consola"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "no hay mecanismo que extraiga errores de la consola para marcarlos en el margen; el sistema de decoraciones solo pinta subrayados en el texto y el margen gutter no se conecta a diagnostics"
+    }
+  ],
+  "why": "no hay mecanismo que extraiga errores de la consola para marcarlos en el margen; el sistema de decoraciones solo pinta subrayados en el texto y el margen gutter no se conecta a diagnostics",
+  "zooms": []
+}

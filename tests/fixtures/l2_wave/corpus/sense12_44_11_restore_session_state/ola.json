@@ -1,0 +1,27 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "plan",
+  "error": "control: need debe ser una fase previa",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura el estado de la sesión al abrir el proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "why": "T4 cerró la fase A (guardar). El pack une T4 con T2 (abrir) vía active tab path. Sigo con la fase B (restaurar) y luego el puente P."
+}

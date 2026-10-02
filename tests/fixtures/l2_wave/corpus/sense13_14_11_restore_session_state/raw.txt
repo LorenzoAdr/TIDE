@@ -1,0 +1,21 @@
+The user wants to know if the application remembers the cursor position, open files, and side panel states when reopening a project.
+I have three completed jobs:
+1.  **Cursor position**: "no hay objeto" (no object found).
+2.  **Open files**: Found mechanism (save/load JSON in `.tuide`).
+3.  **Side panels**: "no hay objeto" (no object found).
+
+The anchor claim has three parts: cursor, files, panels.
+- Files: Confirmed (T2).
+- Cursor: Refuted (T1).
+- Panels: Refuted (T3).
+
+The accumulated evidence is sufficient to close the claim. I have the mechanism for files and the refutation for the others.
+I should close the investigation.
+
+Action: `cerrar`
+Why: The investigation confirms that open files are restored via a JSON mechanism in `.tuide`, but there is no mechanism found for restoring cursor position or side panel states.
+
+JSON structure:
+`{"action":"control_v1","do":"cerrar","why":"se confirma la restauración de archivos abiertos vía JSON en .tuide, pero se refuta la memoria de posición del cursor y estado de pane
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"se confirma la restauración de archivos abiertos vía JSON en .tuide, pero se refuta la memoria de posición del cursor y estado de paneles"}

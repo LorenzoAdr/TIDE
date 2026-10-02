@@ -1,0 +1,23 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+I have 3 completed jobs:
+T1: Asked where compilation errors are detected in console output. Result: didn't find the parser that converts compiler output to errors; found LSP diagnostic counting and console text utils.
+T2: Asked where compiler output is scanned to extract errors. Result: found `build rows`, `format problem line`.
+T3: Asked where the red line is drawn in the left margin for errors. Result: found `rebuild diagnostics by line if changed`, `rebuild diagnostics by line`.
+
+The pack shows:
+T1 -> T2: sin camino
+T1 -> T3: sin camino
+T2 -> T3: sin camino
+
+The user's claim is about connecting console compilation errors to editor margin decorations.
+T1 failed to find the parser.
+T2 found `build rows`, `format problem line` (likely related to console output formatting or problem matching).
+T3 found `rebuild diagnostics by line if changed` (likely related to LSP diagnostics rendering in the editor).
+
+The "sin camino" between T2 and
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack muestra sin camino entre el escaneo de salida del compilador y el dibujo de la línea roja en el margen; el mecanismo que une la consola con las decoraciones del editor no está en el atlas ni en los trabajos leídos"
+}

@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack no une la consola con el margen del editor; las fichas leídas son de selección de texto y renderizado de git, no de diagnóstico de compilación. sin camino entre polos leídos cierra el ancla"}

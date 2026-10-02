@@ -1,0 +1,24 @@
+The user wants to mark compilation errors from the console with a red line in the editor's left margin.
+I have three completed tasks:
+T1: Found `rebuild diagnostics by line` (drawing mechanism).
+T2: Found `Make Diagnostics Panel, build rows` (parsing mechanism).
+T3: Found `apply lsp diagnostics to panel`, `sync diagnostic cache`, `push active file diagnostics from cache`, `cached file diagnostics` (application mechanism).
+
+The user's request is about connecting console errors to the editor margin.
+T2 found where console errors are parsed into diagnostics.
+T3 found where diagnostics are applied to the editor panel and drawn.
+T1 found the drawing mechanism.
+
+The "entre abiertas" section shows:
+T1 => T3: `apply lsp diagnostics to panel` -> `push active file diagnostics from cache` -> `rebuild diagnostics by line if changed` -> `rebuild diagnostics by line`.
+This connects the application of diagnostics to the drawing mechanism.
+
+T2 => T3: `extra toca visto: build rows`. This suggests a connection between the parsing (T2) and the application (T3), but it's weak ("extra toca visto").
+
+The core
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "los errores de la consola se parsean en Make Diagnostics Panel, se aplican al editor vía apply lsp diagnostics to panel y push active file diagnostics from cache, y se dibujan en el margen con rebuild diagnostics by line"
+}

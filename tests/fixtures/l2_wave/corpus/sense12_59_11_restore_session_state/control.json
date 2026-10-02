@@ -1,0 +1,138 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la lista de archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M3",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:save",
+        "src/app/recent_projects.cpp:config_path",
+        "src/app/recent_projects.cpp:remember",
+        "src/app/application.cpp:reopen_workspace_documents"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M1",
+        "M12"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/recent_projects.cpp:load",
+        "src/app/recent_projects.cpp:save",
+        "src/app/recent_projects.cpp:config_path"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la lista de archivos abiertos al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se guarda y restaura la visibilidad de los paneles laterales al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se guarda y restaura la posición del cursor al abrir un proyecto",
+      "consultas": [
+        "dónde se guarda y restaura la posición del cursor al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "editor state"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M1 tiene CursorPos y editor state; es el barrio para la posición del cursor. El usuario quiere recordar la posición."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el cursor no tiene objeto; ataco los otros dos polos del estado: archivos abiertos y paneles laterales. son independientes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega el mecanismo de restauración de archivos abiertos; salto a la siguiente caza del plan (paneles laterales)"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide recordar cursor, archivos y paneles. T1 niega cursor. T2 niega archivos. T3 (paneles) solo lee load/save sin confirmar mecanismo de restauración de visibilidad. El pack no une estos polos a un objeto de estado persistente. Cierra el claim: no hay mecanismo que recuerde la sesión completa."
+    }
+  ],
+  "why": "el ancla pide recordar cursor, archivos y paneles. T1 niega cursor. T2 niega archivos. T3 (paneles) solo lee load/save sin confirmar mecanismo de restauración de visibilidad. El pack no une estos polos a un objeto de estado persistente. Cierra el claim: no hay mecanismo que recuerde la sesión completa.",
+  "zooms": []
+}

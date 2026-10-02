@@ -1,0 +1,125 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detectan los errores de compilación en la salida de la consola",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 5,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja una línea roja en el margen del editor para marcar un error",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostic_severity_color",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la salida del compilador en la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla une dos fenómenos distintos (lectura de consola y pintado de editor); necesito localizar ambos mecanismos por separado para ver si ya están conectados o si falta el puente"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "la fase A no halló el detector de errores de compilación en la consola; salto a la fase B para localizar el dibujo de la línea roja en el margen"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la salida del compilador en la consola",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la salida del compilador en la consola"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "la fase A falló al confundir linker con compilación; busco el parser de errores de compilación real para luego unir con el dibujo del margen"
+    },
+    {
+      "consulta": "dónde se convierten los errores de compilación de la consola en diagnósticos del editor",
+      "consultas": [
+        "dónde se convierten los errores de compilación de la consola en diagnósticos del editor"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T1 y T3 fallaron buscando un parser; T2 confirmó que los diagnósticos dibujan la línea roja. Falta el puente que transforma la salida de texto en objetos de diagnóstico."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack no contiene mecanismo para parsear errores de compilación de la consola; T1 y T3 confirmaron que no existe. T2 localizó el dibujo de líneas rojas (diagnostics), pero sin fuente de datos no se puede unir. el claim se refuta: no hay código que conecte la consola con el margen del editor para errores de compilación."
+    }
+  ],
+  "why": "el pack no contiene mecanismo para parsear errores de compilación de la consola; T1 y T3 confirmaron que no existe. T2 localizó el dibujo de líneas rojas (diagnostics), pero sin fuente de datos no se puede unir. el claim se refuta: no hay código que conecte la consola con el margen del editor para errores de compilación.",
+  "zooms": []
+}

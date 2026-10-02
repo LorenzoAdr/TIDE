@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,8 @@
 #include "ai/l2_context_budget.hpp"
 
 namespace tuide {
+
+struct SymbolIndexSnapshot;
 
 struct Level2BootstrapOpts {
   std::string workspace_root;
@@ -27,6 +30,8 @@ struct Level2BootstrapOpts {
   std::string seed_pack_markdown;
   // Optional JSON from L1 semantic distillation (bridges ES query → EN search_terms).
   std::string distilled_intent_json;
+  // problem_frame_v1 JSON (primary anchor hunt). Falls back from query if empty.
+  std::string problem_frame_json;
   // Directory prefixes (empty = unrestricted). Used for session prompt hint.
   std::vector<std::string> path_scope;
 };
@@ -55,6 +60,8 @@ struct Level2SessionDeps {
   int pack_incomplete_pushback_max = 2;
   // Live accessor for AI path_scope (empty = unrestricted).
   std::function<const std::vector<std::string>&()> path_scope_fn;
+  // Optional symbol index for Effect Summary callers: (A0).
+  std::function<std::shared_ptr<const SymbolIndexSnapshot>()> symbol_snapshot_fn;
 };
 
 class Level2Session {
@@ -114,6 +121,9 @@ class Level2Session {
   static std::string map_initial_path(const std::string& workspace_root);
   static std::string pack_path(const std::string& workspace_root);
   static std::string answer_path(const std::string& workspace_root);
+  // Phase A locate artifacts (L2_EXPLORE_PHASE_A).
+  static std::string a_state_path(const std::string& workspace_root);
+  static std::string a_notes_path(const std::string& workspace_root);
 
   // True when a prior L2 run finished (done/clarify) and may accept follow-ups without bootstrap.
   static bool is_continuable(const std::string& workspace_root);
@@ -134,7 +144,11 @@ class Level2Session {
   static std::string tool_guide_edit_markdown();
   // Compact explore system when EDIT_LEAN_PROMPT (avoids n_ctx blow on ranked map).
   static std::string tool_guide_explore_markdown();
+  static std::string tool_guide_explore_a_markdown();
+  static std::string tool_guide_explore_b_markdown();
   static bool tool_allowed(const std::string& name);
+  // Phase-aware: with L2_EXPLORE_PHASE_A, explore_a/b only allow local (non-LSP) tools.
+  static bool tool_allowed_in_phase(const std::string& name, const std::string& phase);
 
   // Last compile_feedback or edit_feedback turn, whole block, capped (not a byte-tail).
   static std::string last_edit_relevant_observation(const std::string& session_md,
@@ -181,6 +195,39 @@ class Level2Session {
   // Ask/Plan/Git: write natural-language answer (or plan doc) and finish the session.
   Level2TurnResult apply_synthesize(const std::string& workspace_root, const std::string& text);
   Level2TurnResult rollback_pending(const std::string& workspace_root);
+
+  // Phase A (locate): seed peek queue, judge peeks, close with loci[] → explore_b.
+  // No pack.md writes. Behind L2_EXPLORE_PHASE_A (callers should gate).
+  Level2TurnResult seed_a_queue(const std::string& workspace_root,
+                                const std::vector<AQueueBuildInput>& ranked,
+                                const AQueueBuildOpts& opts = {});
+  Level2TurnResult apply_a_judge(const std::string& workspace_root,
+                                 const std::vector<AVerdict>& verdicts,
+                                 bool turn_done_hint = false);
+  Level2TurnResult apply_a_trail_judge(const std::string& workspace_root,
+                                       const std::vector<AVerdict>& verdicts);
+  Level2TurnResult apply_a_done(const std::string& workspace_root,
+                                const std::vector<ALocus>& loci,
+                                const std::string& summary = {});
+  Level2TurnResult apply_f1_done(const std::string& workspace_root,
+                                 const std::vector<ALocus>& loci,
+                                 const std::string& summary = {});
+  Level2TurnResult apply_anchor_miss(const std::string& workspace_root,
+                                     const std::string& reason,
+                                     const std::vector<std::string>& candidates,
+                                     bool retrieval_needed,
+                                     const std::string& summary = {});
+  // Phase B miss → allow paths for a short micro-A / plan outside original loci (capa 4).
+  Level2TurnResult allow_micro_a_paths(const std::string& workspace_root,
+                                       const std::vector<std::string>& paths);
+  // Next ≤5 peek bodies for the explore_a prompt (ephemeral; not persisted as pack).
+  // When trail is active, returns call-stack markdown instead of queue peeks.
+  std::string build_a_peek_tranche_markdown(const std::string& workspace_root,
+                                            int max_peeks = kAMaxPeeksPerTurn);
+  // Refresh pending_stacks for active trail (search + TS hops).
+  bool refresh_a_trail_stacks(const std::string& workspace_root, AState* ast, std::string* err);
+  static AState load_a_state(const std::string& workspace_root);
+  static bool save_a_state(const std::string& workspace_root, const AState& st, std::string* err);
 
   // Semantic pack review (PACK_REVIEW): persist verdict for explore close gate.
   Level2TurnResult mark_pack_review(const std::string& workspace_root, bool ok,

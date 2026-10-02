@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"buscar en internet primero","spawn":{"tipo":"web","brief":"nlohmann","arg":"nlohmann json latest stable release github"}}
+{"action":"admin_v1","do":"spawn","why":"abrir url del notebook","spawn":{"tipo":"web_fetch","brief":"fetch","arg":"https://duckduckgo.com/?q=nlohmann+json+latest+stable+release+github"}}
+{"action":"admin_v1","do":"cerrar","why":"cuerpo en notebook","reply":"Tras web y web_fetch, el notebook tiene fetch:url y fetch:text (Stub fetch / nlohmann json releases)."}

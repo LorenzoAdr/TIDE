@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"explorar","consulta":"dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo","evita":["linker","binary symbols"],"why":"T2 falló buscando en el barrio equivocado; el pack abre 'parse compilation errors' como semilla. Necesito el origen de los datos (diagnostics) antes de unir con T1."}

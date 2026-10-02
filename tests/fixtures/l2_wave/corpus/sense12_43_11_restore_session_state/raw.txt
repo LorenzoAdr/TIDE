@@ -1,0 +1,26 @@
+The user wants to know if the application remembers the cursor position, open files, and sidebar visibility when reopening a project.
+
+I have three completed tasks:
+1.  **Cursor Position**: Found `Cursor Pos` (T1).
+2.  **Open Files**: Found `editor state cpp` (T2).
+3.  **Sidebar Visibility**: No object found (T3).
+
+The user's claim is a conjunction of three things:
+1.  Cursor position is remembered.
+2.  Open files are remembered.
+3.  Sidebar visibility is remembered.
+
+T1 and T2 found mechanisms (`Cursor Pos` and `editor state cpp`).
+T3 found *no object* for sidebar visibility persistence.
+
+The "Atlas" (M*) shows:
+- M1 (editor state) owns `editor state`.
+- M2 (main layout) owns `main layout`.
+- M3/M4 (app session) owns `app session`.
+- M5 (editor panel) owns `editor panel`.
+- M6 (panel) owns `panel`.
+
+T3 asked about "sidebar visibility" (paneles laterales) and found nothing.
+The pack mentions `panel` (M6
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el cursor y los archivos abiertos se restauran (Cursor Pos, editor state cpp), pero no hay mecanismo para recordar la visibilidad de los paneles laterales"}

@@ -1,0 +1,202 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M2",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP deja de responder por timeout para disparar el reinicio",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/lsp_transport.cpp:wait_response",
+        "src/lsp/lsp_transport.cpp:reader_loop",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se usa el deadline de reinicio del lsp para detectar que no responde",
+      "keep": [
+        "M4"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace); necesito encontrar el disparador de detección de fallo para cerrar el ciclo automático"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP deja de responder por timeout para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP deja de responder por timeout para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mapeo de EOF (caída); el ancla pide también 'deja de responder' (timeout). El pack no nombra el timeout; busco el barrio del watchdog."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP deja de responder por timeout para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP deja de responder por timeout para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "timeout"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 3,
+      "why": "T2 refutó el timeout global; busco un watcher o deadline que invoque schedule debounced lsp restart"
+    },
+    {
+      "consulta": "dónde se usa el deadline de reinicio del lsp para detectar que no responde",
+      "consultas": [
+        "dónde se usa el deadline de reinicio del lsp para detectar que no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp restart deadline"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 vio lsp restart deadline en abierto; podría ser el mecanismo de timeout que falta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla se confirma: la aplicación detecta la caída del servidor LSP mediante el evento de fin de transporte (transport reader eof) y dispara automáticamente el reinicio a través de schedule debounced lsp restart y restart lsp for workspace, sin intervención del usuario"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 confirma que la caída (EOF) dispara el reinicio automático. T2 refuta que exista detección de timeout para reinicio; el timeout se detecta pero no reinicia. El ancla se cumple parcialmente: se reinicia al caerse, pero no al dejar de responder por timeout."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el ancla pide detección automática de caída o no respuesta y reinicio. T1 confirma que la caída (EOF) dispara el reinicio. T2 refuta que el timeout (no respuesta) dispare el reinicio. El mecanismo de reinicio existe para caída, pero no para timeout."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 8,
+      "why": "el ancla pide detección automática de caída y reinicio. T1 confirma que la caída (EOF) dispara el reinicio. T2 refuta que la falta de respuesta (timeout) dispare el reinicio. El mecanismo de reinicio existe para caídas, pero no para timeouts."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 9,
+      "why": "la aplicación detecta la caída del LSP (EOF) y lo reinicia, pero no detecta ni reinicia automáticamente si el servidor deja de responder por timeout; el timeout se gestiona a nivel de transporte sin disparar reinicio."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 10,
+      "why": "la aplicación detecta la caída del servidor LSP (transport reader eof) y lo reinicia automáticamente, pero no detecta ni reinicia por timeout de respuesta"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

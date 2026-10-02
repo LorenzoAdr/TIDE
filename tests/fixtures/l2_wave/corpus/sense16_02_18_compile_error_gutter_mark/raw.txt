@@ -1,0 +1,12 @@
+The user wants to mark compilation errors from the console with a red line in the editor margin.
+I have three completed jobs:
+1.  **T1**: "dónde se detectan los errores de compilación en la salida de la consola" -> Closed: "no hay objeto".
+2.  **T2**: "dónde se marcan los errores de compilación en el margen del editor" -> Closed: "visual highlight service, diagnostics on line, handle gutter marker click, handle editor mouse, line gutter marker, line diagnostic marker from map".
+3.  **T3**: "dónde se extrae la línea de error del texto de la consola para marcarla en el editor" -> Closed: "make terminal panel".
+
+Analysis of the situation:
+- T1 failed to find the detection mechanism.
+- T2 found the mechanism for marking the margin (`visual highlight service`, `line gutter marker`, etc.), but the closed note says "Lo leído no era el disparo" (what was read wasn't the trigger). This implies T2 found the *effect* (the UI marking) but not the *cause* (the link from console errors to this marking).
+- T3 found `
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el margen del editor se marca con visual highlight service y line gutter marker; no hay camino desde la detección de errores en la consola"}

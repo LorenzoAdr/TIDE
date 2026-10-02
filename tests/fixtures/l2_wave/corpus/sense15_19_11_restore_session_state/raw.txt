@@ -1,0 +1,6 @@
+The user wants to restore the exact cursor position, open files, and sidebar state when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A: save cursor pos (closed: no object)
+2. [en_curso] B: restore cursor pos (closed: read `restore workspace session`, `open file`, `workspace session hpp`. The child says "read: ...", but the prompt says "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo." Wait, the child's closed text is just "leído: restore workspace session, open file, workspace session hpp". It doesn't explicitly say it found the restoration or not, but the system prompt says "El último Cerrado negó el mapeo. Cierra ESE mapeo (hueco o sin camino), no selles un polo que sí se leyó." Actually, the prompt says "Cerrado de T3: leído: restore workspace session, open file, workspace session hpp". It doesn't say it found the cursor restoration. It just lists what it read. The system instruction says "El último
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la sesión de trabajo restaura las pestañas y el archivo activo, pero no la posición exacta del cursor ni el estado de los paneles laterales; el mapeo de restauración de cursor no existe en el código leído"}

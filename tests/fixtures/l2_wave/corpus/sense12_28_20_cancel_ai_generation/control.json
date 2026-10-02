@@ -1,0 +1,149 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de código",
+      "keep": [
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias cuando se cancela la generación de código",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias cuando se cancela la generación de código",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 7,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se limpia el archivo o se detiene la inserción de texto al cancelar la generación",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: capturar el gesto (Escape/clic) y limpiar el efecto (archivo a medias). Son dos polos distintos que pueden estar en módulos diferentes (UI vs controlador de IA). Un plan de dos locators y un puente permite cerrar cada parte por separado y luego verificar si están conectadas."
+    },
+    {
+      "consulta": "dónde se captura Escape o clic fuera para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura Escape o clic fuera para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M2 huele escape en ai trace; necesito ver si el controlador de IA o el agente nivel 1 interceptan la tecla para disparar la cancelación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "T1 cerró que no hay captura global; el ancla pide dos disparadores distintos (Escape y clic fuera). Atomizo en dos localizadores independientes para buscar cada uno en su barrio (teclado vs ratón/UI), y luego un puente para verificar si ambos llevan a la cancelación limpia."
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias cuando se cancela la generación de código",
+      "consultas": [
+        "dónde se limpia el archivo a medias cuando se cancela la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancelación"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide limpieza; T1 cerró el disparo; ahora busco el efecto de limpieza tras la cancelación"
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias cuando se cancela la generación de código",
+      "consultas": [
+        "dónde se limpia el archivo a medias cuando se cancela la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 cerró con 'clear pending insert', pero no se leyó el mecanismo. Necesito ver cómo se limpia el archivo para confirmar que no queda a medias."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "el mecanismo de limpieza existe (clear pending insert), pero el disparador (Escape/clic fuera) no está implementado; el sistema solo cancela por texto"
+    }
+  ],
+  "why": "el mecanismo de limpieza existe (clear pending insert), pero el disparador (Escape/clic fuera) no está implementado; el sistema solo cancela por texto",
+  "zooms": []
+}

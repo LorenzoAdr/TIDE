@@ -1,0 +1,14 @@
+The user wants to know how to cleanly cancel AI code generation when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed jobs:
+1.  **T1**: Found where Escape/click is captured (`handle ai console keys`, `clear pending insert`, `cancel current`).
+2.  **T2**: Found how file changes are reverted (`rollback pending` in `level2 session` restores `p before`).
+3.  **T3**: Found where the decision is made regarding background activity (`busy` vs `clear pending insert`).
+
+The "control_opened_v1"
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo está completo: la captura de Escape/clic fuera (T1) dispara cancel current, que decide según el estado busy (T3) y ejecuta rollback pending en level2 session para restaurar el contenido previo del archivo (T2), cumpliendo el requisito de cancelar limpiamente sin dejar el archivo a medias"
+}

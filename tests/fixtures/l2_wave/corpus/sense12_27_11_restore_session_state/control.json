@@ -1,0 +1,210 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/app/workspace_model.cpp:open_file_at_confirmed",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restauran los paneles laterales al abrir un proyecto",
+      "keep": [
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_model.cpp:open_file",
+        "src/ui/main_layout.cpp:AiController"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/editor/editor_state.cpp:CursorPos",
+          "src/app/workspace_model.cpp:open_file_at_impl",
+          "src/app/workspace_model.cpp:open_file_at_confirmed",
+          "src/editor/editor_state.cpp:reset_to_single_cursor"
+        ],
+        "consulta": "dónde se restaura la posición del cursor al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [
+          "src/app/application.cpp:restore_workspace_session",
+          "src/app/workspace_model.cpp:open_file"
+        ],
+        "consulta": "dónde se restauran los archivos abiertos al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restauran los paneles laterales al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "C",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay un mecanismo común que restaura el estado del editor al abrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B",
+          "C"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "necesito ver cómo se guarda y restaura el estado del editor y los paneles"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla enumera tres estados distintos (cursor, archivos, paneles). Cada uno puede tener un mecanismo de persistencia y restauración diferente. Separar las cazas permite identificar si hay un sistema unificado o parches independientes."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "el Cerrado afirma el mecanismo de restauración de archivos abiertos (restore workspace session itera session open tabs y llama a workspace open file path)"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "T3 no halló el mecanismo de paneles; salto al puente para componer lo leído"
+    },
+    {
+      "consulta": "dónde se restauran los paneles laterales al abrir un proyecto",
+      "consultas": [
+        "dónde se restauran los paneles laterales al abrir un proyecto"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "restore workspace session"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T3 leyó el barrio pero no halló el mecanismo; el pack une a restore workspace session"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "T1 y T2 confirman la restauración de cursor y archivos. T3 no halló mecanismo para paneles laterales, refutando esa parte del claim. El claim se cierra parcialmente: cursor y archivos se restauran, paneles no."
+    }
+  ],
+  "why": "T1 y T2 confirman la restauración de cursor y archivos. T3 no halló mecanismo para paneles laterales, refutando esa parte del claim. El claim se cierra parcialmente: cursor y archivos se restauran, paneles no.",
+  "zooms": []
+}

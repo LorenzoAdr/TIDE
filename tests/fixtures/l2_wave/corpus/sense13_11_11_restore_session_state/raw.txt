@@ -1,0 +1,13 @@
+The user wants to restore the editor state (cursor position, open files, visible side panels) when reopening a project.
+I have a plan with 3 locators (A, B, C) and a bridge (P).
+T1 (A) failed: looked for cursor position save, found file picker close, not editor state persistence.
+T2 (B) failed: looked for open files list save, found "session path, load", but the closed says "Lo leído no era el disparo". It implies the mechanism wasn't found or confirmed as the trigger.
+T3 (C) failed: looked for side panel state save, found "load working lines from disk, save workspace session, save", but again "Lo leído no era el disparo".
+
+The "Cerrado" for T3 says: "leído: load working lines from disk, save workspace session, save".
+The "Cerrado" for T2 says: "leído: session path, load".
+The "Cerrado" for T1 says: "no encontré el mecanismo...".
+
+The prompt says: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"los tres locadores fallaron: no se halló el mecanismo de guardado de posición, lista de archivos ni estado de paneles al cerrar el editor; el pack no une un barrio que persista el estado completo del workspace"}

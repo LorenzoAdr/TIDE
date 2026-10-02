@@ -1,0 +1,19 @@
+The user wants to ensure that if the LSP server process crashes or stops responding, the application automatically detects it and restarts it without user intervention.
+
+From the previous work:
+- T1 found `restart lsp for workspace`.
+- T2 found no caller for `restart lsp for workspace` when the server crashes/stops responding.
+- T3 found the detection and trigger mechanism: `process build environment updates` acts as the detector, reading `pending lsp restart` and `lsp restart deadline` to check for timeout, and triggers the restart via `restart lsp for workspace`. The debounce scheduling happens in `schedule debounced lsp restart`.
+
+The user's claim is about automatic detection and restart when the LSP crashes or stops responding.
+T3 confirms that there is a mechanism (`process build environment updates`) that detects a timeout (via `lsp restart deadline`) and triggers a restart (`restart lsp for workspace`).
+However, the user specifically mentioned "se cae o deja de responder" (crashes or stops responding).
+Does `process build environment updates` cover "stops responding" (crash/hang)? It checks `lsp restart deadline`, which implies a timeout mechanism.
+Is there a specific crash detection?
+The
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de detección y reinicio automático ya existe: process build environment updates verifica el timeout (lsp restart deadline) y dispara restart lsp for workspace, cubriendo la caída o falta de respuesta del servidor LSP sin intervención del usuario"
+}

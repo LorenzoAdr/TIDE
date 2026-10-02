@@ -1,0 +1,157 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M3",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/lsp/lsp_client.cpp:cancel_inflight_completion",
+        "src/ai/ai_controller.cpp:begin_insert_at",
+        "src/ai/level2_session.cpp:rollback_pending"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "hay camino capturar Escape o clic fuera y limpiar el archivo a medias",
+      "keep": [
+        "M3",
+        "M10"
+      ],
+      "n": 3,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/terminal/raw_pty_screen.cpp:skip_escape"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: el disparo (Escape/clic) y el efecto (limpieza). M2 huele Escape, M8 huele cancelación. Separo para cazar el trigger y el cleanup por separado, luego unifico."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el hijo encontró cancel level1, que es el mecanismo interno de cancelación, no el disparador de Escape o clic fuera. Cierro este mapeo y busco el evento de UI."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado de B niega el mapeo; cancel level1 y rollback pending no limpian el archivo a medias ni responden al fenómeno de Escape/clic fuera. cierro esta rama y busco el mecanismo real de limpieza o refuto el claim"
+    },
+    {
+      "consulta": "hay camino capturar Escape o clic fuera y limpiar el archivo a medias",
+      "consultas": [
+        "hay camino capturar Escape o clic fuera y limpiar el archivo a medias"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "cancel level1"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 y T2 cerraron; el puente une el disparo con la limpieza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "el mecanismo de cancelación limpia al pulsar Escape o hacer clic fuera no se encuentra en el código; las trazas leídas corresponden a escape de strings y parsing ANSI, sin gestión de estado de archivos ni limpieza de inserciones pendientes"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "el último Cerrado negó el mapeo entre capturar Escape/clic fuera y limpiar el archivo a medias; lo leído son funciones de escape de strings y parsing ANSI, no gestión de estado de archivos. Cierra ese mapeo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el último Cerrado niega el camino entre capturar Escape/clic fuera y limpiar el archivo a medias; lo leído son funciones de escape de strings y parsing ANSI, no gestión de estado de archivos. Cierra ese mapeo."
+    }
+  ],
+  "why": "el último Cerrado niega el camino entre capturar Escape/clic fuera y limpiar el archivo a medias; lo leído son funciones de escape de strings y parsing ANSI, no gestión de estado de archivos. Cierra ese mapeo.",
+  "zooms": []
+}

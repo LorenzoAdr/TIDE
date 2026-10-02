@@ -1,0 +1,2 @@
+{"action":"admin_v1","do":"spawn","why":"localizar UI","spawn":{"tipo":"explore","brief":"busy IA"}}
+{"action":"admin_v1","do":"cerrar","why":"stub dice no re-explore","reply":"Explore stub: aún no hay localización real."}

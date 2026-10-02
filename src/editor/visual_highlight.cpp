@@ -275,7 +275,7 @@ void VisualHighlightService::wake_timer_main() {
 }
 
 void VisualHighlightService::enqueue(VisualHighlightJob job) {
-  if (job.path.empty() || job.source.empty()) {
+  if (job.path.empty() || job.lines_snapshot.empty()) {
     return;
   }
   jobs_.remove_if([&](const VisualHighlightJob& queued) { return queued.path == job.path; });
@@ -292,7 +292,9 @@ std::vector<VisualHighlightSnapshot> VisualHighlightService::drain_results() {
 
 namespace {
 
-void build_git_marks_snapshot(const VisualHighlightJob& job, VisualHighlightSnapshot* snap) {
+void build_git_marks_snapshot(const VisualHighlightJob& job,
+                              const std::vector<std::string>& lines,
+                              VisualHighlightSnapshot* snap) {
   if (snap == nullptr || !job.inputs.git_baseline_ready) {
     return;
   }
@@ -309,7 +311,7 @@ void build_git_marks_snapshot(const VisualHighlightJob& job, VisualHighlightSnap
   if (job.inputs.git_head_lines.empty()) {
     return;
   }
-  const LineDiffResult diff = compute_line_diff(job.inputs.git_head_lines, job.lines);
+  const LineDiffResult diff = compute_line_diff(job.inputs.git_head_lines, lines);
   snap->overview.git_changed_lines = std::move(diff.changed_new_lines);
   for (const auto& [line_no, content] : diff.previous_content_by_new_line) {
     snap->overview.git_previous_by_line[line_no] = content;
@@ -340,14 +342,28 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
     return snap;
   }
 
-  const auto tree_snapshot = tree_sitter_service().snapshot_for_highlight(
-      job.path, job.source, job.doc_revision);
+  // Join / normalize / materialize line vectors on the worker thread so the UI
+  // only pays for an O(1) EditorText clone when enqueueing.
+  const std::string source = normalize_editor_source(job.lines_snapshot.to_string());
+  if (source.empty()) {
+    return snap;
+  }
+
+  const bool need_lines =
+      (job.config.selection_occurrences && job.selection.active) ||
+      (job.inputs.git_baseline_ready && !job.inputs.git_untracked_all &&
+       !job.inputs.git_head_lines.empty());
+  const std::vector<std::string> lines =
+      need_lines ? job.lines_snapshot.to_vector() : std::vector<std::string>{};
+
+  const auto tree_snapshot =
+      tree_sitter_service().snapshot_for_highlight(job.path, source, job.doc_revision);
   TSNode root = {};
   if (tree_snapshot.ok && tree_snapshot.tree_copy != nullptr) {
     root = ts_tree_root_node(tree_snapshot.tree_copy);
     if (job.config.matching_bracket && !ts_node_is_null(root)) {
       snap.matching_bracket =
-          bracket_pair_at(root, job.source, job.cursor_line, job.cursor_col);
+          bracket_pair_at(root, source, job.cursor_line, job.cursor_col);
     }
     if (job.config.scope_background && !tree_snapshot.scope_symbols.empty()) {
       snap.immediate_scope = innermost_scope_range_from_symbols(
@@ -355,22 +371,22 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
     }
     if (job.config.scope_brace_highlight && !ts_node_is_null(root)) {
       snap.scope_braces =
-          scope_bracket_pair_from_tree(root, job.source, job.cursor_line, job.cursor_col);
+          scope_bracket_pair_from_tree(root, source, job.cursor_line, job.cursor_col);
     }
     if (job.config.brace_pair_colors && !ts_node_is_null(root)) {
-      snap.colored_braces = colored_curly_braces(root, job.source);
+      snap.colored_braces = colored_curly_braces(root, source);
     }
     if (job.config.code_folding && job.recompute_fold_regions && !ts_node_is_null(root)) {
-      snap.fold_regions = fold_regions_from_tree(root, job.source);
+      snap.fold_regions = fold_regions_from_tree(root, source);
       snap.fold_regions_revision = job.doc_revision;
     }
   }
 
-  if (job.config.selection_occurrences && job.selection.active && !job.lines.empty()) {
+  if (job.config.selection_occurrences && job.selection.active && !lines.empty()) {
     snap.selection_key = job.selection.key;
     snap.selection_occurrences =
-        find_occurrences_in_lines(job.lines, job.selection.needle, job.selection.whole_word,
-                                  nullptr, 0);
+        find_occurrences_in_lines(lines, job.selection.needle, job.selection.whole_word, nullptr,
+                                  0);
   } else {
     snap.selection_key = {};
     snap.selection_occurrences.clear();
@@ -381,7 +397,7 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
     snap.fold_regions_revision = 0;
   }
 
-  build_git_marks_snapshot(job, &snap);
+  build_git_marks_snapshot(job, lines, &snap);
   build_overview_snapshot(job, &snap);
 
   if (tree_snapshot.tree_copy != nullptr) {
@@ -448,7 +464,7 @@ void mark_visual_highlight_dirty(VisualHighlightPanelState* state, int64_t now_m
 void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                      const VisualHighlightConfig& config, bool editor_focused,
                                      bool indexed_source, bool content_settled, int64_t now_ms,
-                                     const VisualHighlightJobInputs& inputs,
+                                     VisualHighlightInputsBuilder build_inputs,
                                      bool selection_in_progress) {
   if (state == nullptr || buffer.path.empty()) {
     return;
@@ -544,9 +560,9 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
     }
   }
 
-  const std::string source = join_editor_lines(buffer.lines);
-  const std::string canonical = normalize_editor_source(source);
-  if (canonical.empty()) {
+  // O(1) persistent snapshot; join/to_vector run on vh-compute.
+  EditorText lines_snapshot = buffer.lines.clone();
+  if (lines_snapshot.empty()) {
     return;
   }
 
@@ -554,13 +570,13 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
   VisualHighlightJob job;
   job.generation = state->next_generation++;
   job.path = buffer.path;
-  job.source = canonical;
-  job.lines = buffer.lines.to_vector();
+  job.lines_snapshot = std::move(lines_snapshot);
   job.cursor_line = line;
   job.cursor_col = col;
   job.doc_revision = doc_revision;
   job.config = config;
-  job.inputs = inputs;
+  // Build heavy inputs (git HEAD lines, find matches) only when dispatching.
+  job.inputs = build_inputs ? build_inputs() : VisualHighlightJobInputs{};
   job.selection = config.selection_occurrences ? build_selection_query(buffer)
                                                : VisualHighlightSelectionQuery{};
   job.indexed_source = indexed_source;

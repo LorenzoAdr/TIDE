@@ -1,0 +1,18 @@
+{
+  "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo",
+  "consultas": [
+    "dónde se parsean los errores de compilación del texto de la consola para extraer línea y archivo"
+  ],
+  "do": "explorar",
+  "error": "control: consulta sin objeto (no una categoría)",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T2 falló buscando en el barrio equivocado; el pack abre 'parse compilation errors' como semilla. Necesito el origen de los datos (diagnostics) antes de unir con T1."
+}

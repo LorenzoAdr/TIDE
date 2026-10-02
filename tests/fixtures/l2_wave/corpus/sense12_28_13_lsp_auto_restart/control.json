@@ -1,0 +1,119 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o deja de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o falta para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/app/application.cpp:run"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso del servidor de lenguaje LSP se ha caído o ha muerto",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje LSP cuando se cae o deja de responder",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje LSP cuando se cae o deja de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo de reinicio (restart lsp for workspace); hay que ver el disparador y el mecanismo"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje LSP se ha caído o falta para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje LSP se ha caído o falta para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp missing install"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el reinicio. El pack sugiere 'on lsp missing install' como un disparador. Necesito confirmar si este evento detecta la caída y activa el reinicio automático."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso del servidor de lenguaje LSP se ha caído o ha muerto",
+      "consultas": [
+        "dónde se detecta que el proceso del servidor de lenguaje LSP se ha caído o ha muerto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró que no hay detección de crash en el barrio de reinicio (M5). El pack tiene abiertas 'on lsp server crashed' y 'lsp server died'. Hay que cazar el detector de muerte del proceso en otro barrio para cerrar el claim de detección automática."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el pack y los trabajos leídos confirman que existe el mecanismo de reinicio (restart lsp for workspace), pero no existe la detección automática de caída o falta de respuesta del proceso LSP. la aplicación solo reinicia tras cambios de entorno o instalación, no por crash."
+    }
+  ],
+  "why": "el pack y los trabajos leídos confirman que existe el mecanismo de reinicio (restart lsp for workspace), pero no existe la detección automática de caída o falta de respuesta del proceso LSP. la aplicación solo reinicia tras cambios de entorno o instalación, no por crash.",
+  "zooms": []
+}

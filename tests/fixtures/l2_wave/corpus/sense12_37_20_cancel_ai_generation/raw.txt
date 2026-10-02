@@ -1,0 +1,35 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current state:
+- T1 found Escape handling: `handle ai console keys` -> `ai clear pending insert` or `cancel current`. No click-outside handling found.
+- T2 and T3 asked about cleaning up the half-written file on cancel. They read `clear pending insert`, `cancel current`, `cancel all`, `cancel level1`.
+- The pack shows connections between these.
+- The user's claim has two parts: 1) Trigger (Escape/click outside),
+---- content ----
+{
+  "action": "control_v1",
+  "do": "plan",
+  "modo": "romper",
+  "fases": [
+    {
+      "id": "A",
+      "kind": "locator",
+      "consulta": "dónde se revierte el contenido del archivo al cancelar la generación de la IA"
+    },
+    {
+      "id": "B",
+      "kind": "locator",
+      "consulta": "dónde se captura el clic fuera del editor para cancelar la generación de la IA"
+    },
+    {
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "consulta": "hay camino entre capturar el clic fuera y revertir el contenido del archivo"
+    }
+  ],
+  "why": "el ancla pide dos mecanismos distintos: limpieza de archivo y captura de clic fuera. T1 cerró Escape pero no clic. T2/T3 nombraron cancelación pero no la reversión de contenido. Se atomiza para cazar cada polo y luego unir."
+}

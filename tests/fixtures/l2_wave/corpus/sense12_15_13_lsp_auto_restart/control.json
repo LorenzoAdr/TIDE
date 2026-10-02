@@ -1,0 +1,126 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:ensure_python_lsp_async"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "quién dispara el reinicio del servidor LSP cuando se detecta que el proceso ha muerto",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia el proceso del servidor LSP tras ser programado el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 7,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:process_build_environment_updates"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o dejado de responder",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o dejado de responder"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo 'pending lsp restart' y 'schedule debounced lsp restart', lo que sugiere que la lógica de detección y reinicio reside allí. Necesito ver el mecanismo de detección (el 'trigger') para confirmar si es automático."
+    },
+    {
+      "consulta": "quién dispara el reinicio del servidor LSP cuando se detecta que el proceso ha muerto",
+      "consultas": [
+        "quién dispara el reinicio del servidor LSP cuando se detecta que el proceso ha muerto"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "debounced lsp restart"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró la detección (clangd process alive). El pack muestra que M5 (application) gestiona el reinicio. Necesito ver el puente: qué código llama a 'restart lsp for workspace' tras la detección de fallo."
+    },
+    {
+      "consulta": "dónde se inicia el proceso del servidor LSP tras ser programado el reinicio",
+      "consultas": [
+        "dónde se inicia el proceso del servidor LSP tras ser programado el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "inicio"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró el disparo (detectar muerte). El pack une 'restart lsp for workspace' con 'on workspace opened' y 'on lsp missing install'. Necesito ver si el reinicio automático está implementado en el flujo de inicio o si falta el mecanismo de relanzamiento automático."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo está completo: la detección de caída (T1/T2) dispara el reinicio programado (T3), que ejecuta el reinicio sin intervención del usuario"
+    }
+  ],
+  "why": "el mecanismo está completo: la detección de caída (T1/T2) dispara el reinicio programado (T3), que ejecuta el reinicio sin intervención del usuario",
+  "zooms": []
+}

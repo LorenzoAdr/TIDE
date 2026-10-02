@@ -1,0 +1,19 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs (T1, T2, T3).
+T1: Asked where Escape/click outside is captured to cancel AI. Result: Not found (read `ai trace escape` string escape, `clear hover` UI).
+T2: Asked where AI generation is cancelled on Escape/click outside. Result: Not found (read `cancel current`, `cancel level1`, `handle user input`, `handle route`, `is cancel input`, `handle editor keys`, `handle editor mouse`).
+T3: Asked where click outside or Escape is captured to cancel AI. Result: No object found.
+
+The pack shows:
+M2 (ai trace) -> M3 (level2 session)
+M3 -> M8 (ai controller)
+M6 (level1 agent) -> M8 (ai controller)
+M8 (ai controller) has `cancel level1`.
+M2 has `ai trace escape`.
+M3 has `cancel current`, `cancel level1`, `handle user input`, `handle route`, `is cancel input`, `handle editor keys`, `handle editor
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "no hay captura de Escape ni clic fuera para cancelar la generación de la IA; lo leído son escapes de strings y clears de hover UI, sin invocación a cancel level1 ni lógica de cancelación"
+}

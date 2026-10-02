@@ -1,0 +1,33 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 (reading errors from console): Found `scan shell output for linker errors` in `binary symbols panel`, but this is specific to linker errors, not a generic compilation error parser for the console. The user wants *compilation* errors (likely from the build output).
+- T2 (drawing red line in margin): Found `line gutter marker`, `gutter buffer line at row`, `line diagnostic marker from map`. This confirms the
+---- content ----
+{
+  "action": "control_v1",
+  "do": "plan",
+  "modo": "romper",
+  "fases": [
+    {
+      "id": "A",
+      "kind": "locator",
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para obtener la línea y el mensaje"
+    },
+    {
+      "id": "B",
+      "kind": "locator",
+      "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor a partir de un error"
+    },
+    {
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "consulta": "hay camino entre el parser de errores de la consola y el creador de marcadores del editor"
+    }
+  ],
+  "why": "el ancla pide unir dos polos: leer errores de compilación de la consola y marcarlos en el margen. T1 falló en encontrar el parser genérico (solo halló linker). T2 halló el dibujo del margen. Necesito localizar el parser de compilación (A) y el creador de marcadores (B) para luego unirlos (P)."
+}

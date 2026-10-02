@@ -1,0 +1,102 @@
+{
+  "name": "admin_autosuper_v1",
+  "diet": "explore + verify enriched context; subset for self-supervised loops",
+  "why": "Misma familia de prompts que se prueban en producto (existe / trampa / tabs / multipolo).",
+  "cases": [
+    {
+      "id": "01_short_exists_adminstate",
+      "kind": "existe",
+      "difficulty": "baja",
+      "style": "corto_claro",
+      "prompt": "dónde está definida la struct AdminState",
+      "gold": {
+        "expect_exit": ["confirmar_cerrar", "confirmar_editar", "cerrar"],
+        "symbols_any": ["AdminState", "l2_admin.hpp"]
+      }
+    },
+    {
+      "id": "04_deseo_console_gutter",
+      "kind": "deseo_trampa",
+      "difficulty": "alta",
+      "style": "deseo",
+      "prompt": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+      "gold": {
+        "expect_exit": ["confirmar_editar", "seguir_explorando", "confirmar_cerrar"],
+        "expect_not_already_implemented": true,
+        "false_friend_forbid_in_cubre_or_reply": [
+          "ya está implementad",
+          "ya está en el código",
+          "funcionalidad solicitada ya"
+        ]
+      }
+    },
+    {
+      "id": "07_exists_restore_session",
+      "kind": "existe",
+      "difficulty": "alta",
+      "style": "largo",
+      "prompt": "al reabrir un workspace, ¿dónde se restauran tabs, paneles y posición de cursor? no me digas solo el archivo, quiero el mecanismo",
+      "gold": {
+        "symbols_any": ["restore_workspace", "save_state", "session"],
+        "expect_exit": ["confirmar_cerrar", "confirmar_editar"]
+      }
+    },
+    {
+      "id": "21_console_tabs_create",
+      "kind": "existe",
+      "difficulty": "alta",
+      "style": "medio",
+      "prompt": "dónde se crean las pestañas de la consola inferior y cómo se decide abrir una nueva",
+      "gold": {
+        "symbols_any": [
+          "build_console_panel_view",
+          "console_panel",
+          "ConsoleTab",
+          "MakeConsole"
+        ],
+        "expect_exit": ["confirmar_cerrar", "confirmar_editar", "cerrar"]
+      }
+    },
+    {
+      "id": "10_short_exists_diagnostics_struct",
+      "kind": "existe",
+      "difficulty": "baja",
+      "style": "corto_claro",
+      "prompt": "dónde se define DiagnosticSeverity",
+      "gold": {
+        "symbols_any": ["DiagnosticSeverity", "diagnostics.hpp"]
+      }
+    },
+    {
+      "id": "13_deseo_underline_to_gutter",
+      "kind": "deseo_trampa",
+      "difficulty": "alta",
+      "style": "deseo",
+      "prompt": "los squiggles de error del LSP ya están; quiero además una barrita en el gutter izquierdo por cada error de clangd",
+      "gold": {
+        "false_friend_forbid_in_cubre_or_reply": ["consola inferior"]
+      }
+    },
+    {
+      "id": "09_multipolo_console_and_style",
+      "kind": "deseo_trampa",
+      "difficulty": "muy_alta",
+      "style": "largo_multipolo",
+      "prompt": "Necesito dos cosas: (1) que los errores que salen en la consola de build se reflejen en el margen del editor y (2) que el indicador sea una línea roja vertical, no un carácter. ¿Existe ya o hay que implementarlo?",
+      "gold": {
+        "expect_not_already_implemented": true,
+        "expect_atomize_or_multi_explore": true
+      }
+    },
+    {
+      "id": "17_hole_blockchain",
+      "kind": "no_existe",
+      "difficulty": "baja",
+      "style": "corto_claro",
+      "prompt": "dónde está el módulo de sincronización blockchain del workspace",
+      "gold": {
+        "expect_not_already_implemented": true
+      }
+    }
+  ]
+}

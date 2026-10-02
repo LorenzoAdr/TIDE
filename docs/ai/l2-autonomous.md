@@ -1,5 +1,8 @@
 # L2 autonomous (Fase E) — local / remote
 
+> **Legacy (chat):** el tab AI usa el [administrador único](l2-admin.md) (`ai.admin_enabled=true`).
+> Este documento describe el camino L2 autónomo antiguo; el código sigue en el repo pero ya no es el hot path NL.
+
 El orquestador (`Level2Session`) + loop (`run_level2_autonomous`) están cableados.
 En esta máquina de desarrollo puede no haber RAM/GPU para el GGUF; el cableado se prueba
 con el test scripted y en el **equipo preparado** con modelo real.
@@ -51,6 +54,78 @@ GGUF en `$XDG_CACHE_HOME/tuide/models/l2/` (o `ai.models.cache_dir`).
 Clave: `ai.level2.api_key` o env `TUIDE_L2_API_KEY` / `OPENAI_API_KEY`.
 Sirve `llama-server`, vLLM, DeepSeek, OpenAI, etc. (`POST {api_base}/chat/completions`).
 `n_ctx_remote` (default **32768**) escala pack/prompt ambicioso; no se auto-detecta del proveedor.
+
+### Híbrido: tuide en Linux ARM + llama-server Metal en el Mac
+
+El IDE (gdb, inotify, PTY, L1 CPU) corre en una VM Linux. El GGUF grande y los
+embeddings van en el Mac con Metal. TIDE **no** descarga ni arranca `llama-server`
+si el host de embeddings no es loopback: solo hace attach HTTP.
+
+En el **Mac**:
+
+```bash
+# GGUF en ~/.cache/tuide/models/l2/ (y l1/) y embed/intent/
+# llama-server con Metal (PATH, TUIDE_LLAMA_SERVER, o cache runtime/llama-b10333)
+./tools/run_host_llama.sh                 # hub HTML: Lanzamiento | Inspección
+./tools/run_host_llama.sh --llm 7b        # hub; preselecciona chat 7B
+./tools/run_host_llama.sh --llm 14b --no-embed
+./tools/run_host_llama.sh --foreground    # hub en esta terminal
+./tools/run_host_llama.sh --stop          # para hub/spy/llama-server en los puertos tuide
+./tools/run_host_llama.sh -y              # autoelige GGUF y abre Inspección
+./tools/run_host_llama.sh --ui gui        # listas nativas (legado)
+./tools/run_host_llama.sh --ui text       # menú TTY
+```
+
+El hub (`http://127.0.0.1:18767`) tiene dos modos:
+
+- **Lanzamiento** — catálogo (Qwen L1/L2 + nomic y GGUF ya en disco), descargar, importar URL de Hugging Face o ruta local, arrancar / parar / reiniciar chat y embed por separado.
+- **Inspección** — el visor spy (historial VM + prompts locales). No gestiona procesos.
+
+En Mac el hub corre en Terminal.app (`open -a Terminal`). El proxy imprime **tokens en vivo** en esa ventana (la VM sigue por HTTP). `--no-spy` desactiva el proxy. `--no-web` vuelve al picker legado.
+Puertos: UI `:18767` (loopback), chat `:8080`, embeddings `:18765` (bind `0.0.0.0` para la VM).
+
+`llama-server` de chat se configura en la pestaña **Lanzamiento** (flash-attn, KV `q8_0`,
+un slot, hilos P, embeddings en CPU, draft 1.5B, pensamiento en vivo en Qwen3/R1).
+Los valores se aplican al Lanzar o Reiniciar. Overrides por env: `TUIDE_HOST_FLASH_ATTN`,
+`TUIDE_HOST_CACHE_TYPE`, `TUIDE_HOST_THREADS`, `TUIDE_HOST_EMBED_NGL`, `TUIDE_HOST_DRAFT`,
+`TUIDE_HOST_DRAFT_GGUF`, `TUIDE_HOST_THINKING`.
+
+En la **VM** (Settings F10 o `.tuide/config.json`):
+
+```json
+"ai": {
+  "level2": {
+    "mode": "remote",
+    "api_base": "http://192.168.64.1:8080/v1",
+    "api_model": "qwen2.5-coder-32b-instruct-q4_k_m",
+    "n_ctx_remote": 32768
+  },
+  "level0": {
+    "embeddings": {
+      "server_host": "192.168.64.1",
+      "server_port": 18765
+    }
+  }
+}
+```
+
+Host típico desde la VM: UTM `192.168.64.1`, OrbStack `host.orb.internal`.
+Overrides sin reescribir config: `TUIDE_L2_API_BASE`, `TUIDE_L2_API_MODEL`,
+`TUIDE_EMBED_HOST`, `TUIDE_EMBED_PORT`.
+
+Comprobar el attach HTTP desde la VM (TCP + `/health` + embed + un completion corto):
+
+```bash
+./build/llama_host_comm_test
+```
+
+Sin servidor en el host: `SKIP` (exit 0). Con `TUIDE_LLAMA_LIVE=1` o los env de arriba: falla si no hay respuesta. `TUIDE_LLAMA_SKIP_GENERATE=1` omite el completion y deja health + embeddings.
+
+Velocidad del GGUF del host (prefill + decode, tok/s; usa el `id` de `/v1/models`):
+
+```bash
+./build/llama_host_comm_test --speed
+```
 
 ## Uso en la app
 
@@ -106,7 +181,12 @@ Banner: `L2 ▸ arranque autónomo (remote n_ctx=32768 pack≈36000) …`.
 - Prompt L2 cabe en el budget del backend activo (local ≈ `n_ctx`; remote ≈ `n_ctx_remote`).
   No se manda `session.md` entero; el disco puede ser más rico que el slice del prompt.
 - **Tool guide solo en system prompt** (no se duplica en `session.md`).
-- **Flujo plan → pack:** en explore preferir `plan` en el **primer** paso
+- **Flujo plan → pack:** con **Phase A/B** (flag `L2_EXPLORE_PHASE_A` **on** por
+  defecto): `explore_a` juzga peeks (`a_judge`/`a_done` → `loci[]`, sin `pack.md`);
+  `explore_b` materializa pack desde loci. Detalle:
+  [`docs/plans/l2-explore-phase-a-b.md`](../plans/l2-explore-phase-a-b.md). Hot path A/B
+  **sin LSP** ([degradación](l2-explore-no-lsp.md)). Override: `L2_FEAT_L2_EXPLORE_PHASE_A=0`
+  restaura explore mezclado: preferir `plan` en el **primer** paso
   (`{"action":"plan","targets":["path:Symbol","path:A-B",…]}`; máx. 16; evitar path bare;
   4–8 targets anclados). Máx. ~8 tools sueltos antes del primer plan (soft `_nudge:_`).
   Tras pack cubierto: extras con `tools` batch (máx. 4); si siguen las tools, otro

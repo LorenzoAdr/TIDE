@@ -1,0 +1,212 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 4,
+      "visto": [
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola para crear los diagnósticos",
+      "keep": [
+        "M1"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se leen los errores de compilación de la consola para crear los diagnósticos",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se envían los diagnósticos al editor para que aparezcan en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino leer los errores de la consola y enviarlos al editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M10"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 y M10 son los únicos que tocan visual highlight; necesito ver si ya hay un mecanismo de marcas en el margen o si hay que crearlo"
+    },
+    {
+      "consulta": "dónde se pinta la línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se pinta la línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide marcar errores con una línea roja; busco el mecanismo que pinta ese indicador visual en el editor"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "diagnostics"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "la caza anterior falló buscando la pintura directa; busco el origen de la marca (diagnostics) que dispara el efecto visual"
+    },
+    {
+      "consulta": "dónde se crea el marcador de diagnóstico en el margen del editor",
+      "consultas": [
+        "dónde se crea el marcador de diagnóstico en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "Make Editor Panel"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 leyó los símbolos del marcador; el pack apunta a Make Editor Panel para ver cómo se instancian"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación de la consola para marcarlos en el editor",
+      "consultas": [
+        "dónde se extraen los errores de compilación de la consola para marcarlos en el editor"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "T3 cerró el dibujo del marcador; falta el origen de los datos (consola -> editor) para completar el claim del usuario"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T3 cerró el dibujo del marcador (el efecto). Falta el origen (los errores de la consola) y el puente que los lleva al editor. Rompo en origen y destino para unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 7,
+      "why": "T4 niega que se lean los errores de la consola para crear diagnósticos; el pack confirma que los diagnósticos vienen de LSP y los errores de shell solo se usan para símbolos de linker. Salto a la siguiente caza."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

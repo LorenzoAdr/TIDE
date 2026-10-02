@@ -1,0 +1,15 @@
+The user wants to know if the application automatically detects when the LSP (Language Server Protocol) process crashes or becomes unresponsive and restarts it without user intervention.
+
+I have three completed jobs (T1, T2, T3) that investigated different aspects of LSP management and restarting.
+
+**Analysis of T1:**
+*   **Query:** Where is it detected that the language server has crashed or is not responding and the restart is triggered?
+*   **Read:** `restart lsp for workspace`, `schedule debounced lsp restart`.
+*   **Result:** Found functions to restart the LSP, but the *detection* mechanism (the trigger) wasn't explicitly found in the read symbols. The read symbols are the *effect* (restart), not the *cause* (detection of crash).
+
+**Analysis of T2:**
+*   **Query:** Where is it detected that the language server is missing or not responding and the restart is triggered?
+*   **Read:** `start completion server`, `escalate`, `ensure completion server`, `health ok`.
+*   **Result:** Found `health ok` and `ensure completion server`. This looks like a health check mechanism for the *completion server* (
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el pack confirma el reinicio automático (restart lsp for workspace, schedule debounced lsp restart) pero no nombra el mecanismo de detección de caída o falta de respuesta (health check, watchdog, timeout). el polo de reinicio existe; el polo de detección automática no se halla en el atlas."}

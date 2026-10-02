@@ -1,0 +1,129 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 2,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria del cursor en el editor",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 4,
+      "visto": [
+        "src/ui/editor_panel.cpp:mouse_to_cursor",
+        "src/ui/editor_panel.cpp:handle_editor_mouse"
+      ]
+    }
+  ],
+  "jobs_run": 1,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor",
+        "estado editor",
+        "índice workspace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide física de cursores y persistencia en índice; busco barrios de movimiento y estado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor",
+        "estado editor",
+        "índice workspace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla menciona trayectoria de cursores, sincronización y persistencia en índice; busco barrios que manejen movimiento, estado del editor o índices del workspace para ver si existe ese mecanismo o es una metáfora"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "movimiento cursor",
+        "parpadeo",
+        "índice vectorial"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla pide mecanismos específicos (trayectoria, parpadeo, índice) que no aparecen en el pack; necesito ver si existen barrios para estos fenómenos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "movimiento cursor",
+        "estado editor",
+        "índice workspace"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla menciona trayectoria, sincronización y persistencia; busco barrios de movimiento, estado y datos"
+    },
+    {
+      "consulta": "dónde se calcula la trayectoria del cursor en el editor",
+      "consultas": [
+        "dónde se calcula la trayectoria del cursor en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "movimiento cursor"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 5,
+      "why": "el bosquejo huele movimiento cursor en terminal; busco el cálculo de trayectoria para ver si existe o es metafórico"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 6,
+      "why": "el cálculo del cursor es una conversión estándar de coordenadas de ratón a posición lógica (mouse to cursor), sin trayectoria balística ni sincronización con Kubernetes; el índice del workspace es un modelo de estado local sin persistencia cuántica vectorial. el ancla mezcla fenómenos reales con conceptos inexistentes en el sistema."
+    }
+  ],
+  "why": "el cálculo del cursor es una conversión estándar de coordenadas de ratón a posición lógica (mouse to cursor), sin trayectoria balística ni sincronización con Kubernetes; el índice del workspace es un modelo de estado local sin persistencia cuántica vectorial. el ancla mezcla fenómenos reales con conceptos inexistentes en el sistema.",
+  "zooms": []
+}

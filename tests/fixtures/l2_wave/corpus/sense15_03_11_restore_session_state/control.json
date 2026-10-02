@@ -1,0 +1,118 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1",
+        "M9"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:close"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la lista de archivos abiertos al cerrar el editor",
+      "keep": [
+        "M1",
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.hpp",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura el estado de la sesión al abrir un proyecto existente",
+      "keep": [
+        "M6",
+        "M4"
+      ],
+      "n": 3,
+      "proposes": 5,
+      "visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/app/workspace_session.cpp:load",
+        "src/app/application.cpp:Application",
+        "src/app/application.cpp:set_workspace"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide recordar tres cosas distintas (cursor, archivos, paneles). Busco dónde se guarda cada una para ver si hay un mecanismo unificado o si hay que parchear cada uno por separado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se restaura el estado de la sesión al abrir un proyecto existente",
+      "consultas": [
+        "dónde se restaura el estado de la sesión al abrir un proyecto existente"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "request start"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "las cazas de cierre fallaron; el pack apunta a request start y open for pid como puntos de entrada al abrir. busco el mecanismo de restauración en la apertura, no en el cierre"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "T3 encontró el mecanismo de restauración (restore workspace session), pero T1 y T2 no hallaron dónde se guarda la posición del cursor ni la lista de archivos al cerrar. Sin el guardado, no hay restauración de esos detalles específicos. El pack no nombra otro mecanismo de persistencia para el cursor o los paneles laterales."
+    }
+  ],
+  "why": "T3 encontró el mecanismo de restauración (restore workspace session), pero T1 y T2 no hallaron dónde se guarda la posición del cursor ni la lista de archivos al cerrar. Sin el guardado, no hay restauración de esos detalles específicos. El pack no nombra otro mecanismo de persistencia para el cursor o los paneles laterales.",
+  "zooms": []
+}

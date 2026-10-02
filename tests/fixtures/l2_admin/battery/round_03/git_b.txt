@@ -1,0 +1,3 @@
+{"action":"admin_v1","do":"spawn","why":"confundido","spawn":{"tipo":"explore","brief":"commits"}}
+{"action":"admin_v1","do":"spawn","why":"inbox dice stub; era git log","spawn":{"tipo":"git","brief":"log","arg":"log"}}
+{"action":"admin_v1","do":"cerrar","why":"ok","reply":"Commits vía git log."}

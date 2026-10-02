@@ -1,0 +1,7 @@
+Al despertar: smoke pantalla oscura. No es Sense15.
+
+1. Append a `.tuide/ai/l2_wave/screenoff/log.jsonl` una línea JSON con hora, evento=wake.
+2. Escribe `.tuide/ai/l2_wave/screenoff/marker.txt` con la hora ISO y la frase `screenoff wake ok`.
+3. No toques `l2_wave.hpp` ni la batería sense15.
+4. Relanza un wait de 30s con sentinel `AGENT_LOOP_WAKE_screenoff` (prueba de relanzar).
+5. Responde en español: despertó, editó, relanzó.

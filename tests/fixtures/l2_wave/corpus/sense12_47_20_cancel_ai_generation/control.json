@@ -1,0 +1,242 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de código",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se maneja la tecla Escape en el panel de consola para cancelar la IA",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/console_panel.cpp:handle_ai_console_keys",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:has_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta el clic fuera del editor para cancelar la generación de IA",
+      "keep": [
+        "M7"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:MakeEditorPanel",
+        "src/ai/ai_controller.cpp:cancel_current"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:tasks_",
+        "src/ai/ai_controller.cpp:tasks_.cancel()"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ai/ai_controller.cpp:cancel_level1",
+          "src/ai/ai_controller.cpp:cancel_current",
+          "src/ai/ai_controller.cpp:cancel_all",
+          "src/ai/ai_controller.cpp:clear_pending_insert",
+          "src/ai/ai_controller.cpp:tasks_",
+          "src/ai/ai_controller.cpp:tasks_.cancel()"
+        ],
+        "consulta": "dónde se limpia el archivo a medias al cancelar la generación de IA",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta el clic fuera del editor para cancelar la generación",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se captura la tecla Escape para cancelar la generación de código",
+      "consultas": [
+        "dónde se captura la tecla Escape para cancelar la generación de código"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele el escape; necesito ver si el trigger llega al controlador"
+    },
+    {
+      "consulta": "dónde se maneja la tecla Escape en el panel de consola para cancelar la IA",
+      "consultas": [
+        "dónde se maneja la tecla Escape en el panel de consola para cancelar la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "M5 tiene handle ai console keys; es el barrio de teclado de la consola IA"
+    },
+    {
+      "consulta": "dónde se detecta el clic fuera del editor para cancelar la generación de IA",
+      "consultas": [
+        "dónde se detecta el clic fuera del editor para cancelar la generación de IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pide dos disparadores: Escape y clic fuera. T2 cerró Escape en consola. Falta el clic fuera para completar el claim."
+    },
+    {
+      "consulta": "dónde se detecta el clic fuera del editor para cancelar la generación de IA",
+      "consultas": [
+        "dónde se detecta el clic fuera del editor para cancelar la generación de IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 4,
+      "why": "T3 encontró Make Editor Panel y cancel current; necesito confirmar si el clic fuera invoca cancel current o cancel all para detener la generación"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "T2 confirma Escape en consola, pero falta el clic fuera (T3 es vago) y la limpieza del archivo (parte clave del claim). Dos loci independientes para cubrir los dos polos del ancla."
+    },
+    {
+      "consulta": "cómo cancel current limpia el archivo a medias al detener la generación",
+      "consultas": [
+        "cómo cancel current limpia el archivo a medias al detener la generación"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "cancel all"
+      ],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 y T3 confirman los disparos (Escape y clic) que invocan cancel current/cancel all. Falta verificar el efecto: si la cancelación limpia el archivo a medias o lo deja corrupto."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "T2 confirma Escape -> cancel current. T3 menciona cancel current en editor. Falta verificar la limpieza del archivo (A) y el mecanismo de clic fuera (B) para cerrar el claim completo."
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de IA",
+      "consultas": [
+        "dónde se limpia el archivo a medias al cancelar la generación de IA"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 8,
+      "why": "T4 cerró con cancel level1 y clear pending insert. El pack une T2=>T4 y T3=>T4 vía cancel current. Necesito ver cómo clear pending insert o cancel level1 limpian el buffer/archivo para confirmar que no queda a medias."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 9,
+      "why": "el mecanismo de cancelación se activa por Escape en la consola y por clic fuera, propagándose a cancel all y clear pending insert para limpiar el archivo a medias"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 10,
+      "why": "el Cerrado afirma el objeto de esta fase: se leyeron los símbolos de cancelación y limpieza (cancel level1, clear pending insert, tasks cancel) que responden a dónde se limpia el archivo a medias"
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

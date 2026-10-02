@@ -1,0 +1,39 @@
+The user wants to know if the editor remembers the cursor position, open files, and panel states when reopening a project.
+I have a plan with 3 phases:
+1. [en_curso] A locator: dónde se guarda el estado de la sesión al cerrar el proyecto
+2. [pendiente] B locator: dónde se restaura el estado de la sesión al abrir el proyecto
+3. [pendiente] P puente: hay camino guardar y restaurar el estado de la sesión (need A B)
+
+Wait, the plan in the prompt says:
+1. [en_curso] A locator: dónde se guarda el estado de la sesión al cerrar el proyecto
+2. [pendiente] B locator: dónde se restaura el estado de la sesión al abrir el proyecto
+3. [pendiente] P puente: hay camino guardar y restaurar el estado de la sesión (need A B)
+
+But the "Trabajos ya hechos" shows:
+T1: dónde se guarda la posición del cursor al cerrar el editor
+T2: dónde se restaura la posición del cursor al abrir el editor
+T3: hay camino guardar la posición del cursor y restaurarla al abrir
+T4: dónde se guarda el
+---- content ----
+{
+  "action": "control_v1",
+  "do": "plan",
+  "modo": "romper",
+  "fases": [
+    {
+      "id": "B",
+      "kind": "locator",
+      "consulta": "dónde se restaura el estado de la sesión al abrir el proyecto"
+    },
+    {
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "consulta": "hay camino entre guardar y restaurar el estado de la sesión"
+    }
+  ],
+  "why": "T4 cerró la fase A (guardar). El pack une T4 con T2 (abrir) vía active tab path. Sigo con la fase B (restaurar) y luego el puente P."
+}

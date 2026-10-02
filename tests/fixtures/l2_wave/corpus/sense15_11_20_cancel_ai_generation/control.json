@@ -1,0 +1,126 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se cancela la generación de código al pulsar Escape o hacer clic fuera",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:handle_route"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para interrumpir la IA",
+      "keep": [
+        "M1",
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/ai/ai_trace.cpp:ai_trace_escape",
+        "src/ui/editor_panel.cpp:handle_editor_escape"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo o se deshace la inserción pendiente al cancelar la generación",
+      "keep": [
+        "M4",
+        "M6"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se cancela la generación de código al pulsar Escape o hacer clic fuera",
+      "consultas": [
+        "dónde se cancela la generación de código al pulsar Escape o hacer clic fuera"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "escape"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M2 huele escape; M8 huele cancelación; necesito ver el disparo y el flujo hacia la limpieza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide dos cosas distintas: el disparo (Escape/clic) y el efecto limpio (no dejar archivo a medias). T1 encontró la cancelación pero no el disparo ni la limpieza. Parto en dos cazas independientes y luego verifico el puente."
+    },
+    {
+      "consulta": "dónde se limpia el archivo o se deshace la inserción pendiente al cancelar la generación",
+      "consultas": [
+        "dónde se limpia el archivo o se deshace la inserción pendiente al cancelar la generación"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clear pending insert"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el disparo de escape no se halló; el pack nombra el efecto de limpieza (clear pending insert) en T1; busco el mecanismo de limpieza para cerrar el polo de limpieza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de cancelación se confirma: clear pending insert limpia la inserción pendiente al cancelar la generación, invocado desde handle user input y cancel current; el polo de captura de Escape en el editor se refuta (ai trace escape y handle editor escape no interrumpen la IA)"
+    }
+  ],
+  "why": "el mecanismo de cancelación se confirma: clear pending insert limpia la inserción pendiente al cancelar la generación, invocado desde handle user input y cancel current; el polo de captura de Escape en el editor se refuta (ai trace escape y handle editor escape no interrumpen la IA)",
+  "zooms": []
+}

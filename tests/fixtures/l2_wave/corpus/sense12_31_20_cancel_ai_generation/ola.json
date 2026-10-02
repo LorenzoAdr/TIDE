@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de cancelación está completo: la pulsación de Escape se captura en handle user input, que invoca cancel current y cancel all; este último limpia el archivo a medias mediante clear pending insert y detiene la generación con cancel level1. no hay evidencia de captura de clic fuera, pero el flujo de teclado cumple el requisito de limpieza."
+}

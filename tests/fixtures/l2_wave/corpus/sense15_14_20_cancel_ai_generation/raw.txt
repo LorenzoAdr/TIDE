@@ -1,0 +1,13 @@
+The user wants to know how to cleanly cancel AI code generation when pressing Escape or clicking outside, without leaving the file half-written.
+I have 3 completed jobs:
+T1: Asked what the AI controller does when canceling level 1 and how it cleans the file. Result: Found cancel mechanism (atomic flag, log), but NO file cleaning action.
+T2: Asked where editor text is cleaned when canceling generation. Result: `cancel live lsp on cursor move` (not the trigger).
+T3: Asked where file content is reverted when canceling generation. Result: No reversion mechanism found in AI controller; only clears atomic flags and calls `cancel all`. `rollback pending` belongs to `level2 session` and is not invoked by `ai controller`.
+
+The anchor claim is: "when AI is generating code and user presses Escape or clicks outside, I want generation to be canceled cleanly without leaving the file half-written".
+The investigation so far shows:
+- Cancellation happens (flags set, generation stops).
+- BUT there is NO file cleaning/reversion mechanism triggered by the AI controller upon cancellation.
+- The file is left as is (or half-written, depending on how the insertion works, but the prompt
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la cancelación detiene la generación y limpia flags atómicos, pero no existe mecanismo de reversión ni limpieza del archivo; el contenido queda tal como se insertó hasta el momento de la interrupción"}

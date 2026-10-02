@@ -1,0 +1,18 @@
+The user wants to automatically detect when the LSP server crashes or stops responding and restart it without user intervention.
+
+I have three completed works (T1, T2, T3).
+T1 found the restart mechanism (`schedule debounced lsp restart`, `restart lsp for workspace`) but noted that the trigger from `transport reader eof` (crash detection) doesn't seem to directly connect to the restart mechanism in the code read. It mentions triggers like `apply workspace settings` or `lsp missing install`.
+T2 looked at `transport reader eof` handling and found `start`, `stop`, `spawn language server`.
+T3 looked for the invocation of `schedule debounced lsp restart` upon crash detection and found `schedule debounced lsp restart`, `on transport reader eof`, `restart lsp for workspace`, `run`, `tick shutdown`.
+
+The "control_opened_v1" shows:
+T1, T2, T3 all share `on transport reader eof` and `schedule debounced lsp restart`.
+T1 mentions `apply workspace settings` and `setup build environment watching` as extra.
+T2 mentions `initialize` and `request start`.
+T3 mentions `apply workspace settings` and `setup build
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de reinicio automático ya existe en la aplicación (schedule debounced lsp restart y restart lsp for workspace), pero la detección de caída (transport reader eof) no está conectada directamente al reinicio; se activa por cambios de configuración o instalación faltante, no por fallo del servidor. el pack no muestra un camino entre la detección de caída y el reinicio, y las cazas confirmaron que el disparo actual no es el deseado. se requiere implementar la conexión entre la detección de fallo y el reinicio, no solo encontrar código existente."
+}

@@ -1,0 +1,230 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se guarda la posición del cursor al cerrar el editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se persiste el rango de selección del cursor al salir",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.hpp",
+        "src/editor/editor_state.cpp:CursorPos"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo guardado",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/editor/editor_state.cpp:CursorPos",
+        "src/editor/editor_state.hpp",
+        "src/app/workspace_model.cpp:open_file_at_impl",
+        "src/editor/editor_state.cpp:reset_to_single_cursor"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se restaura la lista de archivos abiertos al reabrir un proyecto",
+      "keep": [
+        "M1"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/editor/editor_state.hpp",
+        "src/app/workspace_model.cpp:open_file_at_impl"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la lista de archivos abiertos al reabrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se restaura la visibilidad de los paneles laterales al reabrir un proyecto",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M1",
+        "M5",
+        "M6"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide restaurar estado (cursor, archivos, paneles); M1 (editor state), M5 (editor panel) y M6 (panel) son los barrios más probables para la persistencia de la UI, pero sus gaps indican falta de trigger/effect; necesito ver si hay mecanismos de save/restore en sus owns"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla pide persistencia de 3 estados (cursor, archivos, paneles). El pack muestra M1 (cursor) y M5/M6 (paneles) pero sin mecanismo de guardado/carga. Se rompen en 4 localizadores de estado + 1 puente para verificar la coherencia de la sesión."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla pide persistencia de 3 estados (cursor, archivos, paneles). El pack muestra M1 (cursor) y M5/M6 (paneles) pero no el mecanismo de sesión. Parto en guardar/restaurar para cada polo y luego verifico si el flujo une ambos extremos."
+    },
+    {
+      "consulta": "dónde se guarda la posición del cursor y los archivos abiertos al cerrar el editor",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide tres estados distintos (cursor, archivos, paneles) en dos momentos (cerrar/guardar y abrir/restaurar). El pack muestra M1 (cursor), M5 (paneles) pero no el mecanismo de persistencia ni la restauración. Se necesitan locators independientes para cada estado y momento, luego verificar si el flujo une guardar con restaurar."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: plan 2–4 fases",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 5,
+      "why": "el ancla pide recordar cursor y paneles; el pack tiene M1 (cursor) y M5/M6 (paneles) pero no el mecanismo de persistencia; necesito localizar los puntos de escritura y lectura del estado para verificar si existe el arco de memoria"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 6,
+      "why": "el ancla pide recordar estado; el pack tiene M1 (editor state) pero no el mecanismo de persistencia. Parto en guardar y restaurar para ver si existe el arco."
+    },
+    {
+      "consulta": "dónde se persiste el rango de selección del cursor al salir",
+      "consultas": [
+        "dónde se persiste el rango de selección del cursor al salir"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "span on line"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 7,
+      "why": "T1 leyó la estructura; el pack apunta al span como el objeto de estado a guardar. Necesito el sitio de escritura (save) para confirmar la fase A."
+    },
+    {
+      "consulta": "dónde se restaura la posición del cursor al abrir un archivo guardado",
+      "consultas": [
+        "dónde se restaura la posición del cursor al abrir un archivo guardado"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "ensure cursors"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 8,
+      "why": "T1 y T2 cerraron la persistencia (Cursor Pos). El pack señala 'ensure cursors' como el siguiente eslabón para la restauración. Cazo el efecto de reaplicar esa posición."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 9,
+      "why": "T3 cerró el cursor. Quedan dos polos independientes del ancla: archivos y paneles. El pack no une estos barrios al flujo de cursor, así que se cazan por separado."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 10,
+      "why": "T4 no encontró el mecanismo de restauración de la lista de archivos; el Cerrado solo lista fichas leídas sin confirmar el efecto. Salto a la siguiente caza del plan: paneles laterales."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

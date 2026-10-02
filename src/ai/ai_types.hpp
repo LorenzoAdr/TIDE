@@ -120,6 +120,8 @@ struct AiLevel0EmbedSettings {
   std::string model_path;
   // Downloads only via Toolpacks / AI missing toast (never automatic).
   bool auto_download = false;
+  // 127.0.0.1 → tuide forks llama-server. Any other host → attach-only (GPU on another machine).
+  std::string server_host = "127.0.0.1";
   int server_port = 18765;
   // Per-slot context. Short signature passages (~100 chars) fit in 128–256 tokens.
   // Total KV ≈ n_ctx with non-unified slots: each slot gets n_ctx / n_parallel.
@@ -185,8 +187,59 @@ struct AiLevel2Settings {
   int n_threads = 0;
 };
 
+// Tunables for the single-admin harness (src/ai/l2_admin.*). Defaults mirror the
+// compile-time kAdminMax* constants in l2_admin.hpp — see that file for the
+// safety rationale (fail-closed on verify, budgets renew per consulta).
+struct AiHarnessSettings {
+  int max_proposes = 12;         // piloto: turnos LLM por consulta (kAdminMaxProposes)
+  int max_spawns = 8;            // piloto: spawns totales por consulta (kAdminMaxSpawns)
+  int max_explores = 4;          // explorador: spawns por consulta (kAdminMaxExplores)
+  int explore_max_steps = 6;     // explorador: pasos internos por spawn (kAdminExploreMaxSteps)
+  bool verifier_enabled = true;  // false = editar/cerrar sin pase adversarial (riesgo)
+  int max_verify_passes = 2;     // kAdminMaxVerifyPasses
+  int verify_max_steps = 6;      // kAdminVerifyMaxSteps
+  bool refuter_enabled = true;   // segundo pase adversarial dentro de la verificación
+  bool allow_shell = true;       // permitir spawns AdminSpawnTipo::Shell
+  bool allow_web = true;         // permitir spawns AdminSpawnTipo::Web / WebFetch
+  bool allow_test = true;        // permitir spawns AdminSpawnTipo::Test
+  // false (default) = un explore por fenómeno/polo, cada uno independiente (comportamiento
+  // actual). true = un solo explorador puede cubrir una cadena de sub-preguntas CONECTADAS
+  // en un mismo brief. Probado como experimento P16 (docs/plans/l2-admin-verify-round-
+  // reduction.md sección 9): gana en cadenas secuenciales, pero diluir varios ángulos
+  // independientes en un job puede disparar el atajo P2bis y saltarse el verificador —
+  // por eso, cuando está activo, ese atajo concreto se desactiva (ver admin_run_verify).
+  bool explorer_cumulative_mode = false;
+  // Herramienta "trail" del explorador: reconstruye la cadena de llamadas (call-stack)
+  // hacia un símbolo vía grep + heurísticas (sin LLM extra — reusa src/ai/l2_explore_a_trail.cpp,
+  // el mismo motor determinista del explorador legacy de Level2Session). Default true: es
+  // solo lectura, determinista, y estrictamente añade evidencia estructurada al grep/read
+  // habituales, sin el riesgo de shell/web.
+  bool allow_causal_trail = true;
+  // Herramienta "dataflow" del explorador: dónde se declara/escribe/lee una variable o campo,
+  // vía grep + heurísticas (sin LSP, sin LLM extra — reusa src/ai/l2_explore_a_dataflow.cpp,
+  // el hermano de "trail" para estado en vez de llamadas). Default true, mismo motivo que trail.
+  bool allow_dataflow_trace = true;
+  // Herramienta "headers_of": includes/headers de un archivo (FS puro, ya registrada en el
+  // ToolRegistry compartido — src/ai/tool_registry.cpp). Default true.
+  bool allow_headers_of = true;
+  // Herramienta "repo_map": vista del repo rankeada por PageRank vía SymbolWorkspaceIndexer
+  // (ya registrada en el ToolRegistry compartido). Default true.
+  bool allow_repo_map = true;
+  // Cuántos patterns de grep / paths de read puede pedir el explorador EN UNA
+  // SOLA ola (un turno LLM) — kAdminExploreMaxGrepPerWave/MaxReadPerWave.
+  int max_grep_per_wave = 3;
+  int max_read_per_wave = 2;
+  // Tope ACUMULADO de greps/reads en todo el explore (varias olas) —
+  // kAdminExploreMaxGrep/MaxRead. Si este total es bajo, subir el límite por
+  // ola no sirve de mucho: sube ambos a la vez si quieres más margen real.
+  int max_grep_total = 4;
+  int max_read_total = 3;
+};
+
 struct AiSettings {
   bool enabled = true;
+  // Single-admin chat path (replaces L0→L1→L2 hot path). Legacy code stays compiled.
+  bool admin_enabled = true;
   std::vector<std::string> command_whitelist = {"compile", "launch"};
   // Named tasks: name -> argv string (shell-tokenized).
   std::vector<std::pair<std::string, std::string>> tasks;
@@ -207,6 +260,7 @@ struct AiSettings {
   bool llama_vulkan_bundle = false;
   AiLevel0Settings level0;
   AiLevel1Settings level1;
+  AiHarnessSettings harness;
 };
 
 }  // namespace tuide

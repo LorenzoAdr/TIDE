@@ -29,6 +29,8 @@ struct Level2AutonomousLoopOpts {
   L2ContextBudget budget = default_l2_context_budget();
   // If true, stop when explore succeeds (pack complete → phase=edit); do not run edit/compile.
   bool stop_at_explore = false;
+  // If true, stop after successful a_done (Phase A locate only); skip explore_b auto-plan/pack.
+  bool stop_at_phase_a = false;
 };
 
 struct Level2AutonomousLoopResult {

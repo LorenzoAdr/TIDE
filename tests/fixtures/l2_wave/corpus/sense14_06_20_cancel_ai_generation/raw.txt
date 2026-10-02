@@ -1,0 +1,20 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have two completed jobs:
+1.  **T1 (Locator):** Found where Escape/click outside is captured (`handle ai console keys`, `handle console panel mouse`).
+2.  **T2 (Locator):** Found where the file is cleaned up (`cancel current`, `clear pending insert`, `cancel all`, `cancel level1`).
+
+The plan was to bridge these two: "hay camino capturar Escape clic fuera y limpiar el archivo a medias".
+The `control_opened_v1` shows a path: `handle ai console keys` -> `handle user input` -> `handle route` -> `cancel current` -> `cancel all`.
+Also, `clear pending insert` is the "same object" in both T1 and T2.
+
+The user's claim is: "when the AI is generating code and the user presses Escape or clicks outside, I want the generation to be cancelled cleanly without leaving the file half-written".
+
+T1 found the trigger (Escape/click).
+T2 found the cleanup mechanism (`clear pending insert`, `cancel current`).
+The `entre abiertas` section explicitly
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el pack une el disparo (Escape/clic) con la limpieza (clear pending insert) vía handle user input y handle route; el camino existe y el mecanismo de limpieza está identificado"
+}

@@ -1,0 +1,15 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current state:
+- T1: Looked for Escape/click capture. Found text-based cancellation (`cancel`, `cancelar`) in `handle user input`, not keyboard events.
+- T2: Looked for cancellation on Escape/click. Found `cancel level1`, `cancel current`.
+- T3: Looked at what `cancel level1` and `cancel current` do. Found: `cancel level1` sets `agent cancel` flag; `cancel current` clears pending insert (`clear pending insert`) if not busy, or calls `cancel all` (which calls `cancel level1` and `tasks cancel`) if busy, waking the cycle.
+
+The user's claim has two parts:
+1. Trigger: Press Escape or click outside.
+2. Effect: Cancel generation cleanly without leaving file half-written.
+
+T1 refuted the trigger part: there is no Escape/click capture for cancellation; it's text-based.
+T3 confirmed the effect part: `cancel current` / `cancel all` handles the cleanup (`clear pending insert`) and stopping (`agent cancel`, `tasks cancel`).
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide cancelar con Escape o clic fuera; T1 refuta ese disparo (no hay captura de teclado/ratón, solo comandos de texto). T3 confirma el efecto: cancel current limpia el archivo pendiente y cancel level1 detiene la generación. el mecanismo existe pero no se activa con los gestos pedidos."}

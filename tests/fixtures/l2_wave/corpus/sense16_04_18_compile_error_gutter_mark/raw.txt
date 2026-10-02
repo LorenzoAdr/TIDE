@@ -1,0 +1,27 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+I have three completed jobs:
+1.  **T1**: Asked where compilation errors are read from the bottom console.
+    *   Result: Found `diagnostics panel cpp`, `dap backend cpp`, etc., which handle LSP diagnostics, *not* compiler build output.
+    *   Conclusion: No mechanism found for reading compiler errors from the console in the inspected files.
+2.  **T2**: Asked where the compiler output is parsed in the bottom console.
+    *   Result: No object found.
+3.  **T3**: Asked where error lines are extracted from the compiler output in the bottom console.
+    *   Result: No object found.
+
+The pack (Atlas) shows:
+*   M1: editor panel
+*   M2: console expand overlay
+*   M3: visual highlight
+*   M4: editor buffer source
+*   M5: editor context
+*   M6: raw pty screen
+*   M7: console panel
+*   M8: dap backend
+*   M9:
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "no hay mecanismo que lea ni parsee la salida del compilador de la consola inferior; lo leído es el panel de diagnósticos LSP que consume workspace diagnostics del servidor de lenguaje, no la salida del compilador build output"
+}

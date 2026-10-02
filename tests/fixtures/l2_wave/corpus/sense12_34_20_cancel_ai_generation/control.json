@@ -1,0 +1,164 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:cancel_level1"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se limpia el archivo o se detiene la inserción de texto al cancelar la generación",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 1,
+      "why": "el ancla pide dos cosas: capturar el gesto (Escape/clic) y el efecto (limpiar archivo). Son dos polos distintos que pueden estar en barrios diferentes (UI vs controlador de IA). Rompo para cazar cada polo y luego unir."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "dos polos distintos: el trigger (Escape/clic) y el efecto (limpieza del archivo). Se cazan por separado y se une el arco."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se limpia el archivo a medias al cancelar la generación de la IA",
+      "consultas": [
+        "dónde se limpia el archivo a medias al cancelar la generación de la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 cerró con nombres de cancelación; el pack apunta a handle route como siguiente tiro para ver el efecto de limpieza"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 5,
+      "why": "T1 falló en M2 (falso positivo JSON). T2 y T3 leyeron el efecto (limpieza) en M8 pero no el disparador. Necesito localizar el disparador (Escape/clic) en otro barrio (probablemente UI/Editor) y luego unir con la limpieza ya vista."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T1 no encontró el trigger (Escape/clic). T2 y T3 encontraron el efecto (limpieza). Necesito confirmar si existe el trigger y si conecta con el efecto. Rompo en: 1) Buscar el trigger real (quizás no es Escape/clic, o está en otro lugar), 2) Confirmar el efecto (ya visto, pero necesito el locus exacto para el puente), 3) Verificar conexión."
+    },
+    {
+      "consulta": "hay camino capturar Escape clic y limpiar el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 falló en el barrio equivocado (ai trace). T2 y T3 confirmaron el mecanismo de limpieza (cancel level1, clear pending insert). Necesito encontrar el disparador UI correcto (Escape/clic) y unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el mecanismo de cancelación y limpieza ya está identificado en el controlador de IA (cancel level1, clear pending insert); la captura de Escape no existe en el código actual, por lo que el comportamiento deseado no se puede implementar sin añadir el handler de eventos"
+    }
+  ],
+  "why": "el mecanismo de cancelación y limpieza ya está identificado en el controlador de IA (cancel level1, clear pending insert); la captura de Escape no existe en el código actual, por lo que el comportamiento deseado no se puede implementar sin añadir el handler de eventos",
+  "zooms": []
+}

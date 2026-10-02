@@ -1,0 +1,18 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+Current status:
+- T1 (Escape): Failed. Escape key doesn't trigger cancellation in the console input handler; it's text-based ("cancel").
+- T2 (Click outside): Failed. No object found.
+- T3 (Clean up): Found `cancel level1`, `cancel current`, `clear pending insert`.
+
+The anchor has two triggers: Escape and Click outside. Both failed to be found as triggers for cancellation.
+However, T3 found the cleanup mechanism (`clear pending insert`).
+The user's claim is about the *whole* flow: Trigger -> Cancel -> Clean.
+Since the triggers (Escape, Click outside) were not found to exist or link to the cancellation, the claim that "when the user presses Escape or clicks outside, it cancels..." is likely false or incomplete in the current codebase.
+The "cleanly without leaving the file half-written" part relies on the cleanup mechanism. T3 found `clear pending insert`.
+But the trigger part is missing.
+
+Let's look at the "entre abiertas" and "hacia el resto".
+T1 -> cancel all
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide que Escape o clic fuera cancelen y limpien; T1 y T2 niegan esos disparos (no hay objeto ni enlace); T3 halló la limpieza (clear pending insert) pero sin el gatillo el flujo no arranca; el claim se refuta"}

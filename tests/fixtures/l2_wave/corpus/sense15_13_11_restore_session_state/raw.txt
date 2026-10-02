@@ -1,0 +1,19 @@
+The user wants to restore the cursor position, open files, and sidebar panel visibility when reopening a project.
+I have a plan with 4 phases:
+1. [fallo] A: save cursor/files on exit.
+2. [en_curso] B: restore cursor/files on entry.
+3. [pendiente] C: save/restore sidebar visibility.
+4. [pendiente] P: bridge.
+
+Current status:
+- T1 (save/restore editor state): Failed (leído: close, editor panel cpp).
+- T2 (save cursor/files on exit): Failed (leído: save, config path, save workspace session, flush active tab).
+- T3 (restore cursor/files on entry): Failed (leído: reload stale tabs from disk).
+
+The "Cerrado" for T3 says "reload stale tabs from disk" was read, but it wasn't the trigger.
+The "Cerrado" for T2 says "save, config path..." was read, but it wasn't the trigger.
+The "Cerrado" for T1 says "close, editor panel cpp" was read, but it wasn't the trigger.
+
+The pack (control_opened
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"los mapeos leídos (close, save, reload) no son el disparo; el pack no nombra el mecanismo de restauración de cursor ni paneles"}

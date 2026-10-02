@@ -1,0 +1,177 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se pintan las líneas rojas en el margen del editor para marcar errores",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostic_severity_color",
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la consola para crear diagnósticos",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/ui/editor_panel.cpp:make_diagnostic_modal"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "cómo se envían los diagnósticos creados desde la consola al editor para que se pinten en el margen",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line",
+        "src/ui/editor_panel.cpp:rebuild_diagnostics_by_line_if_changed",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 tiene visual highlight (git marks) y M11 escanea errores de shell; necesito ver si M3 soporta marcas de error y cómo M11 las procesa"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer la línea y el archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 2,
+      "why": "el ancla une dos fenómenos distintos: parsear errores de la consola y pintar marcas en el editor. M11 sugiere que ya hay parsing de shell output, y M3 sugiere visual highlight. Necesito localizar ambos mecanismos por separado antes de ver si hay camino o si hay que construirlo."
+    },
+    {
+      "consulta": "dónde se pintan las líneas rojas en el margen del editor para marcar errores",
+      "consultas": [
+        "dónde se pintan las líneas rojas en el margen del editor para marcar errores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "hay que localizar el mecanismo de visualización de errores en el editor antes de conectarlo con la consola"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación de la consola para crear diagnósticos",
+      "consultas": [
+        "dónde se parsean los errores de compilación de la consola para crear diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "make diagnostic modal"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 cerró la pintura; ahora busco el origen de los datos (consola -> diagnósticos)"
+    },
+    {
+      "consulta": "cómo se envían los diagnósticos creados desde la consola al editor para que se pinten en el margen",
+      "consultas": [
+        "cómo se envían los diagnósticos creados desde la consola al editor para que se pinten en el margen"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "make diagnostic modal"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 crea diagnósticos (make diagnostic modal) y T1 los pinta (diagnostic severity color). El pack une ambos. Necesito ver el flujo que conecta la creación con la pintura."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 y T3 no tienen camino directo; necesito unir la creación de diagnósticos desde la consola con la pintura en el margen"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el pack une el parseo de errores de consola con la pintura de líneas rojas en el margen; el mecanismo de envío ya está cubierto por los diagnósticos del editor"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "T2=>T3 sin camino: los diagnósticos de la consola no se envían al editor para pintar el margen; el pack cierra el arco"
+    }
+  ],
+  "why": "T2=>T3 sin camino: los diagnósticos de la consola no se envían al editor para pintar el margen; el pack cierra el arco",
+  "zooms": []
+}

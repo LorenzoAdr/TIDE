@@ -1,0 +1,12 @@
+The user wants to restore the editor state (cursor position, open files, visible/closed side panels) when reopening a previously opened project.
+
+I have a plan with 3 phases:
+1. [fallo] A locator: dónde se guarda la posición del cursor al cerrar el editor
+2. [en_curso] B locator: dónde se restaura la posición del cursor al abrir el editor
+3. [pendiente] P puente: hay camino guardar y restaurar la posición del cursor (need A B)
+
+Work 1 (T1) asked: "dónde se guarda y restaura el estado del editor al cerrar y abrir el proyecto". Result: "no hay objeto".
+Work 2 (T2) asked: "dónde se guarda la posición del cursor al cerrar el editor". Result: "no encontré mecanismo de persistencia de la posición del cursor al cerrar el editor; lo leído muestra que close solo limpia estado UI y reset to single cursor solo establece posición en memoria volátil".
+Work 3 (T3) asked: "dónde se restaura la posición del cursor al abrir el editor". Result: "leído: context menu open editor background, context menu open editor symbol, open file at
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo de persistencia de la posición del cursor al cerrar el editor; lo leído muestra que close solo limpia estado UI y reset to single cursor solo establece posición en memoria volátil"}

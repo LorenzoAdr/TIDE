@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"no_pasar","why":"T4 niega el parser de errores de compilación; el mecanismo leído es para enlazado. Salto a la siguiente caza del plan (B: creación del diagnóstico en el editor)."}

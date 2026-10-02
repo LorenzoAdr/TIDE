@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mecanismo de detección y reinicio automático ya existe: la caída se detecta en async worker main cuando job lsp transport running devuelve falso, estableciendo pending transport restart true; el reinicio se orquesta en restart lsp for workspace, que se dispara tras la detección vía ensure async worker running - start async worker - async worker main - detección - flag - loop de aplicación que llama a restart lsp for workspace si pending lsp restart es true"
+}

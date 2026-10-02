@@ -1,0 +1,13 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have two completed jobs:
+1.  **T1 (Locator):** Where is the Escape key captured to cancel AI generation?
+    *   **Result:** Not found. The read shows cancellation is triggered by text commands ("cancel", "cancelar") in `is cancel input`, not by a keyboard event (Escape).
+    *   **Implication:** The "Escape key" trigger doesn't exist or isn't the mechanism. The user's premise about "pulsing Escape" might be the missing feature or mapped elsewhere.
+2.  **T2 (Locator):** Where is the file cleaned or insertion undone when cancelling AI?
+    *   **Result:** Not found. The read shows cancellation only cleans internal state (`pending insert`, `insert anchor`) and cancels L1/L2 tasks, but there is no code to undo changes in the editor buffer or delete temp files.
+    *   **Implication:** The "clean cancellation" (undoing file changes) doesn't exist.
+
+**Analysis of the Anchor vs. Findings:**
+*   **Anchor:** "Cancel cleanly without leaving file half
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el ancla pide cancelar con Escape y limpiar el archivo; T1 niega la captura de Escape (solo texto) y T2 niega la limpieza del buffer (solo estado interno); el mecanismo no existe"}

@@ -1,0 +1,8 @@
+The user wants to cancel AI code generation by pressing Escape or clicking outside, and wants the file to be cleaned up (not left half-written).
+
+Current state:
+- T1: Searched for Escape/click outside capture. Result: Not found. Cancellation is currently only via text input ("cancel", etc.).
+- T2: Searched for file cleanup on cancel. Result: Found `clear pending insert` called by `cancel all`.
+- T3: Searched for file cleanup on cancel (duplicate/refinement). Result: Confirmed `clear pending insert` called by `cancel current`
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de limpieza existe (clear pending insert), pero el disparador (Escape/clic fuera) no está implementado; el sistema solo cancela por texto"}

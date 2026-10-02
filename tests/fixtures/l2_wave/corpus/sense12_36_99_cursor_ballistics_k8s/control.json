@@ -1,0 +1,83 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se persiste la física de los cursores en el índice vectorial cuántico del workspace",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea",
+      "consultas": [
+        "dónde se calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla pide un mecanismo muy específico (trayectoria balística de cursores + sync k8s + parpadeo). el pack no lo nombra, pero M1 (editor panel) y M4 (application) son los barrios más probables para lógica de cursores y sincronización. un explorador busca el fenómeno descrito."
+    },
+    {
+      "consulta": "dónde se persiste la física de los cursores en el índice vectorial cuántico del workspace",
+      "consultas": [
+        "dónde se persiste la física de los cursores en el índice vectorial cuántico del workspace"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "la primera parte del ancla (trayectoria balística) ya se refutó; queda la segunda parte (persistencia en índice vectorial cuántico) que no se ha cazado"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "el ancla pedía dos objetos (trayectoria balística sincronizada con Kubernetes y persistencia en índice vectorial cuántico). T1 y T2 cerraron que no hay objeto: el sistema es un editor de texto local sin física de cursores, ni integración con Kubernetes, ni índices vectoriales cuánticos. El claim se refuta."
+    }
+  ],
+  "why": "el ancla pedía dos objetos (trayectoria balística sincronizada con Kubernetes y persistencia en índice vectorial cuántico). T1 y T2 cerraron que no hay objeto: el sistema es un editor de texto local sin física de cursores, ni integración con Kubernetes, ni índices vectoriales cuánticos. El claim se refuta.",
+  "zooms": []
+}

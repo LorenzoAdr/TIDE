@@ -1,0 +1,21 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact error line.
+
+Current state:
+- T1 looked for drawing the red line in the margin. Found `rebuild diagnostics by line` (data mapping), but no UI drawing code (`draw diagnostic gutter` etc. returned 0 hits).
+- T2 looked for applying compilation diagnostics to the editor panel. Found `apply lsp diagnostics to panel`, `diagnostics for editor line`.
+- T3 looked for converting console errors to editor diagnostics. Found nothing (no object).
+
+The pack shows:
+- T1 => T2: `apply lsp diagnostics to panel` -> `push active file diagnostics from cache` -> `rebuild diagnostics by line if changed`
+- T1 => T3: no path
+- T2 => T3: no path
+
+T3 explicitly says "no hay objeto" (no object) for converting console errors to editor diagnostics. This means the system currently does *not* convert console errors into editor diagnostics.
+T1 found data mapping (`rebuild diagnostics by line`) but no UI drawing mechanism for the red line in the margin.
+T2 found `apply lsp diagnostics to
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el sistema no convierte los errores de la consola en diagnósticos para el editor (T3: no hay objeto). sin esa conversión, no hay datos que aplicar ni dibujar en el margen. el ancla se refuta: el mecanismo de puente entre consola y editor no existe."
+}

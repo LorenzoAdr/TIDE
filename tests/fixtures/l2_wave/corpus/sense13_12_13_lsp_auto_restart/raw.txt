@@ -1,0 +1,18 @@
+The user wants to implement an automatic restart mechanism for the LSP (Language Server Protocol) server if it crashes or becomes unresponsive.
+I have three completed jobs (T1, T2, T3).
+T1 looked for the detection of the crash and the trigger for restart. It found `start completion server`, `ensure completion server`, `health ok`, `restart lsp for workspace`, `schedule debounced lsp restart`. It concluded that the automatic watchdog/loop is missing.
+T2 looked for the lifecycle management. It found nothing.
+T3 looked for where `schedule debounced lsp restart` is called when the server stops responding. It found `schedule debounced lsp restart`, `wait response`, `send request`.
+
+The pack (M*) mentions:
+M5: `application restart lsp for workspace`, `schedule debounced lsp restart`, `pending lsp restart`, `last lsp environment fingerprint`.
+M6: `embedding backend start server`, `llama backend start completion server`.
+M3: `model store has llama server`, `model store resolve llama server`.
+
+The user's request is "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detect
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de detección automática de caída y reinicio del servidor LSP no existe en el código actual; las búsquedas confirmaron que solo hay arranque inicial y reinicio manual, sin watchdog ni loop de salud"
+}

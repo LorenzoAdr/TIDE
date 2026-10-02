@@ -1,0 +1,13 @@
+The user wants to detect if the LSP server process crashes or stops responding and automatically restart it.
+I have a plan with 3 phases:
+1. A: Detect crash/no response (locator)
+2. B: Restart LSP automatically (locator)
+3. P: Bridge between detection and restart (puente)
+
+Current status:
+- T1 (Phase A): Asked "where is it detected that LSP crashed...". Closed with "leído: restart lsp for workspace, schedule debounced lsp restart, clangd process alive". This is a dump, not a confirmation of the mechanism.
+- T2 (Phase B): Asked "where is LSP restarted when process not alive". Closed with "leído: restart lsp for workspace, schedule debounced lsp restart, clangd process alive". Also a dump.
+- T3: Asked about detection on workspace open. Closed with a detailed explanation about `run` via `lsp missing install` calling `restart lsp for workspace`. It mentions `clangd process alive` but says no explicit heartbeat linked to open event, just conditional restart on startup.
+- T4 (Phase A again?): Asked "where is it detected that LSP process crashed... during execution".
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"el Cerrado de T4 es un dump de nombres (clangd process alive), no afirma el mecanismo de detección de caída durante la ejecución. no_pasar para no gastar otro hijo en el mismo pico sin avance."}

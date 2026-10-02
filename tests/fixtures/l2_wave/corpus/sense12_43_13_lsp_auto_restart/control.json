@@ -1,0 +1,198 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se llama a reiniciar el LSP cuando se detecta que el proceso no está vivo",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia la detección automática de la caída del LSP al abrir el workspace",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 7,
+      "visto": [
+        "src/app/application.cpp:set_workspace",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_client.cpp:clangd_process_alive",
+        "src/app/application.cpp:run",
+        "src/symbols/symbol_provider.hpp:on_workspace_opened"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso del servidor LSP se ha caído o dejado de responder durante la ejecución",
+      "keep": [
+        "M5"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se detecta que el proceso del servidor LSP se ha caído o dejado de responder durante la ejecución",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se reinicia automáticamente el servidor LSP tras detectar la caída",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino la detección de la caída del LSP y su reinicio automático",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene la lógica de reinicio (restart lsp for workspace), pero falta el disparador de detección de fallo. El hijo busca el mecanismo de health check o captura de error que invoque a M5."
+    },
+    {
+      "consulta": "dónde se llama a reiniciar el LSP cuando se detecta que el proceso no está vivo",
+      "consultas": [
+        "dónde se llama a reiniciar el LSP cuando se detecta que el proceso no está vivo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "clangd process alive"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró la detección (clangd process alive) y el reinicio (restart lsp for workspace). Ahora hay que ver si la detección dispara el reinicio automáticamente."
+    },
+    {
+      "consulta": "dónde se inicia la detección automática de la caída del LSP al abrir el workspace",
+      "consultas": [
+        "dónde se inicia la detección automática de la caída del LSP al abrir el workspace"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "on workspace opened"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 y T2 encontraron el mecanismo de reinicio, pero falta confirmar el disparador automático inicial (el 'loop' o el evento que arranca la vigilancia). El pack sugiere 'on workspace opened' como punto de entrada."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide detección y reinicio automático; las exploraciones previas solo encontraron reinicio condicional al abrir el workspace, no un heartbeat o detección continua; se necesita un plan para localizar ambos mecanismos y verificar su conexión"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "control: lo leído no afirma; no pases ese polo",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 5,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 6,
+      "why": "el Cerrado de T4 es un dump de nombres (clangd process alive), no afirma el mecanismo de detección de caída durante la ejecución. no_pasar para no gastar otro hijo en el mismo pico sin avance."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el pack no une el mecanismo: T1 lee símbolos binarios, T2 lee datos de diagnóstico pero no el renderizado del gutter, T3 no halló objeto; sin camino entre polos leídos"
+}

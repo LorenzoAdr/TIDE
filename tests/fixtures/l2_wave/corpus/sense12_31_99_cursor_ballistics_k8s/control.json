@@ -1,0 +1,78 @@
+{
+  "agujas": [
+    "cursor",
+    "blink",
+    "kubernetes",
+    "vector",
+    "physics",
+    "sync"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": false,
+  "consulta": "necesito localizar el módulo que calcula la trayectoria balística de los cursores del editor para sincronizarlos en tiempo real con un cluster de Kubernetes cuando el usuario parpadea, y dónde se persiste esa física en el índice vectorial cuántico del workspace",
+  "induce": "miss-answer",
+  "jobs": [],
+  "jobs_run": 0,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "cursor",
+        "blink",
+        "kubernetes",
+        "vector",
+        "physics",
+        "sync"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla menciona cursores, parpadeo, kubernetes, índice vectorial y física; busco barrios que cubran estos conceptos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "editor",
+        "ai"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla menciona cursores del editor y un índice vectorial; quiero ver qué stems viven en esos barrios para confirmar o refutar el mecanismo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 3,
+      "why": "el pack no nombra el mecanismo del ancla; no hay objeto"
+    }
+  ],
+  "why": "el pack no nombra el mecanismo del ancla; no hay objeto",
+  "zooms": [
+    "editor",
+    "ai"
+  ]
+}

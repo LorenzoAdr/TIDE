@@ -1,0 +1,11 @@
+The user wants to restore the cursor position, open files, and side panel visibility when reopening a project.
+I have a plan with 3 phases:
+A: locator: dónde se restaura la posición del cursor al abrir el proyecto
+B: locator: dónde se restauran los paneles laterales al abrir el proyecto
+P: puente: hay camino restaurar el cursor y restaurar los paneles laterales (need A B)
+
+Current phase: A (en_curso).
+T3 just finished asking: "dónde se restaura la posición del cursor al abrir el proyecto"
+T3 Cerr
+---- content ----
+{"action":"control_v1","do":"no_pasar","why":"el Cerrado niega este pico; salto a la siguiente caza"}

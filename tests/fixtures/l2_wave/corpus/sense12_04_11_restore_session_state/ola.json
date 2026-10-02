@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "no_pasar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T4 no encontró el mecanismo de restauración de archivos (solo leyó la estructura de estado). El plan actual está roto: las fases A y B apuntan a 'restaurar archivos/paneles' pero el pack no tiene pistas para paneles y la caza de archivos falló en el locus actual. Necesito reorientar hacia el 'workspace' o 'session' que orquesta la apertura, no solo el editor."
+}

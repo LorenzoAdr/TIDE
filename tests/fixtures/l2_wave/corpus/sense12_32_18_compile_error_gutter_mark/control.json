@@ -1,0 +1,201 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se dibuja la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se marca la línea roja en el margen izquierdo del editor",
+      "keep": [
+        "M1",
+        "M3"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:clear_editor_line_paint_caches",
+        "src/editor/visual_highlight.cpp:build_git_marks_snapshot"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extrae la línea del error del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 4,
+      "proposes": 4,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/ui/binary_symbols_panel.cpp:parse_linker_undefined_reference"
+      ]
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se extrae la línea del error del texto de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se marca una línea en el margen del editor con un color",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino extraer la línea del error y marcar la línea en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M10"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 y M10 son los únicos que tocan visual highlight; necesito ver si ya hay un mecanismo de marcas en el margen o si hay que crearlo"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "dos polos distintos (consola vs editor); el hijo de A no necesita B"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "dónde se marca la línea roja en el margen izquierdo del editor",
+      "consultas": [
+        "dónde se marca la línea roja en el margen izquierdo del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 cerró que no hay objeto para 'dibujar', pero el pack tiene M3 (visual highlight) y M10 (apply visual highlight fold regions) que manejan marcas visuales. El hijo debe cazar el mecanismo de marca visual, no el dibujo directo."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "T1 y T3 no se unen; T2 no halló objeto. Parto en dos polos: extraer la línea del error (A) y marcar la línea en el margen (B). El puente P cierra el claim si hay camino."
+    },
+    {
+      "consulta": "dónde se marca una línea en el margen del editor con un color",
+      "consultas": [
+        "dónde se marca una línea en el margen del editor con un color"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "visual highlight"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 6,
+      "why": "T4 cerró la extracción (A). Falta B: el dibujo. T2/T3 fallaron en M1/M3; M10 (visual highlight) tiene 'apply visual highlight fold regions' y 'build git marks snapshot' que sugieren marcas visuales. Busco el mecanismo de pintar el margen."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 7,
+      "why": "T4 cerró la fase A (extracción de línea del error). El pack no une A con B; T2/T3 no hallaron el dibujo de la línea roja. Cambio de rumbo: busco el mecanismo de marca de error en el margen del editor (diagnostics/gutter) para luego puentear con la extracción."
+    }
+  ],
+  "why": "presupuesto de trabajos agotado",
+  "zooms": []
+}

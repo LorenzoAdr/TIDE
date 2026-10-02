@@ -1,0 +1,30 @@
+{
+  "committed": true,
+  "fases": [
+    {
+      "ancla_visto": [
+        "src/app/application.cpp:restore_workspace_session",
+        "src/ai/level2_session.cpp:load_state",
+        "src/app/workspace_model.cpp:open_file"
+      ],
+      "consulta": "dónde se restaura la lista de archivos abiertos al cargar el estado del editor",
+      "evita": [],
+      "hacia": [],
+      "id": "A",
+      "kind": "locator",
+      "need": [],
+      "status": "paso"
+    },
+    {
+      "ancla_visto": [],
+      "consulta": "dónde se restaura la visibilidad de los paneles laterales al abrir un proyecto",
+      "evita": [],
+      "hacia": [],
+      "id": "B",
+      "kind": "locator",
+      "need": [],
+      "status": "en_curso"
+    }
+  ],
+  "modo": "romper"
+}

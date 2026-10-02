@@ -1,0 +1,140 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M3",
+        "M8"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/lsp/lsp_transport.cpp:wait_response",
+        "src/lsp/lsp_client.cpp:send_lsp_request"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se programa el reinicio diferido del servidor LSP tras un fallo",
+      "keep": [
+        "M1"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:on_lsp_missing_install"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o no responde para programar el reinicio",
+      "keep": [
+        "M1"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:restart_lsp_for_workspace"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace), pero falta el disparador de detección de fallo. Necesito encontrar el código que observa el estado del servidor y llama a reiniciar."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "lsp missing prompt"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el pack huele M1 (lsp missing prompt) y M2/M4 (lsp symbol provider) como barrios de detección de fallo; el hijo busca el disparo de reinicio"
+    },
+    {
+      "consulta": "dónde se programa el reinicio diferido del servidor LSP tras un fallo",
+      "consultas": [
+        "dónde se programa el reinicio diferido del servidor LSP tras un fallo"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio diferido"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "M5 tiene schedule debounced lsp restart; busco el mecanismo de reinicio automático"
+    },
+    {
+      "consulta": "dónde se detecta que el proceso LSP ha muerto o no responde para programar el reinicio",
+      "consultas": [
+        "dónde se detecta que el proceso LSP ha muerto o no responde para programar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "estado servidor"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "las cazas anteriores encontraron el reinicio pero no el disparador de detección; busco el mecanismo que observa la caída o falta de respuesta"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "las búsquedas de detección automática de caída o no-respuesta del LSP no hallaron el mecanismo; el pack no une un detector de fallo a un reinicio automático"
+    }
+  ],
+  "why": "las búsquedas de detección automática de caída o no-respuesta del LSP no hallaron el mecanismo; el pack no une un detector de fallo a un reinicio automático",
+  "zooms": []
+}

@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el ancla pide cancelar con Escape o clic fuera; T1 refuta ese disparo (no hay captura de teclado/ratón, solo comandos de texto). T3 confirma el efecto: cancel current limpia el archivo pendiente y cancel level1 detiene la generación. el mecanismo existe pero no se activa con los gestos pedidos."
+}

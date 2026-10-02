@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el mapeo de detección de caída y reinicio automático no se halló en la caza anterior; cierro ese camino para buscar el mecanismo real de supervisión del proceso LSP"
+}

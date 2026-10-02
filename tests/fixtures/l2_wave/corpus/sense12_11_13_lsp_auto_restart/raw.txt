@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack y los trabajos leídos confirman el mecanismo: la aplicación detecta la caída o ausencia del LSP (on lsp missing) y dispara automáticamente el reinicio (restart lsp for workspace / schedule debounced lsp restart) sin intervención del usuario. El claim se cumple con lo visto."}

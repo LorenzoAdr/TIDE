@@ -1,0 +1,13 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have already done "Trabajo 1" which asked: "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio".
+The result of Trabajo 1 (Cerrado) says: "leído: start completion server, status text, ensure completion server, health ok".
+The system prompt says: "ESA pregunta no se relanza. Lo leído no era el disparo. PROHIBIDO el mismo claim. do=cerrar ese mapeo."
+This means Trabajo 1 found some related things (start, status, ensure, health ok) but *not* the specific mechanism for detecting a crash/hang and restarting. Or rather, the "Cerrado" implies the specific mapping asked for wasn't found or the read items weren't the trigger.
+Wait, the prompt says: "Si Cerrado dice que no se encontró el objeto, esa caza no halló ESE mapeo: no la relances. Lo leído no era el disparo: do=cerrar ese mapeo."
+So I must close that mapping.
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el mapeo de detección de caída y reinicio automático no se halló en la caza anterior; cierro ese camino para buscar el mecanismo real de supervisión del proceso LSP"
+}

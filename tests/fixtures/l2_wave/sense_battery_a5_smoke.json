@@ -1,0 +1,105 @@
+{
+  "induce": "miss-answer",
+  "why": "A5 smoke N=1: 5 casos train nuevos (no core5, no held-out). Supervisor no lee held-out.",
+  "split": "train_smoke",
+  "cases": [
+    {
+      "id": "01_settings_about_tab",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 01_settings_about_tab; no vender traps context_menu, editor_panel como el disparo",
+      "gold": {
+        "symbols_any": [
+          "settings_modal",
+          "app_settings"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "context_menu",
+          "editor_panel",
+          "panel"
+        ]
+      }
+    },
+    {
+      "id": "04_ai_thinking_status_bar",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 04_ai_thinking_status_bar; no vender traps settings_modal, status como el disparo",
+      "gold": {
+        "symbols_any": [
+          "busy_strip",
+          "ai_controller"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "settings_modal",
+          "status",
+          "panel"
+        ]
+      }
+    },
+    {
+      "id": "07_ai_compile_task",
+      "kind": "existe",
+      "complexity": "media_alta",
+      "via": "case",
+      "expect": "mecanismo de 07_ai_compile_task; no vender traps compile, launch como el disparo",
+      "gold": {
+        "symbols_any": [
+          "task_runner",
+          "ai_controller"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "compile",
+          "launch",
+          "build-release"
+        ]
+      }
+    },
+    {
+      "id": "14_syntax_highlight_repaint",
+      "kind": "existe",
+      "complexity": "media",
+      "via": "case",
+      "expect": "mecanismo de 14_syntax_highlight_repaint; no vender traps performance_panel, console_panel como el disparo",
+      "gold": {
+        "symbols_any": [
+          "ui_invalidation_policy",
+          "editor_panel"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "performance_panel",
+          "console_panel"
+        ]
+      }
+    },
+    {
+      "id": "17_ai_spinner_stuck",
+      "kind": "existe",
+      "complexity": "alta",
+      "via": "case",
+      "expect": "mecanismo de 17_ai_spinner_stuck; no vender traps console_panel, dap_backend como el disparo",
+      "gold": {
+        "symbols_any": [
+          "ai_controller",
+          "level2_autonomous_loop"
+        ],
+        "polos_afirmados": [],
+        "polos_negados": [],
+        "forbid_why": [
+          "console_panel",
+          "dap_backend"
+        ]
+      }
+    }
+  ]
+}

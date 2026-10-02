@@ -1,0 +1,10 @@
+The user wants to mark compilation errors from the console with a red line in the editor's left margin.
+I have three completed jobs:
+1.  **T1**: Found where the red line is drawn (`line gutter marker`, `line diagnostic marker from map`).
+2.  **T2**: Asked where compilation errors are analyzed from the console output. The result was `rebuild diagnostics by line if changed`, `rebuild diagnostics by line`. The system says "Lo leído no era el disparo" (What was read wasn't the trigger). This implies the mechanism found in T2 is likely related to LSP diagnostics or general diagnostics, not specifically parsing the *console output* for compilation errors as requested by the user.
+3.  **T3**: Asked where console errors are read to create markers. Result: `line diagnostic marker from map`, `diagnostics for editor line`. Again, "Lo leído no era el disparo".
+
+The "ancla" (claim) is: "errors appearing in the bottom console should also be marked with a red line in the editor margin".
+The current state shows that the UI part (red line) exists (T1), but the connection from "console output" to "di
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de marcar errores en el margen existe (T1), pero el disparo no proviene de la consola inferior (T2, T3 refutan el origen). el pack no une la consola con el margen; el camino está roto."}

@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack no contiene ningún mecanismo de trayectoria balística, sincronización con Kubernetes ni índice vectorial cuántico; el claim es una ficción fuera del dominio del código leído"}

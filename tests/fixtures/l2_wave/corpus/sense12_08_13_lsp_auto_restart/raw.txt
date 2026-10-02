@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático existe y está implementado: se programa en schedule debounced lsp restart y se ejecuta en restart lsp for workspace cuando el bucle principal run detecta que ha vencido el deadline lsp restart deadline tras una caída o falta de respuesta"}

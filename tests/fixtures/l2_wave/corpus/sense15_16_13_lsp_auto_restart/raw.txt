@@ -1,0 +1,21 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1 (Detection):** Found `on transport reader eof`, `set reader eof handler`, `stop`. This suggests detection of the server stopping (EOF).
+2.  **T2 (Restart):** Found `schedule debounced lsp restart`, `restart lsp for workspace`. This suggests a mechanism to restart exists.
+3.  **T3 (Connection):** Asked if there is a path from detection to restart. The result was "no path found". Specifically, `on transport reader eof` only marks `ready false` and waits, without calling `start` or a respawn mechanism.
+
+The user's claim is: "if the LSP process crashes or stops responding, the application automatically detects it and restarts it".
+
+Evidence:
+- Detection exists (`on transport reader eof`).
+- Restart mechanism exists (`restart lsp for workspace`).
+- **Crucially**, T3 explicitly states there is **no path** connecting the detection of the crash (EOF) to the restart mechanism. The detection handler just marks it as not ready and waits.
+
+Therefore
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el ancla se refuta: aunque existen mecanismos de detección (on transport reader eof) y de reinicio (restart lsp for workspace), no hay camino que los una; la detección de caída solo marca el estado como no listo sin disparar el reinicio automático"
+}

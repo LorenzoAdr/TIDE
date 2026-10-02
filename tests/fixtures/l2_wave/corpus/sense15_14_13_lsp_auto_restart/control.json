@@ -1,0 +1,182 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "keep": [
+        "M5",
+        "M7"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/ai/llama_backend.cpp:health_ok"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se inicia el servidor de lenguaje y se establece la conexión inicial",
+      "keep": [
+        "M6",
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 4,
+      "visto": [
+        "src/ai/embedding_backend.cpp:start_server"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se verifica la salud del servidor de lenguaje y se programa el reinicio si falla",
+      "keep": [
+        "M1",
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/symbols/lsp_symbol_provider.cpp:notify_lsp_status",
+        "src/symbols/lsp_symbol_provider.cpp:set_lsp_status_callback"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el núcleo del reinicio; necesito ver qué dispara ese reinicio automáticamente"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [
+        "health ok"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 2,
+      "why": "el pack nombra health ok como el disparo; un hijo cierra el OFF"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 3,
+      "why": "el Cerrado de T1 dice 'Lo leído no era el disparo'. Necesito encontrar el mecanismo de detección de fallo (crash/unresponsive) que dispara el reinicio, no solo el reinicio en sí."
+    },
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio"
+      ],
+      "do": "explorar",
+      "error": "control: esa caza ya se contestó; cierra ese mapeo o un objeto distinto",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": false,
+      "turn": 4,
+      "why": "el Cerrado de T1 no fue el disparo; busco el mecanismo de detección y reinicio automático"
+    },
+    {
+      "consulta": "dónde se inicia el servidor de lenguaje y se establece la conexión inicial",
+      "consultas": [
+        "dónde se inicia el servidor de lenguaje y se establece la conexión inicial"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "start server"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 5,
+      "why": "el pack muestra 'start server' como abierto; necesito ver cómo se lanza el proceso para entender el ciclo de vida y detectar posibles fallos en el arranque"
+    },
+    {
+      "consulta": "dónde se verifica la salud del servidor de lenguaje y se programa el reinicio si falla",
+      "consultas": [
+        "dónde se verifica la salud del servidor de lenguaje y se programa el reinicio si falla"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "health ok"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "T1 encontró health ok y schedule debounced lsp restart; necesito ver el mecanismo de detección de caída y disparo del reinicio"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "control: el último Cerrado negó el mapeo; no selles un polo anterior",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": false,
+      "turn": 7,
+      "why": "el pack no nombra el mecanismo de detección automática de caída del LSP; los leídos son reinicios manuales o de arranque, no el disparo de salud"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 8,
+      "why": "el pack no nombra el mecanismo de detección automática de caída del LSP; los nombres leídos (restart lsp for workspace, notify lsp status) son acciones manuales o de configuración, no un detector automático de crash. sin camino entre polos leídos cierra el ancla"
+    }
+  ],
+  "why": "el pack no nombra el mecanismo de detección automática de caída del LSP; los nombres leídos (restart lsp for workspace, notify lsp status) son acciones manuales o de configuración, no un detector automático de crash. sin camino entre polos leídos cierra el ancla",
+  "zooms": []
+}

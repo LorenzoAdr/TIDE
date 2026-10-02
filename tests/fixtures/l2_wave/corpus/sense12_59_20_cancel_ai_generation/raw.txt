@@ -1,0 +1,14 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+
+I have three completed works:
+1.  **T1**: Asked where code generation is cancelled on Escape.
+    *   **Result**: Did not find the Escape key mapping. Found that cancellation is triggered by text "cancel" in the console input (`is cancel input`), not a keyboard event.
+    *   **Implication**: The "Escape" trigger might not exist or is handled elsewhere (maybe UI level, not the console input level).
+2.  **T2**: Asked where Escape or click outside is captured to cancel AI generation.
+    *   **Result**: Read `ai trace escape`, `clear hover if`.
+    *   **Implication**: `ai trace escape` suggests there *is* some handling of Escape in the AI trace context. `clear hover if` might be related to UI state.
+3.  **T3**: Asked where the half-written file is cleaned up when cancelling AI generation.
+    *   **Result**: Read `cancel level1`, `clear pending insert`, `cancel current`, `cancel all`, `begin insert at`.
+    *   **
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de cancelación por Escape no se encontró en el input de consola (T1); T2 leyó ai trace escape pero no confirmó el disparo de cancelación limpia; T3 leyó la limpieza (clear pending insert) pero no el trigger de Escape. sin camino entre Escape y la limpieza confirmada."}

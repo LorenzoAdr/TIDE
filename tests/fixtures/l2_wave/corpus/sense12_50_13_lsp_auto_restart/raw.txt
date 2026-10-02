@@ -1,0 +1,15 @@
+The user wants to automatically detect if the LSP server crashes or becomes unresponsive and restart it without user intervention.
+
+I have three completed works:
+1.  **T1**: Found `restart lsp for workspace` and `schedule debounced lsp restart`. This suggests there is a mechanism to restart the LSP.
+2.  **T2**: Found `lsp missing prompt for status key`, `maybe show lsp missing toast`, `Application`. This relates to detecting a missing LSP and showing a toast.
+3.  **T3**: Found `maybe show lsp missing toast` checks `lsp missing prompt for status key` against the catalog. The restart trigger is in `lsp missing install` after a successful installation.
+
+The user's claim is about *automatic* detection and restart when the server *crashes or stops responding*.
+T3 found that the restart happens in `lsp missing install` *after a successful installation*. This implies the current flow might be: detect missing -> prompt user -> install -> restart.
+The user wants: detect crash/unresponsive -> restart (no user interaction).
+
+T1 found `schedule debounced lsp restart`. This sounds like the mechanism for restarting.
+T2/T3 found
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático se activa tras una instalación exitosa (lsp missing install), no al detectar caída o falta de respuesta del servidor en ejecución; la detección actual (maybe show lsp missing toast) muestra un aviso al usuario en lugar de reiniciar automáticamente"}

@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático por caída o no-respuesta del proceso LSP no existe en la aplicación; el reinicio solo se dispara por cambios en el entorno de build o falta de instalación, no por salud del proceso"}

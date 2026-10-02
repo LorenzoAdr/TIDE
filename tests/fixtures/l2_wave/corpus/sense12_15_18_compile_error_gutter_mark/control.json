@@ -1,0 +1,227 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": false,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M1"
+      ],
+      "n": 1,
+      "proposes": 7,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se leen los errores de compilación de la consola inferior",
+      "keep": [
+        "M7"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors",
+        "src/ui/console_panel.cpp:Event"
+      ]
+    }
+  ],
+  "jobs_run": 2,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [
+          "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+          "src/lsp/diagnostics.cpp:diagnostics_on_line",
+          "src/ui/editor_panel.cpp:line_gutter_marker",
+          "src/ui/editor_panel.cpp:handle_gutter_marker_click",
+          "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+        ],
+        "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "paso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se leen los errores de compilación de la consola inferior",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "fallo"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino leer los errores de la consola y marcarlos en el margen",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los adornos del editor; M11 (binary symbols panel) huele a parsing de errores de compilación. Necesito ver si M3 gestiona los 'error squiggles' y si M11 expone los datos de error para que M3 los pinte."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack muestra M11 leyendo salidas de shell y M3 manejando highlights visuales, pero no unen el flujo de errores de compilación a la UI del editor; necesito confirmar si existe ese puente o si son sistemas desconectados"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 niega el polo de lectura: no hay parser de errores de compilación en la consola. El puente P es imposible sin este eslabón. Cierro el claim: el mecanismo no existe en el código actual."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 5,
+      "why": "T2 falló buscando en el panel de símbolos; el mecanismo de parsing de errores genéricos de compilación (gcc/clang) debe estar en otro barrio, probablemente vinculado al sistema de diagnostics o a un servicio de terminal, no a la UI de la consola"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 6,
+      "why": "T2 falló buscando en el panel de símbolos; el mecanismo de parsing de errores de compilación estándar (gcc/clang) debe estar en otro barrio, probablemente vinculado a la gestión de tareas o build, no a la UI de la consola"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 7,
+      "why": "T2 falló en el polo de lectura; necesito encontrar el mecanismo que convierte el texto de la consola en datos de error (archivo, línea, mensaje) para luego conectarlo con T1"
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 8,
+      "why": "T2 falló buscando en el panel de símbolos; el mecanismo de parsing de errores genéricos de compilación no se ha leído aún. Necesito encontrar el origen de los datos (el parser) para luego ver si hay camino hacia el marcador del margen."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 9,
+      "why": "T2 falló buscando en el panel de símbolos; el mecanismo de parsing de errores genéricos de compilación (gcc/clang) no se ha encontrado. Necesito localizar el extractor de errores antes de poder unirlos al margen."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para extraer archivo y línea"
+      ],
+      "do": "explorar",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": false,
+      "turn": 10,
+      "why": "T2 falló buscando en el panel de símbolos; el mecanismo de parsing de errores genéricos de compilación está en otro barrio, probablemente vinculado a la gestión de diagnostics o tasks"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

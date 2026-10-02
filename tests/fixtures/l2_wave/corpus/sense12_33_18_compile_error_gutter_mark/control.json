@@ -1,0 +1,184 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 2,
+  "cerró": false,
+  "circuit": false,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [],
+  "jobs_run": 0,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "margen izquierdo",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "necesito ver si el pack tiene fichas sobre el sistema de errores, el gutter del editor o la pintura de líneas antes de lanzar un explorador"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error de compilación",
+        "margen izquierdo",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla pide un efecto visual en el editor disparado por errores de consola; necesito ver si el pack huele el barrio del margen o el del error"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error de compilación",
+        "margen izquierdo",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla pide un efecto visual (línea roja) en el editor (margen) disparado por un evento (error de compilación); necesito ver si el pack tiene barrios para el error, el editor y el margen"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error de compilación",
+        "margen izquierdo",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 4,
+      "why": "el ancla pide unir un error de consola con una marca visual en el editor; busco barrios de diagnóstico y de decoración de líneas"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error de compilación",
+        "margen izquierdo",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 5,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "diagnóstico",
+        "decoración margen",
+        "panel consola",
+        "buffer editor",
+        "error compilación"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 6,
+      "why": "el pack actual no muestra el mecanismo de diagnóstico ni la decoración del margen; necesito ver si existe un barrio de 'diagnostics' o 'markers' y cómo se conecta con el panel de consola"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error de compilación",
+        "margen izquierdo",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 7,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error de compilación",
+        "margen izquierdo",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 8,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error de compilación",
+        "margen izquierdo",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 9,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "control: bosquejar máx 2",
+      "hacia": [
+        "error de compilación",
+        "margen izquierdo",
+        "línea roja"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 10,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    }
+  ],
+  "why": "",
+  "zooms": []
+}

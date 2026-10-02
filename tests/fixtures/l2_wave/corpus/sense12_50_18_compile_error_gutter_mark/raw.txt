@@ -1,0 +1,15 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line where the error is.
+
+T1 found the mechanism for marking errors in the editor margin: `Make Editor Panel` calls `diagnostics for editor line` in a loop. If `show diagnostic suffix line` is true, it assigns a `gutter marker` and `suffix ptr` rendered in the gutter. Severity is translated via `diagnostic severity tr`.
+T2 looked for reading errors from the console to create diagnostics. It found `diagnostics for editor line`, `diagnostics on line`, `terminal selected text`, `select console word at`, `scan shell output for linker errors`.
+T3 looked for extracting errors from console text to create diagnostics. It found `scan shell output for linker errors`.
+
+The pack shows:
+T1 => T2: same object `diagnostics for editor line`
+T1 => T3: sin camino
+T2 => T3: same object `scan shell output for linker errors`
+
+Wait, T1 found how the editor renders diagnostics in the gutter.
+T2 and T3 found `scan shell output for linker errors` and `diagnostics for editor
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de renderizado en el margen ya está en Make Editor Panel (diagnostics for editor line + gutter marker). la extracción de la consola usa scan shell output for linker errors. no hay camino entre la consola y el margen en el pack; el usuario debe unirlos o el sistema ya lo hace vía diagnostics. el claim se cierra con lo leído."}

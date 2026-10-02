@@ -112,7 +112,19 @@ InstallResult install_toolpack(const std::string& id_spec, ProgressFn on_progres
 
   const auto entry = find_catalog_toolpack(*catalog, id, version);
   if (!entry.has_value()) {
-    result.message = "toolpack no encontrado en el catalogo: " + id_spec;
+    bool id_in_catalog = false;
+    for (const auto& tp : catalog->toolpacks) {
+      if (tp.id == id) {
+        id_in_catalog = true;
+        break;
+      }
+    }
+    if (id_in_catalog) {
+      result.message = "toolpack " + id_spec + " no tiene paquete para " + host_catalog_arch() +
+                       " en el catalogo";
+    } else {
+      result.message = "toolpack no encontrado en el catalogo: " + id_spec;
+    }
     return result;
   }
 
@@ -120,7 +132,12 @@ InstallResult install_toolpack(const std::string& id_spec, ProgressFn on_progres
   fs::create_directories(downloads_dir(), ec);
   fs::create_directories(toolpacks_root(), ec);
 
-  const std::string archive_name = id + "-" + entry->version + "-linux-x86_64.tar.zst";
+  std::string archive_arch = host_catalog_arch();
+  if (!entry->arch.empty()) {
+    archive_arch = normalize_catalog_arch(entry->arch.front());
+  }
+  const std::string archive_name =
+      id + "-" + entry->version + "-linux-" + archive_arch + ".tar.zst";
   const fs::path archive_path = fs::path(downloads_dir()) / archive_name;
   report_progress(on_progress, 5, id);
   const std::string dl_err =

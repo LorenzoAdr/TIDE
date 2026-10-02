@@ -1,0 +1,32 @@
+Al despertar: supervisión sense14 (pack/hijo) en /home/lorenzo/workspace/TIDE.
+
+Sin plazo. No pares el bucle. El usuario lo corta.
+
+NUNCA lances la batería ni el wait desde un Task/subagente. Lanza con Shell en ESTA sesión.
+
+Protocolo: lee este archivo y .cursor/rules/l2-wave-sense12.mdc (bloque Sense14).
+Misma batería `tests/fixtures/l2_wave/sense_battery.json`, induce miss-answer, ancla git d1be1c5.
+Base: /home/lorenzo/workspace/TIDE/.tuide/ai/l2_wave/sense14
+Responde siempre en español.
+
+## Tick
+
+1. Lee CURRENT y el manifest.
+2. Si no hay DONE: proceso vivo → wait; muerto → relanza el MISMO id.
+3. Si SUPERVISED y la siguiente no vive ni DONE: lanza id+1.
+4. Si DONE y no SUPERVISED: juzga las 5 cazas (jobs/control/why; el scoreboard miente).
+5. Una palanca en pack/hijo (think del hijo, hops, peeks, ranking del atlas).
+   No orientación (bosquejo/censo/tesis del Cerrado). Revertir si no mueve el juicio
+   o un caso sube a costa de otro.
+6. Rebuild `l2_wave_test` `l2_think_test` `l2_harness_cli`.
+7. Ledger. Touch SUPERVISED. `./tools/l2_wave_sense_battery.sh NN $BASE`
+8. `./tools/l2_wave/sense14_wait_done.sh NN` (sentinel `AGENT_LOOP_WAKE_sense14`).
+
+Criterio: 11 o 13 sellan el mecanismo y 20 no sella console keys y 18/99 no caen.
+
+Keep orientación (no tocar): bosquejo live, censo off, dump teses r03/r05/r08/r09/r12/r14,
+think High piloto, atlas hijo SU consulta, clon peek 1–2, cover chrome, cover keep 2–3,
+revert close-audit/expand_hops=2, revert hijo High (r01), revert atlas peek 3 (r03),
+revert peek hops 3 (r06), revert follows 4 (r08), revert neighbor max 6 (r10), revert peeks 4 (r12).
+Tras r13: techo pack/hijo. No hay r14 sense14. Handoff a sense15 (sello):
+`tools/l2_wave/sense15_tick_prompt.txt`. Mejor ronda pack: r09.

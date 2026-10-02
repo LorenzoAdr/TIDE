@@ -1,0 +1,19 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+From the previous work:
+T1 found detection mechanisms:
+1. Process crash: `reader loop` detects EOF, calls `transport reader eof` handler which cleans PID with `waitpid`.
+2. Timeout: `wait response` waits on `pending cv` until deadline, if expired, removes pending request and returns false.
+
+T2 found restart mechanism:
+`transport reader eof` cleans state (`ready false`, `waitpid`) but does NOT restart directly.
+Restart is orchestrated in `application`: `schedule debounced lsp restart` schedules a debounced restart (2s), and `restart lsp for workspace` executes workspace/document reopening.
+The gap is what connects the transport EOF to `schedule debounced lsp restart`. T2 says callers of `schedule debounced lsp restart` only show `settings build env`.
+
+T3 checked what `transport reader eof` does to start restart:
+It only cleans state (`ready false`, `waitpid`) and does NOT invoke `spawn` or `restart`. Restart does not happen in this handler.
+
+So we have:
+- Detection: Yes
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"la aplicación detecta la caída del LSP (EOF en reader loop) y el no-respuesta (timeout en wait response), pero el handler de fin de lectura solo limpia el estado y no dispara el reinicio. el mecanismo de reinicio existe en application (schedule debounced lsp restart), pero no hay camino trazado que conecte la detección de fallo al disparo del reinicio; el claim de reinicio automático tras caída queda refutado por la falta de enlace."}

@@ -1,0 +1,33 @@
+{
+  "commit": "d1be1c5",
+  "branch": "feature/IA",
+  "model": "qwen2.5-coder-14b-instruct-q4_k_m",
+  "api_base": "http://192.168.64.1:8080/v1",
+  "induce": "miss-answer",
+  "flags": {
+    "kWaveControlBosquejoLive": true,
+    "kWaveControlCatalogLive": false,
+    "kWaveControlGateCerrarAnyMiss": true,
+    "kWaveControlGateDumpNoCierra": true,
+    "kWaveControlGateDumpNoCierraAny": false,
+    "kWaveControlGateDumpNoEncontr": false,
+    "kWaveControlGateTrasFalloNoSeEncontr": true,
+    "kWaveControlSelloDumpEstaNoAfirma": true,
+    "kWaveControlSelloDumpNoRefutaExiste": true,
+    "kWaveControlSelloHijoNiegaArco": true,
+    "kWaveControlSelloLeerDosNoUne": false,
+    "kWaveControlSelloNoCazadoNoRefuta": false,
+    "kWaveControlSelloPasarNoSellaAncla": true,
+    "kWaveControlSelloPoloNegadoQueda": false,
+    "kWaveControlSelloPolosParcial": true,
+    "kWaveControlSelloReinicioNoEsDetector": true,
+    "kWaveControlSelloSoloNombresNoDisparo": true,
+    "kWaveControlSelloUnoNoRefutaOtro": false,
+    "kWaveControlSelloVistoNombra": true
+  },
+  "exporter": "export_corpus.py",
+  "sense": "sense14",
+  "round": "round_12",
+  "case": "18_compile_error_gutter_mark",
+  "source": "/home/lorenzo/workspace/TIDE/.tuide/ai/l2_wave/sense14/round_12/18_compile_error_gutter_mark"
+}

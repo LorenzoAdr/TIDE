@@ -1,0 +1,20 @@
+The user wants to cancel AI code generation cleanly when pressing Escape or clicking outside, without leaving the file half-written.
+I have a plan with two phases:
+A: locator: dónde se limpia el archivo a medias al cancelar la generación de IA
+B: locator: dónde se detecta el clic fuera del editor para cancelar la generación
+
+Current status:
+T1: Asked about Escape key capture. Closed: no object found (ai trace escape is string escape).
+T2: Asked about Escape key in console panel. Closed: found mechanism (handle ai console keys -> cancel current -> cancel all).
+T3: Asked about click outside editor. Closed: read Make Editor Panel, cancel current.
+T4: Asked about cleaning half-written file. Closed: read cancel level1, cancel current, cancel all, clear pending insert, tasks, tasks cancel.
+
+The last hunt (T4) closed. It read `cancel level1`, `cancel current`, `cancel all`, `clear pending insert`, `tasks`, `tasks cancel`.
+The plan phase A was "dónde se limpia el archivo a medias al cancelar la generación de IA". T4 addressed this.
+The closed says it read those symbols. It doesn't explicitly say it
+---- content ----
+{
+  "action": "control_v1",
+  "do": "pasar",
+  "why": "el Cerrado afirma el objeto de esta fase: se leyeron los símbolos de cancelación y limpieza (cancel level1, clear pending insert, tasks cancel) que responden a dónde se limpia el archivo a medias"
+}

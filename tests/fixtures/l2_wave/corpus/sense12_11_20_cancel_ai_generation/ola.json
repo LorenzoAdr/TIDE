@@ -1,0 +1,20 @@
+{
+  "consulta": "dónde se llama a la cancelación de la generación de IA al pulsar Escape o hacer clic fuera",
+  "consultas": [
+    "dónde se llama a la cancelación de la generación de IA al pulsar Escape o hacer clic fuera"
+  ],
+  "do": "explorar",
+  "error": "control: esa caza no encontró el mapeo; cierra el ancla o parte",
+  "evita": [
+    "escape de caracteres"
+  ],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "T1 falló en el trigger UI; el pack huele M5 (console panel keys) y M4 (picker cancel) como barrios de input; busco el puente entre el gesto y la orden de cancelación"
+}

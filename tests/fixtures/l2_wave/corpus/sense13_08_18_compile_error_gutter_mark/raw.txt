@@ -1,0 +1,20 @@
+The user wants to mark compilation errors from the bottom console with a red line in the left margin of the editor at the exact line of the error.
+
+Current state:
+- T1 asked where the red line is drawn. Found `gutter buffer line at row`, `line gutter marker`, `handle gutter marker click`.
+- T2 asked where compilation errors from the console are processed. Found nothing ("no hay objeto").
+- T3 asked where the error marker in the margin is created. Found `line gutter marker` delegates to `line diagnostic marker from map`, which queries `diagnostics for editor line` on `panel- diagnostics by line`. If there is a `Diagnostic` with `severity k Error`, it returns.
+
+The pack shows:
+- T1 and T3 are linked: `handle gutter marker click` -> `line gutter marker` -> `line diagnostic marker from map`.
+- T2 found nothing.
+- The mechanism for creating the marker is found in T3: it relies on `diagnostics for editor line` and `panel- diagnostics by line`.
+- The user wants compilation errors from the console to trigger this.
+- T2 failed to find where console errors are processed.
+- However,
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de marcar errores en el margen ya existe y depende de diagnostics for editor line; la consola no procesa esos errores para el margen, por lo que no hay objeto que vincular"
+}

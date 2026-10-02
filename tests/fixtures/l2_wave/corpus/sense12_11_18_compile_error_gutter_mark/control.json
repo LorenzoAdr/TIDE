@@ -1,0 +1,211 @@
+{
+  "agujas": [],
+  "amplió": true,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se crean los indicadores visuales de error en el margen del editor",
+      "keep": [
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:diagnostics_for_editor_line",
+        "src/ui/editor_panel.cpp:diagnostic_severity_color",
+        "src/lsp/diagnostics.cpp:diagnostics_on_line",
+        "src/ui/editor_panel.cpp:MakeEditorPanel"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 2,
+      "proposes": 3,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:scan_shell_output_for_linker_errors"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para crear diagnósticos",
+      "keep": [
+        "M11"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/ui/binary_symbols_panel.cpp:parse_linker_undefined_reference"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se crean los diagnósticos de compilación a partir del texto de la consola",
+      "keep": [
+        "M11"
+      ],
+      "n": 4,
+      "proposes": 8,
+      "visto": []
+    }
+  ],
+  "jobs_run": 4,
+  "piloto": true,
+  "plan": {
+    "committed": true,
+    "fases": [
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se crean los diagnósticos de compilación a partir del texto de la consola",
+        "evita": [],
+        "hacia": [],
+        "id": "A",
+        "kind": "locator",
+        "need": [],
+        "status": "en_curso"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "dónde se asocian los diagnósticos a las líneas del editor para mostrar el marcador rojo",
+        "evita": [],
+        "hacia": [],
+        "id": "B",
+        "kind": "locator",
+        "need": [],
+        "status": "pendiente"
+      },
+      {
+        "ancla_visto": [],
+        "consulta": "hay camino la creación del diagnóstico y su asociación al editor",
+        "evita": [],
+        "hacia": [],
+        "id": "P",
+        "kind": "puente",
+        "need": [
+          "A",
+          "B"
+        ],
+        "status": "pendiente"
+      }
+    ],
+    "modo": "romper"
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "ampliar",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "M3",
+        "M11"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M3 (visual highlight) es el barrio de los marcadores visuales; M11 (binary symbols panel) huele a parsing de errores de compilación. Necesito ver si M3 gestiona los 'error squiggles' y si M11 o un vecino conecta la consola con el editor."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el pack muestra M11 (parseo de errores) y M3 (visual highlight) como barrios separados sin conexión; necesito confirmar si existe un flujo que una ambos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "el Cerrado afirma el objeto de esta fase"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T2 no halló el parser general de errores de compilación (solo linker); salto a la siguiente caza para buscar el mecanismo correcto"
+    },
+    {
+      "consulta": "dónde se extraen los errores de compilación del texto de la consola para crear diagnósticos",
+      "consultas": [
+        "dónde se extraen los errores de compilación del texto de la consola para crear diagnósticos"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 5,
+      "why": "T2 falló en M11 (linker específico). El ancla pide errores de compilación generales. Necesito encontrar el mecanismo que lee la consola y genera los diagnostics que T1 ya usa en el margen. Busco el puente entre la salida de texto de la consola y la creación de objetos diagnostic."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 6,
+      "why": "T2 y T3 fallaron en M11 (linker específico). Hay que encontrar el parser general de errores de compilación (A) y luego ver cómo llega al editor (B). Sin camino entre T1 y T2/T3, se parte en dos loci independientes."
+    },
+    {
+      "consulta": "dónde se suscribe el editor a los diagnósticos de compilación para pintar la línea roja en el margen",
+      "consultas": [
+        "dónde se suscribe el editor a los diagnósticos de compilación para pintar la línea roja en el margen"
+      ],
+      "do": "explorar",
+      "error": "control: do no legal ahora (explorar)",
+      "hacia": [
+        "for editor line"
+      ],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": false,
+      "turn": 7,
+      "why": "T1 confirmó el efecto (pintar margen). T2/T3/T4 refutaron el parsing en la consola (M11). El pack muestra 'diagnostics for editor line' como el puente entre el estado y el efecto. Hay que encontrar dónde se llena ese estado con errores de compilación, no dónde se parsea la consola."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 4,
+      "ok": true,
+      "turn": 8,
+      "why": "el sistema no crea diagnósticos de compilación a partir del texto de la consola (T4 vacío, T2/T3 solo linker); sin fuente de datos, no hay camino para marcar el margen"
+    }
+  ],
+  "why": "el sistema no crea diagnósticos de compilación a partir del texto de la consola (T4 vacío, T2/T3 solo linker); sin fuente de datos, no hay camino para marcar el margen",
+  "zooms": []
+}

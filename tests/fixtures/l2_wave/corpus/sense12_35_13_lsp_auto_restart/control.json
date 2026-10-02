@@ -1,0 +1,128 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install",
+        "src/lsp/lsp_client.cpp:clangd_process_alive"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el proceso del servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "keep": [
+        "M5"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:start"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se reinicia el servidor de lenguaje cuando se cierra la conexión de transporte",
+      "keep": [
+        "M5"
+      ],
+      "n": 3,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run",
+        "src/app/application.cpp:on_lsp_missing_install"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene el mecanismo de reinicio (restart lsp for workspace), pero falta el disparador (detection). Busco el puente entre la caída y el reinicio."
+    },
+    {
+      "consulta": "dónde se detecta que el proceso del servidor de lenguaje se ha caído o no responde para disparar el reinicio",
+      "consultas": [
+        "dónde se detecta que el proceso del servidor de lenguaje se ha caído o no responde para disparar el reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "check process health"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 cerró el mapeo en M5; el pack abre check process health, on process exit, check lsp health como candidatos para la detección de caída/no respuesta"
+    },
+    {
+      "consulta": "dónde se reinicia el servidor de lenguaje cuando se cierra la conexión de transporte",
+      "consultas": [
+        "dónde se reinicia el servidor de lenguaje cuando se cierra la conexión de transporte"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "transport reader eof"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 leyó 'on transport reader eof' y 'start'. Necesito confirmar si ese handler dispara el reinicio automático o solo cierra la sesión."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "el mecanismo de detección automática de caída o no respuesta del servidor LSP y su reinicio no existe en el código actual; on transport reader eof solo limpia estado sin reiniciar, y los disparadores de restart lsp for workspace son arranque inicial e instalación, no monitorización de fallos"
+    }
+  ],
+  "why": "el mecanismo de detección automática de caída o no respuesta del servidor LSP y su reinicio no existe en el código actual; on transport reader eof solo limpia estado sin reiniciar, y los disparadores de restart lsp for workspace son arranque inicial e instalación, no monitorización de fallos",
+  "zooms": []
+}

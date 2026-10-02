@@ -1,0 +1,17 @@
+The user wants to know if the application automatically detects when the LSP server crashes or stops responding and restarts it without user intervention.
+
+I have three completed jobs:
+1.  **T1**: Asked where the LSP server is restarted when it crashes or the environment restarts.
+    *   Read: `schedule debounced lsp restart`.
+    *   Closed: `schedule debounced lsp restart`.
+    *   This confirms there is a mechanism to schedule a restart.
+
+2.  **T2**: Asked where it detects that the LSP server has crashed or stopped responding.
+    *   Read: `on lsp notification`, `spawn language server`.
+    *   Closed: `on lsp notification`, `spawn language server`.
+    *   This suggests detection might happen via notifications or spawning logic, but the specific "crash detection" link wasn't explicitly confirmed as the *trigger* for the restart in the closed text, though `spawn language server` implies starting it.
+
+3.  **T3**: Asked where it detects the crash *to trigger* the restart.
+    *   Read: `schedule debounced lsp restart`, `restart lsp for workspace`, `apply workspace settings`, `setup build environment
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el mecanismo de reinicio automático existe (schedule debounced lsp restart), pero no se ha encontrado evidencia de que la detección de caída o falta de respuesta sea el disparador automático; el reinicio parece vinculado a cambios de entorno o configuración, no a un watchdog de salud del proceso"}

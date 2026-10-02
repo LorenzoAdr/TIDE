@@ -1,0 +1,19 @@
+The user wants to restore the editor state (cursor position, open files, panel visibility) when reopening a project.
+I have a plan with 4 phases:
+1. A: Save cursor position (T1) - Closed, but only read "close, close tab, flush active tab". No mechanism found for saving cursor position specifically.
+2. B: Restore open files (T2) - Closed, found mechanism: "restore workspace session" loads "Workspace Session" and calls "workspace open file" for each tab.
+3. C: Control panel visibility (T3) - Closed, read "handle source panel event, secondary visible, On Event, Main Layout State". No mechanism found for saving/restoring panel visibility.
+4. P: Bridge (need A B C) - Pending.
+
+Current status:
+T1 (A) failed to find the save mechanism.
+T2 (B) found the restore mechanism for files.
+T3 (C) failed to find the save/restore mechanism for panels.
+The plan is essentially broken because A and C didn't find the mechanisms. The pack says "exploradores agotados. Cierra citando el mecanismo leído o la refutación."
+I need
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "el mecanismo de restauración de archivos (restore workspace session) se confirma, pero no se halló persistencia para la posición del cursor ni para la visibilidad de paneles; el estado se pierde al cerrar"
+}

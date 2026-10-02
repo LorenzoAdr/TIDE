@@ -1,0 +1,137 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 1,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "keep": [
+        "M2",
+        "M3"
+      ],
+      "n": 1,
+      "proposes": 7,
+      "visto": [
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache",
+        "src/ui/editor_panel.cpp:apply_lsp_diagnostics_to_panel",
+        "src/ui/editor_panel.cpp:line_gutter_marker",
+        "src/ui/editor_panel.cpp:gutter_buffer_line_at_row",
+        "src/ui/editor_panel.cpp:line_diagnostic_marker_from_map"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para generar marcadores",
+      "keep": [
+        "M11",
+        "M12"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ui/editor_panel.cpp:push_active_file_diagnostics_from_cache"
+      ]
+    },
+    {
+      "cerró": false,
+      "consulta": "dónde se leen los errores de compilación de la consola para crear marcadores en el editor",
+      "keep": [],
+      "n": 3,
+      "proposes": 3,
+      "visto": []
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "bosquejar",
+      "error": "",
+      "hacia": [
+        "error marker",
+        "console output",
+        "editor decoration"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "quiero ver si el ancla vive en un barrio o en varios"
+    },
+    {
+      "consulta": "dónde se marcan los errores de compilación en el margen del editor",
+      "consultas": [
+        "dónde se marcan los errores de compilación en el margen del editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "error marker"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "M11 huele a escaneo de errores; M3 huele a marcas visuales. Busco el mecanismo que pinta la línea roja."
+    },
+    {
+      "consulta": "dónde se parsean los errores de compilación del texto de la consola para generar marcadores",
+      "consultas": [
+        "dónde se parsean los errores de compilación del texto de la consola para generar marcadores"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "shell output"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 3,
+      "why": "T1 cerró el marcador; ahora busco el origen: el parser que extrae errores del texto de la consola"
+    },
+    {
+      "consulta": "dónde se leen los errores de compilación de la consola para crear marcadores en el editor",
+      "consultas": [
+        "dónde se leen los errores de compilación de la consola para crear marcadores en el editor"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "shell output"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 4,
+      "why": "T1 confirmó el marcador visual; T2 falló buscando el parser. M11 huele a escaneo de errores de shell; busco el puente entre consola y diagnósticos"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 5,
+      "why": "el mecanismo de marcar errores en el margen existe (line gutter marker con severidad k Error), pero no se encontró el puente que lea los errores de la consola para generar esos marcadores; la funcionalidad solicitada no está implementada"
+    }
+  ],
+  "why": "el mecanismo de marcar errores en el margen existe (line gutter marker con severidad k Error), pero no se encontró el puente que lea los errores de la consola para generar esos marcadores; la funcionalidad solicitada no está implementada",
+  "zooms": []
+}

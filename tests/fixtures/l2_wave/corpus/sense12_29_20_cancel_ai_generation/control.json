@@ -1,0 +1,175 @@
+{
+  "agujas": [
+    "ai",
+    "ui",
+    "editor",
+    "app"
+  ],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se captura la pulsación de Escape o el clic fuera para cancelar la generación de la IA",
+      "keep": [
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 2,
+      "visto": []
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia o revierte el archivo que se está escribiendo a medias al cancelar la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 2,
+      "proposes": 8,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:busy",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at",
+        "src/ai/ai_controller.cpp:handle_user_input"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se limpia o revierte el archivo que se está escribiendo a medias al cancelar la IA",
+      "keep": [
+        "M8"
+      ],
+      "n": 3,
+      "proposes": 7,
+      "visto": [
+        "src/ai/ai_controller.cpp:clear_pending_insert",
+        "src/ai/ai_controller.cpp:cancel_current",
+        "src/ai/ai_controller.cpp:cancel_all",
+        "src/ai/ai_controller.cpp:busy",
+        "src/ai/ai_controller.cpp:cancel_level1",
+        "src/ai/ai_controller.cpp:begin_insert_at",
+        "src/ai/ai_controller.cpp:handle_user_input",
+        "src/ai/ai_controller.cpp:run_insert_async",
+        "src/ai/ai_controller.cpp:is_cancel_input"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "agujas",
+      "error": "",
+      "hacia": [
+        "ai",
+        "ui",
+        "editor",
+        "app"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "el ancla toca entrada (Escape/clic), generación (IA) y archivo (editor/app); quiero ver qué barrios cubren esas zonas"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "zoom",
+      "error": "",
+      "hacia": [],
+      "ids": [
+        "ai",
+        "ui"
+      ],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 2,
+      "why": "el ancla toca generación (ai) y cancelación por Escape/clic (ui); quiero ver qué stems viven en esos barrios"
+    },
+    {
+      "consulta": "hay camino la cancelación por Escape clic y la limpieza del archivo",
+      "consultas": [],
+      "do": "plan",
+      "error": "control: consulta sin objeto (no una categoría)",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": false,
+      "turn": 3,
+      "why": "el ancla pide dos efectos distintos: la detención del flujo (Escape/clic) y la integridad del archivo (limpieza). Son mecanismos que pueden vivir en barrios distintos (ui/ai vs editor/lsp). Partir permite cazar cada polo con precisión."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "plan",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 4,
+      "why": "el ancla pide dos cosas distintas: el gesto de cancelación (Escape/clic) y el efecto de limpieza (archivo a medias). Son dos polos que pueden estar en barrios distintos (ui/ai vs editor/lsp). Un plan de dos locators y un puente permite cerrar cada polo y luego unirlos."
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "no_pasar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 5,
+      "why": "el Cerrado niega este pico; salto a la siguiente caza"
+    },
+    {
+      "consulta": "dónde se limpia o revierte el archivo que se está escribiendo a medias al cancelar la IA",
+      "consultas": [
+        "dónde se limpia o revierte el archivo que se está escribiendo a medias al cancelar la IA"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "handle route"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 6,
+      "why": "el pack une T2 con handle route; el hijo de B cerró el mecanismo de limpieza, ahora tiro al port para ver cómo se invoca"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 7,
+      "why": "el ancla pide cancelar la generación limpiamente sin dejar el archivo a medias. T1 refuta la captura de Escape/clic para cancelar (no hay objeto). T2 y T3 confirman que la cancelación solo limpia el estado interno (pending insert, agent cancel) pero no hay mecanismo que reverta el contenido del archivo ya escrito. El claim se refuta: no existe el comportamiento solicitado."
+    }
+  ],
+  "why": "el ancla pide cancelar la generación limpiamente sin dejar el archivo a medias. T1 refuta la captura de Escape/clic para cancelar (no hay objeto). T2 y T3 confirman que la cancelación solo limpia el estado interno (pending insert, agent cancel) pero no hay mecanismo que reverta el contenido del archivo ya escrito. El claim se refuta: no existe el comportamiento solicitado.",
+  "zooms": [
+    "ai",
+    "ui"
+  ]
+}

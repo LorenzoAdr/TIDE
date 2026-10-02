@@ -1,0 +1,1 @@
+{"action":"control_v1","do":"cerrar","why":"el pack no contiene ningún mecanismo de trayectoria balística, sincronización con Kubernetes ni índice vectorial cuántico; el claim es una alucinación o metáfora sin objeto en el código"}

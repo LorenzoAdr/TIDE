@@ -1,0 +1,14 @@
+The user wants to know if the application automatically detects when the LSP server crashes or becomes unresponsive and restarts it without user intervention.
+
+I have a plan with 3 phases:
+1.  [en_curso] A locator: dónde se detecta que el servidor de lenguaje LSP deja de responder y se dispara el reinicio
+2.  [pendiente] B locator: dónde se detecta que el servidor de lenguaje LSP se ha caído y se dispara el reinicio
+3.  [pendiente] P puente: hay camino detectar que el servidor de lenguaje LSP deja de responder y detectar que el servidor de lenguaje LSP se ha caído (need A B)
+
+I have 3 completed jobs (T1, T2, T3).
+T1 looked for "dónde se detecta que el servidor de lenguaje se ha caído o no responde y se dispara el reinicio" in M5, M8.
+Result: `restart lsp for workspace`, `schedule debounced lsp restart`.
+T2 looked for "dónde se detecta que el servidor de lenguaje LSP se ha caído o no responde y se dispara el reinicio" in M2, M6.
+Result
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"el servidor de lenguaje LSP se reinicia automáticamente al caerse (detectado por EOF en el transporte), pero no hay mecanismo de detección de falta de respuesta (timeout/watchdog); el reinicio se dispara por caída del proceso, no por inactividad"}

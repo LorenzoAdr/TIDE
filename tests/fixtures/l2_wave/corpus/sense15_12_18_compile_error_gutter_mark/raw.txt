@@ -1,0 +1,18 @@
+The user wants to mark compilation errors from the console with a red line in the left margin of the editor.
+I have 3 completed jobs:
+T1: Asked where error marks are painted in the editor margin. Result: Found `collect diagnostic decorations`, `apply decoration` (underline/color in text), but NOT the gutter mechanism. The gutter is managed in `editor panel` (e.g., `line gutter marker`, `handle gutter marker click`), but its rendering logic and connection to diagnostics were not read.
+T2: Asked where compilation errors are extracted from the console text to send to the editor. Result: No object found.
+T3: Asked where the left margin marker is rendered. Result: No object found.
+
+The pack shows:
+M1: editor panel (owns: editor panel)
+M3: visual highlight (owns: visual highlight)
+M4: editor buffer source (owns: editor buffer source)
+M7: console panel (owns: console panel)
+M8: dap backend (owns: dap backend)
+M9: app session (owns: app session)
+M10: embedding backend / visual highlight
+M11: binary symbols panel
+M12: main layout
+---- content ----
+{"action":"control_v1","do":"cerrar","why":"no hay mecanismo que extraiga errores de la consola para marcarlos en el margen; el sistema de decoraciones solo pinta subrayados en el texto y el margen gutter no se conecta a diagnostics"}

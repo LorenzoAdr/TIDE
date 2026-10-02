@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -72,6 +73,10 @@ class ScriptedBrain : public L2Brain {
 };
 
 int main() {
+  // Classic explore path under test (Phase A is promoted on by default).
+  // Phase A cases below setenv L2_FEAT_L2_EXPLORE_PHASE_A=1.
+  setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "0", 1);
+
   const fs::path root = fs::temp_directory_path() / "tuide_l2_auto_test";
   std::error_code ec;
   fs::remove_all(root, ec);
@@ -1101,6 +1106,222 @@ ignore me
            "grammar off when flag 0");
     unsetenv("L2_FEAT_JSON_GRAMMAR");
     fs::remove_all(rootg, ec);
+  }
+
+  {
+    // Phase A locate: seed → a_judge → a_done without writing pack.md
+    setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "1", 1);
+    const fs::path rootA = fs::temp_directory_path() / "tuide_l2_phase_a_test";
+    std::error_code ec;
+    fs::remove_all(rootA, ec);
+    fs::create_directories(rootA / ".tuide" / "ai", ec);
+    fs::create_directories(rootA / "src", ec);
+    {
+      std::ofstream map(rootA / ".tuide" / "ai" / "map_last.md");
+      map << "# Ranked map\n\nquery: spinner\n\n## Ranked entries\n\n"
+             "1. src/busy.cpp:1 — `set_busy`\n";
+    }
+    {
+      std::ofstream f(rootA / "src" / "busy.cpp");
+      f << "void set_busy() {}\nint other() { return 0; }\n";
+    }
+    ToolRegistry toolsA;
+    toolsA.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "void set_busy() {}\n — " + arg};
+    });
+    Level2Session sessionA(Level2SessionDeps{&toolsA, {}, {}});
+    Level2BootstrapOpts bA;
+    bA.workspace_root = rootA.string();
+    bA.query = "spinner stuck";
+    bA.instruction = "fix spinner";
+    std::string errA;
+    expect(sessionA.bootstrap(bA, &errA), "phaseA bootstrap " + errA);
+    expect(sessionA.status_text(rootA.string()).find("phase: explore_a") != std::string::npos,
+           "bootstrap phase explore_a");
+
+    std::vector<tuide::AQueueBuildInput> ranked;
+    {
+      tuide::AQueueBuildInput in;
+      in.file = "src/busy.cpp";
+      in.name = "set_busy";
+      in.line = 1;
+      in.score = 100;
+      in.functionish = true;
+      in.body_lines = 5;
+      ranked.push_back(in);
+    }
+    {
+      tuide::AQueueBuildInput in;
+      in.file = "src/busy.cpp";
+      in.name = "other";
+      in.line = 2;
+      in.score = 50;
+      in.functionish = true;
+      in.body_lines = 3;
+      ranked.push_back(in);
+    }
+    expect(sessionA.seed_a_queue(rootA.string(), ranked).ok, "seed_a_queue");
+    expect(!sessionA.build_a_peek_tranche_markdown(rootA.string()).empty(), "peek tranche");
+
+    std::vector<tuide::AVerdict> vs;
+    {
+      tuide::AVerdict v;
+      v.target = "src/busy.cpp:set_busy";
+      v.verdict = tuide::AVerdictKind::Useful;
+      v.anchor = "src/busy.cpp:set_busy";
+      v.stem = "busy";
+      v.role = tuide::ALocusRole::Primary;
+      v.why = "sets busy flag";
+      vs.push_back(v);
+    }
+    {
+      tuide::AVerdict v;
+      v.target = "src/busy.cpp:other";
+      v.verdict = tuide::AVerdictKind::Reject;
+      v.why = "unrelated";
+      vs.push_back(v);
+    }
+    const auto jdg = sessionA.apply_a_judge(rootA.string(), vs, false);
+    expect(jdg.ok, "a_judge " + jdg.error);
+
+    // plan must be rejected during explore_a
+    const auto bad_plan =
+        sessionA.apply_plan(rootA.string(), {"src/busy.cpp:set_busy"}, "too soon");
+    expect(!bad_plan.ok, "plan blocked in explore_a");
+
+    std::vector<tuide::ALocus> loci;
+    {
+      tuide::ALocus loc;
+      loc.stem = "busy";
+      loc.anchor = "src/busy.cpp:set_busy";
+      loc.role = tuide::ALocusRole::Primary;
+      loc.why = "busy control";
+      loci.push_back(loc);
+    }
+    const auto ad = sessionA.apply_a_done(rootA.string(), loci, "locked busy");
+    expect(ad.ok && ad.phase == "explore_b", "a_done → explore_b");
+
+    // P4: plan outside loci rejected
+    const auto bad_b =
+        sessionA.apply_plan(rootA.string(), {"src/unrelated/foo.cpp:bar"}, "noise");
+    expect(!bad_b.ok || bad_b.error == "plan_outside_loci" ||
+               bad_b.summary.find("plan_outside_loci") != std::string::npos,
+           "plan outside loci blocked");
+
+    // Auto-plan from watchlist (empty targets) builds pack
+    const auto good_b = sessionA.apply_plan(rootA.string(), {}, "from loci");
+    expect(good_b.ok, "plan from watchlist " + good_b.error);
+    expect(fs::exists(rootA / ".tuide" / "ai" / "l2" / "pack.md", ec), "pack after B plan");
+
+    const auto ast = Level2Session::load_a_state(rootA.string());
+    expect(ast.done && ast.loci_draft.size() == 1, "a_state loci");
+
+    // P5: LSP tools denied in explore_b; local get_code_of allowed via apply_tool path
+    // (explore_a already blocks tools). Re-enter explore_b after plan — still no LSP.
+    expect(!tuide::Level2Session::tool_allowed_in_phase("hover", "explore_b"),
+           "hover denied in explore_b");
+    expect(!tuide::Level2Session::tool_allowed_in_phase("workspace_symbols", "explore_a"),
+           "workspace_symbols denied in explore_a");
+    expect(tuide::Level2Session::tool_allowed_in_phase("get_code_of", "explore_b"),
+           "get_code_of allowed local");
+    expect(tuide::Level2Session::tool_allowed_in_phase("hover", "edit"),
+           "hover still allowed in edit");
+
+    unsetenv("L2_FEAT_L2_EXPLORE_PHASE_A");
+    fs::remove_all(rootA, ec);
+  }
+
+  {
+    // P5: A→B with registry that has NO LSP tools (clangd absent).
+    setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "1", 1);
+    const fs::path rootN = fs::temp_directory_path() / "tuide_l2_no_lsp_test";
+    std::error_code ec;
+    fs::remove_all(rootN, ec);
+    fs::create_directories(rootN / ".tuide" / "ai", ec);
+    fs::create_directories(rootN / "src", ec);
+    {
+      std::ofstream map(rootN / ".tuide" / "ai" / "map_last.md");
+      map << "# Ranked map\n\nquery: wake\n\n1. src/wake.cpp:1 — `should_wake`\n";
+    }
+    {
+      std::ofstream f(rootN / "src" / "wake.cpp");
+      f << "bool should_wake() { return true; }\n";
+    }
+    ToolRegistry toolsN;
+    // Intentionally no hover / workspace_symbols / definition.
+    toolsN.register_tool("get_code_of", "local", [](const std::string& arg) {
+      return AiToolResult{true, "bool should_wake() { return true; }\n — " + arg};
+    });
+    toolsN.register_tool("file_outline", "local", [](const std::string& arg) {
+      return AiToolResult{true, "should_wake @1\n — " + arg};
+    });
+    toolsN.register_tool("search", "local",
+                         [](const std::string&) { return AiToolResult{true, "src/wake.cpp:1\n"}; });
+    Level2Session sessionN(Level2SessionDeps{&toolsN, {}, {}});
+    Level2BootstrapOpts bN;
+    bN.workspace_root = rootN.string();
+    bN.query = "wake policy";
+    bN.instruction = "fix should_wake";
+    std::string errN;
+    expect(sessionN.bootstrap(bN, &errN), "no-lsp bootstrap " + errN);
+
+    std::vector<tuide::AQueueBuildInput> rankedN;
+    {
+      tuide::AQueueBuildInput in;
+      in.file = "src/wake.cpp";
+      in.name = "should_wake";
+      in.line = 1;
+      in.score = 100;
+      in.body_lines = 3;
+      rankedN.push_back(in);
+    }
+    expect(sessionN.seed_a_queue(rootN.string(), rankedN).ok, "no-lsp seed");
+    expect(!sessionN.build_a_peek_tranche_markdown(rootN.string()).empty(), "no-lsp peek");
+
+    std::vector<tuide::AVerdict> vsN;
+    {
+      tuide::AVerdict v;
+      v.target = "src/wake.cpp:should_wake";
+      v.verdict = tuide::AVerdictKind::Useful;
+      v.anchor = "src/wake.cpp:should_wake";
+      v.stem = "wake";
+      v.role = tuide::ALocusRole::Primary;
+      v.why = "policy";
+      vsN.push_back(v);
+    }
+    {
+      tuide::AVerdict v;
+      v.target = "src/wake.cpp:noise";
+      v.verdict = tuide::AVerdictKind::Reject;
+      v.stem = "wake";
+      v.why = "not the gate";
+      vsN.push_back(v);
+    }
+    expect(sessionN.apply_a_judge(rootN.string(), vsN, false).ok, "no-lsp judge");
+
+    std::vector<tuide::ALocus> lociN;
+    {
+      tuide::ALocus loc;
+      loc.stem = "wake";
+      loc.anchor = "src/wake.cpp:should_wake";
+      loc.role = tuide::ALocusRole::Primary;
+      lociN.push_back(loc);
+    }
+    expect(sessionN.apply_a_done(rootN.string(), lociN, "locked").ok, "no-lsp a_done");
+    const auto planN = sessionN.apply_plan(rootN.string(), {}, "from loci");
+    expect(planN.ok, "no-lsp plan " + planN.error);
+    expect(fs::exists(rootN / ".tuide" / "ai" / "l2" / "pack.md", ec), "no-lsp pack");
+
+    // LSP tool must be rejected even if somehow registered later
+    toolsN.register_tool("hover", "lsp",
+                         [](const std::string&) { return AiToolResult{true, "should not run"}; });
+    const auto hover = sessionN.apply_tool(rootN.string(), "hover", "src/wake.cpp:1:0");
+    expect(!hover.ok || hover.error.find("LSP") != std::string::npos ||
+               hover.error.find("no permitido") != std::string::npos,
+           "no-lsp hover blocked");
+
+    unsetenv("L2_FEAT_L2_EXPLORE_PHASE_A");
+    fs::remove_all(rootN, ec);
   }
 
   if (failures == 0) {

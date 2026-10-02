@@ -1,0 +1,32 @@
+The user wants to restore the exact state of the editor when reopening a project: cursor position, open files, and visible/closed side panels.
+I have already investigated the cursor position (T1, T2, T3).
+T3 confirmed that the cursor position is saved and restored via `Editor Snapshot` (which contains `Multi Cursor` -> `Cursor Pos`) and pushed to `undo stack` / `redo stack` in `Editor Buffer`.
+The claim has two other parts: "qué archivos tenía abiertos" (which files were open) and "si tenía algún panel lateral visible o cerrado" (if
+---- content ----
+{
+  "action": "control_v1",
+  "do": "plan",
+  "modo": "romper",
+  "fases": [
+    {
+      "id": "A",
+      "kind": "locator",
+      "consulta": "dónde se guarda la lista de archivos abiertos al cerrar el proyecto"
+    },
+    {
+      "id": "B",
+      "kind": "locator",
+      "consulta": "dónde se restaura la lista de archivos abiertos al abrir el proyecto"
+    },
+    {
+      "id": "P",
+      "kind": "puente",
+      "need": [
+        "A",
+        "B"
+      ],
+      "consulta": "hay camino guardar y restaurar la lista de archivos abiertos"
+    }
+  ],
+  "why": "el cursor está cerrado; ahora cazo el segundo polo del ancla: los archivos abiertos. rompo en guardar, restaurar y puente para confirmar el mecanismo de persistencia de la sesión de archivos."
+}

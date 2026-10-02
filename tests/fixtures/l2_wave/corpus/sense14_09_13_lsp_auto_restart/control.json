@@ -1,0 +1,131 @@
+{
+  "agujas": [],
+  "amplió": false,
+  "bosquejos": 0,
+  "cerró": true,
+  "circuit": true,
+  "consulta": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+  "induce": "miss-answer",
+  "jobs": [
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde y se programa su reinicio",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 1,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/lsp/lsp_client.cpp:start",
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "cómo se reinicia el servidor LSP automáticamente tras detectar que se ha caído o no responde",
+      "keep": [
+        "M3",
+        "M6"
+      ],
+      "n": 2,
+      "proposes": 6,
+      "visto": [
+        "src/lsp/lsp_client.cpp:on_transport_reader_eof",
+        "src/lsp/lsp_client.cpp:stop",
+        "src/lsp/lsp_client.cpp:start",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:schedule_debounced_lsp_restart"
+      ]
+    },
+    {
+      "cerró": true,
+      "consulta": "dónde se detecta que el servidor LSP deja de responder y se programa su reinicio",
+      "keep": [
+        "M1",
+        "M2"
+      ],
+      "n": 3,
+      "proposes": 8,
+      "visto": [
+        "src/app/application.cpp:schedule_debounced_lsp_restart",
+        "src/lsp/lsp_transport.cpp:stop",
+        "src/app/application.cpp:restart_lsp_for_workspace",
+        "src/app/application.cpp:run"
+      ]
+    }
+  ],
+  "jobs_run": 3,
+  "piloto": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "script": "",
+  "turns": [
+    {
+      "consulta": "dónde se detecta que el servidor LSP se ha caído o no responde y se programa su reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP se ha caído o no responde y se programa su reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "reinicio lsp"
+      ],
+      "ids": [],
+      "jobs_before": 0,
+      "ok": true,
+      "turn": 1,
+      "why": "M5 tiene 'schedule debounced lsp restart' y 'pending lsp restart'; necesito ver qué dispara esto y cómo se detecta la caída"
+    },
+    {
+      "consulta": "cómo se reinicia el servidor LSP automáticamente tras detectar que se ha caído o no responde",
+      "consultas": [
+        "cómo se reinicia el servidor LSP automáticamente tras detectar que se ha caído o no responde"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "lsp for workspace"
+      ],
+      "ids": [],
+      "jobs_before": 1,
+      "ok": true,
+      "turn": 2,
+      "why": "T1 encontró el disparo (EOF) y la función de reinicio; ahora necesito ver si el reinicio se ejecuta automáticamente y cubre el caso de no respuesta"
+    },
+    {
+      "consulta": "dónde se detecta que el servidor LSP deja de responder y se programa su reinicio",
+      "consultas": [
+        "dónde se detecta que el servidor LSP deja de responder y se programa su reinicio"
+      ],
+      "do": "explorar",
+      "error": "",
+      "hacia": [
+        "health check"
+      ],
+      "ids": [],
+      "jobs_before": 2,
+      "ok": true,
+      "turn": 3,
+      "why": "T2 cerró que on transport reader eof no reinicia; el pack abre health check y ping handler como posibles detectores de no-respuesta; un hijo caza el disparo de reinicio automático"
+    },
+    {
+      "consulta": "",
+      "consultas": [],
+      "do": "cerrar",
+      "error": "",
+      "hacia": [],
+      "ids": [],
+      "jobs_before": 3,
+      "ok": true,
+      "turn": 4,
+      "why": "no existe un mecanismo de reinicio automático tras caída o no-respuesta; lo leído muestra que on transport reader eof solo limpia estado ready false sin relanzar, y las funciones de restart son invocadas manualmente o por cambios de configuración, no por el detector de fallos"
+    }
+  ],
+  "why": "no existe un mecanismo de reinicio automático tras caída o no-respuesta; lo leído muestra que on transport reader eof solo limpia estado ready false sin relanzar, y las funciones de restart son invocadas manualmente o por cambios de configuración, no por el detector de fallos",
+  "zooms": []
+}

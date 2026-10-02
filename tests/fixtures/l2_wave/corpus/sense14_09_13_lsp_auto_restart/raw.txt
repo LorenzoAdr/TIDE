@@ -1,0 +1,15 @@
+The user wants to implement automatic detection and restart of the LSP server if it crashes or becomes unresponsive.
+I have already performed 3 jobs (T1, T2, T3).
+T1 looked for detection and scheduling of restart. Found `restart lsp for workspace`, `start`, `on transport reader eof`.
+T2 looked for automatic restart mechanism. Found `on transport reader eof` only cleans state, restart functions are manual or config-based.
+T3 looked for detection of unresponsiveness and scheduling. Found `schedule debounced lsp restart`, `stop`, `restart lsp for workspace`, `run`.
+
+The "Cerrado" of T2 explicitly states: "no encontré un mecanismo de reinicio automático tras caída o no-respuesta; lo leído muestra que on transport reader eof solo limpia estado ready false sin relanzar, y las funciones de restart son invocadas manualmente o por cambios de configuración, no por el detector de fallos".
+This suggests the feature requested by the user (automatic restart on crash/unresponsiveness) does not currently exist in the codebase in the way described, or at least not in the paths explored so far.
+The "Cerrado" of T1 and T3 also
+---- content ----
+{
+  "action": "control_v1",
+  "do": "cerrar",
+  "why": "no existe un mecanismo de reinicio automático tras caída o no-respuesta; lo leído muestra que on transport reader eof solo limpia estado ready false sin relanzar, y las funciones de restart son invocadas manualmente o por cambios de configuración, no por el detector de fallos"
+}

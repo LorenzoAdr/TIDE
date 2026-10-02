@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -66,7 +67,11 @@ struct WorkspaceModel {
 
   bool active_tab_read_only() const;
   bool active_tab_large_virtual_view() const;
+  bool active_tab_pending_disk_load() const;
   bool active_tab_git_diff_view() const;
+  // True once after an async open finishes for the active tab; editor consumes
+  // it to fire LSP didOpen / tree-sitter prepare with the real document text.
+  bool consume_document_open_notify();
   const std::vector<SideBySideDiffRow>& active_diff_rows() const;
   bool open_git_diff_tab(const std::string& absolute_path, GitService* git);
   bool revert_git_diff_block(int block_index, GitService* git);
@@ -77,7 +82,7 @@ struct WorkspaceModel {
   bool reload_active_tab_from_disk();
   // Record that we have seen disk mtime for path (e.g. after dismissing the conflict).
   void acknowledge_external_disk_mtime(const std::string& absolute_path, std::int64_t mtime_sec);
-  void preview_markdown_in_browser(const std::string& absolute_path);
+  void preview_in_browser(const std::string& absolute_path);
 
  private:
   void refresh_git_diff_tabs_for_path(const std::string& absolute_path, GitService* git);
@@ -101,10 +106,15 @@ struct WorkspaceModel {
                                    const std::string& absolute_path);
   int open_new_tab_from_disk(const std::string& absolute_path, bool external,
                              bool force_full_load = false);
+  void start_async_disk_load(const std::string& absolute_path, uint64_t generation);
+  void apply_async_disk_load(const std::string& absolute_path, uint64_t generation,
+                             std::vector<std::string> lines, bool ok);
   void touch_tab_mru(const std::string& absolute_path);
   void remove_tab_mru(const std::string& absolute_path);
 
   PendingOpenAt pending_open_at_;
+  std::atomic<uint64_t> disk_load_generation_{0};
+  bool document_open_notify_pending_ = false;
 };
 
 }  // namespace tuide

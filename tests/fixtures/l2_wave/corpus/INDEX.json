@@ -1,0 +1,10 @@
+{
+  "n": 577,
+  "dest": "/home/lorenzo/workspace/TIDE/tests/fixtures/l2_wave/corpus",
+  "meta": {
+    "commit": "d1be1c5",
+    "branch": "feature/IA",
+    "model": "qwen2.5-coder-14b-instruct-q4_k_m",
+    "induce": "miss-answer"
+  }
+}

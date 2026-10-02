@@ -56,6 +56,9 @@ enum class UiWakeReason {
   FindMatchesUpdated,
   FilePickerPreview,
   VisualHighlightSync,
+  LspFormat,
+  LspNavigation,
+  LspRename,
 };
 
 struct UiWakeSpec {
@@ -97,6 +100,12 @@ inline UiWakeSpec ui_wake_spec(UiWakeReason reason) {
       return {"file_picker.preview", UiEventKind::InputCorrelated};
     case UiWakeReason::VisualHighlightSync:
       return {"editor.visual_highlight", UiEventKind::InputCorrelated};
+    case UiWakeReason::LspFormat:
+      return {"lsp.format", UiEventKind::InputCorrelated};
+    case UiWakeReason::LspNavigation:
+      return {"lsp.navigation", UiEventKind::InputCorrelated};
+    case UiWakeReason::LspRename:
+      return {"lsp.rename", UiEventKind::InputCorrelated};
   }
   return {"wake", UiEventKind::InputCorrelated};
 }

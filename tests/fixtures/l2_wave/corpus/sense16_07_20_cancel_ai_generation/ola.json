@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "control: un leído no cierra el ancla; no refuta el existe",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": false,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "el polo de disparo (Escape o clic fuera) no existe en el código; la cancelación solo responde al comando de texto 'cancel'. sin disparo, el efecto de limpieza no se activa por esos gestos. el claim se refuta."
+}

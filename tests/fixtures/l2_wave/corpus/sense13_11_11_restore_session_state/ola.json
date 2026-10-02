@@ -1,0 +1,16 @@
+{
+  "consulta": "",
+  "consultas": [],
+  "do": "cerrar",
+  "error": "",
+  "evita": [],
+  "hacia": [],
+  "ids": [],
+  "ok": true,
+  "plan": {
+    "committed": false,
+    "fases": [],
+    "modo": ""
+  },
+  "why": "los tres locadores fallaron: no se halló el mecanismo de guardado de posición, lista de archivos ni estado de paneles al cerrar el editor; el pack no une un barrio que persista el estado completo del workspace"
+}

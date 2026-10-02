@@ -25,6 +25,38 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
+find_package(SQLite3 QUIET)
+if(SQLite3_FOUND)
+  set(TUIDE_SQLITE_LIB SQLite::SQLite3)
+else()
+  # FETCHCONTENT_FULLY_DISCONNECTED=ON en este árbol: no usar FetchContent.
+  set(_tuide_sqlite_dir "${CMAKE_BINARY_DIR}/_deps/sqlite_amalgamation-src")
+  if(NOT EXISTS "${_tuide_sqlite_dir}/sqlite3.c")
+    set(_tuide_sqlite_zip "${CMAKE_BINARY_DIR}/_deps/sqlite-amalgamation-3460100.zip")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
+    message(STATUS "Downloading SQLite amalgamation 3.46.1…")
+    file(DOWNLOAD
+      "https://www.sqlite.org/2024/sqlite-amalgamation-3460100.zip"
+      "${_tuide_sqlite_zip}"
+      SHOW_PROGRESS
+      TLS_VERIFY ON
+      STATUS _tuide_sqlite_dl)
+    list(GET _tuide_sqlite_dl 0 _tuide_sqlite_dl_code)
+    if(NOT _tuide_sqlite_dl_code EQUAL 0)
+      message(FATAL_ERROR "SQLite amalgamation download failed: ${_tuide_sqlite_dl}")
+    endif()
+    file(ARCHIVE_EXTRACT INPUT "${_tuide_sqlite_zip}" DESTINATION "${CMAKE_BINARY_DIR}/_deps")
+    file(RENAME "${CMAKE_BINARY_DIR}/_deps/sqlite-amalgamation-3460100" "${_tuide_sqlite_dir}")
+  endif()
+  add_library(tuide_sqlite3 STATIC "${_tuide_sqlite_dir}/sqlite3.c")
+  target_include_directories(tuide_sqlite3 PUBLIC "${_tuide_sqlite_dir}")
+  set_target_properties(tuide_sqlite3 PROPERTIES C_STANDARD 99)
+  if(UNIX)
+    target_link_libraries(tuide_sqlite3 PUBLIC m ${CMAKE_DL_LIBS})
+  endif()
+  set(TUIDE_SQLITE_LIB tuide_sqlite3)
+endif()
+
 set(TUIDE_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_SOURCE_DIR}/lib/include
   ${tree_sitter_cpp_SOURCE_DIR}/bindings/c
@@ -74,6 +106,7 @@ set(TUIDE_TREE_SITTER_SOURCES
   src/parser/tree_sitter_blocks.cpp
   src/parser/tree_sitter_completion.cpp
   src/parser/tree_sitter_service.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/symbols/symbol_utils.cpp
   src/util/syntax_highlight.cpp
   src/util/syntax_scope.cpp
@@ -162,6 +195,7 @@ add_executable(tuide
   src/ui/lsp_missing_toast.cpp
   src/ui/ai_missing_toast.cpp
   src/ui/shortcuts_modal.cpp
+  src/ui/console_expand_overlay.cpp
   src/ui/settings_modal.cpp
   src/ui/source_substitute_modal.cpp
   src/ui/theme.cpp
@@ -212,6 +246,7 @@ add_executable(tuide
   src/parser/tree_sitter_blocks.cpp
   src/parser/tree_sitter_completion.cpp
   src/parser/tree_sitter_service.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/util/syntax_highlight.cpp
   src/util/syntax_scope.cpp
   src/util/clang_format_config.cpp
@@ -329,12 +364,23 @@ add_executable(tuide
   src/ai/coding_symbol_embed_index.cpp
   src/ai/model_store.cpp
   src/ai/ai_packages.cpp
+  src/ai/action_json.cpp
   src/ai/llama_backend.cpp
   src/ai/level1_action.cpp
   src/ai/level1_agent.cpp
   src/ai/level2_session.cpp
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_causal.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_entityness.cpp
+  src/ai/l2_graph_query_profile.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_effect_registry.cpp
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
   src/ai/l2_context_budget.cpp
@@ -342,6 +388,8 @@ add_executable(tuide
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
   src/ai/level2_debrief.cpp
+  src/ai/l2_admin.cpp
+  src/ai/edit_snapshot.cpp
   src/ai/ai_controller.cpp
   src/terminal/shell_session.cpp
   src/terminal/app_session.cpp
@@ -363,7 +411,9 @@ target_link_libraries(tuide PRIVATE
   ftxui::screen
   cppdap
   ${TUIDE_TREE_SITTER_GRAMMAR_LIBS}
+  ${TUIDE_SQLITE_LIB}
   Threads::Threads
+  ${CMAKE_DL_LIBS}
 )
 
 # Dev/default paths for Bash DAP (vscode-bash-debug + vendored bashdb_dir).
@@ -394,7 +444,9 @@ if(TUIDE_UTIL_LIBRARY)
   target_link_libraries(tuide PRIVATE ${TUIDE_UTIL_LIBRARY})
 endif()
 
-if(UNIX)
+if(APPLE)
+  target_link_options(tuide PRIVATE "-Wl,-export_dynamic")
+elseif(UNIX)
   target_link_options(tuide PRIVATE -rdynamic)
 endif()
 
@@ -707,6 +759,22 @@ target_include_directories(external_viewer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(markdown_html_test
+  tests/markdown_html_test.cpp
+  tests/markdown_highlight_stub.cpp
+  src/util/markdown_html.cpp
+)
+target_include_directories(markdown_html_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+  ${cppdap_SOURCE_DIR}/include
+  ${cppdap_SOURCE_DIR}/third_party/json/include
+)
+target_link_libraries(markdown_html_test PRIVATE
+  tree-sitter
+  ftxui::dom
+)
+
 add_executable(tabular_file_test
   tests/tabular_file_test.cpp
   src/util/tabular_file.cpp
@@ -848,9 +916,14 @@ add_executable(level2_session_test
   src/ai/level2_session.cpp
   src/ai/l2_context_budget.cpp
   src/ai/l2_pack_review.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
+  tests/l2_explore_a_trail_stub.cpp
+  tests/l2_registry_entityness_stub.cpp
 )
 target_include_directories(level2_session_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -864,11 +937,16 @@ add_executable(level2_autonomous_loop_test
   src/ai/l2_context_budget.cpp
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
+  tests/l2_explore_a_trail_stub.cpp
+  tests/l2_registry_entityness_stub.cpp
 )
 target_include_directories(level2_autonomous_loop_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -886,13 +964,145 @@ target_include_directories(l2_context_budget_test PRIVATE
 
 add_executable(l2_action_test
   tests/l2_action_test.cpp
+  tests/l2_explore_a_trail_stub.cpp
   src/ai/l2_action.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/search_replace.cpp
 )
 target_include_directories(l2_action_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
+
+add_executable(l2_problem_frame_test
+  tests/l2_problem_frame_test.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_graph_query_profile.cpp
+)
+target_include_directories(l2_problem_frame_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_entityness_test
+  tests/l2_entityness_test.cpp
+  src/ai/l2_entityness.cpp
+  src/ai/l2_graph_query_profile.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_effect_registry.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_entityness_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_entityness_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS} ${TUIDE_SQLITE_LIB})
+tuide_link_pthread(l2_entityness_test)
+
+add_executable(l2_explore_a_test
+  tests/l2_explore_a_test.cpp
+  tests/l2_explore_a_trail_stub.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
+)
+target_include_directories(l2_explore_a_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_trail_build_test
+  tests/l2_trail_build_test.cpp
+  src/ai/l2_explore_a_causal.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_trail_build_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_trail_build_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+
+add_executable(l2_effect_slice_test
+  tests/l2_effect_slice_test.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/ai/l2_problem_frame.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_effect_slice_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_effect_slice_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+
+add_executable(l2_effect_registry_test
+  tests/l2_effect_registry_test.cpp
+  src/ai/l2_effect_registry.cpp
+  src/ai/l2_cerca_wake.cpp
+  src/ai/l2_graph_query_profile.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_effect_registry_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_effect_registry_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS} ${TUIDE_SQLITE_LIB})
+target_compile_definitions(l2_effect_registry_test PRIVATE
+  "TUIDE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
 
 add_executable(l2_pack_review_test
   tests/l2_pack_review_test.cpp
@@ -910,9 +1120,14 @@ add_executable(level2_debrief_test
   src/ai/level2_session.cpp
   src/ai/l2_context_budget.cpp
   src/ai/l2_pack_review.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
+  tests/l2_explore_a_trail_stub.cpp
+  tests/l2_registry_entityness_stub.cpp
 )
 target_include_directories(level2_debrief_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -928,12 +1143,117 @@ target_include_directories(search_replace_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(edit_snapshot_test
+  tests/edit_snapshot_test.cpp
+  src/ai/edit_snapshot.cpp
+  src/git/git_command.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(edit_snapshot_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_think_test
+  tests/l2_think_test.cpp
+)
+target_include_directories(l2_think_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_wave_test
+  tests/l2_wave_test.cpp
+  src/ai/l2_wave.cpp
+  src/ai/action_json.cpp
+)
+target_include_directories(l2_wave_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_admin_test
+  tests/l2_admin_test.cpp
+  src/ai/l2_admin.cpp
+  src/ai/action_json.cpp
+  src/ai/search_replace.cpp
+  src/ai/l2_grammar.cpp
+  src/ai/l2_explore_a.cpp
+  # Trail real (no el stub): el binario tuide de producción enlaza la
+  # implementación real (con tree-sitter) para do=trail del explorador — usar
+  # el stub aquí habría dejado una regresión de despacho sin cobertura (el
+  # stub ignora el callback de búsqueda y siempre devuelve vacío).
+  src/ai/l2_explore_a_trail.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_problem_frame.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_admin_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_admin_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+
+add_executable(l2_catalog_test
+  tests/l2_catalog_test.cpp
+  src/ai/l2_catalog.cpp
+  src/ai/l2_wave.cpp
+  src/ai/action_json.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_catalog_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_catalog_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+
 add_executable(llama_backend_test
   tests/llama_backend_test.cpp
   src/ai/llama_backend.cpp
+  src/ai/action_json.cpp
   src/ai/model_store.cpp
 )
 target_include_directories(llama_backend_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(llama_host_comm_test
+  tests/llama_host_comm_test.cpp
+  src/ai/llama_backend.cpp
+  src/ai/action_json.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+)
+target_include_directories(llama_host_comm_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
@@ -946,11 +1266,27 @@ add_executable(l2_harness_cli
   src/ai/ai_path_scope.cpp
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_graph_query_profile.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_effect_registry.cpp
+  src/ai/l2_cerca_wake.cpp
+  src/ai/l2_wave.cpp
+  src/ai/l2_wave_bosquejo.cpp
+  src/ai/l2_admin.cpp
+  src/ai/l2_catalog.cpp
+  src/ai/l2_entityness.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
   src/ai/l2_brain_local.cpp
+  src/ai/l2_brain_remote.cpp
   src/ai/llama_backend.cpp
+  src/ai/action_json.cpp
   src/ai/get_code_of.cpp
   src/ai/repo_map.cpp
   src/ai/coding_embed_rerank.cpp
@@ -975,7 +1311,7 @@ target_include_directories(l2_harness_cli PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
   ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
 )
-target_link_libraries(l2_harness_cli PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+target_link_libraries(l2_harness_cli PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS} ${TUIDE_SQLITE_LIB})
 tuide_link_pthread(l2_harness_cli)
 
 add_executable(repo_map_test
@@ -1057,6 +1393,7 @@ add_executable(stem_embed_battery
   src/ai/ai_trace.cpp
   src/indexer/index_rules.cpp
   src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/symbols/symbol_utils.cpp
@@ -1088,6 +1425,7 @@ add_executable(stem_boost_battery
   src/ai/ai_path_scope.cpp
   src/indexer/index_rules.cpp
   src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/symbols/symbol_utils.cpp
@@ -1120,6 +1458,7 @@ add_executable(map_for_query_cli
   src/ai/ai_path_scope.cpp
   src/indexer/index_rules.cpp
   src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/symbols/symbol_utils.cpp
@@ -1143,8 +1482,12 @@ add_executable(l1_intent_debug_cli
   tools/l1_intent_debug_cli.cpp
   tests/tool_registry_stub.cpp
   src/ai/level1_agent.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_effect_summary.cpp
   src/ai/level1_action.cpp
   src/ai/llama_backend.cpp
+  src/ai/action_json.cpp
   src/ai/model_store.cpp
   src/ai/repo_map.cpp
   src/ai/coding_embed_rerank.cpp
@@ -1168,6 +1511,7 @@ add_executable(l1_intent_debug_cli
   src/parser/tree_sitter_locals.cpp
   src/parser/tree_sitter_blocks.cpp
   src/parser/tree_sitter_completion.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/symbols/tree_sitter_symbol_provider.cpp
   src/symbols/symbol_utils.cpp
   src/editor/editor_state.cpp
@@ -1316,9 +1660,21 @@ set(TUIDE_TEST_TARGETS
   level2_debrief_test
   l2_context_budget_test
   l2_action_test
+  l2_problem_frame_test
+  l2_entityness_test
+  l2_explore_a_test
+  l2_trail_build_test
+  l2_effect_slice_test
+  l2_effect_registry_test
   l2_pack_review_test
+  l2_think_test
+  l2_wave_test
+  l2_admin_test
+  l2_catalog_test
   search_replace_test
+  edit_snapshot_test
   llama_backend_test
+  llama_host_comm_test
   repo_map_test
   get_code_of_test
   stem_passage_test
@@ -1328,4 +1684,7 @@ set(TUIDE_TEST_TARGETS
 )
 foreach(_tuide_test_target IN LISTS TUIDE_TEST_TARGETS)
   tuide_link_pthread(${_tuide_test_target})
+  if(CMAKE_DL_LIBS)
+    target_link_libraries(${_tuide_test_target} PRIVATE ${CMAKE_DL_LIBS})
+  endif()
 endforeach()

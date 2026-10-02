@@ -1,0 +1,24 @@
+The user wants to know if the application remembers the cursor position, open files, and side panel visibility when reopening a project.
+I have a plan with 3 phases:
+1.  Cursor position (T1) -> Closed: "no found mechanism" (refuted/negative).
+2.  Open files (T2) -> Closed: "found mechanism" (confirmed).
+3.  Side panel visibility (T3) -> Closed: "no found mechanism" (refuted/negative).
+
+The current state is after T3.
+T3 asked: "dónde se restaura la visibilidad de los paneles laterales al iniciar la sesión".
+T3 result: "no encontré el mecanismo... lo leído... solo gestiona la apertura de archivos... sin tocar la visibilidad de paneles laterales".
+
+The user's anchor has 3 poles:
+1.  Cursor position (T1: negative)
+2.  Open files (T2: positive)
+3.  Side panel visibility (T3: negative)
+
+The plan is effectively finished. I have results for all 3 poles.
+T1: No mechanism found for cursor position restoration.
+T2: Mechanism found for
+---- content ----
+{
+"action": "control_v1",
+"do": "cerrar",
+"why": "el plan cubre los tres polos del ancla: posición del cursor (no se restaura), archivos abiertos (se restauran en restore workspace session), y visibilidad de paneles laterales (no se restaura). el claim se refuta parcialmente: solo los archivos se recuerdan."
+}
