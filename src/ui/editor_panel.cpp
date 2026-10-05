@@ -3687,17 +3687,23 @@ bool try_go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
           if (!polled) {
             return;
           }
-          layout_state->lsp_interactive_ready_handler = nullptr;
-          clear_busy_if(layout_state, BusyActivity::LspNavigate);
+          // The handler lives on the heap inside std::function. Dropping it
+          // frees these captures; copy them out before that.
+          WorkspaceModel* const nav_workspace = workspace;
+          MainLayoutState* const nav_layout = layout_state;
+          const bool nav_declaration = declaration;
+          const int nav_visible = visible_lines;
+          nav_layout->lsp_interactive_ready_handler = nullptr;
+          clear_busy_if(nav_layout, BusyActivity::LspNavigate);
           if (!polled->loc.valid) {
-            if (workspace != nullptr) {
-              workspace->status_message = declaration ? i18n::tr("status.no_declaration")
-                                                      : i18n::tr("status.no_definition");
+            if (nav_workspace != nullptr) {
+              nav_workspace->status_message = nav_declaration ? i18n::tr("status.no_declaration")
+                                                              : i18n::tr("status.no_definition");
             }
             return;
           }
-          apply_editor_navigation(layout_state, polled->loc, [&](const SourceLocation& target) {
-            navigate_to_location(workspace, layout_state, target, visible_lines);
+          apply_editor_navigation(nav_layout, polled->loc, [&](const SourceLocation& target) {
+            navigate_to_location(nav_workspace, nav_layout, target, nav_visible);
           });
         };
     if (!symbols->request_navigation(params, kind, request_id)) {

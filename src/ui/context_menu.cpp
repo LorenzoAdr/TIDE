@@ -639,8 +639,11 @@ bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_stat
           if (!polled) {
             return;
           }
-          layout_state->lsp_interactive_ready_handler = nullptr;
-          apply_format_async_result(workspace, layout_state, symbols, *polled);
+          WorkspaceModel* const fmt_workspace = workspace;
+          MainLayoutState* const fmt_layout = layout_state;
+          const std::shared_ptr<ISymbolProvider> fmt_symbols = symbols;
+          fmt_layout->lsp_interactive_ready_handler = nullptr;
+          apply_format_async_result(fmt_workspace, fmt_layout, fmt_symbols, *polled);
         };
     if (!symbols->request_format(params, request_id)) {
       layout_state->lsp_interactive_ready_handler = nullptr;
@@ -723,8 +726,11 @@ bool format_selection_at_path(WorkspaceModel* workspace, MainLayoutState* layout
           if (!polled) {
             return;
           }
-          layout_state->lsp_interactive_ready_handler = nullptr;
-          apply_format_async_result(workspace, layout_state, symbols, *polled);
+          WorkspaceModel* const fmt_workspace = workspace;
+          MainLayoutState* const fmt_layout = layout_state;
+          const std::shared_ptr<ISymbolProvider> fmt_symbols = symbols;
+          fmt_layout->lsp_interactive_ready_handler = nullptr;
+          apply_format_async_result(fmt_workspace, fmt_layout, fmt_symbols, *polled);
         };
     if (!symbols->request_format_range(params, request_id, keep_line, keep_col)) {
       layout_state->lsp_interactive_ready_handler = nullptr;
@@ -790,17 +796,21 @@ bool go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
           if (!polled) {
             return;
           }
-          layout_state->lsp_interactive_ready_handler = nullptr;
-          clear_busy_if(layout_state, BusyActivity::LspNavigate);
+          WorkspaceModel* const nav_workspace = workspace;
+          MainLayoutState* const nav_layout = layout_state;
+          const bool nav_declaration = declaration;
+          const int nav_visible = visible_lines;
+          nav_layout->lsp_interactive_ready_handler = nullptr;
+          clear_busy_if(nav_layout, BusyActivity::LspNavigate);
           if (!polled->loc.valid) {
-            if (workspace != nullptr) {
-              workspace->status_message = declaration ? i18n::tr("status.no_declaration")
-                                                      : i18n::tr("status.no_definition");
+            if (nav_workspace != nullptr) {
+              nav_workspace->status_message = nav_declaration ? i18n::tr("status.no_declaration")
+                                                              : i18n::tr("status.no_definition");
             }
             return;
           }
-          apply_editor_navigation(layout_state, polled->loc, [&](const SourceLocation& target) {
-            navigate_to_location(workspace, layout_state, target, visible_lines);
+          apply_editor_navigation(nav_layout, polled->loc, [&](const SourceLocation& target) {
+            navigate_to_location(nav_workspace, nav_layout, target, nav_visible);
           });
         };
     if (!symbols->request_navigation(params, kind, request_id)) {
@@ -848,16 +858,20 @@ bool go_to_implementation(WorkspaceModel* workspace, MainLayoutState* layout_sta
           if (!polled) {
             return;
           }
-          layout_state->lsp_interactive_ready_handler = nullptr;
-          clear_busy_if(layout_state, BusyActivity::LspNavigate);
-          if (!polled->loc.valid || navigation_at_same_spot(polled->loc, params)) {
-            if (workspace != nullptr) {
-              workspace->status_message = i18n::tr("status.no_definition");
+          WorkspaceModel* const nav_workspace = workspace;
+          MainLayoutState* const nav_layout = layout_state;
+          const int nav_visible = visible_lines;
+          const NavigationParams nav_params = params;
+          nav_layout->lsp_interactive_ready_handler = nullptr;
+          clear_busy_if(nav_layout, BusyActivity::LspNavigate);
+          if (!polled->loc.valid || navigation_at_same_spot(polled->loc, nav_params)) {
+            if (nav_workspace != nullptr) {
+              nav_workspace->status_message = i18n::tr("status.no_definition");
             }
             return;
           }
-          apply_editor_navigation(layout_state, polled->loc, [&](const SourceLocation& target) {
-            navigate_to_location(workspace, layout_state, target, visible_lines);
+          apply_editor_navigation(nav_layout, polled->loc, [&](const SourceLocation& target) {
+            navigate_to_location(nav_workspace, nav_layout, target, nav_visible);
           });
         };
     if (!symbols->request_navigation(params, NavigationRequestKind::Implementation, request_id)) {
@@ -929,27 +943,37 @@ bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
           if (!polled) {
             return;
           }
-          layout_state->lsp_interactive_ready_handler = nullptr;
-          clear_busy_if(layout_state, BusyActivity::LspRename);
+          WorkspaceModel* const ren_workspace = workspace;
+          MainLayoutState* const ren_layout = layout_state;
+          const std::shared_ptr<ISymbolProvider> ren_symbols = symbols;
+          DebugModel* const ren_model = model;
+          SymbolWorkspaceIndexer* const ren_indexer = symbol_indexer;
+          const std::string ren_path = nav_path;
+          const int ren_line = nav_line;
+          const int ren_col = nav_col;
+          const std::string ren_old = old_name;
+          const std::string ren_to = renamed_to;
+          ren_layout->lsp_interactive_ready_handler = nullptr;
+          clear_busy_if(ren_layout, BusyActivity::LspRename);
           if (!polled->ok || polled->edits.empty()) {
-            if (workspace != nullptr) {
-              workspace->status_message = i18n::tr("status.rename_failed");
+            if (ren_workspace != nullptr) {
+              ren_workspace->status_message = i18n::tr("status.rename_failed");
             }
             return;
           }
           std::string status;
-          if (!apply_workspace_file_edits(workspace, model, symbols, symbol_indexer, polled->edits,
-                                          nav_path, nav_line, nav_col, &status)) {
-            if (workspace != nullptr) {
-              workspace->status_message =
+          if (!apply_workspace_file_edits(ren_workspace, ren_model, ren_symbols, ren_indexer,
+                                          polled->edits, ren_path, ren_line, ren_col, &status)) {
+            if (ren_workspace != nullptr) {
+              ren_workspace->status_message =
                   status.empty() ? i18n::tr("status.rename_failed") : status;
             }
             return;
           }
-          if (workspace != nullptr) {
-            workspace->status_message = i18n::tr_fmt(
+          if (ren_workspace != nullptr) {
+            ren_workspace->status_message = i18n::tr_fmt(
                 "status.renamed",
-                {old_name, renamed_to, std::to_string(polled->edits.size())});
+                {ren_old, ren_to, std::to_string(polled->edits.size())});
           }
         };
     if (!symbols->request_rename(params, request_id)) {

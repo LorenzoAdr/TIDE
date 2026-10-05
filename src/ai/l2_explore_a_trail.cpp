@@ -687,6 +687,15 @@ ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel
         if (ctrl_start == 0) {
           ctrl_start = static_cast<int>(ts_node_start_point(n).row) + 1;
           ctrl_end = static_cast<int>(ts_node_end_point(n).row) + 1;
+          if (std::strcmp(t, "if_statement") == 0) {
+            TSNode alt = ts_node_child_by_field_name(n, "alternative", 11);
+            if (!ts_node_is_null(alt) && !ts_node_is_null(leaf)) {
+              const uint32_t site = ts_node_start_byte(leaf);
+              const uint32_t a = ts_node_start_byte(alt);
+              const uint32_t b = ts_node_end_byte(alt);
+              hop.control_in_else = site >= a && site < b;
+            }
+          }
         }
       }
       if (is_fn_type(t)) {
@@ -734,6 +743,9 @@ ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel
   }
   (void)fn_ast;
 
+  if (ctrl_start > 0) {
+    hop.control_line = ctrl_start;
+  }
   if (!controls_inner_to_outer.empty()) {
     hop.control_kind = controls_inner_to_outer.front();
     std::ostringstream cc;

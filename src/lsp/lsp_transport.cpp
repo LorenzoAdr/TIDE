@@ -1,8 +1,10 @@
 #include "lsp/lsp_transport.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <fcntl.h>
 #include <poll.h>
 #include <sstream>
 #include <unistd.h>
@@ -52,6 +54,13 @@ bool LspTransport::start(int stdin_write_fd, int stdout_read_fd) {
   }
   stdin_fd_ = stdin_write_fd;
   stdout_fd_ = stdout_read_fd;
+  // Non-blocking stdin so a language server that stops reading (SIGSTOP, or
+  // waiting on a client reply) cannot wedge ::write forever. stop() flips
+  // running_ and the writer leaves the poll loop instead of hanging join().
+  const int flags = ::fcntl(stdin_fd_, F_GETFL, 0);
+  if (flags >= 0) {
+    ::fcntl(stdin_fd_, F_SETFL, flags | O_NONBLOCK);
+  }
   {
     std::lock_guard<std::mutex> lock(write_queue_mutex_);
     outbound_.clear();
@@ -127,6 +136,58 @@ uint64_t LspTransport::enqueue_message(std::string payload) {
   return seq;
 }
 
+uint64_t LspTransport::enqueue_message_front(std::string payload) {
+  std::lock_guard<std::mutex> lock(write_queue_mutex_);
+  if (!running_.load(std::memory_order_acquire) || stdin_fd_ < 0) {
+    return 0;
+  }
+  const uint64_t seq = next_write_seq_++;
+  outbound_.push_front(OutboundMessage{std::move(payload), seq});
+  write_cv_.notify_one();
+  return seq;
+}
+
+bool LspTransport::write_all(const char* data, std::size_t len) {
+  std::size_t off = 0;
+  while (off < len) {
+    if (!running_.load(std::memory_order_acquire) || stdin_fd_ < 0) {
+      return false;
+    }
+    pollfd pfd{};
+    pfd.fd = stdin_fd_;
+    pfd.events = POLLOUT;
+    const int rc = ::poll(&pfd, 1, 50);
+    if (!running_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    if (rc < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return false;
+    }
+    if (rc == 0) {
+      continue;
+    }
+    if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 &&
+        (pfd.revents & POLLOUT) == 0) {
+      return false;
+    }
+    const ssize_t n = ::write(stdin_fd_, data + off, len - off);
+    if (n < 0) {
+      if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+        continue;
+      }
+      return false;
+    }
+    if (n == 0) {
+      return false;
+    }
+    off += static_cast<std::size_t>(n);
+  }
+  return true;
+}
+
 bool LspTransport::write_message(const std::string& payload) {
   return enqueue_message(payload) != 0;
 }
@@ -141,15 +202,13 @@ bool LspTransport::write_bytes(const std::string& payload) {
   if (stdin_fd_ < 0) {
     return false;
   }
-  if (::write(stdin_fd_, header.data(), header.size()) !=
-      static_cast<ssize_t>(header.size())) {
+  if (!write_all(header.data(), header.size())) {
     return false;
   }
   if (payload.empty()) {
     return true;
   }
-  return ::write(stdin_fd_, payload.data(), payload.size()) ==
-         static_cast<ssize_t>(payload.size());
+  return write_all(payload.data(), payload.size());
 }
 
 void LspTransport::writer_loop() {
@@ -171,7 +230,7 @@ void LspTransport::writer_loop() {
     const bool ok = write_bytes(message.payload);
     {
       std::lock_guard<std::mutex> lock(write_queue_mutex_);
-      last_written_seq_ = message.seq;
+      last_written_seq_ = std::max(last_written_seq_, message.seq);
       if (!ok) {
         // Drop the rest; the process/pipe is likely dead.
         outbound_.clear();
@@ -188,13 +247,30 @@ void LspTransport::writer_loop() {
 
 bool LspTransport::flush_writes(int timeout_ms) {
   uint64_t target = 0;
+  // Priority replies can complete with a higher seq before older notifications.
+  // A seq is flushed only when it has been written and nothing at or before it
+  // is still queued.
+  auto caught_up = [&] {
+    if (!running_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    if (last_written_seq_ < target) {
+      return false;
+    }
+    for (const OutboundMessage& message : outbound_) {
+      if (message.seq <= target) {
+        return false;
+      }
+    }
+    return true;
+  };
   {
     std::lock_guard<std::mutex> lock(write_queue_mutex_);
     if (next_write_seq_ <= 1) {
       return true;
     }
     target = next_write_seq_ - 1;
-    if (last_written_seq_ >= target && outbound_.empty()) {
+    if (caught_up()) {
       return true;
     }
   }
@@ -206,9 +282,9 @@ bool LspTransport::flush_writes(int timeout_ms) {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   const bool signaled = write_progress_cv_.wait_until(lock, deadline, [&] {
-    return last_written_seq_ >= target || !running_.load(std::memory_order_acquire);
+    return caught_up() || !running_.load(std::memory_order_acquire);
   });
-  return signaled && last_written_seq_ >= target;
+  return signaled && caught_up();
 }
 
 std::optional<std::string> LspTransport::read_message(ReadFailKind* fail_kind) {
@@ -458,7 +534,7 @@ bool LspTransport::write_response(const nlohmann::json& id, nlohmann::json resul
     return false;
   }
   nlohmann::json response = {{"jsonrpc", "2.0"}, {"id", id}, {"result", std::move(result)}};
-  return write_message(response.dump());
+  return enqueue_message_front(response.dump()) != 0;
 }
 
 bool LspTransport::wait_response(int id, int timeout_ms, nlohmann::json* out) {

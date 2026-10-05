@@ -56,6 +56,10 @@ class LspTransport {
   // Enqueue JSON payload for the writer thread. Returns the assigned sequence
   // number, or 0 on failure. Callers no longer block on ::write.
   uint64_t enqueue_message(std::string payload);
+  // Same, but ahead of notifications already queued. Used for server→client
+  // replies so a large didOpen cannot stall clangd waiting on that reply.
+  uint64_t enqueue_message_front(std::string payload);
+  bool write_all(const char* data, std::size_t len);
   bool write_message(const std::string& payload);
   bool write_bytes(const std::string& payload);
   std::optional<std::string> read_message(ReadFailKind* fail_kind = nullptr);

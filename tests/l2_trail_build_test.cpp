@@ -337,7 +337,14 @@ void test_causal_flow_write_caller_chain() {
     expect(leaf->kind == tuide::ACausalNodeKind::Write, "leaf is the write");
     expect(leaf->line == 3, "write line");
     expect(leaf->preview.find("ready_") != std::string::npos, "write preview");
-    expect(leaf->detail.find("Active") != std::string::npos, "write cond");
+    bool saw_active = leaf->detail.find("Active") != std::string::npos;
+    for (const tuide::ACausalFlowNode* step : write_path) {
+      if (step->name.find("Active") != std::string::npos ||
+          step->detail.find("Active") != std::string::npos) {
+        saw_active = true;
+      }
+    }
+    expect(saw_active, "write cond");
   }
 
   std::vector<const tuide::ACausalFlowNode*> down;
@@ -461,6 +468,279 @@ void test_causal_flow_call_climbs_condition() {
   std::filesystem::remove_all(root);
 }
 
+void test_causal_flow_else_uses_local_binding() {
+  char tmpl[] = "/tmp/tuide-causal-else-XXXXXX";
+  char* made = mkdtemp(tmpl);
+  expect(made != nullptr, "temp else workspace");
+  if (made == nullptr) {
+    return;
+  }
+  const std::filesystem::path root = made;
+  std::filesystem::create_directories(root / "src");
+  {
+    std::ofstream out(root / "src" / "host.cpp");
+    out << "void host() {\n"
+           "  const bool ok = start_docker_container(container);\n"
+           "  run([ok]() {\n"
+           "    if (ok) {\n"
+           "      use();\n"
+           "    } else {\n"
+           "      go();\n"
+           "    }\n"
+           "  });\n"
+           "}\n";
+  }
+  auto search = [](const std::string&) -> std::vector<tuide::ATrailSearchHit> {
+    return {};
+  };
+  const tuide::ACausalFlowTree tree = tuide::a_causal_flow_build(
+      root.string(), "go", "src/host.cpp", search, tuide::kACausalFlowMaxWrites,
+      tuide::kACausalMaxChains, tuide::kACausalUpstreamDepth, 7);
+
+  bool saw_else = false;
+  bool saw_binding = false;
+  bool saw_host = false;
+  const auto walk = [&](auto&& self, const tuide::ACausalFlowNode& node) -> void {
+    if (node.name.find("else") != std::string::npos && node.name.find("ok") != std::string::npos) {
+      saw_else = true;
+      expect(node.line == 4, "else guard points at the if");
+    }
+    if (node.name.find("start_docker_container") != std::string::npos) {
+      saw_binding = true;
+      expect(node.line == 2, "local binding line");
+    }
+    if (node.name == "host") {
+      saw_host = true;
+    }
+    for (const tuide::ACausalFlowNode& child : node.children) {
+      self(self, child);
+    }
+  };
+  for (const tuide::ACausalFlowNode& child : tree.root.children) {
+    walk(walk, child);
+  }
+  expect(saw_else, "guard names the else branch");
+  expect(saw_binding, "ok climbs to its assignment");
+  expect(saw_host, "assignment sits in host");
+  std::filesystem::remove_all(root);
+}
+
+void test_causal_flow_caller_condition_opens_local() {
+  char tmpl[] = "/tmp/tuide-causal-cond-XXXXXX";
+  char* made = mkdtemp(tmpl);
+  expect(made != nullptr, "temp cond workspace");
+  if (made == nullptr) {
+    return;
+  }
+  const std::filesystem::path root = made;
+  std::filesystem::create_directories(root / "src");
+  {
+    std::ofstream out(root / "src" / "gate.cpp");
+    out << "void show() {\n"
+           "  visible = true;\n"
+           "}\n"
+           "void set_mode() {\n"
+           "  config_.mode = 1;\n"
+           "}\n"
+           "void apply() {\n"
+           "  const bool shell_restart_needed = config_.mode != 0;\n"
+           "  if (shell_restart_needed) {\n"
+           "    show();\n"
+           "  }\n"
+           "}\n";
+  }
+  auto search = [](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
+    std::vector<tuide::ATrailSearchHit> hits;
+    auto add = [&](const char* path, int line, const char* preview) {
+      tuide::ATrailSearchHit hit;
+      hit.path = path;
+      hit.line = line;
+      hit.preview = preview;
+      hits.push_back(std::move(hit));
+    };
+    if (symbol == "visible") {
+      add("src/gate.cpp", 2, "  visible = true;");
+    } else if (symbol == "show") {
+      add("src/gate.cpp", 1, "void show() {");
+      add("src/gate.cpp", 10, "    show();");
+    } else if (symbol == "config_.mode") {
+      add("src/gate.cpp", 5, "  config_.mode = 1;");
+      add("src/gate.cpp", 8, "  const bool shell_restart_needed = config_.mode != 0;");
+    } else if (symbol == "set_mode") {
+      add("src/gate.cpp", 4, "void set_mode() {");
+    }
+    return hits;
+  };
+  const tuide::ACausalFlowTree tree =
+      tuide::a_causal_flow_build(root.string(), "visible", "src/gate.cpp", search);
+  bool saw_condition = false;
+  bool saw_mode = false;
+  bool saw_set_mode = false;
+  const auto walk = [&](auto&& self, const tuide::ACausalFlowNode& node) -> void {
+    if (node.name.find("shell_restart_needed") != std::string::npos) {
+      saw_condition = true;
+    }
+    if (node.name == "config_.mode") {
+      saw_mode = true;
+    }
+    if (node.kind == tuide::ACausalNodeKind::Write && node.name == "set_mode") {
+      saw_set_mode = true;
+    }
+    for (const tuide::ACausalFlowNode& child : node.children) {
+      self(self, child);
+    }
+  };
+  walk(walk, tree.root);
+  expect(saw_condition, "caller if opens shell_restart_needed");
+  expect(saw_mode, "local binding climbs to config_.mode");
+  expect(saw_set_mode, "config_.mode climbs to set_mode");
+  std::filesystem::remove_all(root);
+}
+
+void test_causal_flow_long_member_climbs_write() {
+  char tmpl[] = "/tmp/tuide-causal-member-XXXXXX";
+  char* made = mkdtemp(tmpl);
+  expect(made != nullptr, "temp member workspace");
+  if (made == nullptr) {
+    return;
+  }
+  const std::filesystem::path root = made;
+  std::filesystem::create_directories(root / "src");
+  {
+    std::ofstream out(root / "src" / "gate.cpp");
+    out << "void show() {\n"
+           "  visible = true;\n"
+           "}\n"
+           "void set_env() {\n"
+           "  settings->active_environment_id = \"a\";\n"
+           "}\n"
+           "void apply() {\n"
+           "  const bool shell_restart_needed =\n"
+           "      previous.build_environments.active_environment_id !=\n"
+           "          config.build_environments.active_environment_id;\n"
+           "  if (shell_restart_needed) {\n"
+           "    show();\n"
+           "  }\n"
+           "}\n";
+  }
+  auto search = [](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
+    std::vector<tuide::ATrailSearchHit> hits;
+    auto add = [&](const char* path, int line, const char* preview) {
+      tuide::ATrailSearchHit hit;
+      hit.path = path;
+      hit.line = line;
+      hit.preview = preview;
+      hits.push_back(std::move(hit));
+    };
+    if (symbol == "visible") {
+      add("src/gate.cpp", 2, "  visible = true;");
+    } else if (symbol == "show") {
+      add("src/gate.cpp", 1, "void show() {");
+      add("src/gate.cpp", 12, "    show();");
+    } else if (symbol == "active_environment_id") {
+      add("src/gate.cpp", 5, "  settings->active_environment_id = \"a\";");
+      add("src/gate.cpp", 9, "      previous.build_environments.active_environment_id !=");
+    } else if (symbol == "set_env") {
+      add("src/gate.cpp", 4, "void set_env() {");
+    }
+    return hits;
+  };
+  const tuide::ACausalFlowTree tree =
+      tuide::a_causal_flow_build(root.string(), "visible", "src/gate.cpp", search);
+  bool saw_field = false;
+  bool saw_write = false;
+  const auto walk = [&](auto&& self, const tuide::ACausalFlowNode& node) -> void {
+    if (node.name == "active_environment_id") {
+      saw_field = true;
+    }
+    if (node.kind == tuide::ACausalNodeKind::Write && node.name == "set_env") {
+      saw_write = true;
+    }
+    for (const tuide::ACausalFlowNode& child : node.children) {
+      self(self, child);
+    }
+  };
+  walk(walk, tree.root);
+  expect(saw_field, "long member shows as active_environment_id");
+  expect(saw_write, "active_environment_id climbs to set_env");
+  std::filesystem::remove_all(root);
+}
+
+void test_causal_flow_call_site_without_symbol_search() {
+  char tmpl[] = "/tmp/tuide-causal-callsite-XXXXXX";
+  char* made = mkdtemp(tmpl);
+  expect(made != nullptr, "temp callsite workspace");
+  if (made == nullptr) {
+    return;
+  }
+  const std::filesystem::path root = made;
+  std::filesystem::create_directories(root / "src");
+  {
+    std::ofstream out(root / "src" / "host.cpp");
+    out << "void host() {\n"
+           "  go();\n"
+           "}\n"
+           "void other() {\n"
+           "  go();\n"
+           "}\n";
+  }
+  auto search = [](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
+    std::vector<tuide::ATrailSearchHit> hits;
+    if (symbol == "go") {
+      tuide::ATrailSearchHit decoy;
+      decoy.path = "src/host.cpp";
+      decoy.line = 5;
+      decoy.preview = "decoy_go();";
+      hits.push_back(std::move(decoy));
+    }
+    return hits;
+  };
+  const tuide::ACausalFlowTree site = tuide::a_causal_flow_build(
+      root.string(), "go", "src/host.cpp", search, tuide::kACausalFlowMaxWrites,
+      tuide::kACausalMaxChains, tuide::kACausalUpstreamDepth, 2, tuide::ACausalFlowScope::Site);
+  bool saw_host = false;
+  bool saw_call = false;
+  bool saw_decoy = false;
+  const auto walk = [&](auto&& self, const tuide::ACausalFlowNode& node) -> void {
+    if (node.name == "host") {
+      saw_host = true;
+    }
+    if (node.name.find("go()") != std::string::npos) {
+      saw_call = true;
+    }
+    if (node.name.find("decoy") != std::string::npos) {
+      saw_decoy = true;
+    }
+    for (const tuide::ACausalFlowNode& child : node.children) {
+      self(self, child);
+    }
+  };
+  for (const tuide::ACausalFlowNode& child : site.root.children) {
+    walk(walk, child);
+  }
+  expect(saw_host, "call site names the enclosing function");
+  expect(saw_call, "call site shows the clicked line");
+  expect(!saw_decoy, "site scope does not search the clicked symbol");
+
+  const tuide::ACausalFlowTree all = tuide::a_causal_flow_build(
+      root.string(), "go", "src/host.cpp", search, tuide::kACausalFlowMaxWrites,
+      tuide::kACausalMaxChains, tuide::kACausalUpstreamDepth, 2, tuide::ACausalFlowScope::Symbol);
+  bool saw_other = false;
+  const auto walk_all = [&](auto&& self, const tuide::ACausalFlowNode& node) -> void {
+    if (node.name == "other") {
+      saw_other = true;
+    }
+    for (const tuide::ACausalFlowNode& child : node.children) {
+      self(self, child);
+    }
+  };
+  for (const tuide::ACausalFlowNode& child : all.root.children) {
+    walk_all(walk_all, child);
+  }
+  expect(saw_other, "symbol scope lists the other call");
+  std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -469,6 +749,10 @@ int main() {
   test_trap_l0_drops_unlinked_cxl();
   test_causal_flow_write_caller_chain();
   test_causal_flow_call_climbs_condition();
+  test_causal_flow_else_uses_local_binding();
+  test_causal_flow_caller_condition_opens_local();
+  test_causal_flow_long_member_climbs_write();
+  test_causal_flow_call_site_without_symbol_search();
   if (failures != 0) {
     std::cerr << failures << " test(s) failed\n";
     return 1;
