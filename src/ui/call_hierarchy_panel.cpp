@@ -497,6 +497,76 @@ Element render_chain_row(const CallHierarchyViewState& hierarchy, int visible_ro
   return row | reflect(layout->box);
 }
 
+Element render_causal_tree_row(const CallHierarchyViewState& hierarchy, int visible_row,
+                              int node_index, bool selected, MainLayoutState* layout_state,
+                              RowLayout* layout, int max_width, bool conditions_only) {
+  const CallHierarchyTreeNode& node = hierarchy.nodes[static_cast<std::size_t>(node_index)];
+  layout->visible_row = visible_row;
+  layout->leaf_node = node_index;
+  layout->segments.assign(1, SegmentSpan{});
+  layout->segments.front().node_index = node_index;
+
+  const int indent_n = std::max(0, node.depth - 1);
+  const std::string indent(static_cast<std::size_t>(indent_n) * 2, ' ');
+  std::string name = node.item.name.empty() ? std::string("?") : node.item.name;
+  if (conditions_only) {
+    name = node.item.detail.empty() ? i18n::tr("panel.causal_flow.no_condition") : node.item.detail;
+  }
+  const std::string prefix = " " + indent;
+  const std::string seg_id = press_id::call_hierarchy_seg(node_index);
+  const bool hovered = layout_state != nullptr && layout_state->clickable.is_hovered(seg_id);
+  const bool pressed = layout_state != nullptr && layout_state->clickable.is_pressed(seg_id);
+  const std::string location = "  @ " + call_hierarchy_node_location(node);
+  const bool show_detail = !conditions_only && !node.item.detail.empty() &&
+                           name.find(node.item.detail) == std::string::npos;
+  const bool show_preview = !conditions_only && !node.preview.empty() &&
+                            name.find(node.preview) == std::string::npos;
+  const int width = std::max(16, max_width);
+  int cols = display_cols(prefix + name + location);
+  if (show_detail) {
+    cols += display_cols(node.item.detail) + 2;
+  }
+  if (show_preview) {
+    cols += display_cols(node.preview) + 2;
+  }
+
+  Element label = fitted_text(prefix, name, width, theme::ColorForSymbolKind(node.item.kind));
+  label = StyleClickable(std::move(label), {false, hovered, pressed, false});
+  label = std::move(label) | reflect(layout->segments.front().box);
+
+  Element row;
+  if (cols <= width) {
+    Elements parts;
+    parts.push_back(std::move(label));
+    if (show_detail) {
+      parts.push_back(text("  " + node.item.detail) | color(theme::Muted()));
+    }
+    parts.push_back(text(location) | color(theme::Muted()) | reflect(layout->location_box));
+    if (show_preview) {
+      parts.push_back(text("  " + node.preview) | color(theme::Header()));
+    }
+    row = hbox(std::move(parts));
+  } else {
+    Elements lines;
+    lines.push_back(std::move(label));
+    Elements tail;
+    tail.push_back(text(prefix));
+    if (show_detail) {
+      tail.push_back(text("  " + node.item.detail) | color(theme::Muted()));
+    }
+    tail.push_back(text(location) | color(theme::Muted()) | reflect(layout->location_box));
+    lines.push_back(hbox(std::move(tail)));
+    if (show_preview) {
+      lines.push_back(fitted_text(prefix + "  ", node.preview, width, theme::Header()));
+    }
+    row = vbox(std::move(lines));
+  }
+  if (selected) {
+    row = row | bgcolor(theme::TabIdle());
+  }
+  return row | reflect(layout->box);
+}
+
 Element render_reference_row(const CallHierarchyViewState& hierarchy, int visible_row,
                              int node_index, bool selected, MainLayoutState* layout_state,
                              RowLayout* layout) {
@@ -645,6 +715,11 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
       }
 
       if (hierarchy->kind == CallHierarchyContentKind::CausalFlow) {
+        if (event == Event::Character('a')) {
+          toggle_causal_point_view(hierarchy, workspace, layout_state, sidebar, indexer);
+          state->scroll_line = 0;
+          return true;
+        }
         if (event == Event::Character('u')) {
           hierarchy->causal_fold = hierarchy->causal_fold == CausalFlowFold::Upstream
                                        ? CausalFlowFold::All
@@ -758,7 +833,7 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
                            color(theme::Muted());
           if (is_causal) {
             footer = paragraphAlignLeft(" " + i18n::tr_fmt(footer_key, {hierarchy->status})) |
-                     color(theme::Muted());
+                     color(theme::Muted()) | size(HEIGHT, LESS_THAN, 4);
           } else {
             footer = std::move(footer) | size(HEIGHT, EQUAL, 1);
           }
@@ -795,10 +870,16 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
                                                     &state->row_layouts[static_cast<std::size_t>(i)]));
                 return;
               }
+              if (is_causal) {
+                rows.push_back(render_causal_tree_row(
+                    *hierarchy, i, node_index, selected, layout_state,
+                    &state->row_layouts[static_cast<std::size_t>(i)], causal_width,
+                    hierarchy->causal_conditions && selected));
+                return;
+              }
               rows.push_back(render_chain_row(
                   *hierarchy, i, node_index, selected, layout_state,
-                  &state->row_layouts[static_cast<std::size_t>(i)], causal_width,
-                  is_causal && hierarchy->causal_conditions && selected));
+                  &state->row_layouts[static_cast<std::size_t>(i)], causal_width, false));
             };
             if (!is_causal) {
               for (int i = 0; i < static_cast<int>(visible.size()); ++i) {

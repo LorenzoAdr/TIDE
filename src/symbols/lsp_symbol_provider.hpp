@@ -286,6 +286,8 @@ class LspSymbolProvider : public ISymbolProvider {
   void did_change_timer_main();
   bool sync_document_for_completion(const std::string& path, const std::string& text);
   void open_companion_sources_for_clangd_locked(const std::string& header_path);
+  void resume_lsp_for_path(const std::string& path);
+  void publish_open_buffers_to_clangd();
   void clear_shadow_companion_locked(const std::string& companion_path);
   bool buffer_open_locked(const std::string& path) const;
   LspClient* client_for_path(const std::string& path);

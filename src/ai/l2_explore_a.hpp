@@ -94,6 +94,8 @@ struct ATrailHop {
   std::string control_kind;   // innermost if|switch|for|while|do|try|""
   std::string control_chain;  // nested controls call→…→fn, e.g. "if → switch"
   std::string control_cond;   // condition text(s), e.g. if (state == Active)
+  int control_line = 0;       // 1-based line of the innermost control header
+  bool control_in_else = false;  // innermost if: the site sits in the else branch
   int call_line = 0;          // 1-based call site
   std::string snippet;        // control block(s) and/or ±N lines around call
   std::string summary;        // 1–2 lines when compacted as parent
@@ -618,12 +620,16 @@ struct ACausalFlowTree {
 // `search` is the same rg callback trail and dataflow already use.
 // Upstream chains run outer caller → … → writing function (every call site, not the
 // AI trail's 3-stack sample). Downstream hangs 2 callee hops under each read.
-// `anchor_line` is 1-based. When that line is a call of `name`, the tree starts at
-// the guarding if/switch and then climbs the values in that condition.
+// Site: tree-sitter at `anchor_line` only. The clicked symbol is not searched.
+// Symbol: every call site of `name`, or every write and read when the click is not a call.
+enum class ACausalFlowScope { Site, Symbol };
+
+// `anchor_line` is 1-based. Site scope still climbs the if/switch that wraps that line.
 ACausalFlowTree a_causal_flow_build(
     const std::string& workspace_root, const std::string& name, const std::string& path_hint,
     const std::function<std::vector<ATrailSearchHit>(const std::string& symbol)>& search,
     int max_writes = kACausalFlowMaxWrites, int max_stacks = kATrailMaxStacks,
-    int max_depth = kATrailMaxDepth, int anchor_line = 0);
+    int max_depth = kATrailMaxDepth, int anchor_line = 0,
+    ACausalFlowScope scope = ACausalFlowScope::Symbol);
 
 }  // namespace tuide

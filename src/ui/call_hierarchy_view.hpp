@@ -67,6 +67,16 @@ struct CallHierarchyViewState {
   bool causal_conditions = false;
   // When set, visible chains are those that pass through this symbol.
   std::string causal_link;
+  // Click site. When causal_here is set, only chains through that line stay visible.
+  bool causal_here = false;
+  bool causal_anchor_known = false;
+  std::string causal_anchor_path;
+  int causal_anchor_line = -1;
+  // Point tree is the click. All tree is the symbol search, filled on `a`.
+  bool causal_showing_all = false;
+  bool causal_want_all = false;
+  std::vector<CallHierarchyTreeNode> causal_point_nodes;
+  std::vector<CallHierarchyTreeNode> causal_all_nodes;
 
   void clear();
 };
@@ -85,15 +95,23 @@ bool open_references_view(CallHierarchyViewState* view, WorkspaceModel* workspac
                           const std::shared_ptr<ISymbolProvider>& symbols, int line, int col,
                           const std::string& symbol_at_cursor = {});
 
+// symbol_wide false: tree-sitter at the click. true: search the symbol (`a`).
 bool open_causal_flow_view(CallHierarchyViewState* view, WorkspaceModel* workspace,
                            MainLayoutState* layout_state, RightSidebarState* sidebar,
                            const std::string& symbol, WorkspaceIndexer* indexer = nullptr,
-                           int editor_line = -1, const std::string& anchor_path = {});
+                           int editor_line = -1, const std::string& anchor_path = {},
+                           bool symbol_wide = false);
 
 // Keep the current causal tree and show only the chain that reaches target.
 // With no chain, the tree stays and the status says so.
 void connect_causal_flow_view(CallHierarchyViewState* view, WorkspaceModel* workspace,
                               const std::string& target);
+
+// `a` swaps the click tree and the symbol-wide tree. The symbol search starts
+// the first time all is requested.
+void toggle_causal_point_view(CallHierarchyViewState* view, WorkspaceModel* workspace,
+                              MainLayoutState* layout_state, RightSidebarState* sidebar,
+                              WorkspaceIndexer* indexer);
 
 void navigate_to_call_hierarchy_node(WorkspaceModel* workspace, FocusManagerState* focus,
                                      MainLayoutState* layout_state,

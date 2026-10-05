@@ -337,13 +337,9 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		}
 	});
 	symbol_provider_->set_did_change_debounce_callback([this] {
-		if (layout_state_.ui_events != nullptr) {
-			layout_state_.ui_events->post_on_main([this] {
-				if (symbol_provider_) {
-					symbol_provider_->tick_debounced_updates();
-				}
-			});
-		} else if (symbol_provider_) {
+		// Run on the debounce thread. Posting didChange onto the UI thread
+		// serialized the whole buffer during Ctrl+click and froze the editor.
+		if (symbol_provider_) {
 			symbol_provider_->tick_debounced_updates();
 		}
 	});

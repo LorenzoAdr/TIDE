@@ -1143,23 +1143,47 @@ void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
   if (ui_inhibited_ && use_background_index_) {
     client_.set_background_paused(true);
   }
-  for (const auto& entry : open_buffers_) {
-    const std::string lang = language_id_for_path(entry.first);
-    if (is_lazy_lsp_language(lang)) {
+}
+
+void LspSymbolProvider::publish_open_buffers_to_clangd() {
+  struct OpenDoc {
+    std::string path;
+    std::string text;
+    bool header = false;
+  };
+  std::vector<OpenDoc> docs;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_ || !client_.ready()) {
+      return;
+    }
+    docs.reserve(open_buffers_.size());
+    for (const auto& entry : open_buffers_) {
+      if (is_lazy_lsp_language(language_id_for_path(entry.first))) {
+        continue;
+      }
+      OpenDoc doc;
+      doc.path = entry.first;
+      doc.text = entry.second;
+      doc.header = is_cpp_header_path(entry.first);
+      docs.push_back(std::move(doc));
+    }
+  }
+  for (OpenDoc& doc : docs) {
+    if (doc.text.empty()) {
+      doc.text = read_file_text(doc.path);
+    }
+    if (!is_lsp_trackable_path(doc.path, doc.text)) {
       continue;
     }
-    std::string text = entry.second;
-    if (text.empty()) {
-      text = buffer_text_for_path(entry.first);
+    client_.did_open(doc.path, doc.text);
+    if (doc.header) {
+      open_companion_sources_for_clangd_locked(doc.path);
     }
-    if (!is_lsp_trackable_path(entry.first, text)) {
-      continue;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (use_lsp_) {
+      enqueue_semantic_tokens_locked(normalize_lsp_path(doc.path));
     }
-    client_.did_open(entry.first, text);
-    if (is_cpp_header_path(entry.first)) {
-      open_companion_sources_for_clangd_locked(entry.first);
-    }
-    enqueue_semantic_tokens_locked(normalize_lsp_path(entry.first));
   }
   semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
 }
@@ -1213,6 +1237,9 @@ void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir)
     }
     if (want_worker) {
       ensure_async_worker_running();
+    }
+    if (ok) {
+      publish_open_buffers_to_clangd();
     }
   });
 }
@@ -2671,22 +2698,37 @@ void LspSymbolProvider::clear_shadow_companion_locked(const std::string& compani
 }
 
 void LspSymbolProvider::open_companion_sources_for_clangd_locked(const std::string& header_path) {
-  if (!use_lsp_ || !is_cpp_header_path(header_path)) {
+  // Name kept for callers. Does not require mutex_ held — and must not be
+  // called while it is held. Disk reads and didOpen run outside the lock so a
+  // ctrl+click on the UI thread cannot stall behind them.
+  if (!is_cpp_header_path(header_path)) {
     return;
   }
-
   const std::string header_key = normalize_lsp_path(header_path);
-  for (const std::string& companion : companion_source_paths_for_header(header_path)) {
-    const std::string companion_key = normalize_lsp_path(companion);
-    if (companion_key.empty() || buffer_open_locked(companion_key)) {
-      continue;
+  std::vector<std::string> to_read;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_) {
+      return;
     }
+    for (const std::string& companion : companion_source_paths_for_header(header_path)) {
+      const std::string companion_key = normalize_lsp_path(companion);
+      if (companion_key.empty() || buffer_open_locked(companion_key)) {
+        continue;
+      }
+      to_read.push_back(companion_key);
+    }
+  }
+  for (const std::string& companion_key : to_read) {
     const std::string companion_text = read_file_text(companion_key);
     if (!is_lsp_trackable_path(companion_key, companion_text)) {
       continue;
     }
     client_.did_open(companion_key, companion_text);
-    shadow_companions_[header_key].insert(companion_key);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (use_lsp_) {
+      shadow_companions_[header_key].insert(companion_key);
+    }
   }
 }
 
@@ -2765,18 +2807,14 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
     if (LspClient* lsp = client_for_path(path)) {
       lsp->did_open(path, text);
     }
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (use_lsp_ && is_cpp_header_path(path)) {
+    if (is_cpp_header_path(path)) {
       open_companion_sources_for_clangd_locked(path);
     }
   } else if (open_header) {
     if (LspClient* lsp = client_for_path(path)) {
       lsp->did_open(path, text);
     }
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (use_lsp_) {
-      open_companion_sources_for_clangd_locked(path);
-    }
+    open_companion_sources_for_clangd_locked(path);
   } else if (notify_open) {
     if (LspClient* lsp = client_for_path(path)) {
       lsp->did_open(path, text);
@@ -3236,6 +3274,22 @@ bool LspSymbolProvider::wait_for_client_for_path(const std::string& path, int ti
   }
 }
 
+void LspSymbolProvider::resume_lsp_for_path(const std::string& path) {
+  // Idle mode SIGSTOPs the language server. A go-to issued while it is stopped
+  // sits in a full pipe until the RPC timeout, and the editor looks frozen.
+  LspClient* lsp = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    lsp = client_for_path(path);
+    if (lsp == nullptr && client_.ready()) {
+      lsp = &client_;
+    }
+  }
+  if (lsp != nullptr) {
+    lsp->set_background_paused(false);
+  }
+}
+
 LspClient* LspSymbolProvider::prepare_lsp_client(const std::string& path, std::string& text) {
   if (!lsp_enabled_ || path.empty() || !is_lsp_trackable_path(path, text)) {
     return nullptr;
@@ -3246,21 +3300,30 @@ LspClient* LspSymbolProvider::prepare_lsp_client(const std::string& path, std::s
   wait_for_client_for_path(path, 150);
 
   LspClient* lsp = nullptr;
+  bool need_disk_text = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (is_cpp_header_path(path)) {
-      open_companion_sources_for_clangd_locked(path);
-    }
     if (text.empty()) {
-      text = buffer_text_for_path(path);
+      const auto it = open_buffers_.find(path);
+      if (it != open_buffers_.end()) {
+        text = it->second;
+      } else {
+        need_disk_text = true;
+      }
     }
     lsp = client_for_path(path);
-    if (lsp == nullptr) {
-      return nullptr;
-    }
-    if (!text.empty() && !lsp->document_is_open(path)) {
-      lsp->did_open(path, text);
-    }
+  }
+  if (need_disk_text) {
+    text = read_file_text(path);
+  }
+  if (lsp == nullptr) {
+    return nullptr;
+  }
+  if (!text.empty() && !lsp->document_is_open(path)) {
+    lsp->did_open(path, text);
+  }
+  if (is_cpp_header_path(path)) {
+    open_companion_sources_for_clangd_locked(path);
   }
   return lsp;
 }
@@ -3280,10 +3343,12 @@ bool LspSymbolProvider::request_navigation(const NavigationParams& params,
     return false;
   }
   // Navigation may fall back to tree-sitter even when the path is not LSP-trackable.
+  // Do not prepare/didOpen here: this runs on the UI thread for Ctrl+click, and
+  // serializing the buffer (or waiting on a paused server) freezes the editor.
+  // The async worker calls prepare_lsp_client from goto_*.
   if (is_lsp_trackable_path(params.path, params.text)) {
     ensure_lazy_lsp_for_path(params.path);
-    std::string text = params.text;
-    prepare_lsp_client(params.path, text);
+    resume_lsp_for_path(params.path);
   }
   {
     std::lock_guard<std::mutex> lock(mutex_);
