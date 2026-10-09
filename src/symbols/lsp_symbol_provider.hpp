@@ -157,7 +157,8 @@ class LspSymbolProvider : public ISymbolProvider {
 
   void set_lsp_enabled(bool enabled);
   bool lsp_enabled() const;
-  void set_workspace_clangd_options(bool use_gcc_query_driver, bool background_index);
+  void set_workspace_clangd_options(bool use_gcc_query_driver, bool background_index,
+                                    const CompileCommandsSettings& compile_commands = {});
   void set_ui_inhibited(bool inhibited);
   void set_lsp_request_counter(std::atomic<uint64_t>* counter);
   void set_async_job_ready_callback(std::function<void(LspAsyncJobKind)> callback);
@@ -321,6 +322,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool lsp_enabled_ = true;
   bool use_gcc_query_driver_ = true;
   bool use_background_index_ = false;
+  CompileCommandsSettings clangd_compile_commands_;
   bool use_lsp_ = false;
   bool clangd_launched_ = false;
   bool ui_inhibited_ = false;

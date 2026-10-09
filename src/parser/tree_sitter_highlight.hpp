@@ -17,6 +17,10 @@ namespace tuide {
 LineHighlights highlights_for_line(TSNode root, const std::string& source, int line_0,
                                    TreeSitterLangKind lang = TreeSitterLangKind::kCpp);
 
+// Highlight one displayed line with the grammar of `path`. Columns are byte offsets
+// into `line` (the text as shown, not the file line). Empty when the path has no grammar.
+LineHighlights highlights_for_snippet(const std::string& path, const std::string& line);
+
 std::vector<LineHighlights> highlights_for_document(
     TSNode root, const std::string& source,
     TreeSitterLangKind lang = TreeSitterLangKind::kCpp);

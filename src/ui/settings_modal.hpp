@@ -30,6 +30,7 @@ enum class SettingsPanel {
   kStatus,
   kShortcuts,
   kIncludePaths,
+  kFilePickerExcludes,
   kCompileCommands,
   kPathMappings,
   kPathBrowser,
@@ -40,6 +41,7 @@ enum class SettingsPanel {
 enum class PathBrowserPurpose {
   kIncludePath,
   kMappingHostPath,
+  kFilePickerExclude,
 };
 
 using SettingsApplyCallback = std::function<void(const AppSettings&)>;
@@ -55,6 +57,7 @@ struct SettingsModalState {
   PathBrowserPurpose path_browser_purpose = PathBrowserPurpose::kIncludePath;
   int selected = 0;
   int include_path_selected = 0;
+  int file_picker_exclude_selected = 0;
   int compile_commands_selected = 0;
   int mapping_selected = 0;
   int docker_container_selected = 0;
@@ -100,6 +103,7 @@ struct SettingsModalState {
   theme::UiColorPreset ui_colors_edit_original_preset = theme::UiColorPreset::kDarkClassic;
   CompileCommandsSettings draft_compile_commands;
   std::vector<std::string> draft_clangd_extra_include_paths;
+  std::vector<std::string> draft_file_picker_exclude_dirs;
   ClangFormatConfig draft_clang_format;
   bool clang_format_file_exists = false;
   ClangFormatApplyCallback clang_format_changed_callback;

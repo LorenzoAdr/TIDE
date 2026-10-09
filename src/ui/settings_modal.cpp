@@ -21,6 +21,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
+#include "indexer/index_rules.hpp"
 #include "toolpacks/catalog.hpp"
 #include "toolpacks/language_packs.hpp"
 #include "toolpacks/store.hpp"
@@ -216,8 +217,9 @@ constexpr int kGlobalOptionCount = kAfterClangd;
 constexpr int kWorkspaceGccQueryDriver = 0;
 constexpr int kWorkspaceBackgroundIndex = 1;
 constexpr int kWorkspaceIncludePaths = 2;
-constexpr int kWorkspaceCompileCommands = 3;
-constexpr int kWorkspaceOptionCount = 4;
+constexpr int kWorkspaceFilePickerExcludes = 3;
+constexpr int kWorkspaceCompileCommands = 4;
+constexpr int kWorkspaceOptionCount = 5;
 
 constexpr int kFormatBasedOnStyle = 0;
 constexpr int kFormatIndentWidth = 1;
@@ -1049,6 +1051,51 @@ void open_include_paths_panel(SettingsModalState* state) {
   state->include_path_selected = 0;
 }
 
+void clamp_file_picker_exclude_selection(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  const int count = static_cast<int>(state->draft_file_picker_exclude_dirs.size());
+  if (count == 0) {
+    state->file_picker_exclude_selected = 0;
+    return;
+  }
+  state->file_picker_exclude_selected =
+      std::max(0, std::min(state->file_picker_exclude_selected, count - 1));
+}
+
+void open_file_picker_excludes_panel(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->panel = SettingsPanel::kFilePickerExcludes;
+  state->file_picker_exclude_selected = 0;
+}
+
+SettingsPanel panel_behind_path_browser(PathBrowserPurpose purpose) {
+  switch (purpose) {
+    case PathBrowserPurpose::kMappingHostPath:
+      return SettingsPanel::kPathMappings;
+    case PathBrowserPurpose::kFilePickerExclude:
+      return SettingsPanel::kFilePickerExcludes;
+    case PathBrowserPurpose::kIncludePath:
+      return SettingsPanel::kIncludePaths;
+  }
+  return SettingsPanel::kIncludePaths;
+}
+
+std::string path_browser_title(PathBrowserPurpose purpose) {
+  switch (purpose) {
+    case PathBrowserPurpose::kMappingHostPath:
+      return i18n::tr("settings.path_browser.add_mapping");
+    case PathBrowserPurpose::kFilePickerExclude:
+      return i18n::tr("settings.path_browser.add_file_picker_exclude");
+    case PathBrowserPurpose::kIncludePath:
+      return i18n::tr("settings.path_browser.add_include");
+  }
+  return i18n::tr("settings.path_browser.add_include");
+}
+
 void open_compile_commands_panel(SettingsModalState* state) {
   if (state == nullptr) {
     return;
@@ -1573,6 +1620,19 @@ void confirm_path_browser_selection(SettingsModalState* state) {
     return;
   }
 
+  if (state->path_browser_purpose == PathBrowserPurpose::kFilePickerExclude) {
+    const std::string rel = normalize_file_picker_exclude_dir(state->workspace_root, chosen);
+    if (!rel.empty() &&
+        std::find(state->draft_file_picker_exclude_dirs.begin(),
+                  state->draft_file_picker_exclude_dirs.end(),
+                  rel) == state->draft_file_picker_exclude_dirs.end()) {
+      state->draft_file_picker_exclude_dirs.push_back(rel);
+    }
+    state->panel = SettingsPanel::kFilePickerExcludes;
+    clamp_file_picker_exclude_selection(state);
+    return;
+  }
+
   if (!path_already_listed(state, chosen)) {
     state->draft_clangd_extra_include_paths.push_back(chosen);
   }
@@ -1593,6 +1653,20 @@ void delete_selected_include_path(SettingsModalState* state) {
       state->draft_clangd_extra_include_paths.begin() +
       static_cast<std::ptrdiff_t>(index));
   clamp_include_path_selection(state);
+}
+
+void delete_selected_file_picker_exclude(SettingsModalState* state) {
+  if (state == nullptr || state->draft_file_picker_exclude_dirs.empty()) {
+    return;
+  }
+  clamp_file_picker_exclude_selection(state);
+  const auto index = static_cast<std::size_t>(state->file_picker_exclude_selected);
+  if (index >= state->draft_file_picker_exclude_dirs.size()) {
+    return;
+  }
+  state->draft_file_picker_exclude_dirs.erase(
+      state->draft_file_picker_exclude_dirs.begin() + static_cast<std::ptrdiff_t>(index));
+  clamp_file_picker_exclude_selection(state);
 }
 
 bool handle_top_level_tab_keys(SettingsModalState* state, Event event) {
@@ -1691,6 +1765,10 @@ void activate_workspace_option(SettingsModalState* state, int index) {
     open_include_paths_panel(state);
     return;
   }
+  if (index == kWorkspaceFilePickerExcludes) {
+    open_file_picker_excludes_panel(state);
+    return;
+  }
   if (index == kWorkspaceCompileCommands) {
     open_compile_commands_panel(state);
     return;
@@ -1779,6 +1857,10 @@ void activate_settings_click(SettingsModalState* state, int index, int mouse_x) 
     case SettingsPanel::kIncludePaths:
       state->include_path_selected = index;
       clamp_include_path_selection(state);
+      break;
+    case SettingsPanel::kFilePickerExcludes:
+      state->file_picker_exclude_selected = index;
+      clamp_file_picker_exclude_selection(state);
       break;
     case SettingsPanel::kCompileCommands:
       activate_compile_commands_option(state, index);
@@ -1984,6 +2066,10 @@ bool handle_workspace_settings_keys(SettingsModalState* state, Event event) {
       open_include_paths_panel(state);
       return true;
     }
+    if (state->selected == kWorkspaceFilePickerExcludes) {
+      open_file_picker_excludes_panel(state);
+      return true;
+    }
     if (state->selected == kWorkspaceCompileCommands) {
       open_compile_commands_panel(state);
       return true;
@@ -1994,6 +2080,10 @@ bool handle_workspace_settings_keys(SettingsModalState* state, Event event) {
   if (event == Event::Character(' ')) {
     if (state->selected == kWorkspaceIncludePaths) {
       open_include_paths_panel(state);
+      return true;
+    }
+    if (state->selected == kWorkspaceFilePickerExcludes) {
+      open_file_picker_excludes_panel(state);
       return true;
     }
     if (state->selected == kWorkspaceCompileCommands) {
@@ -2179,6 +2269,37 @@ bool handle_include_paths_keys(SettingsModalState* state, Event event) {
   return true;
 }
 
+bool handle_file_picker_excludes_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return false;
+  }
+
+  if (event == Event::Escape) {
+    state->panel = SettingsPanel::kWorkspace;
+    return true;
+  }
+  if (event == Event::Character('a') || event == Event::Character('A')) {
+    open_path_browser_panel(state, PathBrowserPurpose::kFilePickerExclude);
+    return true;
+  }
+  if (event == Event::Character('d') || event == Event::Character('D') ||
+      event == Event::Delete) {
+    delete_selected_file_picker_exclude(state);
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    state->file_picker_exclude_selected += 1;
+    clamp_file_picker_exclude_selection(state);
+    return true;
+  }
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->file_picker_exclude_selected -= 1;
+    clamp_file_picker_exclude_selection(state);
+    return true;
+  }
+  return true;
+}
+
 void activate_path_browser_row(SettingsModalState* state, int row) {
   if (state == nullptr) {
     return;
@@ -2205,9 +2326,7 @@ bool handle_path_browser_keys(SettingsModalState* state, Event event) {
     if (state->path_browser.handle_filter_input(event) == PathBrowserFilterResult::kClearFilter) {
       return true;
     }
-    state->panel = state->path_browser_purpose == PathBrowserPurpose::kMappingHostPath
-                       ? SettingsPanel::kPathMappings
-                       : SettingsPanel::kIncludePaths;
+    state->panel = panel_behind_path_browser(state->path_browser_purpose);
     return true;
   }
   if (event == Event::Character('a') || event == Event::Character('A')) {
@@ -2263,6 +2382,8 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
       return handle_shortcuts_settings_keys(state, event);
     case SettingsPanel::kIncludePaths:
       return handle_include_paths_keys(state, event);
+    case SettingsPanel::kFilePickerExcludes:
+      return handle_file_picker_excludes_keys(state, event);
     case SettingsPanel::kCompileCommands:
       return handle_compile_commands_keys(state, event);
     case SettingsPanel::kPathMappings:
@@ -3575,6 +3696,24 @@ SettingsBodyContent build_workspace_settings(SettingsModalState* state) {
   }
 
   {
+    const bool selected = state->selected == kWorkspaceFilePickerExcludes;
+    const std::size_t count = state->draft_file_picker_exclude_dirs.size();
+    const std::string label =
+        i18n::tr_fmt("settings.workspace.file_picker_excludes.label", {std::to_string(count)});
+    Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
+      title = title | inverted;
+    }
+    add_click_target(&content, kWorkspaceFilePickerExcludes);
+    content.rows.push_back(title);
+    content.rows.push_back(
+        text("    " + i18n::tr("settings.workspace.file_picker_excludes.description")) |
+        color(theme::Muted()));
+    content.rows.push_back(text(""));
+  }
+
+  {
     const bool selected = state->selected == kWorkspaceCompileCommands;
     const std::string label = i18n::tr_fmt(
         "settings.workspace.compile_commands.label",
@@ -3757,14 +3896,39 @@ SettingsBodyContent build_include_paths_panel(const SettingsModalState* state) {
   return content;
 }
 
+SettingsBodyContent build_file_picker_excludes_panel(const SettingsModalState* state) {
+  SettingsBodyContent content;
+  content.rows.push_back(text(i18n::tr("settings.file_picker_excludes.title")) |
+                         color(theme::Accent()) | bold);
+  content.rows.push_back(separator());
+  if (state->draft_file_picker_exclude_dirs.empty()) {
+    content.rows.push_back(text(i18n::tr("settings.file_picker_excludes.empty")) |
+                           color(theme::Muted()));
+  } else {
+    for (int i = 0; i < static_cast<int>(state->draft_file_picker_exclude_dirs.size()); ++i) {
+      const bool selected = i == state->file_picker_exclude_selected;
+      const std::string& path = state->draft_file_picker_exclude_dirs[static_cast<std::size_t>(i)];
+      Element line = text(path) | color(selected ? theme::Accent() : theme::Header());
+      if (selected) {
+        content.focus_row = static_cast<int>(content.rows.size());
+        line = line | inverted;
+      }
+      add_click_target(&content, i);
+      content.rows.push_back(line);
+    }
+  }
+  content.rows.push_back(separator());
+  content.rows.push_back(text(i18n::tr("settings.file_picker_excludes.footer")) |
+                         color(theme::Muted()));
+  return content;
+}
+
 SettingsBodyContent build_path_browser_panel(SettingsModalState* state) {
   SettingsBodyContent content;
   state->path_browser.ensure_browser_entries();
 
-  content.rows.push_back(text(state->path_browser_purpose == PathBrowserPurpose::kMappingHostPath
-                          ? i18n::tr("settings.path_browser.add_mapping")
-                          : i18n::tr("settings.path_browser.add_include")) |
-                 color(theme::Accent()) | bold);
+  content.rows.push_back(text(path_browser_title(state->path_browser_purpose)) |
+                         color(theme::Accent()) | bold);
   content.rows.push_back(separator());
   std::string filter_line = state->path_browser.filter_query;
   filter_line.push_back('_');
@@ -4107,6 +4271,7 @@ bool compile_commands_eq(const CompileCommandsSettings& a, const CompileCommands
 
 bool workspace_config_eq(const WorkspaceConfig& a, const WorkspaceConfig& b) {
   return a.clangd_extra_include_paths == b.clangd_extra_include_paths &&
+         a.file_picker_exclude_dirs == b.file_picker_exclude_dirs &&
          a.clangd_use_gcc_query_driver == b.clangd_use_gcc_query_driver &&
          a.clangd_background_index == b.clangd_background_index && a.theme == b.theme &&
          a.ui_colors_preset == b.ui_colors_preset && ui_colors_eq(a.ui_colors, b.ui_colors) &&
@@ -4171,6 +4336,8 @@ WorkspaceConfig workspace_config_from_draft(const SettingsModalState& state) {
   workspace.clangd_use_gcc_query_driver = state.draft_clangd_use_gcc_query_driver;
   workspace.clangd_background_index = state.draft_clangd_background_index;
   workspace.clangd_extra_include_paths = state.draft_clangd_extra_include_paths;
+  workspace.file_picker_exclude_dirs = state.draft_file_picker_exclude_dirs;
+  workspace.language_overrides = state.workspace_baseline.language_overrides;
   workspace.compile_commands = state.draft_compile_commands;
   workspace.theme = state.draft_theme;
   workspace.ui_colors_preset = state.draft_ui_colors_preset;
@@ -4400,6 +4567,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_clangd_use_gcc_query_driver = workspace_config.clangd_use_gcc_query_driver;
   state->draft_clangd_background_index = workspace_config.clangd_background_index;
   state->draft_clangd_extra_include_paths = workspace_config.clangd_extra_include_paths;
+  state->draft_file_picker_exclude_dirs = workspace_config.file_picker_exclude_dirs;
   state->draft_compile_commands = workspace_config.compile_commands;
   state->path_browser.launch_root = workspace_root.empty() ? canonical_browser_root("")
                                                              : workspace_root;
@@ -4527,14 +4695,13 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
               state->panel = SettingsPanel::kAi;
               return true;
             case SettingsPanel::kPathBrowser:
-              state->panel = state->path_browser_purpose == PathBrowserPurpose::kMappingHostPath
-                                 ? SettingsPanel::kPathMappings
-                                 : SettingsPanel::kIncludePaths;
+              state->panel = panel_behind_path_browser(state->path_browser_purpose);
               return true;
             case SettingsPanel::kPathMappings:
               state->panel = SettingsPanel::kCompileCommands;
               return true;
             case SettingsPanel::kIncludePaths:
+            case SettingsPanel::kFilePickerExcludes:
             case SettingsPanel::kCompileCommands:
               state->panel = SettingsPanel::kWorkspace;
               return true;
@@ -4576,6 +4743,7 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
 
         clamp_top_level_selection(state);
         clamp_include_path_selection(state);
+        clamp_file_picker_exclude_selection(state);
         clamp_compile_commands_selection(state);
         clamp_mapping_selection(state);
         clamp_ui_colors_selection(state);
@@ -4631,6 +4799,11 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
             title = i18n::tr("settings.title.include_paths");
             footer = "";
             content = build_include_paths_panel(state);
+            break;
+          case SettingsPanel::kFilePickerExcludes:
+            title = i18n::tr("settings.title.file_picker_excludes");
+            footer = "";
+            content = build_file_picker_excludes_panel(state);
             break;
           case SettingsPanel::kCompileCommands:
             title = i18n::tr("settings.title.compile_commands");

@@ -699,6 +699,33 @@ LineHighlights highlights_for_line(TSNode root, const std::string& source, int l
   return result;
 }
 
+LineHighlights highlights_for_snippet(const std::string& path, const std::string& line) {
+  const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
+  const TSLanguage* language = tree_sitter_language_for_kind(lang);
+  if (language == nullptr || line.empty()) {
+    return {};
+  }
+
+  static std::mutex parser_mu;
+  static TSParser* parser = nullptr;
+  std::lock_guard<std::mutex> lock(parser_mu);
+  if (parser == nullptr) {
+    parser = ts_parser_new();
+  }
+  if (parser == nullptr || !ts_parser_set_language(parser, language)) {
+    return {};
+  }
+
+  TSTree* tree = ts_parser_parse_string(parser, nullptr, line.data(),
+                                        static_cast<uint32_t>(line.size()));
+  if (tree == nullptr) {
+    return {};
+  }
+  LineHighlights result = highlights_for_line(ts_tree_root_node(tree), line, 0, lang);
+  ts_tree_delete(tree);
+  return result;
+}
+
 Element HighlightTreeSitterLine(const std::string& line, int line_index,
                                 const LineHighlights& highlights, int cursor_col,
                                 Decorator cursor_style, int col_offset) {

@@ -59,6 +59,32 @@ void test_file_picker_excludes_binaries_keeps_pdf() {
   check((*snapshot.file_picker_catalog)[1].path == "docs/guide.pdf", "pdf in catalog");
 }
 
+void test_file_picker_catalog_skips_excluded_dirs() {
+  check(tuide::normalize_file_picker_exclude_dir("/ws", "dictionary/") == "dictionary",
+        "strip trailing slash");
+  check(tuide::normalize_file_picker_exclude_dir("/ws", "/ws/install/include") == "install/include",
+        "absolute path becomes workspace-relative");
+  check(tuide::normalize_file_picker_exclude_dir("/ws", "/other/install").empty(),
+        "path outside the workspace is dropped");
+  check(tuide::file_picker_path_excluded("dictionary/mod/foo.h", {"dictionary"}),
+        "file under dictionary");
+  check(!tuide::file_picker_path_excluded("src/dictionary_notes.cpp", {"dictionary"}),
+        "shared name prefix is not a directory");
+  check(tuide::file_picker_path_excluded("out/install/a.h", {"out/install"}), "nested install");
+  check(!tuide::file_picker_path_excluded("src/main.cpp", {"dictionary", "out/install"}),
+        "source stays searchable");
+
+  tuide::IndexSnapshot snapshot;
+  snapshot.files = {"src/main.cpp", "dictionary/mod/foo.h", "out/install/a.h", "docs/guide.pdf"};
+  snapshot.filter_options.file_picker_exclude_dirs = {"dictionary", "out/install"};
+  tuide::rebuild_index_file_picker_catalog(&snapshot);
+  check(snapshot.file_picker_catalog != nullptr, "excluded catalog exists");
+  check(snapshot.file_picker_catalog->size() == 2, "excluded dirs dropped from picker");
+  check((*snapshot.file_picker_catalog)[0].path == "src/main.cpp", "source remains in picker");
+  check((*snapshot.file_picker_catalog)[1].path == "docs/guide.pdf", "pdf remains in picker");
+  check(snapshot.files.size() == 4, "index still keeps excluded files");
+}
+
 void test_build_noise_paths_not_listed() {
   check(tuide::is_build_noise_path("chapters/a.aux"), "aux");
   check(tuide::is_build_noise_path("main.log"), "log");
@@ -217,6 +243,7 @@ int main() {
   test_rebuild_files_lower();
   test_rebuild_file_picker_catalog();
   test_file_picker_excludes_binaries_keeps_pdf();
+  test_file_picker_catalog_skips_excluded_dirs();
   test_build_noise_paths_not_listed();
   test_index_path_matches_prefix();
   test_coalesce_file_index_changes_drops_dominated_removes();

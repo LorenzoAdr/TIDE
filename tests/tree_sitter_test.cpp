@@ -1252,6 +1252,36 @@ void test_xml_fragment_wrap_keeps_prolog_outside() {
   ts_parser_delete(parser);
 }
 
+bool span_covers(const LineHighlights& line, const char* capture, int start, int end) {
+  for (const HighlightSpan& span : line.spans) {
+    if (span.capture == capture && span.start_col <= start && span.end_col >= end) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void test_snippet_highlight_follows_file_language() {
+  const std::string cpp_line = "return 0;";
+  const LineHighlights cpp = highlights_for_snippet("src/a.cpp", cpp_line);
+  assert(span_covers(cpp, "keyword", 0, 6));
+  assert(span_covers(cpp, "number", 7, 8));
+
+  const LineHighlights py = highlights_for_snippet("src/a.py", "return 0");
+  assert(span_covers(py, "keyword", 0, 6));
+  assert(span_covers(py, "number", 7, 8));
+
+  const LineHighlights cpp_comment = highlights_for_snippet("src/a.hpp", "// note");
+  assert(span_covers(cpp_comment, "comment", 0, 7));
+
+  const LineHighlights py_comment = highlights_for_snippet("src/a.py", "# note");
+  assert(span_covers(py_comment, "comment", 0, 6));
+
+  const LineHighlights plain = highlights_for_snippet("notes.txt", "return 0;");
+  assert(plain.spans.empty());
+  assert(highlights_for_snippet("src/a.cpp", "").spans.empty());
+}
+
 }  // namespace
 }  // namespace tuide
 
@@ -1300,6 +1330,7 @@ int main() {
   tuide::test_xml_unmap_window_matches_full_document();
   tuide::test_viewport_preview_xml_far_from_top_only_visible_rows();
   tuide::test_normalize_editor_source_trailing_newline();
+  tuide::test_snippet_highlight_follows_file_language();
   std::cout << "tree_sitter_test ok\n";
   return 0;
 }

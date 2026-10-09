@@ -880,7 +880,8 @@ void Application::restart_lsp_for_workspace() {
 	}
 	const auto setup = ensure_compile_commands_for_clangd(workspace_.root, workspace_config_);
 	symbol_provider_->set_workspace_clangd_options(workspace_config_.clangd_use_gcc_query_driver,
-	                                               workspace_config_.clangd_background_index);
+	                                               workspace_config_.clangd_background_index,
+	                                               workspace_config_.compile_commands);
 	symbol_provider_->on_workspace_opened(workspace_.root, setup.compile_dir);
 	enqueue_ui_task([this]() {
 		reopen_workspace_documents(&workspace_, symbol_provider_);
@@ -972,6 +973,7 @@ void Application::request_ai_indexes() {
 IndexFilterOptions Application::index_filter_options() const {
 	IndexFilterOptions options;
 	options.show_all_files = app_settings_.show_all_workspace_files;
+	options.file_picker_exclude_dirs = workspace_config_.file_picker_exclude_dirs;
 	return options;
 }
 
@@ -1282,6 +1284,9 @@ void Application::apply_workspace_settings(const WorkspaceConfig &config) {
 	    previous.compile_commands.mode != config.compile_commands.mode ||
 	    previous.compile_commands.docker_container != config.compile_commands.docker_container;
 
+	const bool picker_excludes_changed =
+	    previous.file_picker_exclude_dirs != config.file_picker_exclude_dirs;
+
 	workspace_config_ = config;
 	if (workspace_config_.ui_colors_preset == theme::UiColorPreset::kCustom) {
 		theme::apply_color_preset(theme::UiColorPreset::kCustom, workspace_config_.ui_colors);
@@ -1304,6 +1309,9 @@ void Application::apply_workspace_settings(const WorkspaceConfig &config) {
 		apply_clangd_workspace_config(workspace_.root, workspace_config_);
 		restart_lsp_for_workspace();
 		sync_symbol_workspace_indexer();
+	}
+	if (picker_excludes_changed) {
+		indexer_.set_file_picker_exclude_dirs(workspace_config_.file_picker_exclude_dirs);
 	}
 	workspace_.buffer.view_token++;
 	UI_WAKE(&layout_state_, "app");
@@ -1541,7 +1549,7 @@ void Application::set_workspace(const std::string &workspace_root,
 		}
 		symbol_provider_->set_workspace_clangd_options(
 		    workspace_config_.clangd_use_gcc_query_driver,
-		    workspace_config_.clangd_background_index);
+		    workspace_config_.clangd_background_index, workspace_config_.compile_commands);
 		symbol_provider_->on_workspace_opened(absolute, setup.compile_dir);
 		last_lsp_environment_fingerprint_ =
 		    global_build_environment_service().active_environment_fingerprint();

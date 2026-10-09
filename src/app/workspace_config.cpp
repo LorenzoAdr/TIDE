@@ -1,9 +1,12 @@
 #include "app/workspace_config.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
 #include <nlohmann/json.hpp>
+
+#include "indexer/index_rules.hpp"
 
 namespace fs = std::filesystem;
 
@@ -679,6 +682,23 @@ WorkspaceConfig WorkspaceConfig::load(const std::string& workspace_root) {
     if (doc.contains("ai")) {
       parse_ai_settings(doc["ai"], &config.ai);
     }
+    if (doc.contains("file_picker_exclude_dirs") && doc["file_picker_exclude_dirs"].is_array()) {
+      for (const auto& entry : doc["file_picker_exclude_dirs"]) {
+        if (!entry.is_string()) {
+          continue;
+        }
+        const std::string value =
+            normalize_file_picker_exclude_dir(workspace_root, entry.get<std::string>());
+        if (value.empty()) {
+          continue;
+        }
+        if (std::find(config.file_picker_exclude_dirs.begin(),
+                      config.file_picker_exclude_dirs.end(),
+                      value) == config.file_picker_exclude_dirs.end()) {
+          config.file_picker_exclude_dirs.push_back(value);
+        }
+      }
+    }
     if (doc.contains("language_overrides") && doc["language_overrides"].is_object()) {
       for (auto it = doc["language_overrides"].begin(); it != doc["language_overrides"].end();
            ++it) {
@@ -733,6 +753,7 @@ bool WorkspaceConfig::save(const std::string& workspace_root) const {
 
   nlohmann::json doc;
   doc["clangd_extra_include_paths"] = clangd_extra_include_paths;
+  doc["file_picker_exclude_dirs"] = file_picker_exclude_dirs;
   doc["clangd_use_gcc_query_driver"] = clangd_use_gcc_query_driver;
   doc["clangd_background_index"] = clangd_background_index;
   doc["theme"] = theme::theme_name(theme);

@@ -209,6 +209,80 @@ bool is_file_picker_candidate_path(const std::string& path) {
   return !is_probably_binary_path(path);
 }
 
+std::string normalize_file_picker_exclude_dir(const std::string& workspace_root,
+                                              const std::string& raw) {
+  std::string path = raw;
+  for (char& c : path) {
+    if (c == '\\') {
+      c = '/';
+    }
+  }
+  while (!path.empty() && (path.back() == '/' || path.back() == ' ')) {
+    path.pop_back();
+  }
+  std::size_t start = 0;
+  while (start < path.size() && path[start] == ' ') {
+    ++start;
+  }
+  if (start > 0) {
+    path.erase(0, start);
+  }
+  if (path.empty() || path == "." || path == "..") {
+    return {};
+  }
+
+  const fs::path as_path(path);
+  if (!workspace_root.empty()) {
+    fs::path abs = as_path;
+    if (abs.is_relative()) {
+      abs = fs::path(workspace_root) / abs;
+    }
+    const fs::path root = fs::path(workspace_root).lexically_normal();
+    const fs::path rel = abs.lexically_normal().lexically_relative(root);
+    if (rel.empty() || rel == "." || *rel.begin() == "..") {
+      return {};
+    }
+    std::string rel_str = rel.generic_string();
+    while (!rel_str.empty() && rel_str.back() == '/') {
+      rel_str.pop_back();
+    }
+    if (rel_str.empty() || rel_str == ".") {
+      return {};
+    }
+    return rel_str;
+  }
+
+  for (const auto& part : as_path) {
+    if (part == "..") {
+      return {};
+    }
+  }
+  while (path.size() >= 2 && path[0] == '.' && path[1] == '/') {
+    path.erase(0, 2);
+  }
+  return path;
+}
+
+bool file_picker_path_excluded(const std::string& relative_path,
+                               const std::vector<std::string>& exclude_dirs) {
+  if (relative_path.empty() || exclude_dirs.empty()) {
+    return false;
+  }
+  for (const std::string& dir : exclude_dirs) {
+    if (dir.empty()) {
+      continue;
+    }
+    if (relative_path == dir) {
+      return true;
+    }
+    if (relative_path.size() > dir.size() && relative_path.compare(0, dir.size(), dir) == 0 &&
+        relative_path[dir.size()] == '/') {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool text_looks_binary(const std::string& text) {
   constexpr std::size_t kSample = 8192;
   const std::size_t limit = std::min(text.size(), kSample);

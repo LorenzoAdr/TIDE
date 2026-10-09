@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <sys/wait.h>
 
 namespace tuide {
 
@@ -35,6 +36,30 @@ std::string run_shell_capture(const std::string& command, const int timeout_seco
   }
   pclose(pipe);
   return output;
+}
+
+int run_shell_status(const std::string& command, const int timeout_seconds, std::string* output) {
+  std::string wrapped = command;
+  if (timeout_seconds > 0) {
+    wrapped = "timeout --foreground " + std::to_string(timeout_seconds) + "s " + command;
+  }
+  FILE* pipe = popen(wrapped.c_str(), "r");
+  if (pipe == nullptr) {
+    return -1;
+  }
+  std::array<char, 4096> buffer{};
+  std::string captured;
+  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+    captured += buffer.data();
+  }
+  if (output != nullptr) {
+    *output = std::move(captured);
+  }
+  const int status = pclose(pipe);
+  if (status < 0 || !WIFEXITED(status)) {
+    return -1;
+  }
+  return WEXITSTATUS(status);
 }
 
 bool run_shell_stdin(const std::string& command, const std::string& stdin_data,

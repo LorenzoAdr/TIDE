@@ -77,6 +77,8 @@ class WorkspaceIndexer {
   void remove_path_prefixes(const std::string& workspace_root,
                             const std::vector<std::string>& prefixes);
   bool refresh(const std::string& workspace_root);
+  // Actualiza el catálogo de Ctrl+P sin reindexar. No toca el explorador.
+  void set_file_picker_exclude_dirs(std::vector<std::string> dirs);
   void stop();
   // Callback receives whether any queued change needs a UI wake (tree listing
   // or a modify of a file currently visible in the editor).
@@ -99,6 +101,7 @@ class WorkspaceIndexer {
   std::function<void(bool wake_ui)> change_notify_;
   std::function<bool(const std::string& absolute_path)> modify_wake_predicate_;
   mutable std::mutex modify_wake_mutex_;
+  std::vector<std::string> file_picker_exclude_dirs_;
   std::thread worker_;
   std::atomic<bool> scanning_{false};
   std::atomic<bool> stop_requested_{false};

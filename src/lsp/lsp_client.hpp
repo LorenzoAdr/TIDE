@@ -16,6 +16,7 @@
 #include "lsp/lsp_text_edits.hpp"
 #include "lsp/semantic_tokens.hpp"
 #include "lsp/diagnostics.hpp"
+#include "app/workspace_config.hpp"
 #include "lsp/language_server_spec.hpp"
 #include "symbols/call_hierarchy.hpp"
 #include "symbols/code_action.hpp"
@@ -35,7 +36,12 @@ class LspClient {
   // Backward-compatible clangd entry point (builds a clangd spec internally).
   bool start(const std::string& workspace_root,
              const std::string& compile_commands_dir = {},
-             bool use_gcc_query_driver = true, bool background_index = false);
+             bool use_gcc_query_driver = true, bool background_index = false,
+             const CompileCommandsSettings& compile_commands = {});
+  // True when the running clangd was started with docker exec inside the workspace container.
+  bool docker_clangd_active() const {
+    return docker_clangd_active_.load(std::memory_order_acquire);
+  }
   void stop();
   void set_background_paused(bool paused);
   void set_request_counter(std::atomic<uint64_t>* counter);
@@ -193,6 +199,7 @@ class LspClient {
   std::mutex transport_io_mutex_;
   std::mutex stop_mutex_;
   std::atomic<bool> ready_{false};
+  std::atomic<bool> docker_clangd_active_{false};
   std::atomic<bool> intentionally_stopping_{false};
   pid_t child_pid_ = -1;
   int stdin_write_fd_ = -1;

@@ -616,6 +616,9 @@ void rebuild_index_file_picker_catalog(IndexSnapshot* snapshot) {
     if (!is_file_picker_candidate_path(path)) {
       continue;
     }
+    if (file_picker_path_excluded(path, snapshot->filter_options.file_picker_exclude_dirs)) {
+      continue;
+    }
     FilePickerCatalogEntry entry;
     entry.path = path;
     entry.display_label = path;
@@ -671,6 +674,7 @@ void WorkspaceIndexer::start_scan(const std::string& workspace_root,
     scan_workspace_skeleton(workspace_root, filter_options, anchor_path, open_file_path,
                             snap.get());
     std::lock_guard<std::mutex> lock(mutex_);
+    file_picker_exclude_dirs_ = filter_options.file_picker_exclude_dirs;
     snapshot_ = snap;
   }
   {
@@ -770,6 +774,10 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
   TUIDE_MON("idx", "workspace_indexer.files=" + std::to_string(snap->files.size()));
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (snap->filter_options.file_picker_exclude_dirs != file_picker_exclude_dirs_) {
+      snap->filter_options.file_picker_exclude_dirs = file_picker_exclude_dirs_;
+      rebuild_index_file_picker_catalog(snap.get());
+    }
     snapshot_ = snap;
   }
   scanning_ = false;
@@ -1048,6 +1056,18 @@ void WorkspaceIndexer::remove_path_prefixes(const std::string& workspace_root,
 
   std::lock_guard<std::mutex> lock(mutex_);
   snapshot_ = updated;
+}
+
+void WorkspaceIndexer::set_file_picker_exclude_dirs(std::vector<std::string> dirs) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  file_picker_exclude_dirs_ = dirs;
+  if (!snapshot_) {
+    return;
+  }
+  auto updated = std::make_shared<IndexSnapshot>(*snapshot_);
+  updated->filter_options.file_picker_exclude_dirs = std::move(dirs);
+  rebuild_index_file_picker_catalog(updated.get());
+  snapshot_ = std::move(updated);
 }
 
 bool WorkspaceIndexer::refresh(const std::string& workspace_root) {

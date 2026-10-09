@@ -7,6 +7,9 @@ namespace tuide {
 
 struct IndexFilterOptions {
   bool show_all_files = false;
+  // Prefijos relativos al workspace que el buscador de archivos (Ctrl+P) no lista.
+  // El explorador y la navegación (p. ej. Ctrl+clic vía compile_commands) no los usan.
+  std::vector<std::string> file_picker_exclude_dirs;
 };
 
 // Carpetas pesadas: nunca se indexan en profundidad; pueden mostrarse como stub.
@@ -22,6 +25,12 @@ bool is_probably_binary_path(const std::string& path);
 bool is_build_noise_path(const std::string& path);
 // Candidatos de Ctrl+P: excluye binarios conocidos; los PDF sí se incluyen (visor externo).
 bool is_file_picker_candidate_path(const std::string& path);
+// Deja la ruta relativa al workspace, sin barra final. Vacío si sale del workspace o no es usable.
+std::string normalize_file_picker_exclude_dir(const std::string& workspace_root,
+                                              const std::string& raw);
+// true si relative_path es el directorio excluido o está debajo.
+bool file_picker_path_excluded(const std::string& relative_path,
+                               const std::vector<std::string>& exclude_dirs);
 bool text_looks_binary(const std::string& text);
 bool is_lsp_trackable_path(const std::string& path, const std::string& text = {});
 bool is_cpp_header_path(const std::string& path);

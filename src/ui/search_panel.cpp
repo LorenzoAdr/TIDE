@@ -8,7 +8,9 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "app/debug_model.hpp"
 #include "ftxui/component/component.hpp"
@@ -19,6 +21,8 @@
 #include "ftxui/dom/node.hpp"
 #include "ftxui/screen/box.hpp"
 #include "indexer/workspace_indexer.hpp"
+#include "parser/tree_sitter_highlight.hpp"
+#include "parser/tree_sitter_language.hpp"
 #include "search/workspace_search.hpp"
 #include "search/workspace_search_runner.hpp"
 #include "ui/cursor_blink.hpp"
@@ -32,6 +36,7 @@
 #include "ui/text_input_style.hpp"
 #include "ui/theme.hpp"
 #include "ui/key_bindings.hpp"
+#include "util/syntax_scope.hpp"
 #include "i18n/tr.hpp"
 #include "editor/text_ops.hpp"
 
@@ -158,6 +163,8 @@ struct SearchPanelState {
   bool replace_pending = false;
   bool replace_just_finished = false;
   std::string replace_reload_path;
+  // Keyed by language + preview text. Filled lazily for visible rows.
+  std::unordered_map<std::string, LineHighlights> snippet_highlights;
 };
 
 namespace {
@@ -356,24 +363,119 @@ bool update_search_hover(SearchPanelState* state, MainLayoutState* layout_state,
   return apply_hover_repaint(layout_state, before);
 }
 
-void append_highlighted_preview(Elements* parts, const std::string& preview,
-                                const std::string& highlight) {
+std::string snippet_highlight_key(const std::string& path, const std::string& preview) {
+  return std::to_string(static_cast<int>(tree_sitter_lang_kind_for_path(path))) + '\n' + preview;
+}
+
+const LineHighlights* cached_snippet_highlights(
+    SearchPanelState* state, const std::string& path, const std::string& preview) {
+  if (state == nullptr || preview.empty() ||
+      tree_sitter_lang_kind_for_path(path) == TreeSitterLangKind::kNone) {
+    return nullptr;
+  }
+  const std::string key = snippet_highlight_key(path, preview);
+  auto it = state->snippet_highlights.find(key);
+  if (it == state->snippet_highlights.end()) {
+    if (state->snippet_highlights.size() > 2048) {
+      state->snippet_highlights.clear();
+    }
+    it = state->snippet_highlights.emplace(key, highlights_for_snippet(path, preview)).first;
+  }
+  return &it->second;
+}
+
+void append_highlighted_preview(Elements* parts, SearchPanelState* state, const std::string& path,
+                                const std::string& preview, const std::string& highlight) {
   if (parts == nullptr) {
     return;
   }
-  std::size_t pos = 0;
-  while (pos <= preview.size()) {
-    const auto found =
-        highlight.empty() ? std::string::npos : preview.find(highlight, pos);
-    if (found == std::string::npos) {
-      parts->push_back(text(preview.substr(pos)) | color(theme::Header()));
-      break;
+
+  std::vector<std::pair<int, int>> matches;
+  if (!highlight.empty()) {
+    std::size_t pos = 0;
+    while (pos <= preview.size()) {
+      const auto found = preview.find(highlight, pos);
+      if (found == std::string::npos) {
+        break;
+      }
+      matches.emplace_back(static_cast<int>(found),
+                           static_cast<int>(found + highlight.size()));
+      pos = found + highlight.size();
     }
-    if (found > pos) {
-      parts->push_back(text(preview.substr(pos, found - pos)) | color(theme::Header()));
+  }
+
+  const LineHighlights* hl = cached_snippet_highlights(state, path, preview);
+  const bool have_spans = hl != nullptr && !hl->spans.empty();
+
+  auto push_text = [&](int start, int end, Decorator style) {
+    if (end <= start || start < 0) {
+      return;
     }
-    parts->push_back(text(highlight) | color(theme::Stop()) | bold);
-    pos = found + highlight.size();
+    Element element = text(preview.substr(static_cast<std::size_t>(start),
+                                          static_cast<std::size_t>(end - start)));
+    if (style) {
+      element = element | style;
+    }
+    parts->push_back(std::move(element));
+  };
+
+  auto emit_range = [&](int start, int end, Decorator base, bool plain) {
+    int cursor = start;
+    for (const auto& match : matches) {
+      if (match.second <= cursor) {
+        continue;
+      }
+      if (match.first >= end) {
+        break;
+      }
+      const int lo = std::max(match.first, cursor);
+      const int hi = std::min(match.second, end);
+      if (lo > cursor) {
+        push_text(cursor, lo, base);
+      }
+      if (hi > lo) {
+        if (plain) {
+          push_text(lo, hi, color(theme::Stop()) | bold);
+        } else {
+          push_text(lo, hi, base | bgcolor(theme::FindMatchBg()));
+        }
+      }
+      cursor = hi;
+      if (cursor >= end) {
+        return;
+      }
+    }
+    if (cursor < end) {
+      push_text(cursor, end, base);
+    }
+  };
+
+  const int n = static_cast<int>(preview.size());
+  if (!have_spans) {
+    emit_range(0, n, color(theme::Header()), true);
+    return;
+  }
+
+  int col = 0;
+  for (const HighlightSpan& span : hl->spans) {
+    if (span.start_col > n) {
+      continue;
+    }
+    const int clamped_end = std::min(span.end_col, n);
+    if (span.start_col < col) {
+      continue;
+    }
+    if (span.start_col > col) {
+      emit_range(col, span.start_col, color(theme::SyntaxDefault()), false);
+    }
+    if (clamped_end > span.start_col) {
+      const SyntaxScope scope = SyntaxScopeForTreeSitterCapture(span.capture);
+      emit_range(span.start_col, clamped_end, DecoratorForSyntaxScope(scope), false);
+      col = clamped_end;
+    }
+  }
+  if (col < n) {
+    emit_range(col, n, color(theme::SyntaxDefault()), false);
   }
 }
 
@@ -476,6 +578,7 @@ void apply_search_results(SearchPanelState* state, std::vector<WorkspaceSearchRe
   clear_busy(layout_state);
   state->results = std::move(results);
   state->result_count = static_cast<int>(state->results.size());
+  state->snippet_highlights.clear();
   state->collapsed_files.clear();
   state->selected = 0;
   state->first_visible = 0;
@@ -554,6 +657,7 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
     state->runner.cancel();
     state->committed_query.clear();
     state->results.clear();
+    state->snippet_highlights.clear();
     state->collapsed_files.clear();
     state->selected = 0;
     state->result_count = 0;
@@ -570,6 +674,7 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
   }
   state->status = i18n::tr("search.status.searching");
   state->results.clear();
+  state->snippet_highlights.clear();
   state->collapsed_files.clear();
   state->selected = 0;
   state->first_visible = 0;
@@ -1175,7 +1280,8 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
               parts.push_back(text(tree_indent_guide_prefix(display.depth)) |
                               color(theme::AccentDim()));
               parts.push_back(text(std::to_string(hit.line) + ": ") | color(theme::Accent()));
-              append_highlighted_preview(&parts, hit.preview, state->committed_query);
+              append_highlighted_preview(&parts, state.get(), hit.file, hit.preview,
+                                         state->committed_query);
               row = hbox(std::move(parts));
             }
             row = StyleListRow(std::move(row), selected, hovered, pressed);

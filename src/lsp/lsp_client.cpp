@@ -23,6 +23,7 @@
 #include "app/workspace_config.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/compile_commands_remap.hpp"
+#include "util/docker_clangd.hpp"
 #include <chrono>
 
 namespace fs = std::filesystem;
@@ -313,13 +314,29 @@ bool LspClient::start(const LanguageServerSpec& spec) {
 
 bool LspClient::start(const std::string& workspace_root,
                       const std::string& compile_commands_dir,
-                      const bool use_gcc_query_driver, const bool background_index) {
+                      const bool use_gcc_query_driver, const bool background_index,
+                      const CompileCommandsSettings& compile_commands) {
   std::string compile_dir = compile_commands_dir;
   if (compile_dir.empty()) {
     WorkspaceConfig default_config;
+    default_config.compile_commands = compile_commands;
     const auto setup = ensure_compile_commands_for_clangd(workspace_root, default_config);
     compile_dir = setup.compile_dir;
   }
+
+  if (!compile_commands.docker_container.empty() &&
+      compile_commands.mode != CompileCommandsMode::kHost) {
+    if (const auto launch =
+            prepare_docker_clangd_launch(workspace_root, compile_dir, compile_commands)) {
+      const LanguageServerSpec spec = make_docker_clangd_spec(
+          workspace_root, *launch, use_gcc_query_driver, background_index);
+      if (start(spec)) {
+        docker_clangd_active_.store(true, std::memory_order_release);
+        return true;
+      }
+    }
+  }
+
   const auto spec =
       make_clangd_spec(workspace_root, compile_dir, use_gcc_query_driver, background_index);
   if (!spec.has_value()) {
@@ -331,6 +348,7 @@ bool LspClient::start(const std::string& workspace_root,
 void LspClient::stop() {
   std::lock_guard<std::mutex> stop_lock(stop_mutex_);
   intentionally_stopping_.store(true, std::memory_order_release);
+  docker_clangd_active_.store(false, std::memory_order_release);
   ready_ = false;
 
   // Kill the language server *before* joining the reader. basedpyright/node and

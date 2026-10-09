@@ -33,6 +33,8 @@ struct CompileCommandsSettings {
 
 struct WorkspaceConfig {
   std::vector<std::string> clangd_extra_include_paths;
+  // Directorios (relativos al workspace) que el buscador de archivos no lista.
+  std::vector<std::string> file_picker_exclude_dirs;
   bool clangd_use_gcc_query_driver = true;
   bool clangd_background_index = false;
   theme::ThemeMode theme = theme::ThemeMode::kDark;

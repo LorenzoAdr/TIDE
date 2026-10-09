@@ -1198,6 +1198,7 @@ void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir)
   std::string compile_dir;
   bool gcc_query = true;
   bool background_index = false;
+  CompileCommandsSettings compile_commands;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!compile_commands_dir.empty()) {
@@ -1211,6 +1212,7 @@ void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir)
     compile_dir = compile_commands_dir_.empty() ? compile_commands_dir : compile_commands_dir_;
     gcc_query = use_gcc_query_driver_;
     background_index = use_background_index_;
+    compile_commands = clangd_compile_commands_;
   }
 
   // Join outside mutex_: the async worker takes mutex_ while running jobs.
@@ -1220,9 +1222,11 @@ void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir)
   }
 
   lsp_starting_.store(true, std::memory_order_release);
-  lsp_startup_thread_ = std::thread([this, root, compile_dir, gcc_query, background_index] {
+  lsp_startup_thread_ = std::thread([this, root, compile_dir, gcc_query, background_index,
+                                     compile_commands] {
     set_current_thread_name("lsp-start");
-    const bool ok = client_.start(root, compile_dir, gcc_query, background_index);
+    const bool ok =
+        client_.start(root, compile_dir, gcc_query, background_index, compile_commands);
     if (shutting_down_.load(std::memory_order_acquire)) {
       client_.stop();
       lsp_starting_.store(false, std::memory_order_release);
@@ -1234,6 +1238,11 @@ void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir)
       lsp_starting_.store(false, std::memory_order_release);
       finish_lsp_start_locked(ok);
       want_worker = ok && use_lsp_;
+    }
+    if (ok && !compile_commands.docker_container.empty() &&
+        compile_commands.mode != CompileCommandsMode::kHost) {
+      notify_lsp_status(client_.docker_clangd_active() ? "status.clangd_docker_started"
+                                                       : "status.clangd_docker_fallback");
     }
     if (want_worker) {
       ensure_async_worker_running();
@@ -2342,11 +2351,13 @@ bool LspSymbolProvider::lsp_enabled() const {
   return lsp_enabled_;
 }
 
-void LspSymbolProvider::set_workspace_clangd_options(const bool use_gcc_query_driver,
-                                                     const bool background_index) {
+void LspSymbolProvider::set_workspace_clangd_options(
+    const bool use_gcc_query_driver, const bool background_index,
+    const CompileCommandsSettings& compile_commands) {
   std::lock_guard<std::mutex> lock(mutex_);
   use_gcc_query_driver_ = use_gcc_query_driver;
   use_background_index_ = background_index;
+  clangd_compile_commands_ = compile_commands;
 }
 
 LspAsyncJobKind LspSymbolProvider::to_public_job_kind(const AsyncJobKind kind) {

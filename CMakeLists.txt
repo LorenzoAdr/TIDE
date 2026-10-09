@@ -308,6 +308,8 @@ add_executable(tuide
   src/util/shell_utils.cpp
   src/util/system_clipboard.cpp
   src/util/docker_shell.cpp
+  src/util/docker_clangd_spec.cpp
+  src/util/docker_clangd.cpp
   src/util/clangd_workspace_setup.cpp
   src/build/build_environment.cpp
   src/build/build_environment_state.cpp
@@ -1573,6 +1575,7 @@ add_executable(lsp_completion_probe
   tools/lsp_probe_stubs.cpp
   src/lsp/language_server_spec.cpp
   src/lsp/lsp_client.cpp
+  src/util/docker_clangd_spec.cpp
   src/lsp/lsp_transport.cpp
   src/lsp/lsp_uri.cpp
   src/app/language_override.cpp
@@ -1624,6 +1627,12 @@ target_include_directories(toolpacks_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(docker_clangd_test
+  tests/docker_clangd_test.cpp
+  src/util/docker_clangd_spec.cpp
+)
+target_include_directories(docker_clangd_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 set(TUIDE_TEST_TARGETS
   i18n_test
   text_ops_test
@@ -1633,6 +1642,7 @@ set(TUIDE_TEST_TARGETS
   bracket_match_test
   indent_guides_test
   build_environment_test
+  docker_clangd_test
   workspace_detect_test
   recent_projects_test
   fuzzy_match_test
