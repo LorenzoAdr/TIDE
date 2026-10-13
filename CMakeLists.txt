@@ -821,6 +821,12 @@ add_executable(compiler_location_test
 )
 target_include_directories(compiler_location_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(monitor_log_test
+  tests/monitor_log_test.cpp
+  src/util/monitor_log.cpp
+)
+target_include_directories(monitor_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 add_executable(raw_pty_screen_test
   tests/raw_pty_screen_test.cpp
   src/terminal/raw_pty_screen.cpp
@@ -1656,6 +1662,7 @@ set(TUIDE_TEST_TARGETS
   search_result_tree_test
   ui_invalidation_policy_test
   compiler_location_test
+  monitor_log_test
   raw_pty_screen_test
   gfortran_diagnostics_test
   doc_comment_test

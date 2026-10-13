@@ -66,6 +66,7 @@ class DapBackend : public IDebugBackend {
   bool initialize_session();
   bool send_configuration_done();
   void handle_command(const UiCommand& command);
+  void enqueue(UiCommand command);
   void refresh_stack(int thread_id);
   void refresh_variables(int frame_id);
   void fetch_variable_children(int variables_reference,

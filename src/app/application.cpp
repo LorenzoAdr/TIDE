@@ -3471,6 +3471,14 @@ int Application::run() {
 				        << " focus=" << focus_state_.region_label();
 				TUIDE_MON("ui", key_msg.str());
 			}
+			if (monitor_log::enabled() && !event.is_mouse() &&
+			    !event_is_kitty_key_release(event)) {
+				if (const std::optional<KeyAction> action =
+				        keybind_match(event, KeyScope::Any)) {
+					monitor_log::note_user_action(key_action_id(*action), event.input(),
+					                              focus_state_.region_label());
+				}
+			}
 
 			// Tuide app shortcuts must run before any_modal_open() and editor interceptors.
 			if (keybind_matches(KeyAction::QuickOpen, event)) {

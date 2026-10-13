@@ -209,8 +209,26 @@ void DapBackend::stop() {
   session_close_guard_.reset();
 }
 
+void DapBackend::enqueue(UiCommand command) {
+  std::string detail;
+  switch (command.kind) {
+    case UiCommandKind::kEvaluate:
+    case UiCommandKind::kAddWatch:
+    case UiCommandKind::kSetWatchValue:
+      detail = command.expression;
+      break;
+    case UiCommandKind::kSetBreakpoints:
+      detail = command.breakpoint_file;
+      break;
+    default:
+      break;
+  }
+  monitor_log::note_dap_queued(ui_command_kind_name(command.kind), detail);
+  commands_.push(std::move(command));
+}
+
 void DapBackend::submit(const UiCommand& command) {
-  commands_.push(command);
+  enqueue(command);
 }
 
 void DapBackend::set_wake_callback(DebugWakeCallback callback) {
@@ -318,7 +336,7 @@ void DapBackend::setup_session() {
     if (breakpoints_pending_sync_) {
       UiCommand sync;
       sync.kind = UiCommandKind::kSyncBreakpoints;
-      commands_.push(sync);
+      enqueue(std::move(sync));
     }
 
     // No llamar session_->send() aquí: este handler corre en el hilo lector DAP
@@ -326,7 +344,7 @@ void DapBackend::setup_session() {
     UiCommand refresh;
     refresh.kind = UiCommandKind::kRefreshStack;
     refresh.thread_id = active_thread_id_;
-    commands_.push(refresh);
+    enqueue(std::move(refresh));
   });
 
   session_->registerHandler([&](const dap::ContinuedEvent& e) {
@@ -1345,12 +1363,19 @@ void DapBackend::on_inferior_core_loaded() {
   UiCommand refresh;
   refresh.kind = UiCommandKind::kRefreshStack;
   refresh.thread_id = active_thread_id_;
-  commands_.push(refresh);
+  enqueue(std::move(refresh));
 }
 
 void DapBackend::handle_command(const UiCommand& command) {
+  const char* kind = ui_command_kind_name(command.kind);
+  monitor_log::note_dap_started(kind);
+  struct FinishDapNote {
+    const char* kind;
+    ~FinishDapNote() { monitor_log::note_dap_finished(kind); }
+  } finish_dap_note{kind};
+
   std::ostringstream scope_name;
-  scope_name << "handle_command kind=" << ui_command_kind_name(command.kind);
+  scope_name << "handle_command kind=" << kind;
   monitor_log::MonitorScope command_scope("dap", scope_name.str());
 
   if (command.kind == UiCommandKind::kSetBreakpoints) {
@@ -1908,7 +1933,7 @@ void DapBackend::handle_command(const UiCommand& command) {
         UiCommand refresh;
         refresh.kind = UiCommandKind::kFetchVariables;
         refresh.frame_id = command.frame_id;
-        commands_.push(refresh);
+        enqueue(std::move(refresh));
       }
       break;
     }
