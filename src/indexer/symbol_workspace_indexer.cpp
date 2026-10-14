@@ -6,6 +6,7 @@
 #include <functional>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "indexer/index_rules.hpp"
 #include "parser/tree_sitter_tags.hpp"
@@ -78,6 +79,51 @@ FileIndexPiece index_relative_file_fallback(const std::shared_ptr<ISymbolProvide
   return piece;
 }
 
+bool file_matches_any_prefix(const std::string& file, const std::vector<std::string>& prefixes) {
+  for (const std::string& prefix : prefixes) {
+    if (index_path_matches_prefix(file, prefix)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void erase_symbol_prefixes(SymbolIndexSnapshot* snap, const std::vector<std::string>& prefixes) {
+  if (snap == nullptr || prefixes.empty()) {
+    return;
+  }
+  const auto drop = [&](const std::string& file) {
+    return file_matches_any_prefix(file, prefixes);
+  };
+  snap->symbols.erase(std::remove_if(snap->symbols.begin(), snap->symbols.end(),
+                                      [&](const IndexedSymbol& symbol) { return drop(symbol.file); }),
+                      snap->symbols.end());
+  snap->refs.erase(std::remove_if(snap->refs.begin(), snap->refs.end(),
+                                  [&](const IndexedRef& ref) { return drop(ref.file); }),
+                   snap->refs.end());
+}
+
+void erase_exact_files(SymbolIndexSnapshot* snap, const std::unordered_set<std::string>& files) {
+  if (snap == nullptr || files.empty()) {
+    return;
+  }
+  snap->symbols.erase(std::remove_if(snap->symbols.begin(), snap->symbols.end(),
+                                      [&](const IndexedSymbol& symbol) {
+                                        return files.count(symbol.file) > 0;
+                                      }),
+                      snap->symbols.end());
+  snap->refs.erase(std::remove_if(snap->refs.begin(), snap->refs.end(),
+                                  [&](const IndexedRef& ref) { return files.count(ref.file) > 0; }),
+                   snap->refs.end());
+}
+
+bool symbol_less(const IndexedSymbol& a, const IndexedSymbol& b) {
+  if (a.file != b.file) {
+    return a.file < b.file;
+  }
+  return a.name < b.name;
+}
+
 }  // namespace
 
 SymbolWorkspaceIndexer::SymbolWorkspaceIndexer() {
@@ -117,6 +163,11 @@ void SymbolWorkspaceIndexer::start_scan(const std::string& workspace_root,
     }
   }
   running_ = true;
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    worker_alive_ = true;
+    edit_queue_.clear();
+  }
   worker_ = std::thread([this, workspace_root, provider, file_indexer] {
     set_current_thread_name("idx-syms");
     worker_main(workspace_root, provider, file_indexer);
@@ -130,46 +181,23 @@ void SymbolWorkspaceIndexer::reindex_file(const std::string& workspace_root,
   if (!is_indexed_source_path(relative_file) || relative_file.empty()) {
     return;
   }
-  // Avoid racing the full scan (open tabs used to look like "the whole map").
-  if (running_.load()) {
+  EditBatch batch;
+  batch.reindex_paths.push_back(relative_file);
+  batch.priority = true;
+  if (!enqueue_batch(std::move(batch))) {
+    reindex_paths_now(workspace_root, provider_, {relative_file});
+  }
+}
+
+void SymbolWorkspaceIndexer::enqueue_fs_changes(std::vector<std::string> removed_prefixes,
+                                                std::vector<std::string> reindex_paths) {
+  if (removed_prefixes.empty() && reindex_paths.empty()) {
     return;
   }
-
-  auto updated = std::make_shared<SymbolIndexSnapshot>();
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
-      return;
-    }
-    updated->workspace_root = workspace_root;
-    updated->partial = snapshot_->partial;
-    updated->symbols.reserve(snapshot_->symbols.size());
-    for (const auto& sym : snapshot_->symbols) {
-      if (sym.file != relative_file) {
-        updated->symbols.push_back(sym);
-      }
-    }
-    for (const auto& ref : snapshot_->refs) {
-      if (ref.file != relative_file) {
-        updated->refs.push_back(ref);
-      }
-    }
-  }
-
-  const auto piece = index_relative_file_tags(workspace_root, relative_file);
-  updated->symbols.insert(updated->symbols.end(), piece.symbols.begin(), piece.symbols.end());
-  updated->refs.insert(updated->refs.end(), piece.refs.begin(), piece.refs.end());
-
-  std::sort(updated->symbols.begin(), updated->symbols.end(),
-            [](const IndexedSymbol& a, const IndexedSymbol& b) {
-              if (a.file != b.file) {
-                return a.file < b.file;
-              }
-              return a.name < b.name;
-            });
-
-  std::lock_guard<std::mutex> lock(mutex_);
-  snapshot_ = updated;
+  EditBatch batch;
+  batch.remove_prefixes = std::move(removed_prefixes);
+  batch.reindex_paths = std::move(reindex_paths);
+  enqueue_batch(std::move(batch));
 }
 
 void SymbolWorkspaceIndexer::remove_file(const std::string& workspace_root,
@@ -177,29 +205,7 @@ void SymbolWorkspaceIndexer::remove_file(const std::string& workspace_root,
   if (relative_file.empty()) {
     return;
   }
-
-  auto updated = std::make_shared<SymbolIndexSnapshot>();
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
-      return;
-    }
-    updated->workspace_root = workspace_root;
-    updated->partial = snapshot_->partial;
-    for (const auto& sym : snapshot_->symbols) {
-      if (sym.file != relative_file) {
-        updated->symbols.push_back(sym);
-      }
-    }
-    for (const auto& ref : snapshot_->refs) {
-      if (ref.file != relative_file) {
-        updated->refs.push_back(ref);
-      }
-    }
-  }
-
-  std::lock_guard<std::mutex> lock(mutex_);
-  snapshot_ = updated;
+  remove_path_prefixes(workspace_root, std::vector<std::string>{relative_file});
 }
 
 void SymbolWorkspaceIndexer::remove_path_prefix(const std::string& workspace_root,
@@ -215,6 +221,82 @@ void SymbolWorkspaceIndexer::remove_path_prefixes(const std::string& workspace_r
   if (prefixes.empty()) {
     return;
   }
+  EditBatch batch;
+  batch.remove_prefixes = prefixes;
+  batch.priority = true;
+  if (!enqueue_batch(std::move(batch))) {
+    remove_prefixes_now(workspace_root, prefixes);
+  }
+}
+
+bool SymbolWorkspaceIndexer::enqueue_batch(EditBatch batch) {
+  if (batch.remove_prefixes.empty() && batch.reindex_paths.empty()) {
+    return true;
+  }
+  std::lock_guard<std::mutex> lock(queue_mutex_);
+  if (!worker_alive_.load()) {
+    return false;
+  }
+  if (batch.priority) {
+    edit_queue_.push_front(std::move(batch));
+  } else {
+    edit_queue_.push_back(std::move(batch));
+  }
+  queue_cv_.notify_one();
+  return true;
+}
+
+std::vector<SymbolWorkspaceIndexer::EditBatch> SymbolWorkspaceIndexer::steal_priority_batches() {
+  std::vector<EditBatch> out;
+  std::lock_guard<std::mutex> lock(queue_mutex_);
+  for (auto it = edit_queue_.begin(); it != edit_queue_.end();) {
+    if (!it->priority) {
+      ++it;
+      continue;
+    }
+    out.push_back(std::move(*it));
+    it = edit_queue_.erase(it);
+  }
+  return out;
+}
+
+void SymbolWorkspaceIndexer::remove_prefixes_now(const std::string& workspace_root,
+                                                 const std::vector<std::string>& prefixes) {
+  if (prefixes.empty()) {
+    return;
+  }
+  auto updated = std::make_shared<SymbolIndexSnapshot>();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
+      return;
+    }
+    *updated = *snapshot_;
+  }
+  erase_symbol_prefixes(updated.get(), prefixes);
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
+    return;
+  }
+  snapshot_ = std::move(updated);
+}
+
+void SymbolWorkspaceIndexer::reindex_paths_now(const std::string& workspace_root,
+                                               const std::shared_ptr<ISymbolProvider>& provider,
+                                               std::vector<std::string> relative_files) {
+  (void)provider;
+  std::vector<std::string> sources;
+  std::unordered_set<std::string> seen;
+  sources.reserve(relative_files.size());
+  for (std::string& relative : relative_files) {
+    if (!is_indexed_source_path(relative) || !seen.insert(relative).second) {
+      continue;
+    }
+    sources.push_back(std::move(relative));
+  }
+  if (sources.empty()) {
+    return;
+  }
 
   auto updated = std::make_shared<SymbolIndexSnapshot>();
   {
@@ -222,46 +304,121 @@ void SymbolWorkspaceIndexer::remove_path_prefixes(const std::string& workspace_r
     if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
       return;
     }
-    updated->workspace_root = workspace_root;
-    updated->partial = snapshot_->partial;
-    updated->symbols.reserve(snapshot_->symbols.size());
-    updated->refs.reserve(snapshot_->refs.size());
-    for (const auto& sym : snapshot_->symbols) {
-      bool drop = false;
-      for (const std::string& prefix : prefixes) {
-        if (index_path_matches_prefix(sym.file, prefix)) {
-          drop = true;
-          break;
-        }
+    *updated = *snapshot_;
+  }
+  erase_exact_files(updated.get(), seen);
+
+  std::vector<std::string> blocked;
+  std::unordered_set<std::string> done;
+  auto last_publish = std::chrono::steady_clock::now();
+  bool dirty = true;
+
+  auto publish = [&](bool force) {
+    if (!dirty && !force) {
+      return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (!force && now - last_publish < std::chrono::milliseconds(200)) {
+      return;
+    }
+    auto copy = std::make_shared<SymbolIndexSnapshot>(*updated);
+    copy->partial = false;
+    std::sort(copy->symbols.begin(), copy->symbols.end(), symbol_less);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
+        return;
       }
-      if (!drop) {
-        updated->symbols.push_back(sym);
+      snapshot_ = std::move(copy);
+    }
+    last_publish = now;
+    dirty = false;
+  };
+
+  auto absorb_priority = [&]() {
+    for (EditBatch& batch : steal_priority_batches()) {
+      if (!batch.remove_prefixes.empty()) {
+        erase_symbol_prefixes(updated.get(), batch.remove_prefixes);
+        blocked.insert(blocked.end(), batch.remove_prefixes.begin(), batch.remove_prefixes.end());
+        dirty = true;
+      }
+      for (const std::string& path : batch.reindex_paths) {
+        if (!is_indexed_source_path(path) || file_matches_any_prefix(path, blocked)) {
+          continue;
+        }
+        erase_exact_files(updated.get(), {path});
+        const FileIndexPiece piece = index_relative_file_tags(workspace_root, path);
+        updated->symbols.insert(updated->symbols.end(), piece.symbols.begin(), piece.symbols.end());
+        updated->refs.insert(updated->refs.end(), piece.refs.begin(), piece.refs.end());
+        done.insert(path);
+        dirty = true;
       }
     }
-    for (const auto& ref : snapshot_->refs) {
-      bool drop = false;
-      for (const std::string& prefix : prefixes) {
-        if (index_path_matches_prefix(ref.file, prefix)) {
-          drop = true;
-          break;
-        }
+  };
+
+  for (const std::string& relative : sources) {
+    if (worker_alive_.load() && stop_requested_.load()) {
+      break;
+    }
+    absorb_priority();
+    if (done.count(relative) > 0 || file_matches_any_prefix(relative, blocked)) {
+      continue;
+    }
+    const FileIndexPiece piece = index_relative_file_tags(workspace_root, relative);
+    updated->symbols.insert(updated->symbols.end(), piece.symbols.begin(), piece.symbols.end());
+    updated->refs.insert(updated->refs.end(), piece.refs.begin(), piece.refs.end());
+    done.insert(relative);
+    dirty = true;
+    publish(false);
+  }
+  publish(true);
+}
+
+void SymbolWorkspaceIndexer::idle_loop(std::string workspace_root,
+                                       std::shared_ptr<ISymbolProvider> provider) {
+  while (!stop_requested_.load()) {
+    std::vector<EditBatch> ready;
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex_);
+      queue_cv_.wait(lock, [this] {
+        return stop_requested_.load() || !edit_queue_.empty();
+      });
+      if (stop_requested_.load() && edit_queue_.empty()) {
+        return;
       }
-      if (!drop) {
-        updated->refs.push_back(ref);
+      while (!edit_queue_.empty()) {
+        ready.push_back(std::move(edit_queue_.front()));
+        edit_queue_.pop_front();
+      }
+    }
+    std::stable_partition(ready.begin(), ready.end(),
+                          [](const EditBatch& batch) { return batch.priority; });
+    for (EditBatch& batch : ready) {
+      if (stop_requested_.load()) {
+        return;
+      }
+      if (!batch.remove_prefixes.empty()) {
+        remove_prefixes_now(workspace_root, batch.remove_prefixes);
+      }
+      if (!batch.reindex_paths.empty()) {
+        reindex_paths_now(workspace_root, provider, std::move(batch.reindex_paths));
       }
     }
   }
-
-  std::lock_guard<std::mutex> lock(mutex_);
-  snapshot_ = updated;
 }
 
 void SymbolWorkspaceIndexer::stop() {
   stop_requested_ = true;
+  queue_cv_.notify_all();
   if (worker_.joinable()) {
     worker_.join();
   }
   running_ = false;
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    worker_alive_ = false;
+    edit_queue_.clear();
+  }
   notify_progress(false, progress_done_.load(), progress_total_.load());
 }
 
@@ -409,6 +566,11 @@ void SymbolWorkspaceIndexer::worker_main(std::string workspace_root,
   }
   running_ = false;
   notify_progress(false, progress_done_.load(), progress_total_.load());
+  if (stop_requested_.load()) {
+    return;
+  }
+  // Los ficheros que aparecieron durante el escaneo quedan en la cola.
+  idle_loop(std::move(workspace_root), std::move(provider));
 }
 
 }  // namespace tuide

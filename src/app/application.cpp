@@ -1131,13 +1131,8 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 			TUIDE_MON_SCOPE("ui", "tick.apply_pending_connection");
 			apply_pending_connection();
 		}
-		// File-system sync must run even while typing: deferred-panel gating used to
-		// drop inotify updates until the next idle window.
-		{
-			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_index_changes");
-			TUIDE_MON_SCOPE("ui", "tick.process_index_changes");
-			process_index_changes();
-		}
+		// Las ráfagas de inotify las aplica idx-apply. Este tick solo recibe el wake
+		// cuando el snapshot ya está publicado.
 		if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_build_environment");
 			TUIDE_MON_SCOPE("ui", "tick.process_build_environment_updates");
@@ -2604,84 +2599,6 @@ bool Application::is_editor_visible_path(const std::string& absolute_path) const
 	                 normalized) != editor_visible_abs_paths_.end();
 }
 
-void Application::process_index_changes() {
-	if (workspace_.root.empty()) {
-		return;
-	}
-	bool changed = false;
-	bool wake_ui = false;
-	const auto path_matches_prefix = [](const std::string& path, const std::string& prefix) {
-		return index_path_matches_prefix(path, prefix);
-	};
-
-	std::vector<std::string> pending_removes;
-	std::vector<FileIndexChange> pending_upserts;
-	auto flush_pending_removes = [&]() {
-		if (pending_removes.empty()) {
-			return;
-		}
-		indexer_.remove_path_prefixes(workspace_.root, pending_removes);
-		symbol_indexer_.remove_path_prefixes(workspace_.root, pending_removes);
-		pending_removes.clear();
-	};
-	auto flush_pending_upserts = [&]() {
-		if (pending_upserts.empty()) {
-			return;
-		}
-		indexer_.upsert_files(workspace_.root, pending_upserts);
-		for (const FileIndexChange& change : pending_upserts) {
-			symbol_indexer_.reindex_file(workspace_.root, change.relative_path,
-			                             change.absolute_path);
-		}
-		pending_upserts.clear();
-	};
-
-	for (const auto &change : coalesce_file_index_changes(indexer_.drain_changes())) {
-		changed = true;
-		if (change.wake_ui) {
-			wake_ui = true;
-		}
-		switch (change.kind) {
-		case FileIndexChangeKind::Remove:
-		case FileIndexChangeKind::RemovePrefix:
-			flush_pending_upserts();
-			if (!change.relative_path.empty()) {
-				pending_removes.push_back(change.relative_path);
-			}
-			break;
-		case FileIndexChangeKind::IndexDirectory:
-			flush_pending_removes();
-			flush_pending_upserts();
-			indexer_.index_directory(workspace_.root, change.relative_path,
-			                         change.absolute_path);
-			if (auto snapshot = indexer_.snapshot()) {
-				for (const std::string &file : snapshot->files) {
-					if (!path_matches_prefix(file, change.relative_path)) {
-						continue;
-					}
-					const std::string absolute =
-					    (std::filesystem::path(workspace_.root) / file).string();
-					symbol_indexer_.reindex_file(workspace_.root, file, absolute);
-				}
-			}
-			break;
-		case FileIndexChangeKind::Upsert:
-		default:
-			flush_pending_removes();
-			pending_upserts.push_back(change);
-			break;
-		}
-	}
-	flush_pending_removes();
-	flush_pending_upserts();
-	// Solo repintar cuando el listado del árbol puede haber cambiado (alta/baja/rename).
-	// Un modify silencioso (p. ej. reindex de sources) no debe forzar otro frame.
-	if (changed && wake_ui) {
-		layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
-		UI_WAKE(&layout_state_, "app");
-	}
-}
-
 bool Application::any_modal_open() const {
 	return workspace_wizard_state_.open || external_file_wizard_state_.open ||
 	       connection_wizard_state_.open || file_picker_state_.open || symbol_picker_state_.open ||
@@ -3156,15 +3073,18 @@ int Application::run() {
 			layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
 		});
 	});
-	indexer_.set_change_notify([this](bool wake_ui) {
-		if (!wake_ui) {
-			return;
+	indexer_.set_change_notify([this](const IndexApplyUpdate& update) {
+		if (update.wake_ui) {
+			layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
+			UI_WAKE(&layout_state_, "indexer.fs_change");
 		}
-		layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
-		UI_WAKE(&layout_state_, "indexer.fs_change");
-		// Full rg list just replaced the skeleton: rebuild AI map if it is stale/short.
-		if (!indexer_.scanning() && ai_indexes_requested_) {
+		// Solo al cerrar el escaneo completo: un árbol corto no debe relanzar el mapa
+		// en cada ráfaga de ficheros (unzip, install).
+		if (update.scan_finished && !indexer_.scanning() && ai_indexes_requested_) {
 			enqueue_ui_task([this]() { sync_symbol_workspace_indexer(false); });
+		}
+		if (!update.removed_prefixes.empty() || !update.reindex_paths.empty()) {
+			symbol_indexer_.enqueue_fs_changes(update.removed_prefixes, update.reindex_paths);
 		}
 	});
 	symbol_indexer_.set_progress_callback([this](bool scanning, std::size_t done, std::size_t total) {

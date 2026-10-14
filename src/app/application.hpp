@@ -88,7 +88,6 @@ class Application {
 
  private:
   void drain_events();
-  void process_index_changes();
   void apply_event(const DebugEvent& event);
   void submit_command(const UiCommand& command);
   void refresh_all_watches();

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -51,6 +53,10 @@ class SymbolWorkspaceIndexer {
   void reindex_file(const std::string& workspace_root,
                     const std::string& relative_file,
                     const std::string& absolute_path);
+  // Lote del indexador de ficheros (hilo idx-apply). No bloquea: se pliega al
+  // acabar el escaneo completo, o lo consume el bucle incremental.
+  void enqueue_fs_changes(std::vector<std::string> removed_prefixes,
+                          std::vector<std::string> reindex_paths);
   void remove_file(const std::string& workspace_root, const std::string& relative_file);
   void remove_path_prefix(const std::string& workspace_root, const std::string& prefix);
   void remove_path_prefixes(const std::string& workspace_root,
@@ -64,9 +70,23 @@ class SymbolWorkspaceIndexer {
   void set_progress_callback(ProgressCallback callback);
 
  private:
+  struct EditBatch {
+    std::vector<std::string> remove_prefixes;
+    std::vector<std::string> reindex_paths;
+    bool priority = false;
+  };
+
   void worker_main(std::string workspace_root,
                    std::shared_ptr<ISymbolProvider> provider,
                    WorkspaceIndexer* file_indexer);
+  void idle_loop(std::string workspace_root, std::shared_ptr<ISymbolProvider> provider);
+  bool enqueue_batch(EditBatch batch);
+  std::vector<EditBatch> steal_priority_batches();
+  void remove_prefixes_now(const std::string& workspace_root,
+                           const std::vector<std::string>& prefixes);
+  void reindex_paths_now(const std::string& workspace_root,
+                         const std::shared_ptr<ISymbolProvider>& provider,
+                         std::vector<std::string> relative_files);
   void publish_snapshot_locked(std::shared_ptr<SymbolIndexSnapshot> snap);
   void notify_progress(bool scanning, std::size_t done, std::size_t total);
 
@@ -74,6 +94,10 @@ class SymbolWorkspaceIndexer {
   std::shared_ptr<const SymbolIndexSnapshot> snapshot_;
   std::shared_ptr<ISymbolProvider> provider_;
   std::thread worker_;
+  std::mutex queue_mutex_;
+  std::condition_variable queue_cv_;
+  std::deque<EditBatch> edit_queue_;
+  std::atomic<bool> worker_alive_{false};
   std::atomic<bool> running_{false};
   std::atomic<bool> stop_requested_{false};
   std::atomic<std::size_t> progress_done_{0};

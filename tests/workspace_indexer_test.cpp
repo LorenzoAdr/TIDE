@@ -237,6 +237,85 @@ void test_symlink_dirs_keep_link_name_in_folders() {
   fs::remove_all(fs::temp_directory_path() / "tuide_symlink_outside", ec);
 }
 
+void test_upsert_reaches_snapshot_without_ui_drain() {
+  namespace fs = std::filesystem;
+  const fs::path root = fs::temp_directory_path() / "tuide_async_upsert_test";
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(root / "src", ec);
+  {
+    std::ofstream((root / "src" / "main.cpp").string()) << "int main(){return 0;}\n";
+  }
+
+  tuide::WorkspaceIndexer indexer;
+  indexer.start_scan(root.string(), {});
+  for (int i = 0; i < 200 && indexer.scanning(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  check(!indexer.scanning(), "upsert scan finished");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  const fs::path extra = root / "src" / "extra.cpp";
+  {
+    std::ofstream(extra.string()) << "void extra(){}\n";
+  }
+  indexer.upsert_file(root.string(), "src/extra.cpp", extra.string());
+
+  bool found = false;
+  for (int i = 0; i < 160 && !found; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    const auto snap = indexer.snapshot();
+    if (snap == nullptr) {
+      continue;
+    }
+    found = std::find(snap->files.begin(), snap->files.end(), "src/extra.cpp") != snap->files.end();
+  }
+  check(found, "async upsert visible in snapshot");
+  indexer.stop();
+  fs::remove_all(root, ec);
+}
+
+void test_new_directory_is_indexed_off_the_caller() {
+  namespace fs = std::filesystem;
+  const fs::path root = fs::temp_directory_path() / "tuide_async_tree_test";
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(root / "src", ec);
+  {
+    std::ofstream((root / "src" / "main.cpp").string()) << "int main(){return 0;}\n";
+  }
+
+  tuide::WorkspaceIndexer indexer;
+  indexer.start_scan(root.string(), {});
+  for (int i = 0; i < 200 && indexer.scanning(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  check(!indexer.scanning(), "tree scan finished");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  fs::create_directories(root / "pack", ec);
+  constexpr int kFiles = 30;
+  for (int i = 0; i < kFiles; ++i) {
+    std::ofstream((root / "pack" / ("f" + std::to_string(i) + ".cpp")).string()) << "void f(){}\n";
+  }
+
+  bool found_first = false;
+  bool found_last = false;
+  for (int i = 0; i < 200 && !(found_first && found_last); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    const auto snap = indexer.snapshot();
+    if (snap == nullptr) {
+      continue;
+    }
+    found_first = std::find(snap->files.begin(), snap->files.end(), "pack/f0.cpp") != snap->files.end();
+    found_last =
+        std::find(snap->files.begin(), snap->files.end(), "pack/f29.cpp") != snap->files.end();
+  }
+  check(found_first && found_last, "new tree indexed without a UI drain");
+  indexer.stop();
+  fs::remove_all(root, ec);
+}
+
 }  // namespace
 
 int main() {
@@ -250,5 +329,7 @@ int main() {
   test_coalesce_dedupes_consecutive_upserts();
   test_fs_change_debounce_constants();
   test_symlink_dirs_keep_link_name_in_folders();
+  test_upsert_reaches_snapshot_without_ui_drain();
+  test_new_directory_is_indexed_off_the_caller();
   return 0;
 }
