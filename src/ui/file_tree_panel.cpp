@@ -4,8 +4,10 @@
 #include "editor/indent_guides.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -187,6 +189,43 @@ std::optional<Color> file_git_status_dot(const GitStatusEntry& entry) {
     return theme::Success();
   }
   return std::nullopt;
+}
+
+bool has_any_suffix(const std::string& lower_name, std::initializer_list<const char*> suffixes) {
+  for (const char* suffix : suffixes) {
+    const std::string s(suffix);
+    if (lower_name.size() >= s.size() &&
+        lower_name.compare(lower_name.size() - s.size(), s.size(), s) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Groups files by semantic role rather than by extension, reusing the syntax-highlight
+// colors so the explorer stays coherent across every theme preset (incl. light ones)
+// instead of hardcoding a color that only looks right in the default dark palette.
+Color file_label_color(const std::string& filename) {
+  std::string lower = filename;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (lower == "cmakelists.txt" || lower == "makefile" || lower == "gnumakefile" ||
+      has_any_suffix(lower, {".cmake", ".mk"})) {
+    return theme::BuildFileKeyword();
+  }
+  if (has_any_suffix(lower, {".h", ".hpp", ".hh", ".hxx", ".inl"})) {
+    return theme::SyntaxType();
+  }
+  if (has_any_suffix(lower, {".cpp", ".cc", ".cxx", ".c"})) {
+    return theme::SyntaxFunction();
+  }
+  if (has_any_suffix(lower, {".json", ".yaml", ".yml", ".toml"})) {
+    return theme::SyntaxString();
+  }
+  if (has_any_suffix(lower, {".md", ".markdown", ".txt", ".rst"})) {
+    return theme::Muted();
+  }
+  return theme::FileText();
 }
 
 std::string relative_path_in_workspace(const std::string& workspace_root,
@@ -1018,7 +1057,8 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
       const std::string icon =
           entry.is_file ? file_glyph_display(entry.label)
                         : folder_glyph(entry.folder != nullptr && entry.folder->expanded);
-      const Color label_color = entry.is_file ? theme::FileText() : theme::DirectoryText();
+      const Color label_color =
+          entry.is_file ? file_label_color(entry.label) : theme::DirectoryText();
       // Indent must notflex: otherwise a tight panel shrinks guides with the label and
       // long names drift left vs short siblings.
       Element row = text(icon + " " + entry.label) | color(label_color) | xflex_shrink;
