@@ -125,6 +125,9 @@ GitExplorerMarks build_git_explorer_marks(const GitService* git) {
 }
 
 std::string git_status_badge(const GitStatusEntry& entry) {
+  if (entry.is_conflicted()) {
+    return "U";
+  }
   std::string badge;
   if (entry.staged != GitFileStatus::kUnmodified) {
     switch (entry.staged) {
@@ -168,6 +171,9 @@ std::string git_status_badge(const GitStatusEntry& entry) {
 }
 
 Color git_status_color(const GitStatusEntry& entry) {
+  if (entry.is_conflicted()) {
+    return theme::Error();
+  }
   if (entry.unstaged == GitFileStatus::kUntracked) {
     return theme::Warning();
   }
@@ -178,6 +184,9 @@ Color git_status_color(const GitStatusEntry& entry) {
 }
 
 std::optional<Color> file_git_status_dot(const GitStatusEntry& entry) {
+  if (entry.is_conflicted()) {
+    return theme::Error();
+  }
   if (entry.unstaged == GitFileStatus::kUntracked) {
     return theme::Warning();
   }

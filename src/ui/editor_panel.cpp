@@ -477,6 +477,7 @@ struct ViewportLineRenderKeyInput {
   bool has_breakpoint = false;
   bool has_execution = false;
   bool in_immediate_scope_gutter = false;
+  ConflictLineBand conflict_band = ConflictLineBand::kNone;
   const std::string* suffix_ptr = nullptr;
   bool symbol_press_active = false;
   const std::vector<Diagnostic>* line_diagnostics = nullptr;
@@ -525,6 +526,7 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
   h = viewport_line_hash_bool(h, line.has_execution);
   h = viewport_line_hash_int(h, line.gutter_marker);
   h = viewport_line_hash_bool(h, line.in_immediate_scope_gutter);
+  h = viewport_line_hash_int(h, static_cast<int>(line.conflict_band));
   h = viewport_line_hash_bool(h, indent_guides_enabled);
   h = viewport_line_hash_int(h, scope_highlight_strength);
   h = viewport_line_hash_bool(h, typing_burst);
@@ -4602,6 +4604,78 @@ bool revert_git_diff_block_from_panel(WorkspaceModel* workspace, EditorPanelStat
   return true;
 }
 
+// Hunks de conflicto de merge del archivo actualmente abierto, o un vector vacío si
+// no hay ninguno o el snapshot de visual-highlight todavía corresponde a otro archivo.
+const std::vector<ConflictHunk>& active_conflict_hunks_for_buffer(const EditorBuffer& buffer,
+                                                                   const EditorPanelState& panel) {
+  static const std::vector<ConflictHunk> kEmpty{};
+  if (buffer.path.empty() || panel.visual_highlight.snapshot.path != buffer.path) {
+    return kEmpty;
+  }
+  return panel.visual_highlight.snapshot.conflict_hunks;
+}
+
+std::string join_lines_with_newline(const std::vector<std::string>& lines) {
+  std::string out;
+  for (std::size_t i = 0; i < lines.size(); ++i) {
+    if (i != 0) {
+      out += '\n';
+    }
+    out += lines[i];
+  }
+  return out;
+}
+
+// 'c' = accept current (ours), 'i' = accept incoming (theirs), 'b' = accept both.
+bool resolve_conflict_hunk_in_buffer(EditorBuffer* buffer, const ConflictHunk& hunk, char action) {
+  if (buffer == nullptr) {
+    return false;
+  }
+  const int total_lines = buffer->lines.size();
+  if (hunk.start_line < 0 || hunk.end_line < hunk.start_line || hunk.end_line >= total_lines) {
+    return false;
+  }
+  const std::vector<std::string> all_lines = buffer->lines.to_vector();
+  std::vector<std::string> replacement;
+  switch (action) {
+    case 'c':
+      replacement = conflict_hunk_side_lines(all_lines, hunk, ConflictSide::kOurs);
+      break;
+    case 'i':
+      replacement = conflict_hunk_side_lines(all_lines, hunk, ConflictSide::kTheirs);
+      break;
+    case 'b':
+      replacement = conflict_hunk_both_lines(all_lines, hunk);
+      break;
+    default:
+      return false;
+  }
+  buffer->reset_to_single_cursor(hunk.start_line, 0);
+  buffer->primary().head = {
+      hunk.end_line, static_cast<int>(all_lines[static_cast<std::size_t>(hunk.end_line)].size())};
+  const std::string joined = join_lines_with_newline(replacement);
+  if (joined.empty()) {
+    // paste_at_primary() no-ops on empty text; delete the marker/selected range directly.
+    commit_undo_group(buffer);
+    push_undo(buffer);
+    delete_all_selections(buffer);
+    buffer->dirty = true;
+    buffer->view_token++;
+  } else {
+    paste_at_primary(buffer, joined);
+  }
+  return true;
+}
+
+bool jump_to_conflict_hunk(EditorBuffer* buffer, int visible_lines, const ConflictHunk& hunk) {
+  if (buffer == nullptr) {
+    return false;
+  }
+  buffer->reset_to_single_cursor(hunk.start_line, 0);
+  ensure_scroll_centered(buffer, visible_lines);
+  return true;
+}
+
 bool handle_git_diff_view_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                                 EditorPanelState* panel, GitService* git,
                                 MainLayoutState* layout_state, const Mouse& m, int visible_lines) {
@@ -6748,6 +6822,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
          (vh_state.dirty || vh_state.job_inflight) && vh_has_stale_cursor_highlights);
     const int scope_highlight_strength =
         vh_cursor_active && vh_config.scope_background ? vh_config.scope_strength : 58;
+    const bool vh_conflicts_active =
+        vh_config.enabled && vh_path_match && !vh_snap.conflict_hunks.empty();
 
     const bool path_indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
@@ -7362,6 +7438,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     static const std::vector<ColoredBraceMarker> kNoColoredBraces{};
     const std::vector<ColoredBraceMarker>& colored_braces =
         vh_braces_active ? panel_state->visual_highlight.snapshot.colored_braces : kNoColoredBraces;
+    static const std::vector<ConflictHunk> kNoConflictHunks{};
+    const std::vector<ConflictHunk>& active_conflict_hunks =
+        vh_conflicts_active ? panel_state->visual_highlight.snapshot.conflict_hunks
+                            : kNoConflictHunks;
     const uint64_t colored_brace_token =
         vh_braces_active ? panel_state->visual_highlight.snapshot.generation : 0;
     const std::vector<ColoredBraceMarker>* colored_braces_ptr =
@@ -7392,6 +7472,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
       const bool is_primary = (i == buffer.primary_line());
       const bool caret_line = show_caret && editor_focused && is_primary;
+      const ConflictLineBand conflict_band = active_conflict_hunks.empty()
+                                                 ? ConflictLineBand::kNone
+                                                 : conflict_line_band(active_conflict_hunks, i);
       const bool in_immediate_scope_gutter =
           vh_cursor_active && vh_config.scope_background && immediate_scope.valid &&
           immediate_scope.contains(i);
@@ -7473,6 +7556,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       key_input.has_breakpoint = line_breakpoint;
       key_input.has_execution = line_execution;
       key_input.in_immediate_scope_gutter = in_immediate_scope_gutter;
+      key_input.conflict_band = conflict_band;
       key_input.suffix_ptr = suffix_ptr;
       key_input.symbol_press_active = symbol_press_active;
       key_input.line_diagnostics = underline_diagnostics;
@@ -7566,6 +7650,14 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           xflex_shrink;
       if (line_execution) {
         code_row = code_row | inverted;
+      }
+      if (conflict_band != ConflictLineBand::kNone) {
+        const Color conflict_bg = conflict_band == ConflictLineBand::kOurs
+                                      ? theme::ConflictOursBg()
+                                  : conflict_band == ConflictLineBand::kBase
+                                      ? theme::ConflictBaseBg()
+                                      : theme::ConflictTheirsBg();
+        code_row = code_row | bgcolor(conflict_bg);
       }
 
       CachedViewportLineRow cached_row;
@@ -7787,6 +7879,38 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                          layout_state);
       }
       return true;
+    }
+    if (!workspace->active_tab_git_diff_view()) {
+      const std::vector<ConflictHunk>& hunks =
+          active_conflict_hunks_for_buffer(*buffer, *panel_state);
+      if (!hunks.empty() &&
+          (event_is_alt_c(event) || event_is_alt_i(event) || event_is_alt_b(event) ||
+           event_is_alt_n(event) || event_is_alt_m(event))) {
+        const int cursor_line = buffer->primary_line();
+        if (event_is_alt_n(event) || event_is_alt_m(event)) {
+          const int index = event_is_alt_n(event) ? find_next_conflict_hunk(hunks, cursor_line)
+                                                   : find_prev_conflict_hunk(hunks, cursor_line);
+          if (index >= 0) {
+            jump_to_conflict_hunk(buffer, visible, hunks[static_cast<std::size_t>(index)]);
+            if (layout_state != nullptr) {
+              UI_WAKE(layout_state, "editor.conflict.jump");
+            }
+          }
+          return true;
+        }
+        const int index = conflict_hunk_at_line(hunks, cursor_line);
+        if (index >= 0) {
+          const char action = event_is_alt_c(event) ? 'c' : event_is_alt_i(event) ? 'i' : 'b';
+          if (resolve_conflict_hunk_in_buffer(buffer, hunks[static_cast<std::size_t>(index)],
+                                              action)) {
+            notify_editor_buffer_changed(workspace, panel_state.get(), symbols, layout_state);
+            if (layout_state != nullptr) {
+              UI_WAKE(layout_state, "editor.conflict.resolve");
+            }
+          }
+        }
+        return true;
+      }
     }
     return handle_editor_keys(workspace, focus, find_state.get(), goto_state.get(),
                               completion_state.get(), panel_state.get(), diagnostic_state.get(),

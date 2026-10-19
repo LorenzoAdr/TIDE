@@ -56,6 +56,10 @@ constexpr const char* kGitDiscardConfirm = "git-discard-confirm";
 constexpr const char* kGitDiscardCancel = "git-discard-cancel";
 constexpr const char* kGitListScrollbar = "git-list-scrollbar";
 constexpr const char* kGitDiffScrollbar = "git-diff-scrollbar";
+constexpr const char* kGitMergeContinue = "git-merge-continue";
+constexpr const char* kGitMergeAbort = "git-merge-abort";
+constexpr const char* kGitMergeAbortConfirm = "git-merge-abort-confirm";
+constexpr const char* kGitMergeAbortCancel = "git-merge-abort-cancel";
 
 struct StatusVisualRow {
   bool is_dir = false;
@@ -67,6 +71,9 @@ struct StatusVisualRow {
 };
 
 std::string status_badge(const GitStatusEntry& entry) {
+  if (entry.is_conflicted()) {
+    return "U";
+  }
   std::string badge;
   if (entry.staged != GitFileStatus::kUnmodified && entry.staged != GitFileStatus::kUntracked &&
       entry.staged != GitFileStatus::kIgnored) {
@@ -114,6 +121,9 @@ std::string status_badge(const GitStatusEntry& entry) {
 }
 
 Color status_color(const GitStatusEntry& entry) {
+  if (entry.is_conflicted()) {
+    return theme::Error();
+  }
   if (entry.unstaged == GitFileStatus::kUntracked || entry.staged == GitFileStatus::kUntracked) {
     return theme::Warning();
   }
@@ -124,16 +134,20 @@ Color status_color(const GitStatusEntry& entry) {
 }
 
 bool entry_is_staged(const GitStatusEntry& entry) {
-  return entry.staged != GitFileStatus::kUnmodified && entry.staged != GitFileStatus::kUntracked &&
-         entry.staged != GitFileStatus::kIgnored;
+  return !entry.is_conflicted() && entry.staged != GitFileStatus::kUnmodified &&
+         entry.staged != GitFileStatus::kUntracked && entry.staged != GitFileStatus::kIgnored;
 }
 
 bool entry_is_untracked(const GitStatusEntry& entry) {
-  return entry.unstaged == GitFileStatus::kUntracked || entry.staged == GitFileStatus::kUntracked;
+  return !entry.is_conflicted() &&
+         (entry.unstaged == GitFileStatus::kUntracked || entry.staged == GitFileStatus::kUntracked);
 }
 
 int entry_sort_rank(const GitStatusEntry& entry) {
-  // staged → modified → untracked. Porcelain "??" sets both sides to '?'.
+  // conflicto → staged → modified → untracked. Porcelain "??" sets both sides to '?'.
+  if (entry.is_conflicted()) {
+    return -1;
+  }
   if (entry_is_untracked(entry)) {
     return 2;
   }
@@ -1048,6 +1062,71 @@ void confirm_discard_modal(GitService* git, GitPanelState* state, MainLayoutStat
   discard_selected(git, state, layout_state);
 }
 
+const char* merge_kind_i18n_key(GitMergeKind kind) {
+  switch (kind) {
+    case GitMergeKind::kMerge:
+      return "git.merge.kind.merge";
+    case GitMergeKind::kRebase:
+      return "git.merge.kind.rebase";
+    case GitMergeKind::kCherryPick:
+      return "git.merge.kind.cherry_pick";
+    case GitMergeKind::kRevert:
+      return "git.merge.kind.revert";
+    case GitMergeKind::kNone:
+    default:
+      return "";
+  }
+}
+
+void do_merge_continue(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
+  if (git == nullptr || state == nullptr) {
+    return;
+  }
+  state->operation_pending = true;
+  git->merge_continue([state, layout_state](bool ok, const std::string& msg) {
+    state->operation_pending = false;
+    set_status(state, ok ? i18n::tr("git.status.merge_continued") : msg);
+    if (layout_state != nullptr) {
+      wake_console_panel(layout_state, "wake");
+    }
+  });
+}
+
+void close_merge_abort_modal(GitPanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->merge_abort_modal_open = false;
+  state->merge_abort_focus_confirm = false;
+}
+
+void open_merge_abort_modal(GitPanelState* state, MainLayoutState* layout_state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->merge_abort_modal_open = true;
+  state->merge_abort_focus_confirm = false;
+  if (layout_state != nullptr) {
+    wake_console_panel(layout_state, "git.merge_abort.open");
+  }
+}
+
+void confirm_merge_abort_modal(GitService* git, GitPanelState* state,
+                               MainLayoutState* layout_state) {
+  if (git == nullptr || state == nullptr) {
+    return;
+  }
+  close_merge_abort_modal(state);
+  state->operation_pending = true;
+  git->merge_abort([state, layout_state](bool ok, const std::string& msg) {
+    state->operation_pending = false;
+    set_status(state, ok ? i18n::tr("git.status.merge_aborted") : msg);
+    if (layout_state != nullptr) {
+      wake_console_panel(layout_state, "wake");
+    }
+  });
+}
+
 void open_commit_modal(GitPanelState* state) {
   if (state == nullptr) {
     return;
@@ -1264,8 +1343,8 @@ std::vector<GitStatusEntry> staged_entries_for_commit(GitService* git) {
   }
   const GitStatusSnapshot status = git->status();
   for (const GitStatusEntry& entry : status.entries) {
-    if (entry.staged != GitFileStatus::kUnmodified && entry.staged != GitFileStatus::kUntracked &&
-        entry.staged != GitFileStatus::kIgnored) {
+    if (!entry.is_conflicted() && entry.staged != GitFileStatus::kUnmodified &&
+        entry.staged != GitFileStatus::kUntracked && entry.staged != GitFileStatus::kIgnored) {
       out.push_back(entry);
     }
   }
@@ -1543,6 +1622,105 @@ bool handle_discard_modal_keys(GitService* git, GitPanelState* state, MainLayout
   return true;
 }
 
+Element render_merge_abort_modal(GitService* git, GitPanelState* state,
+                                 MainLayoutState* layout_state) {
+  if (git == nullptr || state == nullptr || !state->merge_abort_modal_open) {
+    return text("");
+  }
+  const bool confirm_hovered = interaction_active(layout_state, kGitMergeAbortConfirm) ||
+                               state->merge_abort_focus_confirm;
+  const bool confirm_pressed =
+      layout_state != nullptr &&
+      layout_state->clickable.is_pressed(std::string_view(kGitMergeAbortConfirm));
+  const bool cancel_hovered =
+      interaction_active(layout_state, kGitMergeAbortCancel) || !state->merge_abort_focus_confirm;
+  const bool cancel_pressed =
+      layout_state != nullptr &&
+      layout_state->clickable.is_pressed(std::string_view(kGitMergeAbortCancel));
+  Element confirm_btn =
+      MakeToolbarButton(text(" " + i18n::tr("git.merge.abort") + " "), confirm_hovered,
+                        confirm_pressed, false, &state->merge_abort_confirm_box, true);
+  Element cancel_btn =
+      MakeToolbarButton(text(" " + i18n::tr("git.discard.cancel") + " "), cancel_hovered,
+                        cancel_pressed, false, &state->merge_abort_cancel_box, true);
+
+  const std::string kind_label = i18n::tr(merge_kind_i18n_key(git->merge_state().kind));
+
+  Elements body;
+  body.push_back(text(i18n::tr("git.merge.abort_modal_question")) | color(theme::Header()));
+  body.push_back(text(""));
+  body.push_back(hbox({std::move(confirm_btn), text(" "), std::move(cancel_btn)}));
+  body.push_back(text(i18n::tr("git.discard.footer")) | color(theme::Muted()));
+
+  return ModalWindow(
+      text(i18n::tr_fmt("git.merge.abort_modal_title", {kind_label})) | color(theme::Warning()),
+      vbox(std::move(body)) | size(WIDTH, EQUAL, 56));
+}
+
+bool handle_merge_abort_modal_keys(GitService* git, GitPanelState* state,
+                                   MainLayoutState* layout_state, Event event) {
+  if (state == nullptr || !state->merge_abort_modal_open) {
+    return false;
+  }
+  if (event == Event::Escape) {
+    close_merge_abort_modal(state);
+    return true;
+  }
+  if (event == Event::Return) {
+    if (state->merge_abort_focus_confirm) {
+      trigger_press(layout_state, std::string_view(kGitMergeAbortConfirm));
+      confirm_merge_abort_modal(git, state, layout_state);
+    } else {
+      trigger_press(layout_state, std::string_view(kGitMergeAbortCancel));
+      close_merge_abort_modal(state);
+    }
+    return true;
+  }
+  if (event == Event::Tab || event == Event::ArrowLeft || event == Event::ArrowRight ||
+      event == Event::ArrowUp || event == Event::ArrowDown) {
+    state->merge_abort_focus_confirm = !state->merge_abort_focus_confirm;
+    return true;
+  }
+  return true;
+}
+
+Element render_merge_banner(const GitMergeState& merge_state, MainLayoutState* layout_state,
+                            GitPanelState* state) {
+  const std::string kind_label = i18n::tr(merge_kind_i18n_key(merge_state.kind));
+  const int conflicts_left = static_cast<int>(merge_state.conflicted_paths.size());
+  std::string message;
+  if (conflicts_left <= 0) {
+    message = i18n::tr_fmt("git.merge.banner_resolved", {kind_label});
+  } else if (conflicts_left == 1) {
+    message = i18n::tr_fmt("git.merge.banner_one", {kind_label});
+  } else {
+    message = i18n::tr_fmt("git.merge.banner_many", {kind_label, std::to_string(conflicts_left)});
+  }
+
+  const bool continue_hovered = interaction_active(layout_state, kGitMergeContinue);
+  const bool continue_pressed =
+      layout_state != nullptr &&
+      layout_state->clickable.is_pressed(std::string_view(kGitMergeContinue));
+  const bool abort_hovered = interaction_active(layout_state, kGitMergeAbort);
+  const bool abort_pressed =
+      layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitMergeAbort));
+
+  Element continue_btn =
+      MakeToolbarButton(text(i18n::tr("git.merge.continue")), continue_hovered, continue_pressed,
+                        conflicts_left > 0, &state->merge_continue_box, true);
+  Element abort_btn = MakeToolbarButton(text(i18n::tr("git.merge.abort")), abort_hovered,
+                                        abort_pressed, false, &state->merge_abort_box, true);
+
+  return hbox({
+             text(message) | color(theme::Warning()) | flex,
+             std::move(continue_btn),
+             text(" "),
+             std::move(abort_btn),
+             text(" "),
+         }) |
+         size(HEIGHT, EQUAL, 1) | bgcolor(theme::PanelBg());
+}
+
 bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
                      FocusManagerState* focus, WorkspaceModel* workspace, Event event) {
   if (state == nullptr || git == nullptr) {
@@ -1550,6 +1728,9 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
   }
 
   if (handle_discard_modal_keys(git, state, layout_state, event)) {
+    return true;
+  }
+  if (handle_merge_abort_modal_keys(git, state, layout_state, event)) {
     return true;
   }
   if (handle_auth_modal_keys(git, state, layout_state, event)) {
@@ -2022,6 +2203,38 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     return true;
   }
 
+  // Modal de confirmación de abortar merge/rebase/cherry-pick/revert.
+  if (state->merge_abort_modal_open) {
+    if (m.motion == Mouse::Moved) {
+      update_panel_hover(
+          layout_state, m.x, m.y,
+          {{kGitMergeAbortConfirm, &state->merge_abort_confirm_box},
+           {kGitMergeAbortCancel, &state->merge_abort_cancel_box}},
+          [](std::string_view id) {
+            return id == kGitMergeAbortConfirm || id == kGitMergeAbortCancel;
+          });
+      if (state->merge_abort_confirm_box.Contain(m.x, m.y)) {
+        state->merge_abort_focus_confirm = true;
+      } else if (state->merge_abort_cancel_box.Contain(m.x, m.y)) {
+        state->merge_abort_focus_confirm = false;
+      }
+      return true;
+    }
+    if (is_press) {
+      if (state->merge_abort_confirm_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitMergeAbortConfirm));
+        confirm_merge_abort_modal(git, state, layout_state);
+        return true;
+      }
+      if (state->merge_abort_cancel_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitMergeAbortCancel));
+        close_merge_abort_modal(state);
+        return true;
+      }
+    }
+    return true;
+  }
+
   // Modal de auth remoto.
   if (state->auth_modal_open) {
     if (m.motion == Mouse::Moved) {
@@ -2115,7 +2328,9 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
          {kGitViewToggle, &state->view_toggle_box},
          {kGitSearch, &state->search_box},
          {kGitListScrollbar, &state->list_scrollbar_box},
-         {kGitDiffScrollbar, &state->diff_scrollbar_box}},
+         {kGitDiffScrollbar, &state->diff_scrollbar_box},
+         {kGitMergeContinue, &state->merge_continue_box},
+         {kGitMergeAbort, &state->merge_abort_box}},
         [](std::string_view id) {
           return id.rfind("git-", 0) == 0;
         });
@@ -2247,6 +2462,22 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     trigger_press(layout_state, std::string_view(kGitTab4));
     select_tab(state, git, GitPanelState::kTabGraph);
     return true;
+  }
+
+  {
+    const GitMergeState merge_state = git->merge_state();
+    if (merge_state.in_progress()) {
+      if (merge_state.conflicted_paths.empty() && state->merge_continue_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitMergeContinue));
+        do_merge_continue(git, state, layout_state);
+        return true;
+      }
+      if (state->merge_abort_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitMergeAbort));
+        open_merge_abort_modal(state, layout_state);
+        return true;
+      }
+    }
   }
 
   if ((state->selected_tab == GitPanelState::kTabStatus ||
@@ -2813,12 +3044,17 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
             bgcolor(theme::CodeBg()) | border,
     });
 
-    Element result = vbox({
-                         tabs | size(HEIGHT, EQUAL, 1),
-                         separator(),
-                         std::move(body) | flex,
-                     }) |
-                     flex | bgcolor(theme::PanelBg()) | reflect(state->panel_box);
+    const GitMergeState merge_state = git->merge_state();
+    Elements rows;
+    rows.push_back(tabs | size(HEIGHT, EQUAL, 1));
+    if (merge_state.in_progress()) {
+      rows.push_back(render_merge_banner(merge_state, layout_state, state));
+    }
+    rows.push_back(separator());
+    rows.push_back(std::move(body) | flex);
+
+    Element result = vbox(std::move(rows)) | flex | bgcolor(theme::PanelBg()) |
+                     reflect(state->panel_box);
 
     return result;
   });
@@ -2842,6 +3078,9 @@ Component MakeGitCommitModalOverlay(Component main, GitService* git, GitPanelSta
     }
     if (state->discard_modal_open) {
       return ScreenModalOverlay(std::move(base), render_discard_modal(state, layout_state));
+    }
+    if (state->merge_abort_modal_open) {
+      return ScreenModalOverlay(std::move(base), render_merge_abort_modal(git, state, layout_state));
     }
     if (state->auth_modal_open) {
       return ScreenModalOverlay(std::move(base), render_auth_modal(state, layout_state));

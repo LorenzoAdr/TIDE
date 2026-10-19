@@ -97,6 +97,12 @@ bool event_is_alt_p(const ftxui::Event& event);
 bool event_is_quick_open(const ftxui::Event& event);
 bool event_is_ctrl_o(const ftxui::Event& event);
 bool event_is_alt_e(const ftxui::Event& event);
+// Resolución de conflictos de merge en el editor.
+bool event_is_alt_c(const ftxui::Event& event);  // accept current (ours)
+bool event_is_alt_i(const ftxui::Event& event);  // accept incoming (theirs)
+bool event_is_alt_b(const ftxui::Event& event);  // accept both
+bool event_is_alt_n(const ftxui::Event& event);  // next conflict
+bool event_is_alt_m(const ftxui::Event& event);  // previous conflict
 bool event_has_shift_modifier(const ftxui::Event& event);
 bool event_has_ctrl_modifier(const ftxui::Event& event);
 bool event_is_plain_tab(const ftxui::Event& event);

@@ -29,6 +29,24 @@ struct GitRepoInfo {
   int subrepo_count = 0;
 };
 
+// Qué operación de git está a mitad de camino (deja archivos en conflicto detrás).
+enum class GitMergeKind {
+  kNone,
+  kMerge,
+  kRebase,
+  kCherryPick,
+  kRevert,
+};
+
+struct GitMergeState {
+  GitMergeKind kind = GitMergeKind::kNone;
+  std::string repo_root;
+  // Rutas (relativas al workspace) de archivos con conflicto sin resolver.
+  std::vector<std::string> conflicted_paths;
+
+  bool in_progress() const { return kind != GitMergeKind::kNone; }
+};
+
 class GitService {
  public:
   GitService();
@@ -60,6 +78,7 @@ class GitService {
   GitRepoInfo context_repo_info() const;
   void set_context_from_path(const std::string& workspace_rel_path);
   GitStatusSnapshot status() const;
+  GitMergeState merge_state() const;
   GitFileDiff file_diff(const std::string& absolute_path) const;
   std::vector<GitCommitEntry> log_entries() const;
   std::vector<GitCommitEntry> log_search_results() const;
@@ -88,6 +107,11 @@ class GitService {
   void discard_files(const std::vector<std::string>& paths, CompletionCallback on_done);
   void commit(const std::string& message, CompletionCallback on_done);
   void checkout_branch(const std::string& branch, CompletionCallback on_done);
+  // Continúa (merge/rebase/cherry-pick/revert) --continue, resolviendo el mensaje
+  // de commit sin abrir editor interactivo.
+  void merge_continue(CompletionCallback on_done);
+  // Aborta la operación en curso (merge/rebase/cherry-pick/revert) --abort.
+  void merge_abort(CompletionCallback on_done);
   void push(CompletionCallback on_done);
   void pull(CompletionCallback on_done);
   void push(const GitCredentials& credentials, CompletionCallback on_done);
@@ -107,6 +131,7 @@ class GitService {
   void worker_main();
   void set_error_unlocked(const std::string& message);
   void load_all_status();
+  GitMergeState load_merge_state_for_root(const std::string& repo_root) const;
   void merge_status_snapshot(GitStatusSnapshot* merged, const GitStatusSnapshot& part,
                              const std::string& repo_prefix) const;
   void load_file_diff_text(const std::string& repo_root, const std::string& repo_rel,
@@ -147,6 +172,7 @@ class GitService {
   std::string context_repo_root_;
   GitRepoInfo repo_info_;
   GitStatusSnapshot status_;
+  GitMergeState merge_state_;
   std::map<std::string, GitFileDiff> file_diffs_;
   std::map<std::string, std::string> file_diff_texts_;
   std::vector<GitCommitEntry> log_entries_;

@@ -349,6 +349,7 @@ add_executable(tuide
   src/git/git_diff.cpp
   src/git/git_log.cpp
   src/git/git_service.cpp
+  src/git/merge_conflict.cpp
   src/ai/level0_router.cpp
   src/ai/level0_intent_index.cpp
   src/ai/embedding_backend.cpp
@@ -872,6 +873,18 @@ add_executable(git_diff_test
   src/git/git_diff.cpp
 )
 target_include_directories(git_diff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(git_status_test
+  tests/git_status_test.cpp
+  src/git/git_status.cpp
+)
+target_include_directories(git_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(merge_conflict_test
+  tests/merge_conflict_test.cpp
+  src/git/merge_conflict.cpp
+)
+target_include_directories(merge_conflict_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_executable(git_command_test
   tests/git_command_test.cpp
@@ -1670,6 +1683,8 @@ set(TUIDE_TEST_TARGETS
   nm_reader_test
   git_diff_test
   git_command_test
+  git_status_test
+  merge_conflict_test
   level0_router_test
   level0_intent_index_test
   level1_agent_test

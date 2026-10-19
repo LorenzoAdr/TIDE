@@ -349,12 +349,20 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
     return snap;
   }
 
+  // Chequeo barato sobre el string ya unido antes de pagar el vector<string> completo:
+  // la inmensa mayoría de los archivos nunca tienen marcadores de conflicto.
+  const bool has_conflict_marker_substr = source.find("<<<<<<<") != std::string::npos;
   const bool need_lines =
       (job.config.selection_occurrences && job.selection.active) ||
       (job.inputs.git_baseline_ready && !job.inputs.git_untracked_all &&
-       !job.inputs.git_head_lines.empty());
+       !job.inputs.git_head_lines.empty()) ||
+      has_conflict_marker_substr;
   const std::vector<std::string> lines =
       need_lines ? job.lines_snapshot.to_vector() : std::vector<std::string>{};
+
+  if (has_conflict_marker_substr) {
+    snap.conflict_hunks = parse_conflict_markers(lines).hunks;
+  }
 
   const auto tree_snapshot =
       tree_sitter_service().snapshot_for_highlight(job.path, source, job.doc_revision);

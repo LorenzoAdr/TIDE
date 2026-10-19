@@ -808,6 +808,17 @@ Color DiffDeleteBg() {
 Color DiffChangeBg() {
   return diff_line_bg(g_mode == ThemeMode::kLight ? rgb(180, 100, 0) : rgb(255, 200, 80));
 }
+// "ours"/actual = azul, "theirs"/entrante = verde: misma convención que el merge
+// editor de VS Code. "base" (diff3) queda neutro entre ambos.
+Color ConflictOursBg() {
+  return diff_line_bg(g_mode == ThemeMode::kLight ? rgb(40, 110, 200) : rgb(90, 170, 255));
+}
+Color ConflictBaseBg() {
+  return diff_line_bg(g_mode == ThemeMode::kLight ? rgb(130, 130, 130) : rgb(170, 170, 170));
+}
+Color ConflictTheirsBg() {
+  return diff_line_bg(g_mode == ThemeMode::kLight ? rgb(0, 140, 60) : rgb(80, 220, 120));
+}
 Color StackFrame() { return current_palette().stack_frame; }
 
 Color StatusBar() {

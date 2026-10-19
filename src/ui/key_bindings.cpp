@@ -587,6 +587,51 @@ bool event_is_quick_open(const ftxui::Event& event) {
   return event_is_ctrl_p(event);
 }
 
+bool event_is_alt_c(const ftxui::Event& event) {
+  return event == ftxui::Event::AltC || alt_letter(event, 'c', 'C') ||
+         event == ftxui::Event::Special("\x1B" "c") ||
+         event == ftxui::Event::Special("\x1B[99;3u") ||
+         event == ftxui::Event::Special("\x1B[67;3u") ||
+         event == ftxui::Event::Special("\x1B[27;3;99~") ||
+         event == ftxui::Event::Special("\x1B[27;3;67~");
+}
+
+bool event_is_alt_i(const ftxui::Event& event) {
+  return event == ftxui::Event::AltI || alt_letter(event, 'i', 'I') ||
+         event == ftxui::Event::Special("\x1Bi") ||
+         event == ftxui::Event::Special("\x1B[105;3u") ||
+         event == ftxui::Event::Special("\x1B[73;3u") ||
+         event == ftxui::Event::Special("\x1B[27;3;105~") ||
+         event == ftxui::Event::Special("\x1B[27;3;73~");
+}
+
+bool event_is_alt_b(const ftxui::Event& event) {
+  return event == ftxui::Event::AltB || alt_letter(event, 'b', 'B') ||
+         event == ftxui::Event::Special("\x1B" "b") ||
+         event == ftxui::Event::Special("\x1B[98;3u") ||
+         event == ftxui::Event::Special("\x1B[66;3u") ||
+         event == ftxui::Event::Special("\x1B[27;3;98~") ||
+         event == ftxui::Event::Special("\x1B[27;3;66~");
+}
+
+bool event_is_alt_n(const ftxui::Event& event) {
+  return event == ftxui::Event::AltN || alt_letter(event, 'n', 'N') ||
+         event == ftxui::Event::Special("\x1Bn") ||
+         event == ftxui::Event::Special("\x1B[110;3u") ||
+         event == ftxui::Event::Special("\x1B[78;3u") ||
+         event == ftxui::Event::Special("\x1B[27;3;110~") ||
+         event == ftxui::Event::Special("\x1B[27;3;78~");
+}
+
+bool event_is_alt_m(const ftxui::Event& event) {
+  return event == ftxui::Event::AltM || alt_letter(event, 'm', 'M') ||
+         event == ftxui::Event::Special("\x1Bm") ||
+         event == ftxui::Event::Special("\x1B[109;3u") ||
+         event == ftxui::Event::Special("\x1B[77;3u") ||
+         event == ftxui::Event::Special("\x1B[27;3;109~") ||
+         event == ftxui::Event::Special("\x1B[27;3;77~");
+}
+
 bool event_is_alt_e(const ftxui::Event& event) {
   return event == ftxui::Event::AltE || alt_letter(event, 'e', 'E') ||
          event == ftxui::Event::Special("\x1B" "e") ||

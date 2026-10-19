@@ -14,6 +14,7 @@
 #include "editor/editor_folds.hpp"
 #include "editor/editor_text.hpp"
 #include "editor/text_search.hpp"
+#include "git/merge_conflict.hpp"
 #include "parser/tree_sitter_locals.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/main_layout.hpp"
@@ -91,6 +92,9 @@ struct VisualHighlightSnapshot {
   std::vector<TextMatch> selection_occurrences;
   std::vector<FoldRegion> fold_regions;
   uint64_t fold_regions_revision = 0;
+  // Bloques de conflicto de merge sin resolver detectados en el documento (vacío si
+  // no hay ninguno). Calculado en el worker junto con el resto de este snapshot.
+  std::vector<ConflictHunk> conflict_hunks;
   bool ready = false;
 };
 

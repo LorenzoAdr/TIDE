@@ -117,6 +117,10 @@ Color Success();
 Color DiffAddBg();
 Color DiffDeleteBg();
 Color DiffChangeBg();
+// Subtle line backgrounds for the 3 bands of an unresolved merge conflict in the editor.
+Color ConflictOursBg();
+Color ConflictBaseBg();
+Color ConflictTheirsBg();
 Color StackFrame();
 Color StatusBar();
 

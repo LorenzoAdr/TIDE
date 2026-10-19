@@ -25,6 +25,22 @@ GitFileStatus char_to_status(char c) {
   }
 }
 
+// Códigos XY de "unmerged path" documentados en git-status(1). No se interpretan
+// carácter a carácter (a diferencia del resto de códigos): el par completo indica
+// de qué lado viene el conflicto.
+bool is_unmerged_code(char x, char y) {
+  switch (x) {
+    case 'D':
+      return y == 'D' || y == 'U';
+    case 'A':
+      return y == 'U' || y == 'A';
+    case 'U':
+      return y == 'D' || y == 'A' || y == 'U';
+    default:
+      return false;
+  }
+}
+
 }  // namespace
 
 GitStatusSnapshot parse_git_status_porcelain(const std::string& output) {
@@ -41,8 +57,13 @@ GitStatusSnapshot parse_git_status_porcelain(const std::string& output) {
     }
 
     GitStatusEntry entry;
-    entry.staged = char_to_status(line[0]);
-    entry.unstaged = char_to_status(line[1]);
+    if (is_unmerged_code(line[0], line[1])) {
+      entry.staged = GitFileStatus::kConflicted;
+      entry.unstaged = GitFileStatus::kConflicted;
+    } else {
+      entry.staged = char_to_status(line[0]);
+      entry.unstaged = char_to_status(line[1]);
+    }
     entry.path = line.substr(3);
 
     if (entry.staged == GitFileStatus::kRenamed && entry.path.find(" -> ") != std::string::npos) {
@@ -50,13 +71,17 @@ GitStatusSnapshot parse_git_status_porcelain(const std::string& output) {
       entry.path = entry.path.substr(arrow + 4);
     }
 
-    if (entry.staged != GitFileStatus::kUnmodified) {
-      ++snapshot.staged_count;
-    }
-    if (entry.unstaged == GitFileStatus::kUntracked) {
-      ++snapshot.untracked_count;
-    } else if (entry.unstaged != GitFileStatus::kUnmodified) {
-      ++snapshot.unstaged_count;
+    if (entry.is_conflicted()) {
+      ++snapshot.conflicted_count;
+    } else {
+      if (entry.staged != GitFileStatus::kUnmodified) {
+        ++snapshot.staged_count;
+      }
+      if (entry.unstaged == GitFileStatus::kUntracked) {
+        ++snapshot.untracked_count;
+      } else if (entry.unstaged != GitFileStatus::kUnmodified) {
+        ++snapshot.unstaged_count;
+      }
     }
     snapshot.entries.push_back(std::move(entry));
   }

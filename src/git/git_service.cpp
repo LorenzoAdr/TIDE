@@ -746,6 +746,11 @@ GitStatusSnapshot GitService::status() const {
   return status_;
 }
 
+GitMergeState GitService::merge_state() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return merge_state_;
+}
+
 GitFileDiff GitService::file_diff(const std::string& absolute_path) const {
   std::lock_guard<std::mutex> lock(mutex_);
   const std::string rel = repo_relative_path_unlocked(absolute_path);
@@ -1080,6 +1085,77 @@ void GitService::checkout_branch(const std::string& branch, CompletionCallback o
   });
 }
 
+namespace {
+
+const char* merge_kind_subcommand(GitMergeKind kind) {
+  switch (kind) {
+    case GitMergeKind::kMerge:
+      return "merge";
+    case GitMergeKind::kRebase:
+      return "rebase";
+    case GitMergeKind::kCherryPick:
+      return "cherry-pick";
+    case GitMergeKind::kRevert:
+      return "revert";
+    case GitMergeKind::kNone:
+    default:
+      return nullptr;
+  }
+}
+
+}  // namespace
+
+void GitService::merge_continue(CompletionCallback on_done) {
+  std::string repo_root;
+  GitMergeKind kind;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    repo_root = context_repo_root_unlocked();
+    kind = merge_state_.kind;
+  }
+  const char* subcommand = merge_kind_subcommand(kind);
+  if (repo_root.empty() || subcommand == nullptr) {
+    dispatch_completion(on_done, false, i18n::tr("git.merge.none_in_progress"));
+    return;
+  }
+  enqueue([this, repo_root, subcommand, on_done]() {
+    // core.editor=true evita que --continue se quede esperando un editor
+    // interactivo para el mensaje de commit (no hay tty disponible aquí).
+    const auto result =
+        run_git(repo_root, {"-c", "core.editor=true", subcommand, "--continue"});
+    if (result.success()) {
+      invalidate();
+      dispatch_completion(on_done, true, result.stdout_text);
+    } else {
+      dispatch_completion(on_done, false, result.stderr_text);
+    }
+  });
+}
+
+void GitService::merge_abort(CompletionCallback on_done) {
+  std::string repo_root;
+  GitMergeKind kind;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    repo_root = context_repo_root_unlocked();
+    kind = merge_state_.kind;
+  }
+  const char* subcommand = merge_kind_subcommand(kind);
+  if (repo_root.empty() || subcommand == nullptr) {
+    dispatch_completion(on_done, false, i18n::tr("git.merge.none_in_progress"));
+    return;
+  }
+  enqueue([this, repo_root, subcommand, on_done]() {
+    const auto result = run_git(repo_root, {subcommand, "--abort"});
+    if (result.success()) {
+      invalidate();
+      dispatch_completion(on_done, true, result.stdout_text);
+    } else {
+      dispatch_completion(on_done, false, result.stderr_text);
+    }
+  });
+}
+
 void GitService::push(CompletionCallback on_done) {
   push(GitCredentials{}, std::move(on_done));
 }
@@ -1239,6 +1315,39 @@ bool GitService::diff_text_cached_unlocked(const std::string& rel) const {
   return file_diff_texts_.find(rel) != file_diff_texts_.end();
 }
 
+GitMergeState GitService::load_merge_state_for_root(const std::string& repo_root) const {
+  GitMergeState state;
+  if (repo_root.empty()) {
+    return state;
+  }
+  const auto git_dir_result = run_git(repo_root, {"rev-parse", "--git-dir"});
+  if (!git_dir_result.success()) {
+    return state;
+  }
+  const std::string git_dir_raw = trim_newline(git_dir_result.stdout_text);
+  if (git_dir_raw.empty()) {
+    return state;
+  }
+  fs::path git_dir(git_dir_raw);
+  if (git_dir.is_relative()) {
+    git_dir = fs::path(repo_root) / git_dir;
+  }
+
+  std::error_code ec;
+  if (fs::exists(git_dir / "MERGE_HEAD", ec)) {
+    state.kind = GitMergeKind::kMerge;
+  } else if (fs::exists(git_dir / "CHERRY_PICK_HEAD", ec)) {
+    state.kind = GitMergeKind::kCherryPick;
+  } else if (fs::exists(git_dir / "REVERT_HEAD", ec)) {
+    state.kind = GitMergeKind::kRevert;
+  } else if (fs::is_directory(git_dir / "rebase-merge", ec) ||
+             fs::is_directory(git_dir / "rebase-apply", ec)) {
+    state.kind = GitMergeKind::kRebase;
+  }
+  state.repo_root = repo_root;
+  return state;
+}
+
 void GitService::load_all_status() {
   if (stop_.load()) {
     return;
@@ -1246,6 +1355,7 @@ void GitService::load_all_status() {
 
   std::string workspace;
   std::string main_root;
+  std::string context_root;
   bool main_valid = false;
   std::vector<GitSubrepoInfo> subrepos;
   {
@@ -1254,6 +1364,7 @@ void GitService::load_all_status() {
     main_root = main_repo_root_;
     main_valid = main_repo_valid_;
     subrepos = subrepos_;
+    context_root = context_repo_root_unlocked();
   }
   if (workspace.empty()) {
     return;
@@ -1273,13 +1384,17 @@ void GitService::load_all_status() {
           }
           entry.path = ws_rel;
         }
-        if (entry.staged != GitFileStatus::kUnmodified) {
+        if (entry.is_conflicted()) {
+          ++merged.conflicted_count;
+        } else if (entry.staged != GitFileStatus::kUnmodified) {
           ++merged.staged_count;
         }
-        if (entry.unstaged == GitFileStatus::kUntracked) {
-          ++merged.untracked_count;
-        } else if (entry.unstaged != GitFileStatus::kUnmodified) {
-          ++merged.unstaged_count;
+        if (!entry.is_conflicted()) {
+          if (entry.unstaged == GitFileStatus::kUntracked) {
+            ++merged.untracked_count;
+          } else if (entry.unstaged != GitFileStatus::kUnmodified) {
+            ++merged.unstaged_count;
+          }
         }
         merged.entries.push_back(std::move(entry));
       }
@@ -1295,15 +1410,29 @@ void GitService::load_all_status() {
     for (GitStatusEntry entry : parsed.entries) {
       entry.path = join_workspace_path(sub.workspace_path, entry.path);
       entry.repo_prefix = sub.workspace_path;
-      if (entry.staged != GitFileStatus::kUnmodified) {
+      if (entry.is_conflicted()) {
+        ++merged.conflicted_count;
+      } else if (entry.staged != GitFileStatus::kUnmodified) {
         ++merged.staged_count;
       }
-      if (entry.unstaged == GitFileStatus::kUntracked) {
-        ++merged.untracked_count;
-      } else if (entry.unstaged != GitFileStatus::kUnmodified) {
-        ++merged.unstaged_count;
+      if (!entry.is_conflicted()) {
+        if (entry.unstaged == GitFileStatus::kUntracked) {
+          ++merged.untracked_count;
+        } else if (entry.unstaged != GitFileStatus::kUnmodified) {
+          ++merged.unstaged_count;
+        }
       }
       merged.entries.push_back(std::move(entry));
+    }
+  }
+
+  GitMergeState merge_state =
+      load_merge_state_for_root(!context_root.empty() ? context_root : main_root);
+  if (merge_state.in_progress()) {
+    for (const auto& entry : merged.entries) {
+      if (entry.is_conflicted()) {
+        merge_state.conflicted_paths.push_back(entry.path);
+      }
     }
   }
 
@@ -1312,6 +1441,7 @@ void GitService::load_all_status() {
     return;
   }
   status_ = std::move(merged);
+  merge_state_ = std::move(merge_state);
 }
 
 void GitService::load_file_diff_text(const std::string& repo_root, const std::string& repo_rel,

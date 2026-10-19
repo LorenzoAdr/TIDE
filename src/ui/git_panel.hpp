@@ -71,6 +71,8 @@ struct GitPanelState {
   bool discard_modal_open = false;
   bool discard_focus_confirm = false;  // false = Cancelar (por defecto)
   std::vector<std::string> discard_modal_paths;
+  bool merge_abort_modal_open = false;
+  bool merge_abort_focus_confirm = false;  // false = Cancelar (por defecto)
   bool operation_pending = false;
   std::string pending_diff_path;
   int last_file_click_index = -1;
@@ -101,8 +103,14 @@ struct GitPanelState {
   ftxui::Box discard_modal_confirm_box;
   ftxui::Box discard_modal_cancel_box;
   ftxui::Box discard_modal_files_box;
+  ftxui::Box merge_continue_box;
+  ftxui::Box merge_abort_box;
+  ftxui::Box merge_abort_confirm_box;
+  ftxui::Box merge_abort_cancel_box;
 
-  bool git_overlay_open() const { return auth_modal_open || discard_modal_open; }
+  bool git_overlay_open() const {
+    return auth_modal_open || discard_modal_open || merge_abort_modal_open;
+  }
 };
 
 ftxui::Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
