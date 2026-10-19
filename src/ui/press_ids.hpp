@@ -179,6 +179,24 @@ inline std::string editor_tab_close(int index) {
   return "editor.tab_close." + std::to_string(index);
 }
 
+constexpr std::string_view kSessionTabAdd = "console.session_tab.add";
+constexpr std::string_view kSessionTabSplit = "console.session_tab.split";
+
+inline std::string session_tab(int index) {
+  return "console.session_tab." + std::to_string(index);
+}
+
+inline std::string session_tab_close(int index) {
+  return "console.session_tab_close." + std::to_string(index);
+}
+
+inline bool is_session_tab_hover(std::string_view id) {
+  return id == kSessionTabAdd || id == kSessionTabSplit ||
+         id.rfind("console.session_tab_close.", 0) == 0 ||
+         (id.rfind("console.session_tab.", 0) == 0 &&
+          id.rfind("console.session_tab_close.", 0) != 0);
+}
+
 inline std::string editor_symbol(int line, int start_col, int end_col) {
   return "editor.symbol." + std::to_string(line) + "." + std::to_string(start_col) + "." +
          std::to_string(end_col);
@@ -205,7 +223,8 @@ inline bool is_console_tab_hover(std::string_view id) {
 }
 
 inline bool is_console_header_hover(std::string_view id) {
-  return is_console_tab_hover(id) || id == kConsoleHide || id == kConsoleExpand ||
+  return is_console_tab_hover(id) || is_session_tab_hover(id) || id == kConsoleHide ||
+         id == kConsoleExpand ||
          id == kConsoleAiStop ||
          id == kConsoleAiReset || id == kConsoleAiWorkflow || id == kConsoleAiWorkflowAgent ||
          id == kConsoleAiWorkflowAsk || id == kConsoleAiWorkflowPlan ||

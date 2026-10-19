@@ -28,6 +28,7 @@
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/lsp_symbol_provider.hpp"
 #include "terminal/shell_session.hpp"
+#include "terminal/shell_session_manager.hpp"
 #include "terminal/app_session.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
@@ -144,6 +145,7 @@ class Application {
   void request_terminal_autostart();
   void inject_terminal_command(const std::string& command);
   void try_flush_terminal_inject();
+  void sync_terminal_consumer_active(bool terminal_tab_visible);
   DockerReadyGateResult ensure_docker_for_terminal(const std::string& container);
   void reset_docker_start_gate();
   void on_docker_start_confirm();
@@ -217,7 +219,7 @@ class Application {
   WorkspaceConfig workspace_config_;
   ClangFormatConfig clang_format_config_;
   ShellLaunchConfig cached_shell_launch_config_;
-  ShellSession shell_session_;
+  ShellSessionManager shell_sessions_;
   AppSession app_session_;
   ConnectionWizardState connection_wizard_state_;
   WorkspaceWizardState workspace_wizard_state_;

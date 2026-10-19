@@ -472,7 +472,7 @@ void Application::stop_all_subprocesses() {
 	build_artifact_watcher_.stop();
 	global_build_environment_service().shutdown();
 	shutdown_host_cmake_compile_commands();
-	shell_session_.stop();
+	shell_sessions_.stop_all();
 	if (symbol_provider_) {
 		symbol_provider_->on_workspace_closed();
 	}
@@ -601,13 +601,32 @@ void Application::try_flush_terminal_inject() {
 	if (pending_terminal_inject_.empty()) {
 		return;
 	}
-	if (!shell_session_.running()) {
+	if (!shell_sessions_.active_session()->running()) {
 		layout_state_.console_visible = true;
 		layout_state_.terminal_start_requested = true;
 		return;
 	}
-	shell_session_.write_raw(pending_terminal_inject_);
+	shell_sessions_.active_session()->write_raw(pending_terminal_inject_);
 	pending_terminal_inject_.clear();
+}
+
+// Keeps every session's PTY reader in the right mode: only the active
+// session (and, when the split view is on, its partner) should accumulate
+// output for the UI to drain; every other session stays in background-drain
+// mode so a noisy process in an unseen tab cannot grow output_chunks_ unbounded.
+void Application::sync_terminal_consumer_active(bool terminal_tab_visible) {
+	const int active = shell_sessions_.active_index();
+	const int count = shell_sessions_.count();
+	const int partner = (terminal_tab_visible && layout_state_.terminal_split_enabled && count >= 2)
+	                        ? (active + 1) % count
+	                        : -1;
+	for (int i = 0; i < count; ++i) {
+		ShellSession* session = shell_sessions_.session_at(i);
+		if (session == nullptr) {
+			continue;
+		}
+		session->set_consumer_active(terminal_tab_visible && (i == active || i == partner));
+	}
 }
 
 void Application::maybe_show_lsp_missing_toast(const std::string& status_i18n_key) {
@@ -1078,9 +1097,9 @@ void Application::run_input_sync_drain(int64_t now_ms) {
 	}
 	layout_state_.activity_gate.tick(now_ms);
 	refresh_editor_visible_paths();
-	shell_session_.set_consumer_active(
-	    layout_state_.console_visible &&
-	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal);
+	sync_terminal_consumer_active(layout_state_.console_visible &&
+	                              layout_state_.console_tabs.selected_tab ==
+	                                  ConsolePanelTabs::kTerminal);
 	app_session_.set_consumer_active(
 	    layout_state_.console_visible &&
 	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp);
@@ -1112,9 +1131,9 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 	    layout_state_.activity_gate.phase(),
 	    layout_state_.activity_gate.ms_in_current_phase(now_ms));
 
-	shell_session_.set_consumer_active(
-	    layout_state_.console_visible &&
-	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal);
+	sync_terminal_consumer_active(layout_state_.console_visible &&
+	                              layout_state_.console_tabs.selected_tab ==
+	                                  ConsolePanelTabs::kTerminal);
 	app_session_.set_consumer_active(
 	    layout_state_.console_visible &&
 	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp);
@@ -1166,10 +1185,10 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
   // While starting() is true, pending_shell_autostart is false — keep ticking or the
   // UI freezes on "(starting terminal...)" until the user presses a key.
   const bool pending_shell_autostart =
-      layout_state_.terminal_start_requested && !shell_session_.running() &&
-      !shell_session_.starting();
+      layout_state_.terminal_start_requested && !shell_sessions_.active_session()->running() &&
+      !shell_sessions_.active_session()->starting();
   const bool shell_start_in_flight =
-      layout_state_.terminal_start_requested && shell_session_.starting();
+      layout_state_.terminal_start_requested && shell_sessions_.active_session()->starting();
   if ((plan.run_terminal || pending_shell_autostart || shell_start_in_flight) &&
       layout_state_.console_visible && layout_state_.terminal_tick_callback) {
 		UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal");
@@ -1296,7 +1315,7 @@ void Application::apply_workspace_settings(const WorkspaceConfig &config) {
 	if (shell_restart_needed) {
 		invalidate_docker_mount_cache();
 		rebuild_shell_launch_config();
-		shell_session_.stop();
+		shell_sessions_.reset();
 		request_terminal_autostart();
 		setup_build_environment_watching();
 	}
@@ -1402,7 +1421,7 @@ void Application::tick_shutdown() {
 			     backend_started_ = false;
 		     }
 	     }},
-	    {i18n::tr("app.shutdown.close_terminal"), [this] { shell_session_.stop(); }},
+	    {i18n::tr("app.shutdown.close_terminal"), [this] { shell_sessions_.stop_all(); }},
 	    {i18n::tr("app.shutdown.stop_indexers"),
 	     [this] {
 		     symbol_indexer_.stop();
@@ -1505,7 +1524,7 @@ void Application::set_workspace(const std::string &workspace_root,
 	}
 	file_picker_state_.indexed_root.clear();
 	file_picker_state_.index_snapshot.reset();
-	shell_session_.stop();
+	shell_sessions_.reset();
 	model_.console_output.clear();
 	request_terminal_autostart();
 	workspace_config_ = WorkspaceConfig::load(absolute);
@@ -2856,7 +2875,7 @@ int Application::run() {
 	auto build_ui = [&]() {
 		return MakeMainLayout(
 		    &app_mode_, &model_, &workspace_, &secondary_workspace_, &source_state_, &focus_state_,
-		    symbol_provider_, on_command, &layout_state_, on_stop_debug, &shell_session_,
+		    symbol_provider_, on_command, &layout_state_, on_stop_debug, &shell_sessions_,
 		    &app_session_, &indexer_, &symbol_indexer_, shell_launch_config, &git_service_,
 		    &git_panel_state_, &welcome_screen_state_, [this] { open_external_file_wizard(); },
 		    [this] { open_connection_wizard(); }, [this] { open_workspace_wizard(); },
@@ -3790,7 +3809,7 @@ int Application::run() {
 			     layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp);
 			const bool shell_terminal_focus = terminal_tab &&
 			                                  focus_state_.region == FocusRegion::Terminal &&
-			                                  shell_session_.running();
+			                                  shell_sessions_.active_session()->running();
 		const bool shell_console_keys = shell_terminal_focus || expanded_terminal;
 		const bool skip_global_for_shell_return =
 		    event == Event::Return && shell_console_keys &&
@@ -3952,12 +3971,13 @@ int Application::run() {
 				    layout_state_.console_tabs.selected_tab != ConsolePanelTabs::kSearch &&
 				    !is_terminal_filter_focus(layout_state_.text_input_focus) &&
 				    (layout_state_.text_input_focus == TextInputFocus::Console ||
-				     (focus_state_.region == FocusRegion::Terminal && shell_session_.running())) &&
-				    shell_session_.running()) {
+				     (focus_state_.region == FocusRegion::Terminal &&
+				      shell_sessions_.active_session()->running())) &&
+				    shell_sessions_.active_session()->running()) {
 					if (event == Event::Tab) {
-						shell_session_.write_raw("\t");
+						shell_sessions_.active_session()->write_raw("\t");
 					} else {
-						shell_session_.write_raw("\x1b[Z");
+						shell_sessions_.active_session()->write_raw("\x1b[Z");
 					}
 					if (layout_state_.terminal_follow_input_callback) {
 						layout_state_.terminal_follow_input_callback();

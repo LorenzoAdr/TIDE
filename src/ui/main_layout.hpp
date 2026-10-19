@@ -17,6 +17,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "terminal/shell_session.hpp"
+#include "terminal/shell_session_manager.hpp"
 #include "terminal/app_session.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
@@ -156,6 +157,9 @@ struct MainLayoutState {
   bool console_expanded = false;
   std::function<ftxui::Element()> console_expanded_render;
   std::function<void()> console_toggle_expanded;
+  // Terminal tab: show the active shell session side by side with the next
+  // one (active_index + 1, wrapping) instead of just the active one.
+  bool terminal_split_enabled = false;
   bool explorer_visible = true;
   bool welcome_visible = false;
   bool diagnostics_panel_visible = false;
@@ -468,7 +472,7 @@ ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                                 CommandCallback on_command,
                                 MainLayoutState* layout_state,
                                 StopDebugCallback on_stop_debug,
-                                ShellSession* shell,
+                                ShellSessionManager* shell_sessions,
                                 AppSession* app_session,
                                 WorkspaceIndexer* indexer,
                                 SymbolWorkspaceIndexer* symbol_indexer,

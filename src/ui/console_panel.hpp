@@ -14,6 +14,7 @@
 #include "ui/git_panel.hpp"
 #include "git/git_service.hpp"
 #include "terminal/shell_session.hpp"
+#include "terminal/shell_session_manager.hpp"
 #include "terminal/app_session.hpp"
 
 namespace tuide {
@@ -24,7 +25,7 @@ struct MainLayoutState;
 struct RightSidebarState;
 
 ftxui::Component MakeConsolePanel(AppMode* app_mode, DebugModel* model,
-                                  ShellSession* shell, AppSession* app_session,
+                                  ShellSessionManager* shell_sessions, AppSession* app_session,
                                   CommandCallback on_command,
                                   MainLayoutState* layout_state,
                                   FocusManagerState* focus, int* bottom_height,

@@ -963,7 +963,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                          FocusManagerState* focus,
                          std::shared_ptr<ISymbolProvider> symbols,
                          CommandCallback on_command, MainLayoutState* layout_state,
-                         StopDebugCallback on_stop_debug, ShellSession* shell,
+                         StopDebugCallback on_stop_debug, ShellSessionManager* shell_sessions,
                          AppSession* app_session, WorkspaceIndexer* indexer,
                          SymbolWorkspaceIndexer* symbol_indexer,
                          ShellLaunchConfigProvider shell_launch_config, GitService* git_service,
@@ -1003,7 +1003,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
 
   auto console = MakeCachedPanelRender(
       layout_state, UiPanelId::Console,
-      MakeConsolePanel(app_mode, model, shell, app_session, on_command, layout_state, focus,
+      MakeConsolePanel(app_mode, model, shell_sessions, app_session, on_command, layout_state, focus,
                        &split_state->bottom_height, shell_launch_config, workspace, symbols, indexer,
                        symbol_indexer, &layout_state->right_sidebar, git_service, git_panel_state));
   auto center_with_console =

@@ -708,7 +708,7 @@ bool poll_filter_runner(BinarySymbolsPanelState* state, MainLayoutState* layout_
 }
 
 void tick_binary_symbols_panel(BinarySymbolsPanelState* state, MainLayoutState* layout_state,
-                               DebugModel* model, ShellSession* shell) {
+                               DebugModel* model, ShellSessionManager* shell_sessions) {
   if (state == nullptr || layout_state == nullptr) {
     return;
   }
@@ -720,6 +720,7 @@ void tick_binary_symbols_panel(BinarySymbolsPanelState* state, MainLayoutState* 
   poll_runner(state, layout_state);
   poll_filter_runner(state, layout_state);
 
+  ShellSession* shell = shell_sessions != nullptr ? shell_sessions->active_session() : nullptr;
   if (shell != nullptr && state->pending_shell_scan) {
     const std::string screen = shell->screen_text();
     if (screen.size() != state->last_shell_output_size) {
@@ -804,7 +805,8 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
                                  FocusManagerState* focus, MainLayoutState* layout_state,
                                  const std::shared_ptr<ISymbolProvider>& symbols,
                                  SymbolWorkspaceIndexer* symbol_indexer,
-                                 WorkspaceIndexer* file_indexer, ShellSession* shell) {
+                                 WorkspaceIndexer* file_indexer,
+                                 ShellSessionManager* shell_sessions) {
   auto state = std::make_shared<BinarySymbolsPanelState>();
   state->placeholder_filter = i18n::tr("panel.symbols.filter_placeholder");
 
@@ -815,7 +817,7 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
   auto input_layers = Container::Vertical(children);
 
   auto handler = [workspace, model, focus, state, layout_state, symbols, symbol_indexer,
-                  file_indexer, shell, filter_input](Event event) -> bool {
+                  file_indexer, shell_sessions, filter_input](Event event) -> bool {
     if (layout_state == nullptr) {
       return false;
     }
@@ -829,7 +831,7 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
     }
 
     if (event == Event::Custom) {
-      tick_binary_symbols_panel(state.get(), layout_state, model, shell);
+      tick_binary_symbols_panel(state.get(), layout_state, model, shell_sessions);
       return true;
     }
 

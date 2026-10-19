@@ -394,6 +394,7 @@ add_executable(tuide
   src/ai/edit_snapshot.cpp
   src/ai/ai_controller.cpp
   src/terminal/shell_session.cpp
+  src/terminal/shell_session_manager.cpp
   src/terminal/app_session.cpp
   src/terminal/raw_pty_screen.cpp
   src/terminal/pty_input.cpp

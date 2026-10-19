@@ -11,6 +11,7 @@
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "terminal/shell_session.hpp"
+#include "terminal/shell_session_manager.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 #include "util/nm_reader.hpp"
@@ -32,6 +33,6 @@ ftxui::Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* m
                                         const std::shared_ptr<ISymbolProvider>& symbols,
                                         SymbolWorkspaceIndexer* symbol_indexer,
                                         WorkspaceIndexer* file_indexer,
-                                        ShellSession* shell);
+                                        ShellSessionManager* shell_sessions);
 
 }  // namespace tuide
