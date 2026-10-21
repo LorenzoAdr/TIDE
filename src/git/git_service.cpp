@@ -45,6 +45,26 @@ bool looks_like_hash_query(const std::string& query) {
   return true;
 }
 
+std::string main_repo_choice_label(const std::string& workspace, const std::string& main_root) {
+  if (main_root.empty()) {
+    return ".";
+  }
+  std::error_code ec;
+  if (!workspace.empty()) {
+    const fs::path rel = fs::relative(fs::path(main_root), fs::path(workspace), ec);
+    if (!ec) {
+      std::string text = rel.generic_string();
+      if (text.empty() || text == ".") {
+        const std::string name = fs::path(workspace).filename().generic_string();
+        return name.empty() ? std::string(".") : name;
+      }
+      return text;
+    }
+  }
+  const std::string name = fs::path(main_root).filename().generic_string();
+  return name.empty() ? main_root : name;
+}
+
 bool commit_matches_query(const GitCommitEntry& entry, const std::string& query,
                           const std::string& query_lower) {
   if (entry.short_hash.size() >= query.size()) {
@@ -221,13 +241,18 @@ bool GitService::is_untracked(const std::string& path) const {
 
 void GitService::open(const std::string& workspace_root) {
   const std::string root = normalize_path(workspace_root);
+  std::string keep_context;
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (workspace_root_ == root) {
+      keep_context = context_repo_root_;
+    }
     workspace_root_ = root;
     main_repo_root_.clear();
     main_repo_valid_ = false;
     subrepos_.clear();
     context_repo_root_.clear();
+    repo_branch_by_root_.clear();
     repo_info_ = {};
     status_ = {};
     file_diffs_.clear();
@@ -249,7 +274,7 @@ void GitService::open(const std::string& workspace_root) {
   if (root.empty()) {
     return;
   }
-  enqueue([this, root] { discover_repos(root); });
+  enqueue([this, root, keep_context] { discover_repos(root, keep_context); });
 }
 
 void GitService::close() {
@@ -260,6 +285,7 @@ void GitService::close() {
     main_repo_valid_ = false;
     subrepos_.clear();
     context_repo_root_.clear();
+    repo_branch_by_root_.clear();
     repo_info_ = {};
     status_ = {};
     file_diffs_.clear();
@@ -277,7 +303,8 @@ void GitService::close() {
   }
 }
 
-void GitService::discover_repos(const std::string& workspace_root) {
+void GitService::discover_repos(const std::string& workspace_root,
+                                const std::string& keep_context) {
   if (stop_.load()) {
     return;
   }
@@ -309,6 +336,7 @@ void GitService::discover_repos(const std::string& workspace_root) {
     main_repo_root_.clear();
     subrepos_.clear();
     context_repo_root_.clear();
+    repo_branch_by_root_.clear();
     repo_info_ = info;
     notify_updated();
     return;
@@ -329,6 +357,33 @@ void GitService::discover_repos(const std::string& workspace_root) {
     info.root = main_root;
   }
 
+  std::string context =
+      main_valid ? main_root : (subrepos.empty() ? std::string{} : subrepos.front().root);
+  if (!keep_context.empty()) {
+    bool keep = main_valid && keep_context == main_root;
+    if (!keep) {
+      for (const auto& sub : subrepos) {
+        if (sub.root == keep_context) {
+          keep = true;
+          break;
+        }
+      }
+    }
+    if (keep) {
+      context = keep_context;
+    }
+  }
+
+  std::string context_branch;
+  if (main_valid && context == main_root) {
+    context_branch = info.branch;
+  } else if (!context.empty()) {
+    const auto branch = run_git(context, {"rev-parse", "--abbrev-ref", "HEAD"});
+    if (branch.success()) {
+      context_branch = trim_newline(branch.stdout_text);
+    }
+  }
+
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (workspace_root_ != workspace_root) {
@@ -338,8 +393,14 @@ void GitService::discover_repos(const std::string& workspace_root) {
     main_repo_root_ = main_root;
     subrepos_ = std::move(subrepos);
     repo_info_ = info;
-    context_repo_root_ =
-        main_valid ? main_root : (subrepos_.empty() ? std::string{} : subrepos_.front().root);
+    context_repo_root_ = context;
+    repo_branch_by_root_.clear();
+    if (main_valid && !info.branch.empty()) {
+      repo_branch_by_root_[main_root] = info.branch;
+    }
+    if (!context.empty() && !context_branch.empty()) {
+      repo_branch_by_root_[context] = context_branch;
+    }
   }
   notify_updated();
   load_all_status();
@@ -733,12 +794,90 @@ GitRepoInfo GitService::context_repo_info() const {
   return info;
 }
 
-void GitService::set_context_from_path(const std::string& workspace_rel_path) {
+std::vector<GitRepoChoice> GitService::repo_choices() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  const ResolvedGitPath resolved = resolve_path_unlocked(workspace_rel_path);
-  if (resolved.valid) {
-    context_repo_root_ = resolved.repo_root;
+  std::vector<GitRepoChoice> out;
+  std::unordered_set<std::string> seen;
+  if (main_repo_valid_ && !main_repo_root_.empty()) {
+    GitRepoChoice choice;
+    choice.root = main_repo_root_;
+    choice.is_main = true;
+    choice.label = main_repo_choice_label(workspace_root_, main_repo_root_);
+    out.push_back(choice);
+    seen.insert(choice.root);
   }
+  std::vector<GitRepoChoice> subs;
+  for (const auto& sub : subrepos_) {
+    if (sub.root.empty() || seen.count(sub.root) > 0) {
+      continue;
+    }
+    GitRepoChoice choice;
+    choice.root = sub.root;
+    choice.is_main = false;
+    choice.label = sub.workspace_path.empty() ? sub.root : sub.workspace_path;
+    subs.push_back(std::move(choice));
+    seen.insert(sub.root);
+  }
+  std::sort(subs.begin(), subs.end(), [](const GitRepoChoice& a, const GitRepoChoice& b) {
+    return a.label < b.label;
+  });
+  out.insert(out.end(), subs.begin(), subs.end());
+  return out;
+}
+
+std::string GitService::selected_repo_root() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return context_repo_root_unlocked();
+}
+
+std::string GitService::selected_repo_branch() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const std::string root = context_repo_root_unlocked();
+  const auto it = repo_branch_by_root_.find(root);
+  if (it != repo_branch_by_root_.end() && !it->second.empty()) {
+    return it->second;
+  }
+  if (main_repo_valid_ && root == main_repo_root_) {
+    return repo_info_.branch;
+  }
+  return {};
+}
+
+void GitService::select_repo(const std::string& root) {
+  if (root.empty()) {
+    return;
+  }
+  bool changed = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!repo_known_unlocked(root)) {
+      return;
+    }
+    changed = switch_context_unlocked(root);
+  }
+  cache_branch_async(root);
+  if (changed) {
+    notify_updated();
+  }
+}
+
+void GitService::set_context_from_path(const std::string& workspace_rel_path) {
+  std::string root;
+  bool changed = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const ResolvedGitPath resolved = resolve_path_unlocked(workspace_rel_path);
+    if (!resolved.valid || resolved.repo_root.empty()) {
+      return;
+    }
+    root = resolved.repo_root;
+    changed = switch_context_unlocked(root);
+  }
+  if (!changed) {
+    return;
+  }
+  cache_branch_async(root);
+  notify_updated();
 }
 
 GitStatusSnapshot GitService::status() const {
@@ -896,7 +1035,7 @@ void GitService::stage_files(const std::vector<std::string>& paths, CompletionCa
       if (!resolved.valid) {
         continue;
       }
-      context_repo_root_ = resolved.repo_root;
+      switch_context_unlocked(resolved.repo_root);
       items.push_back({resolved.repo_root, resolved.repo_rel});
     }
   }
@@ -941,7 +1080,7 @@ void GitService::unstage_files(const std::vector<std::string>& paths, Completion
       if (!resolved.valid) {
         continue;
       }
-      context_repo_root_ = resolved.repo_root;
+      switch_context_unlocked(resolved.repo_root);
       items.push_back({resolved.repo_root, resolved.repo_rel});
     }
   }
@@ -987,7 +1126,7 @@ void GitService::discard_files(const std::vector<std::string>& paths, Completion
       if (!resolved.valid) {
         continue;
       }
-      context_repo_root_ = resolved.repo_root;
+      switch_context_unlocked(resolved.repo_root);
       bool untracked = false;
       for (const GitStatusEntry& entry : status_.entries) {
         if (entry.path == path || entry.path == resolved.workspace_rel) {
@@ -1399,7 +1538,7 @@ void GitService::load_log(const std::string& root) {
   const auto result =
       run_git(root, {"log", "-n", "50", "--decorate=short", "--format=%H|%h|%s"});
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_.empty()) {
+  if (workspace_root_.empty() || context_repo_root_unlocked() != root) {
     return;
   }
   if (result.success()) {
@@ -1461,7 +1600,7 @@ void GitService::load_log_search(const std::string& root, const std::string& que
   }
 
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_.empty()) {
+  if (workspace_root_.empty() || context_repo_root_unlocked() != root) {
     return;
   }
   log_search_query_ = query;
@@ -1474,7 +1613,7 @@ void GitService::load_branches(const std::string& root) {
   }
   const auto result = run_git(root, {"branch", "-a", "--no-color"});
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_.empty()) {
+  if (workspace_root_.empty() || context_repo_root_unlocked() != root) {
     return;
   }
   if (result.success()) {
@@ -1537,15 +1676,16 @@ void GitService::load_commit_files(const std::string& root, const std::string& c
   }
   const auto result =
       run_git(root, {"diff-tree", "--no-commit-id", "--name-status", "-r", commit_hash});
+  auto files = result.success() ? parse_commit_name_status(result.stdout_text)
+                                : std::vector<GitCommitFileEntry>{};
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_.empty()) {
+  if (workspace_root_.empty() || context_repo_root_unlocked() != root) {
     return;
   }
-  if (result.success()) {
-    commit_files_[commit_hash] = parse_commit_name_status(result.stdout_text);
-  } else {
-    commit_files_[commit_hash] = {};
+  for (auto& file : files) {
+    file.path = repo_path_to_workspace_unlocked(root, file.path);
   }
+  commit_files_[commit_hash] = std::move(files);
 }
 
 void GitService::load_graph(const std::string& root) {
@@ -1555,7 +1695,7 @@ void GitService::load_graph(const std::string& root) {
   const auto result =
       run_git(root, {"log", "--graph", "--oneline", "--all", "--decorate", "-n", "80"});
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_.empty()) {
+  if (workspace_root_.empty() || context_repo_root_unlocked() != root) {
     return;
   }
   graph_loaded_ = true;
@@ -1581,6 +1721,90 @@ std::string GitService::context_repo_root_unlocked() const {
     return subrepos_.front().root;
   }
   return {};
+}
+
+bool GitService::repo_known_unlocked(const std::string& root) const {
+  if (root.empty()) {
+    return false;
+  }
+  if (main_repo_valid_ && root == main_repo_root_) {
+    return true;
+  }
+  for (const auto& sub : subrepos_) {
+    if (sub.root == root) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool GitService::switch_context_unlocked(const std::string& root) {
+  if (root.empty()) {
+    return false;
+  }
+  const std::string current = context_repo_root_unlocked();
+  if (current == root) {
+    context_repo_root_ = root;
+    return false;
+  }
+  context_repo_root_ = root;
+  log_entries_.clear();
+  log_search_query_.clear();
+  log_search_results_.clear();
+  branches_.clear();
+  graph_lines_.clear();
+  graph_loaded_ = false;
+  commit_files_.clear();
+  return true;
+}
+
+void GitService::cache_branch_async(const std::string& root) {
+  if (root.empty()) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = repo_branch_by_root_.find(root);
+    if (it != repo_branch_by_root_.end() && !it->second.empty()) {
+      return;
+    }
+  }
+  enqueue([this, root]() {
+    if (stop_.load()) {
+      return;
+    }
+    const auto branch = run_git(root, {"rev-parse", "--abbrev-ref", "HEAD"});
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!repo_known_unlocked(root)) {
+        return;
+      }
+      if (branch.success()) {
+        repo_branch_by_root_[root] = trim_newline(branch.stdout_text);
+      }
+    }
+    notify_updated();
+  });
+}
+
+std::string GitService::repo_path_to_workspace_unlocked(const std::string& repo_root,
+                                                       const std::string& repo_rel) const {
+  if (repo_rel.empty()) {
+    return repo_rel;
+  }
+  if (main_repo_valid_ && repo_root == main_repo_root_) {
+    if (workspace_root_.empty() || repo_root == workspace_root_) {
+      return repo_rel;
+    }
+    const std::string workspace_rel = repo_to_workspace_rel(workspace_root_, repo_root, repo_rel);
+    return workspace_rel.empty() ? repo_rel : workspace_rel;
+  }
+  for (const auto& sub : subrepos_) {
+    if (sub.root == repo_root) {
+      return join_workspace_path(sub.workspace_path, repo_rel);
+    }
+  }
+  return repo_rel;
 }
 
 }  // namespace tuide

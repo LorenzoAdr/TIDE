@@ -86,6 +86,13 @@ struct GitPanelState {
   ScrollbarLayout list_scrollbar_layout{};
   ScrollbarLayout diff_scrollbar_layout{};
   ftxui::Box view_toggle_box;
+  bool repo_menu_open = false;
+  int repo_menu_scroll = 0;
+  int repo_menu_cursor = 0;
+  std::string active_repo_root;
+  ftxui::Box repo_picker_box;
+  ftxui::Box repo_menu_box;
+  std::vector<ftxui::Box> repo_menu_row_boxes;
   ftxui::Box search_box;
   ftxui::Box stage_box;
   ftxui::Box unstage_box;

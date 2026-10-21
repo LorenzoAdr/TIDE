@@ -29,6 +29,13 @@ struct GitRepoInfo {
   int subrepo_count = 0;
 };
 
+// Entrada del desplegable del panel Git: repo principal o un subrepo.
+struct GitRepoChoice {
+  std::string root;
+  std::string label;
+  bool is_main = false;
+};
+
 class GitService {
  public:
   GitService();
@@ -58,6 +65,11 @@ class GitService {
   bool has_subrepos() const;
   GitRepoInfo repo_info() const;
   GitRepoInfo context_repo_info() const;
+  // Repo que el panel Git está mostrando (log, ramas, grafo, commit, push).
+  std::vector<GitRepoChoice> repo_choices() const;
+  std::string selected_repo_root() const;
+  std::string selected_repo_branch() const;
+  void select_repo(const std::string& root);
   void set_context_from_path(const std::string& workspace_rel_path);
   GitStatusSnapshot status() const;
   GitFileDiff file_diff(const std::string& absolute_path) const;
@@ -102,7 +114,12 @@ class GitService {
   std::string repo_relative_path_unlocked(const std::string& path) const;
   ResolvedGitPath resolve_path_unlocked(const std::string& path) const;
   std::string context_repo_root_unlocked() const;
-  void discover_repos(const std::string& workspace_root);
+  bool repo_known_unlocked(const std::string& root) const;
+  bool switch_context_unlocked(const std::string& root);
+  void cache_branch_async(const std::string& root);
+  std::string repo_path_to_workspace_unlocked(const std::string& repo_root,
+                                              const std::string& repo_rel) const;
+  void discover_repos(const std::string& workspace_root, const std::string& keep_context);
   void enqueue(std::function<void()> task);
   void worker_main();
   void set_error_unlocked(const std::string& message);
@@ -145,6 +162,7 @@ class GitService {
   bool main_repo_valid_ = false;
   std::vector<GitSubrepoInfo> subrepos_;
   std::string context_repo_root_;
+  std::map<std::string, std::string> repo_branch_by_root_;
   GitRepoInfo repo_info_;
   GitStatusSnapshot status_;
   std::map<std::string, GitFileDiff> file_diffs_;

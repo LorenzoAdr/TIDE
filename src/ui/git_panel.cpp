@@ -56,6 +56,11 @@ constexpr const char* kGitDiscardConfirm = "git-discard-confirm";
 constexpr const char* kGitDiscardCancel = "git-discard-cancel";
 constexpr const char* kGitListScrollbar = "git-list-scrollbar";
 constexpr const char* kGitDiffScrollbar = "git-diff-scrollbar";
+constexpr const char* kGitRepoPicker = "git-repo-picker";
+constexpr int kRepoMenuMaxVisible = 12;
+
+void focus_repo(GitService* git, GitPanelState* state, const std::string& root);
+void open_repo_menu(GitService* git, GitPanelState* state);
 
 struct StatusVisualRow {
   bool is_dir = false;
@@ -157,6 +162,143 @@ void split_path_display(const std::string& path, std::string* name, std::string*
   *dir = path.substr(0, slash + 1);
 }
 
+std::string display_status_path(const std::string& path, const std::string& strip_prefix) {
+  if (strip_prefix.empty() || path.empty()) {
+    return path;
+  }
+  const std::string prefix = strip_prefix + "/";
+  if (path.compare(0, prefix.size(), prefix) == 0 && path.size() > prefix.size()) {
+    return path.substr(prefix.size());
+  }
+  return path;
+}
+
+std::string ellipsize_end(const std::string& value, std::size_t max_chars) {
+  if (value.size() <= max_chars) {
+    return value;
+  }
+  if (max_chars <= 1) {
+    return value.substr(0, max_chars);
+  }
+  return "…" + value.substr(value.size() - (max_chars - 1));
+}
+
+std::string repo_menu_row_id(int index) {
+  return std::string("git-repo-") + std::to_string(index);
+}
+
+struct RepoScope {
+  bool multiple = false;
+  bool main = true;
+  std::string root;
+  std::string label;
+  std::string branch;
+  std::string prefix;
+  std::vector<GitRepoChoice> choices;
+};
+
+RepoScope repo_scope(GitService* git) {
+  RepoScope scope;
+  if (git == nullptr) {
+    return scope;
+  }
+  scope.choices = git->repo_choices();
+  scope.root = git->selected_repo_root();
+  scope.branch = git->selected_repo_branch();
+  scope.multiple = scope.choices.size() > 1;
+  const GitRepoChoice* match = nullptr;
+  for (const auto& choice : scope.choices) {
+    if (choice.root == scope.root) {
+      match = &choice;
+      break;
+    }
+  }
+  if (match == nullptr && !scope.choices.empty()) {
+    match = &scope.choices.front();
+  }
+  if (match != nullptr) {
+    scope.main = match->is_main;
+    scope.label = match->label;
+    if (scope.root.empty()) {
+      scope.root = match->root;
+    }
+    if (!match->is_main) {
+      scope.prefix = match->label;
+    }
+  }
+  return scope;
+}
+
+std::string scope_strip_prefix(const RepoScope& scope) {
+  if (!scope.multiple || scope.main) {
+    return {};
+  }
+  return scope.prefix;
+}
+
+GitStatusSnapshot status_for_scope(GitService* git, const RepoScope& scope) {
+  GitStatusSnapshot full;
+  if (git != nullptr) {
+    full = git->status();
+  }
+  if (git == nullptr || !scope.multiple) {
+    return full;
+  }
+  GitStatusSnapshot out;
+  for (const GitStatusEntry& entry : full.entries) {
+    const bool take = scope.main ? entry.repo_prefix.empty()
+                                 : (!scope.prefix.empty() && entry.repo_prefix == scope.prefix);
+    if (!take) {
+      continue;
+    }
+    if (entry.staged != GitFileStatus::kUnmodified && entry.staged != GitFileStatus::kUntracked &&
+        entry.staged != GitFileStatus::kIgnored) {
+      ++out.staged_count;
+    }
+    if (entry.unstaged == GitFileStatus::kUntracked) {
+      ++out.untracked_count;
+    } else if (entry.unstaged != GitFileStatus::kUnmodified) {
+      ++out.unstaged_count;
+    }
+    out.entries.push_back(entry);
+  }
+  return out;
+}
+
+struct PanelGitView {
+  RepoScope scope;
+  GitStatusSnapshot status;
+  std::string strip_prefix;
+};
+
+PanelGitView panel_git_view(GitService* git) {
+  PanelGitView view;
+  view.scope = repo_scope(git);
+  view.strip_prefix = scope_strip_prefix(view.scope);
+  view.status = status_for_scope(git, view.scope);
+  return view;
+}
+
+void reveal_repo_menu_cursor(GitPanelState* state, int count) {
+  if (state == nullptr) {
+    return;
+  }
+  const int visible = std::max(1, std::min(kRepoMenuMaxVisible, std::max(count, 1)));
+  const int max_scroll = std::max(0, count - visible);
+  if (count <= 0) {
+    state->repo_menu_cursor = 0;
+    state->repo_menu_scroll = 0;
+    return;
+  }
+  state->repo_menu_cursor = std::max(0, std::min(state->repo_menu_cursor, count - 1));
+  if (state->repo_menu_cursor < state->repo_menu_scroll) {
+    state->repo_menu_scroll = state->repo_menu_cursor;
+  } else if (state->repo_menu_cursor >= state->repo_menu_scroll + visible) {
+    state->repo_menu_scroll = state->repo_menu_cursor - visible + 1;
+  }
+  state->repo_menu_scroll = std::max(0, std::min(state->repo_menu_scroll, max_scroll));
+}
+
 std::string to_lower_copy(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
@@ -171,11 +313,14 @@ bool path_matches_filter(const std::string& path, const std::string& filter) {
 }
 
 std::vector<int> visible_status_indices(const std::vector<GitStatusEntry>& entries,
-                                        const std::string& filter) {
+                                        const std::string& filter,
+                                        const std::string& strip_prefix) {
   std::vector<int> indices;
   indices.reserve(entries.size());
   for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
-    if (path_matches_filter(entries[static_cast<std::size_t>(i)].path, filter)) {
+    const std::string shown =
+        display_status_path(entries[static_cast<std::size_t>(i)].path, strip_prefix);
+    if (path_matches_filter(shown, filter)) {
       indices.push_back(i);
     }
   }
@@ -187,14 +332,16 @@ std::vector<int> visible_status_indices(const std::vector<GitStatusEntry>& entri
     if (rank_a != rank_b) {
       return rank_a < rank_b;
     }
-    return left.path < right.path;
+    return display_status_path(left.path, strip_prefix) <
+           display_status_path(right.path, strip_prefix);
   });
   return indices;
 }
 
 std::vector<StatusVisualRow> build_status_visual_rows(const std::vector<GitStatusEntry>& entries,
                                                      const std::vector<int>& indices,
-                                                     bool tree_view) {
+                                                     bool tree_view,
+                                                     const std::string& strip_prefix) {
   std::vector<StatusVisualRow> rows;
   if (!tree_view) {
     rows.reserve(indices.size());
@@ -202,7 +349,7 @@ std::vector<StatusVisualRow> build_status_visual_rows(const std::vector<GitStatu
       const auto& entry = entries[static_cast<std::size_t>(idx)];
       StatusVisualRow row;
       row.entry_index = idx;
-      split_path_display(entry.path, &row.name, &row.dir);
+      split_path_display(display_status_path(entry.path, strip_prefix), &row.name, &row.dir);
       rows.push_back(std::move(row));
     }
     return rows;
@@ -210,7 +357,8 @@ std::vector<StatusVisualRow> build_status_visual_rows(const std::vector<GitStatu
 
   std::set<std::string> inserted_dirs;
   for (int idx : indices) {
-    const std::string& path = entries[static_cast<std::size_t>(idx)].path;
+    const std::string path =
+        display_status_path(entries[static_cast<std::size_t>(idx)].path, strip_prefix);
     std::size_t start = 0;
     int depth = 0;
     while (true) {
@@ -298,7 +446,8 @@ bool mouse_control_active(const Mouse& m, const Event& event) {
 
 std::vector<int> entry_indices_under_prefix(const std::vector<GitStatusEntry>& entries,
                                             const std::vector<int>& indices,
-                                            const std::string& prefix) {
+                                            const std::string& prefix,
+                                            const std::string& strip_prefix) {
   std::vector<int> out;
   if (prefix.empty()) {
     return out;
@@ -307,7 +456,8 @@ std::vector<int> entry_indices_under_prefix(const std::vector<GitStatusEntry>& e
     if (idx < 0 || idx >= static_cast<int>(entries.size())) {
       continue;
     }
-    const std::string& path = entries[static_cast<std::size_t>(idx)].path;
+    const std::string path =
+        display_status_path(entries[static_cast<std::size_t>(idx)].path, strip_prefix);
     if (path.size() >= prefix.size() && path.compare(0, prefix.size(), prefix) == 0) {
       out.push_back(idx);
     }
@@ -316,11 +466,12 @@ std::vector<int> entry_indices_under_prefix(const std::vector<GitStatusEntry>& e
 }
 
 bool dir_row_selected(const StatusVisualRow& row, const std::vector<GitStatusEntry>& entries,
-                      const std::vector<int>& indices, const std::set<int>& multi_selected) {
+                      const std::vector<int>& indices, const std::set<int>& multi_selected,
+                      const std::string& strip_prefix) {
   if (!row.is_dir || row.dir_prefix.empty()) {
     return false;
   }
-  const auto kids = entry_indices_under_prefix(entries, indices, row.dir_prefix);
+  const auto kids = entry_indices_under_prefix(entries, indices, row.dir_prefix, strip_prefix);
   if (kids.empty()) {
     return false;
   }
@@ -390,12 +541,13 @@ std::vector<std::string> paths_for_stage_action(GitService* git, GitPanelState* 
   if (git == nullptr || state == nullptr) {
     return paths;
   }
-  const GitStatusSnapshot status = git->status();
-  const auto indices = visible_status_indices(status.entries, state->search_query);
+  const PanelGitView view = panel_git_view(git);
+  const auto indices =
+      visible_status_indices(view.status.entries, state->search_query, view.strip_prefix);
   if (!state->multi_selected.empty()) {
     for (int idx : state->multi_selected) {
-      if (idx >= 0 && idx < static_cast<int>(status.entries.size())) {
-        paths.push_back(status.entries[static_cast<std::size_t>(idx)].path);
+      if (idx >= 0 && idx < static_cast<int>(view.status.entries.size())) {
+        paths.push_back(view.status.entries[static_cast<std::size_t>(idx)].path);
       }
     }
     return paths;
@@ -405,8 +557,8 @@ std::vector<std::string> paths_for_stage_action(GitService* git, GitPanelState* 
   }
   clamp_selection(state, static_cast<int>(indices.size()));
   const int entry_index = indices[static_cast<std::size_t>(state->selected_file)];
-  if (entry_index >= 0 && entry_index < static_cast<int>(status.entries.size())) {
-    paths.push_back(status.entries[static_cast<std::size_t>(entry_index)].path);
+  if (entry_index >= 0 && entry_index < static_cast<int>(view.status.entries.size())) {
+    paths.push_back(view.status.entries[static_cast<std::size_t>(entry_index)].path);
   }
   return paths;
 }
@@ -496,11 +648,13 @@ std::vector<LogCommitViewLine> build_log_commit_view_lines(
   }
   constexpr std::size_t kMaxLinesPerFile = 250;
   constexpr std::size_t kMaxTotalLines = 2000;
+  const std::string strip = scope_strip_prefix(repo_scope(git));
   for (const auto& file : files) {
     if (rows.size() >= kMaxTotalLines) {
       break;
     }
-    rows.push_back({LogCommitViewLine::Kind::FileHeader, file.status + " " + file.path});
+    rows.push_back({LogCommitViewLine::Kind::FileHeader,
+                    file.status + " " + display_status_path(file.path, strip)});
     const std::string diff = git->timeline_diff_text(file.path, commit_hash);
     if (diff.empty()) {
       rows.push_back({LogCommitViewLine::Kind::Muted,
@@ -565,13 +719,13 @@ void open_status_file_diff(GitService* git, GitPanelState* state, MainLayoutStat
   if (git == nullptr || state == nullptr || layout_state == nullptr || workspace == nullptr) {
     return;
   }
-  // status() returns by value: never bind references to its members (dangling → bad_alloc).
-  const GitStatusSnapshot status = git->status();
-  if (entry_index < 0 || entry_index >= static_cast<int>(status.entries.size())) {
+  const PanelGitView view = panel_git_view(git);
+  if (entry_index < 0 || entry_index >= static_cast<int>(view.status.entries.size())) {
     return;
   }
   if (layout_state->git_open_diff_view) {
-    layout_state->git_open_diff_view(status.entries[static_cast<std::size_t>(entry_index)].path);
+    layout_state->git_open_diff_view(
+        view.status.entries[static_cast<std::size_t>(entry_index)].path);
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;
     }
@@ -826,14 +980,15 @@ int selected_status_entry_index(GitService* git, GitPanelState* state) {
   if (git == nullptr || state == nullptr) {
     return -1;
   }
-  const GitStatusSnapshot status = git->status();
-  const auto indices = visible_status_indices(status.entries, state->search_query);
+  const PanelGitView view = panel_git_view(git);
+  const auto indices =
+      visible_status_indices(view.status.entries, state->search_query, view.strip_prefix);
   if (indices.empty()) {
     return -1;
   }
   clamp_selection(state, static_cast<int>(indices.size()));
   const int entry_index = indices[static_cast<std::size_t>(state->selected_file)];
-  if (entry_index < 0 || entry_index >= static_cast<int>(status.entries.size())) {
+  if (entry_index < 0 || entry_index >= static_cast<int>(view.status.entries.size())) {
     return -1;
   }
   return entry_index;
@@ -844,18 +999,18 @@ void ensure_selected_diff(GitService* git, GitPanelState* state) {
     return;
   }
   // Keep one snapshot: binding refs to git->status().entries/.path is UB (dangling).
-  const GitStatusSnapshot status = git->status();
-  const auto indices = visible_status_indices(status.entries, state->search_query);
+  const PanelGitView view = panel_git_view(git);
+  const auto indices =
+      visible_status_indices(view.status.entries, state->search_query, view.strip_prefix);
   if (indices.empty()) {
     return;
   }
   clamp_selection(state, static_cast<int>(indices.size()));
   const int entry_index = indices[static_cast<std::size_t>(state->selected_file)];
-  if (entry_index < 0 || entry_index >= static_cast<int>(status.entries.size())) {
+  if (entry_index < 0 || entry_index >= static_cast<int>(view.status.entries.size())) {
     return;
   }
-  const std::string path = status.entries[static_cast<std::size_t>(entry_index)].path;
-  git->set_context_from_path(path);
+  const std::string path = view.status.entries[static_cast<std::size_t>(entry_index)].path;
   reset_diff_scroll_for_path(state, path);
   if (!git->has_file_diff_text(path)) {
     git->refresh_file_diff(path);
@@ -1262,8 +1417,8 @@ std::vector<GitStatusEntry> staged_entries_for_commit(GitService* git) {
   if (git == nullptr) {
     return out;
   }
-  const GitStatusSnapshot status = git->status();
-  for (const GitStatusEntry& entry : status.entries) {
+  const PanelGitView view = panel_git_view(git);
+  for (const GitStatusEntry& entry : view.status.entries) {
     if (entry.staged != GitFileStatus::kUnmodified && entry.staged != GitFileStatus::kUntracked &&
         entry.staged != GitFileStatus::kIgnored) {
       out.push_back(entry);
@@ -1306,8 +1461,10 @@ Element render_commit_modal(GitService* git, GitPanelState* state, MainLayoutSta
   const int input_width = std::max(40, dims.modal_width - 6);
   const int file_rows_visible = std::max(6, dims.max_rows - 6);
 
-  const auto staged = staged_entries_for_commit(git);
-  const int total_files = static_cast<int>(staged.size());
+    const auto staged = staged_entries_for_commit(git);
+    const RepoScope commit_scope = repo_scope(git);
+    const std::string commit_strip = scope_strip_prefix(commit_scope);
+    const int total_files = static_cast<int>(staged.size());
   const int max_scroll = std::max(0, total_files - file_rows_visible);
   state->commit_modal_file_scroll =
       std::max(0, std::min(state->commit_modal_file_scroll, max_scroll));
@@ -1322,7 +1479,7 @@ Element render_commit_modal(GitService* git, GitPanelState* state, MainLayoutSta
       const GitStatusEntry& entry = staged[static_cast<std::size_t>(i)];
       file_rows.push_back(hbox({
           text(" " + status_badge(entry) + " ") | color(status_color(entry)),
-          text(entry.path) | color(theme::Header()),
+          text(display_status_path(entry.path, commit_strip)) | color(theme::Header()),
           filler(),
       }));
     }
@@ -1567,6 +1724,31 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
     return false;
   }
 
+  if (state->repo_menu_open) {
+    const auto choices = git->repo_choices();
+    const int count = static_cast<int>(choices.size());
+    if (count <= 0) {
+      state->repo_menu_open = false;
+    } else if (event == Event::Escape) {
+      state->repo_menu_open = false;
+      return true;
+    } else if (event == Event::ArrowUp || event == Event::Character('k')) {
+      state->repo_menu_cursor = std::max(0, state->repo_menu_cursor - 1);
+      reveal_repo_menu_cursor(state, count);
+      return true;
+    } else if (event == Event::ArrowDown || event == Event::Character('j')) {
+      state->repo_menu_cursor = std::min(count - 1, state->repo_menu_cursor + 1);
+      reveal_repo_menu_cursor(state, count);
+      return true;
+    } else if (event == Event::Return) {
+      const int idx = std::max(0, std::min(state->repo_menu_cursor, count - 1));
+      focus_repo(git, state, choices[static_cast<std::size_t>(idx)].root);
+      return true;
+    } else {
+      state->repo_menu_open = false;
+    }
+  }
+
   if (event_is_tuide_global_shortcut(event)) {
     return false;
   }
@@ -1597,11 +1779,11 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
   }
 
   if (state->selected_tab == GitPanelState::kTabStatus) {
-    const GitStatusSnapshot status = git->status();
-    const auto& entries = status.entries;
-    const auto indices = visible_status_indices(entries, state->search_query);
+    const PanelGitView view = panel_git_view(git);
+    const auto& entries = view.status.entries;
+    const auto indices = visible_status_indices(entries, state->search_query, view.strip_prefix);
     const int count = static_cast<int>(indices.size());
-    const auto rows = build_status_visual_rows(entries, indices, state->tree_view);
+    const auto rows = build_status_visual_rows(entries, indices, state->tree_view, view.strip_prefix);
     const int visible = state->last_list_visible;
     if ((event == Event::ArrowUp || event == Event::Character('k')) && state->selected_file > 0) {
       --state->selected_file;
@@ -2090,6 +2272,10 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     if (is_press && state->search_focus) {
       state->search_focus = false;
     }
+    if (is_press && state->repo_menu_open) {
+      state->repo_menu_open = false;
+      return true;
+    }
     return false;
   }
 
@@ -2099,31 +2285,49 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     if (state->list_sep_hovered != sep_hit) {
       state->list_sep_hovered = sep_hit;
     }
-    update_panel_hover(
-        layout_state, m.x, m.y,
-        {{kGitTab0, &state->tab_boxes[0]},
-         {kGitTab1, &state->tab_boxes[1]},
-         {kGitTab2, &state->tab_boxes[2]},
-         {kGitTab3, &state->tab_boxes[3]},
-         {kGitTab4, &state->tab_boxes[4]},
-         {kGitStage, &state->stage_box},
-         {kGitUnstage, &state->unstage_box},
-         {kGitDiscard, &state->discard_box},
-         {kGitPush, &state->push_box},
-         {kGitPull, &state->pull_box},
-         {kGitCommit, &state->commit_box},
-         {kGitViewToggle, &state->view_toggle_box},
-         {kGitSearch, &state->search_box},
-         {kGitListScrollbar, &state->list_scrollbar_box},
-         {kGitDiffScrollbar, &state->diff_scrollbar_box}},
-        [](std::string_view id) {
-          return id.rfind("git-", 0) == 0;
-        });
+    std::vector<std::string> repo_row_ids;
+    std::vector<HoverTarget> hits = {
+        {kGitTab0, &state->tab_boxes[0]},
+        {kGitTab1, &state->tab_boxes[1]},
+        {kGitTab2, &state->tab_boxes[2]},
+        {kGitTab3, &state->tab_boxes[3]},
+        {kGitTab4, &state->tab_boxes[4]},
+        {kGitStage, &state->stage_box},
+        {kGitUnstage, &state->unstage_box},
+        {kGitDiscard, &state->discard_box},
+        {kGitPush, &state->push_box},
+        {kGitPull, &state->pull_box},
+        {kGitCommit, &state->commit_box},
+        {kGitViewToggle, &state->view_toggle_box},
+        {kGitSearch, &state->search_box},
+        {kGitListScrollbar, &state->list_scrollbar_box},
+        {kGitDiffScrollbar, &state->diff_scrollbar_box},
+        {kGitRepoPicker, &state->repo_picker_box},
+    };
+    if (state->repo_menu_open) {
+      repo_row_ids.reserve(state->repo_menu_row_boxes.size());
+      for (int i = 0; i < static_cast<int>(state->repo_menu_row_boxes.size()); ++i) {
+        repo_row_ids.push_back(repo_menu_row_id(state->repo_menu_scroll + i));
+        hits.push_back({repo_row_ids.back(), &state->repo_menu_row_boxes[static_cast<std::size_t>(i)]});
+      }
+    }
+    update_panel_hover(layout_state, m.x, m.y, hits, [](std::string_view id) {
+      return id.rfind("git-", 0) == 0;
+    });
     return false;
   }
 
   // Wheel: no robar foco (evita el salto de layout al sincronizar Terminal).
   if (is_wheel) {
+    if (state->repo_menu_open && !state->repo_menu_box.IsEmpty() &&
+        state->repo_menu_box.Contain(m.x, m.y)) {
+      const int count = static_cast<int>(git->repo_choices().size());
+      const int visible = std::min(kRepoMenuMaxVisible, std::max(count, 1));
+      const int max_scroll = std::max(0, count - visible);
+      const int delta = m.button == Mouse::WheelUp ? -1 : 1;
+      state->repo_menu_scroll = std::max(0, std::min(state->repo_menu_scroll + delta, max_scroll));
+      return true;
+    }
     if (handle_git_list_scrollbar_mouse(state, layout_state, m, state->last_list_total,
                                         state->last_list_visible)) {
       return true;
@@ -2151,9 +2355,10 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
       if (state->selected_tab == GitPanelState::kTabStatus) {
         const int entry_index = selected_status_entry_index(git, state);
         if (entry_index >= 0) {
-          const GitStatusSnapshot status = git->status();
-          if (entry_index < static_cast<int>(status.entries.size())) {
-            const std::string& path = status.entries[static_cast<std::size_t>(entry_index)].path;
+          const PanelGitView view = panel_git_view(git);
+          if (entry_index < static_cast<int>(view.status.entries.size())) {
+            const std::string path =
+                view.status.entries[static_cast<std::size_t>(entry_index)].path;
             scroll_git_diff(state, wheel_delta, count_diff_lines(git->file_diff_text(path)),
                             state->last_diff_visible);
           }
@@ -2213,6 +2418,35 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
 
   if (!is_press) {
     return false;
+  }
+
+  if (!state->repo_picker_box.IsEmpty() && state->repo_picker_box.Contain(m.x, m.y)) {
+    trigger_press(layout_state, std::string_view(kGitRepoPicker));
+    if (state->repo_menu_open) {
+      state->repo_menu_open = false;
+    } else {
+      open_repo_menu(git, state);
+    }
+    return true;
+  }
+  if (state->repo_menu_open) {
+    const auto choices = git->repo_choices();
+    const int visible = std::min(kRepoMenuMaxVisible, static_cast<int>(choices.size()));
+    for (int i = 0; i < visible && i < static_cast<int>(state->repo_menu_row_boxes.size()); ++i) {
+      if (!state->repo_menu_row_boxes[static_cast<std::size_t>(i)].Contain(m.x, m.y)) {
+        continue;
+      }
+      const int idx = state->repo_menu_scroll + i;
+      if (idx >= 0 && idx < static_cast<int>(choices.size())) {
+        trigger_press(layout_state, repo_menu_row_id(idx));
+        focus_repo(git, state, choices[static_cast<std::size_t>(idx)].root);
+      }
+      return true;
+    }
+    if (!state->repo_menu_box.IsEmpty() && state->repo_menu_box.Contain(m.x, m.y)) {
+      return true;
+    }
+    state->repo_menu_open = false;
   }
 
   if (!state->list_sep_box.IsEmpty() && state->list_sep_box.Contain(m.x, m.y)) {
@@ -2304,10 +2538,11 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     }
     const int index = list_index_from_mouse(state, *local);
     if (state->selected_tab == GitPanelState::kTabStatus) {
-      const GitStatusSnapshot status = git->status();
-      const auto& entries = status.entries;
-      const auto indices = visible_status_indices(entries, state->search_query);
-      const auto rows = build_status_visual_rows(entries, indices, state->tree_view);
+      const PanelGitView view = panel_git_view(git);
+      const auto& entries = view.status.entries;
+      const auto indices = visible_status_indices(entries, state->search_query, view.strip_prefix);
+      const auto rows =
+          build_status_visual_rows(entries, indices, state->tree_view, view.strip_prefix);
       if (index < 0 || index >= static_cast<int>(rows.size())) {
         return true;
       }
@@ -2315,7 +2550,8 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
       const bool ctrl = mouse_control_active(m, event);
 
       if (row.is_dir) {
-        const auto kids = entry_indices_under_prefix(entries, indices, row.dir_prefix);
+        const auto kids =
+            entry_indices_under_prefix(entries, indices, row.dir_prefix, view.strip_prefix);
         set_multi_entries(state, kids, ctrl);
         if (!kids.empty()) {
           int selected_pos = 0;
@@ -2387,9 +2623,99 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
   return false;
 }
 
+void reset_repo_view(GitPanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected_file = 0;
+  state->file_scroll = 0;
+  state->log_scroll = 0;
+  state->branch_scroll = 0;
+  state->timeline_scroll = 0;
+  state->graph_scroll = 0;
+  state->diff_scroll = 0;
+  state->last_diff_path.clear();
+  state->last_log_commit.clear();
+  state->last_timeline_commit.clear();
+  state->timeline_file.clear();
+  state->log_search_applied.clear();
+  state->search_query.clear();
+  state->search_cursor = 0;
+  state->search_focus = false;
+  clear_multi_selection(state);
+}
+
+void refresh_repo_tab(GitService* git, GitPanelState* state) {
+  if (git == nullptr || state == nullptr) {
+    return;
+  }
+  if (state->selected_tab == GitPanelState::kTabLog) {
+    git->refresh_log();
+  } else if (state->selected_tab == GitPanelState::kTabBranches) {
+    git->refresh_branches();
+  } else if (state->selected_tab == GitPanelState::kTabGraph) {
+    git->refresh_graph();
+  } else if (state->selected_tab == GitPanelState::kTabStatus) {
+    ensure_selected_diff(git, state);
+  }
+}
+
+void focus_repo(GitService* git, GitPanelState* state, const std::string& root) {
+  if (git == nullptr || state == nullptr || root.empty()) {
+    return;
+  }
+  const bool changed = root != git->selected_repo_root();
+  git->select_repo(root);
+  state->repo_menu_open = false;
+  state->active_repo_root = git->selected_repo_root();
+  if (!changed) {
+    return;
+  }
+  reset_repo_view(state);
+  refresh_repo_tab(git, state);
+}
+
+void open_repo_menu(GitService* git, GitPanelState* state) {
+  if (git == nullptr || state == nullptr) {
+    return;
+  }
+  state->repo_menu_open = true;
+  state->search_focus = false;
+  state->repo_menu_scroll = 0;
+  state->repo_menu_cursor = 0;
+  const auto choices = git->repo_choices();
+  const std::string selected = git->selected_repo_root();
+  for (int i = 0; i < static_cast<int>(choices.size()); ++i) {
+    if (choices[static_cast<std::size_t>(i)].root == selected) {
+      state->repo_menu_cursor = i;
+      break;
+    }
+  }
+  reveal_repo_menu_cursor(state, static_cast<int>(choices.size()));
+}
+
+void sync_active_repo(GitService* git, GitPanelState* state) {
+  if (git == nullptr || state == nullptr) {
+    return;
+  }
+  const std::string root = git->selected_repo_root();
+  if (root.empty() || root == state->active_repo_root) {
+    return;
+  }
+  const bool initial = state->active_repo_root.empty();
+  state->active_repo_root = root;
+  state->repo_menu_open = false;
+  if (initial) {
+    return;
+  }
+  reset_repo_view(state);
+  refresh_repo_tab(git, state);
+}
+
 }  // namespace
 
 void GitPanelEnsureSelectedDiff(GitService* git, GitPanelState* state) {
+  sync_active_repo(git, state);
   ensure_selected_diff(git, state);
 }
 
@@ -2411,6 +2737,7 @@ void GitPanelActivate(GitService* git, GitPanelState* state) {
   state->timeline_file.clear();
   state->commit_modal_open = false;
   state->search_focus = false;
+  state->repo_menu_open = false;
   clear_multi_selection(state);
   if (git != nullptr) {
     git->refresh_status();
@@ -2457,8 +2784,11 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
 
     // Evitar context_repo_info() en cada paint: hace run_git síncrono y satura el loop.
     const GitRepoInfo repo = git->repo_info();
-    const GitRepoInfo main_repo = repo;
     if (!repo.valid) {
+      state->repo_menu_open = false;
+      state->repo_picker_box = Box{};
+      state->repo_menu_box = Box{};
+      state->repo_menu_row_boxes.clear();
       return vbox({
                  text(" " + (repo.last_error.empty() ? i18n::tr("git.not_repo")
                                                     : repo.last_error)) |
@@ -2467,12 +2797,7 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
              flex | bgcolor(theme::PanelBg()) | reflect(state->panel_box);
     }
 
-    std::ostringstream branch_text;
-    branch_text << repo.branch;
-    if (main_repo.subrepo_count > 0) {
-      branch_text << "  (" << i18n::tr_fmt("git.header.subrepos",
-                                            {std::to_string(main_repo.subrepo_count)}) << ")";
-    }
+    const PanelGitView view = panel_git_view(git);
 
     const bool hover0 = interaction_active(layout_state, kGitTab0);
     const bool hover1 = interaction_active(layout_state, kGitTab1);
@@ -2491,7 +2816,38 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
         layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitTab4));
 
     Elements header_left;
-    header_left.push_back(text(branch_text.str()) | bold | color(theme::Success()));
+    if (view.scope.multiple) {
+      std::string caption = view.scope.label;
+      if (!view.scope.branch.empty()) {
+        caption += caption.empty() ? view.scope.branch : " @ " + view.scope.branch;
+      }
+      if (caption.empty()) {
+        caption = repo.branch;
+      }
+      caption += state->repo_menu_open ? " ▴" : " ▾";
+      caption = ellipsize_end(caption, 48);
+      const bool picker_hovered = interaction_active(layout_state, kGitRepoPicker);
+      const bool picker_pressed =
+          layout_state != nullptr &&
+          layout_state->clickable.is_pressed(std::string_view(kGitRepoPicker));
+      Element picker = text(" " + caption + " ") | bold | color(theme::Success());
+      if (picker_pressed) {
+        picker = std::move(picker) | inverted;
+      } else if (picker_hovered) {
+        picker = std::move(picker) | bgcolor(theme::TabHover());
+      }
+      header_left.push_back(std::move(picker) | reflect(state->repo_picker_box));
+    } else {
+      state->repo_menu_open = false;
+      state->repo_picker_box = Box{};
+      state->repo_menu_box = Box{};
+      state->repo_menu_row_boxes.clear();
+      std::string branch_label = !view.scope.branch.empty() ? view.scope.branch : repo.branch;
+      if (!view.scope.main && !view.scope.label.empty()) {
+        branch_label = view.scope.label + (branch_label.empty() ? "" : " @ " + branch_label);
+      }
+      header_left.push_back(text(" " + branch_label) | bold | color(theme::Success()));
+    }
 
     const bool show_search = state->selected_tab == GitPanelState::kTabStatus ||
                              state->selected_tab == GitPanelState::kTabLog;
@@ -2572,14 +2928,14 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
 
     Elements left_rows;
     Elements center_rows;
-    const GitStatusSnapshot status = git->status();
     int list_total = 0;
 
     if (state->selected_tab == GitPanelState::kTabStatus) {
-      const auto& entries = status.entries;
-      const auto indices = visible_status_indices(entries, state->search_query);
+      const auto& entries = view.status.entries;
+      const auto indices = visible_status_indices(entries, state->search_query, view.strip_prefix);
       clamp_selection(state, static_cast<int>(indices.size()));
-      const auto rows = build_status_visual_rows(entries, indices, state->tree_view);
+      const auto rows =
+          build_status_visual_rows(entries, indices, state->tree_view, view.strip_prefix);
       list_total = static_cast<int>(rows.size());
       if (rows.empty()) {
         left_rows.push_back(text(i18n::tr("git.working_tree_clean")) | color(theme::Muted()));
@@ -2592,7 +2948,8 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
       for (int i = state->file_scroll; i < end; ++i) {
         const auto& row = rows[static_cast<std::size_t>(i)];
         if (row.is_dir) {
-          const bool selected = dir_row_selected(row, entries, indices, state->multi_selected);
+          const bool selected =
+              dir_row_selected(row, entries, indices, state->multi_selected, view.strip_prefix);
           left_rows.push_back(render_status_file_row(GitStatusEntry{}, row, selected));
           continue;
         }
@@ -2603,8 +2960,9 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
       }
 
       if (selected_entry >= 0) {
-        const std::string& path = entries[static_cast<std::size_t>(selected_entry)].path;
-        center_rows.push_back(text(i18n::tr_fmt("git.diff.title", {path})) | color(theme::Accent()) |
+        const std::string path = entries[static_cast<std::size_t>(selected_entry)].path;
+        const std::string shown = display_status_path(path, view.strip_prefix);
+        center_rows.push_back(text(i18n::tr_fmt("git.diff.title", {shown})) | color(theme::Accent()) |
                               bold);
         center_rows.push_back(separator() | color(theme::AccentDim()));
         const std::string diff = git->file_diff_text(path);
@@ -2819,6 +3177,62 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
                          std::move(body) | flex,
                      }) |
                      flex | bgcolor(theme::PanelBg()) | reflect(state->panel_box);
+
+    if (state->repo_menu_open && view.scope.multiple && !state->repo_picker_box.IsEmpty() &&
+        !state->panel_box.IsEmpty()) {
+      const int total = static_cast<int>(view.scope.choices.size());
+      reveal_repo_menu_cursor(state, total);
+      const int visible = std::min(kRepoMenuMaxVisible, std::max(total, 0));
+      state->repo_menu_row_boxes.resize(static_cast<std::size_t>(std::max(visible, 0)));
+      Elements menu_rows;
+      menu_rows.push_back(text(" " + i18n::tr("git.repo.menu") + " ") | bold |
+                          color(theme::Accent()) | bgcolor(theme::PanelBg()));
+      menu_rows.push_back(separator() | color(theme::AccentDim()));
+      for (int i = 0; i < visible; ++i) {
+        const int idx = state->repo_menu_scroll + i;
+        if (idx < 0 || idx >= total) {
+          break;
+        }
+        const GitRepoChoice& choice = view.scope.choices[static_cast<std::size_t>(idx)];
+        const bool active = choice.root == view.scope.root;
+        const bool cursor = idx == state->repo_menu_cursor;
+        const std::string row_id = repo_menu_row_id(idx);
+        const bool row_hovered =
+            layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
+        const bool row_pressed =
+            layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
+        const int depth = choice.is_main
+                              ? 0
+                              : static_cast<int>(std::count(choice.label.begin(), choice.label.end(), '/'));
+        const std::string indent(static_cast<std::size_t>(std::max(0, depth) * 2), ' ');
+        const std::string label = std::string(active ? " ● " : " ○ ") + indent +
+                                  ellipsize_end(choice.label, 64) + " ";
+        Element line = text(label) | color(active ? theme::Success() : theme::Header()) |
+                       bgcolor(theme::PanelBg());
+        line = StyleListRow(std::move(line), cursor, row_hovered, row_pressed);
+        menu_rows.push_back(
+            std::move(line) | reflect(state->repo_menu_row_boxes[static_cast<std::size_t>(i)]));
+      }
+      Element menu = vbox(std::move(menu_rows)) | border | bgcolor(theme::PanelBg()) |
+                     reflect(state->repo_menu_box);
+      const int rel_x = std::max(0, state->repo_picker_box.x_min - state->panel_box.x_min);
+      const int rel_y = std::max(0, state->repo_picker_box.y_max - state->panel_box.y_min + 1);
+      result = dbox({
+          std::move(result),
+          vbox({
+              filler() | size(HEIGHT, EQUAL, rel_y),
+              hbox({
+                  filler() | size(WIDTH, EQUAL, rel_x),
+                  std::move(menu) | clear_under,
+                  filler(),
+              }),
+              filler(),
+          }) | flex,
+      });
+    } else if (!state->repo_menu_open) {
+      state->repo_menu_box = Box{};
+      state->repo_menu_row_boxes.clear();
+    }
 
     return result;
   });

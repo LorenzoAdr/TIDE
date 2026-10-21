@@ -903,6 +903,7 @@ const StringTable& english_strings() {
       {"git.header.modified", "{0} modified"},
       {"git.header.untracked", "{0} untracked"},
       {"git.header.subrepos", "{0} subrepos"},
+      {"git.repo.menu", "Repository"},
       {"git.working_tree_clean", " (working tree clean)"},
       {"git.diff.title", " Diff: {0}"},
       {"git.diff.loading", " loading diff…"},
