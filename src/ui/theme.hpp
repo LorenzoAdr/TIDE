@@ -28,6 +28,7 @@ struct UiColorOverrides {
   std::optional<ColorRgb> title;
   std::optional<ColorRgb> directory;
   std::optional<ColorRgb> file;
+  std::optional<ColorRgb> file_header;
 
   bool empty() const;
 };

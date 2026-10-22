@@ -302,4 +302,40 @@ std::string resolve_compiler_path(const std::string& path, const std::string& wo
   return path;
 }
 
+std::string map_container_compiler_path(const std::string& path,
+                                       const std::vector<ContainerHostPrefix>& mappings) {
+  if (path.empty() || path.front() != '/') {
+    return {};
+  }
+
+  auto trim_slash = [](std::string value) {
+    while (value.size() > 1 && value.back() == '/') {
+      value.pop_back();
+    }
+    return value;
+  };
+
+  std::vector<ContainerHostPrefix> sorted = mappings;
+  std::sort(sorted.begin(), sorted.end(),
+            [](const ContainerHostPrefix& a, const ContainerHostPrefix& b) {
+              return a.container.size() > b.container.size();
+            });
+
+  for (const auto& mapping : sorted) {
+    const std::string container = trim_slash(mapping.container);
+    const std::string host = trim_slash(mapping.host);
+    if (container.empty() || host.empty() || path.size() < container.size()) {
+      continue;
+    }
+    if (path.compare(0, container.size(), container) != 0) {
+      continue;
+    }
+    if (path.size() > container.size() && path[container.size()] != '/') {
+      continue;
+    }
+    return host + path.substr(container.size());
+  }
+  return {};
+}
+
 }  // namespace tuide

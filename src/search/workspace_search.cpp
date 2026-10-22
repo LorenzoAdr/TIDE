@@ -120,12 +120,7 @@ bool file_included(const std::string& relative_path, const std::string& include_
 }
 
 bool path_under_always_skipped_dir(const std::string& relative_path) {
-  for (const auto& part : fs::path(relative_path)) {
-    if (is_lazy_stub_dir_name(part.string())) {
-      return true;
-    }
-  }
-  return false;
+  return path_hits_lazy_stub(relative_path);
 }
 
 bool file_excluded(const std::string& relative_path, const std::string& exclude_pattern) {

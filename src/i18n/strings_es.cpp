@@ -475,7 +475,7 @@ const StringTable& spanish_strings() {
       {"settings.general.helix_mode.label", "Modo Helix en el editor"},
       {"settings.general.helix_mode.description", "Edición modal estilo Helix: hjkl, modos normal/insert/select, números de línea relativos"},
       {"settings.general.show_all_files.label", "Mostrar todos los archivos del workspace"},
-      {"settings.general.show_all_files.description", "Incluye archivos ocultos (.tuide, .clangd, etc.) y gitignore. Carpetas pesadas (.git, build) aparecen como stubs y se cargan al expandir"},
+      {"settings.general.show_all_files.description", "Incluye archivos ocultos (.tuide, .clangd, etc.) y gitignore. Carpetas pesadas (.git, build, install) aparecen como stubs y se cargan al expandir, un nivel cada vez"},
       {"settings.general.monitor.label", "Monitor interno (log de cuelgues)"},
       {"settings.general.monitor.description", "Registra llamadas en ~/.config/tuide/monitor.log (~1 s) y deja la última orden y los ámbitos abiertos en monitor.flight. Impacto en rendimiento"},
       {"settings.general.icons.label", "Iconos Nerd Font (Auto / Siempre / Nunca)"},

@@ -83,26 +83,7 @@ void append_glob_args(const std::string& patterns, bool exclude,
 }
 
 void append_always_skip_dir_globs(std::vector<std::string>* args) {
-  static constexpr const char* kAlwaysSkip[] = {
-      ".git",
-      "build",
-      "cmake-build-debug",
-      "cmake-build-release",
-      "node_modules",
-      "_deps",
-      ".cache",
-      "dist",
-      "out",
-      ".venv",
-      "venv",
-      "__pycache__",
-  };
-  for (const char* dir : kAlwaysSkip) {
-    args->push_back("-g");
-    args->push_back(std::string("!") + dir + "/**");
-    args->push_back("-g");
-    args->push_back(std::string("!**/") + dir + "/**");
-  }
+  append_lazy_stub_rg_globs(args);
 }
 
 fs::path search_root_for(const WorkspaceSearchOptions& opts) {
@@ -165,10 +146,8 @@ bool parse_match_line(const std::string& line, const fs::path& workspace_root,
   if (!rel.has_value()) {
     return true;
   }
-  for (const auto& part : fs::path(*rel)) {
-    if (is_lazy_stub_dir_name(part.string())) {
-      return true;
-    }
+  if (path_hits_lazy_stub(*rel)) {
+    return true;
   }
 
   int col = 1;

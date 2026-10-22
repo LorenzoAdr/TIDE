@@ -4,6 +4,7 @@
 #include <cctype>
 #include <filesystem>
 #include <unordered_set>
+#include <vector>
 
 #include "app/language_override.hpp"
 
@@ -61,6 +62,8 @@ const std::unordered_set<std::string>& lazy_stub_dir_names() {
   static const std::unordered_set<std::string> kNames = {
       ".git",
       "build",
+      "install",
+      "CMakeFiles",
       "cmake-build-debug",
       "cmake-build-release",
       "node_modules",
@@ -68,6 +71,8 @@ const std::unordered_set<std::string>& lazy_stub_dir_names() {
       ".cache",
       "dist",
       "out",
+      "obj",
+      "output",
       ".venv",
       "venv",
       "__pycache__",
@@ -75,19 +80,61 @@ const std::unordered_set<std::string>& lazy_stub_dir_names() {
   return kNames;
 }
 
+bool is_exact_lazy_stub_dir_name(const std::string& name) {
+  return lazy_stub_dir_names().count(name) > 0;
+}
+
+// build-wizard, build-debug, cmake-build-relwithdebinfo, …
+bool name_has_lazy_stub_prefix(const std::string& name) {
+  return (name.size() > 6 && name.compare(0, 6, "build-") == 0) ||
+         (name.size() > 12 && name.compare(0, 12, "cmake-build-") == 0);
+}
+
 bool path_has_lazy_stub_component(const std::string& relative_path) {
-  for (const auto& part : fs::path(relative_path)) {
-    if (is_lazy_stub_dir_name(part.string())) {
-      return true;
-    }
-  }
-  return false;
+  return path_hits_lazy_stub(relative_path);
 }
 
 }  // namespace
 
 bool is_lazy_stub_dir_name(const std::string& name) {
-  return lazy_stub_dir_names().count(name) > 0;
+  return is_exact_lazy_stub_dir_name(name) || name_has_lazy_stub_prefix(name);
+}
+
+bool path_hits_lazy_stub(const std::string& relative_path) {
+  std::vector<std::string> parts;
+  for (const auto& part : fs::path(relative_path)) {
+    const std::string text = part.string();
+    if (text.empty() || text == "." || text == "/") {
+      continue;
+    }
+    parts.push_back(text);
+  }
+  if (parts.empty()) {
+    return false;
+  }
+  for (std::size_t i = 0; i + 1 < parts.size(); ++i) {
+    if (is_lazy_stub_dir_name(parts[i])) {
+      return true;
+    }
+  }
+  return is_exact_lazy_stub_dir_name(parts.back());
+}
+
+void append_lazy_stub_rg_globs(std::vector<std::string>* args) {
+  if (args == nullptr) {
+    return;
+  }
+  auto add = [&](const std::string& pattern) {
+    args->push_back("-g");
+    args->push_back("!" + pattern + "/**");
+    args->push_back("-g");
+    args->push_back("!**/" + pattern + "/**");
+  };
+  for (const std::string& name : lazy_stub_dir_names()) {
+    add(name);
+  }
+  add("build-*");
+  add("cmake-build-*");
 }
 
 bool should_show_lazy_stub(const std::string& name, const IndexFilterOptions& options) {

@@ -23,11 +23,27 @@ int main() {
   show_all.show_all_files = true;
   expect(tuide::should_skip_dir_name(".git", show_all), "git always skipped in deep scan");
   expect(tuide::should_skip_dir_name("build", show_all), "build always skipped in deep scan");
+  expect(tuide::should_skip_dir_name("install", show_all), "install always skipped in deep scan");
+  expect(tuide::should_skip_dir_name("build-wizard", show_all), "build-* skipped in deep scan");
+  expect(tuide::should_skip_dir_name("cmake-build-relwithdebinfo", show_all),
+         "cmake-build-* skipped in deep scan");
+  expect(tuide::should_skip_dir_name("CMakeFiles", show_all), "CMakeFiles skipped in deep scan");
+  expect(!tuide::should_skip_dir_name("src", show_all), "source dirs are scanned");
   expect(!tuide::should_list_workspace_path(".git/config", show_all), "git paths never listed");
   expect(!tuide::should_list_workspace_path("build/obj.o", show_all),
          "build paths never listed in bulk");
+  expect(!tuide::should_list_workspace_path("install/include/a.h", show_all),
+         "install tree never listed in bulk");
+  expect(!tuide::should_list_workspace_path("build-wizard/CMakeFiles/a.o", show_all),
+         "build-* tree never listed in bulk");
+  expect(tuide::should_list_workspace_path("tools/build-portable.sh", show_all),
+         "build- script is not a build directory");
+  expect(tuide::path_hits_lazy_stub("install/lib/libtuide.so"), "install path is a stub");
+  expect(!tuide::path_hits_lazy_stub("tools/build-portable.sh"), "script path is not under a stub");
   expect(tuide::should_show_lazy_stub(".git", show_all), "git stub visible with show all");
   expect(tuide::should_show_lazy_stub("build", show_all), "build stub visible with show all");
+  expect(tuide::should_show_lazy_stub("install", show_all), "install stub visible with show all");
+  expect(tuide::should_show_lazy_stub("build-wizard", show_all), "build-* stub visible with show all");
   expect(tuide::should_list_workspace_path(".tuide/settings.json", show_all),
          "show all includes other dot paths");
   expect(tuide::should_list_workspace_path(".clangd", show_all), "show all includes .clangd");
@@ -35,8 +51,16 @@ int main() {
   tuide::IndexFilterOptions hidden;
   hidden.show_all_files = false;
   expect(!tuide::should_show_lazy_stub("build", hidden), "stubs hidden without show all");
+  expect(!tuide::should_show_lazy_stub("install", hidden), "install hidden without show all");
+  expect(!tuide::should_show_lazy_stub("build-wizard", hidden), "build-* hidden without show all");
   expect(tuide::should_skip_dir_name(".git", hidden), "hidden dirs skipped by default");
+  expect(tuide::should_skip_dir_name("install", hidden), "install skipped by default");
+  expect(tuide::should_skip_dir_name("obj", hidden), "obj skipped by default");
   expect(!tuide::should_list_workspace_path(".git/config", hidden), "hidden paths excluded");
+  expect(!tuide::should_list_workspace_path("install/bin/tuide", hidden),
+         "install paths excluded by default");
+  expect(!tuide::should_list_workspace_path("output/a.o", hidden),
+         "output paths excluded by default");
 
   const std::vector<std::string> csv_lines = {
       "name,age,city",

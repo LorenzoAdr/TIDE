@@ -12,10 +12,17 @@ struct IndexFilterOptions {
   std::vector<std::string> file_picker_exclude_dirs;
 };
 
-// Carpetas pesadas: nunca se indexan en profundidad; pueden mostrarse como stub.
+// Carpetas pesadas (build, install, build-*, …): nunca se indexan en profundidad.
+// Con show_all_files se muestran como stub y el explorador lista un solo nivel al expandir.
 bool is_lazy_stub_dir_name(const std::string& name);
+// true si algún directorio padre es stub, o el último componente es un nombre exacto
+// de stub. Los prefijos (build-*) no se aplican al nombre de fichero: tools/build-portable.sh
+// sigue siendo visible.
+bool path_hits_lazy_stub(const std::string& relative_path);
 // Stub visible en el explorador (p. ej. con show_all_files).
 bool should_show_lazy_stub(const std::string& name, const IndexFilterOptions& options = {});
+// -g '!dir/**' y -g '!**/dir/**' para que rg no recorra árboles de compilación.
+void append_lazy_stub_rg_globs(std::vector<std::string>* args);
 
 bool should_skip_dir_name(const std::string& name,
                           const IndexFilterOptions& options = {});

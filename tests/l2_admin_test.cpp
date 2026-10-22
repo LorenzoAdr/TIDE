@@ -16,6 +16,7 @@ using tuide::AdminClarifyTurn;
 using tuide::AdminDo;
 using tuide::AdminEvidenceItem;
 using tuide::AdminJob;
+using tuide::AdminEpisode;
 using tuide::AdminJobResult;
 using tuide::AdminLoopOpts;
 using tuide::AdminOla;
@@ -64,6 +65,8 @@ using tuide::admin_shell_enrich_result;
 using tuide::admin_shell_stays_in_workspace;
 using tuide::admin_url_fetch_allowed;
 using tuide::admin_user_prompt;
+using tuide::admin_system_prompt;
+using tuide::admin_refresh_propose_budget;
 using tuide::AdminGrepFn;
 using tuide::AdminToolFn;
 using tuide::kAdminMaxExplores;
@@ -1273,8 +1276,52 @@ int main() {
       expect(pfull.find("Explore agotado") != std::string::npos ||
                  pfull.find("AGOTADO") != std::string::npos,
              "prompt marks explore exhausted");
+      expect(pfull.find("Sigue solo con") == std::string::npos,
+             "explore cap does not order another search");
     }
     fs::remove_all(root, ec);
+  }
+
+  {
+    // Retomar tras ask_user refresca proposes/spawns y deja el cupo de explores
+    // donde estaba: si ya se gastó, el piloto no ve una caza nueva.
+    AdminState resumed;
+    resumed.proposes = 11;
+    resumed.spawns = 8;
+    resumed.verify_passes = 2;
+    resumed.edit_confirmed = true;
+    resumed.explore_jobs_baseline = 1;
+    resumed.consulta = "realce de color en el explorador";
+    AdminEpisode ep;
+    ep.consulta = resumed.consulta;
+    ep.reply = "propongo entry_color por sufijo";
+    resumed.episodes.push_back(ep);
+    for (int i = 0; i < 1 + kAdminMaxExplores; ++i) {
+      AdminJob j;
+      j.id = i + 1;
+      j.tipo = "explore";
+      j.ok = true;
+      resumed.jobs.push_back(j);
+    }
+    expect(admin_explores_used_this_consulta(resumed) == kAdminMaxExplores,
+           "explores spent before resume");
+    admin_refresh_propose_budget(&resumed);
+    expect(resumed.proposes == 0 && resumed.spawns == 0 && resumed.verify_passes == 0,
+           "resume refreshes propose counters");
+    expect(resumed.edit_confirmed, "resume keeps edit_confirmed");
+    expect(resumed.explore_jobs_baseline == 1, "resume does not move explore baseline");
+    expect(admin_explores_used_this_consulta(resumed) == kAdminMaxExplores,
+           "resume does not reopen explore quota");
+    expect(resumed.consulta == "realce de color en el explorador", "consulta unchanged by refresh");
+
+    const std::string sys = admin_system_prompt(false);
+    expect(sys.find("actúa (explore/search)") == std::string::npos,
+           "system prompt does not order a hunt on every user answer");
+    expect(sys.find("evidencia reunida, no memoria del modelo") != std::string::npos,
+           "notebook is evidence, not model memory");
+    const std::string sys_cum = admin_system_prompt(true);
+    expect(sys_cum.find("evidencia reunida, no memoria del modelo") != std::string::npos,
+           "cumulative prompt same notebook distinction");
   }
 
   if (failures) {

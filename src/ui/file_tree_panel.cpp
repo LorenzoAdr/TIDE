@@ -1018,7 +1018,19 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
       const std::string icon =
           entry.is_file ? file_glyph_display(entry.label)
                         : folder_glyph(entry.folder != nullptr && entry.folder->expanded);
-      const Color label_color = entry.is_file ? theme::FileText() : theme::DirectoryText();
+      const std::string& rel_path = entry.relative_path;
+      const auto has_suffix = [&](const char* suffix) {
+        const std::string s(suffix);
+        return rel_path.size() >= s.size() &&
+               rel_path.compare(rel_path.size() - s.size(), s.size(), s) == 0;
+      };
+      const bool is_header = entry.is_file &&
+                             (has_suffix(".h") || has_suffix(".hpp") ||
+                              has_suffix(".hh") || has_suffix(".hxx") ||
+                              has_suffix(".inl"));
+      const Color label_color = !entry.is_file
+                                    ? theme::DirectoryText()
+                                    : (is_header ? Color::Cyan : theme::FileText());
       // Indent must notflex: otherwise a tight panel shrinks guides with the label and
       // long names drift left vs short siblings.
       Element row = text(icon + " " + entry.label) | color(label_color) | xflex_shrink;

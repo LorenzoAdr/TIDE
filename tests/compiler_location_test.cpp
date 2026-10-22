@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -78,6 +79,23 @@ void test_no_match() {
   expect(!tuide::find_compiler_location("").has_value(), "empty line");
 }
 
+void test_container_path_maps_to_host() {
+  const std::vector<tuide::ContainerHostPrefix> mappings = {
+      {"/workspace", "/home/user/proj"},
+      {"/workspace/build", "/tmp/proj-build"},
+  };
+  expect(tuide::map_container_compiler_path("/workspace/src/main.cpp", mappings) ==
+             "/home/user/proj/src/main.cpp",
+         "container source maps onto the workspace mount");
+  expect(tuide::map_container_compiler_path("/workspace/build/CMakeFiles/a.cpp", mappings) ==
+             "/tmp/proj-build/CMakeFiles/a.cpp",
+         "longer container prefix wins");
+  expect(tuide::map_container_compiler_path("/workspace2/src/main.cpp", mappings).empty(),
+         "a longer directory name is not the same prefix");
+  expect(tuide::map_container_compiler_path("src/main.cpp", mappings).empty(),
+         "relative compiler paths stay relative");
+}
+
 }  // namespace
 
 int main() {
@@ -89,6 +107,7 @@ int main() {
   test_from_continuation();
   test_from_prefix_stripped();
   test_no_match();
+  test_container_path_maps_to_host();
   std::cout << "compiler_location_test: OK\n";
   return 0;
 }

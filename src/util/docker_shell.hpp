@@ -15,6 +15,10 @@ enum class DockerReadyGateResult { Proceed, Wait, Decline };
 std::string host_path_to_container_path(const std::string& host_path,
                                         const std::vector<PathMapping>& mount_mappings);
 
+// Absolute path printed inside the workspace container (compiler errors, for example)
+// rewritten to the host file behind the bind mount. Empty when it does not map.
+std::string terminal_path_to_host(const std::string& workspace_root, const std::string& path);
+
 ShellLaunchConfig resolve_shell_launch_config(const std::string& workspace_root,
                                               const WorkspaceConfig& config);
 

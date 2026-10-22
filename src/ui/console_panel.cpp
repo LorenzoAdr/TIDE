@@ -55,6 +55,7 @@
 #include "ui/ai_transcript_view.hpp"
 #include "i18n/tr.hpp"
 #include "util/compiler_location.hpp"
+#include "util/docker_shell.hpp"
 #include "util/monitor_log.hpp"
 
 namespace tuide {
@@ -932,8 +933,21 @@ bool open_terminal_link(WorkspaceModel* workspace, DebugModel* model, FocusManag
     return false;
   }
   const std::string cwd = model != nullptr ? model->workspace_root : workspace->root;
-  const std::string resolved =
-      resolve_compiler_path(match.path, workspace->root, cwd);
+  std::string resolved = resolve_compiler_path(match.path, workspace->root, cwd);
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(resolved, ec)) {
+    const std::string mapped = terminal_path_to_host(workspace->root, match.path);
+    if (!mapped.empty()) {
+      ec.clear();
+      const std::filesystem::path canonical =
+          std::filesystem::weakly_canonical(std::filesystem::path(mapped), ec);
+      const std::filesystem::path candidate = ec ? std::filesystem::path(mapped) : canonical;
+      ec.clear();
+      if (std::filesystem::is_regular_file(candidate, ec)) {
+        resolved = candidate.string();
+      }
+    }
+  }
   workspace->record_cursor_jump();
   const int line = std::max(0, match.line - 1);
   const int col = match.column > 0 ? std::max(0, match.column - 1) : 0;

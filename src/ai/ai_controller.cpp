@@ -1112,14 +1112,15 @@ void AiController::run_admin_async(const std::string& message) {
         // edit_confirmed — una edición ya confirmada a mitad de camino no debe
         // perderse solo por haber pasado por un ask_user.
         admin_refresh_propose_budget(&st);
-        // Si el usuario aporta la tarea real (p.ej. tras un saludo ask_user),
-        // promueve la respuesta a consulta — si no, el piloto se queda con "hola"
-        // y vuelve a preguntar el contexto (VS Code, etc.).
-        if (message.size() > st.consulta.size() + 8) {
+        // Saludo sin evidencia (p.ej. consulta "hola" y luego la tarea real):
+        // la respuesta más larga pasa a ser la consulta. Si ya hay notebook o
+        // episodio, el «sí» se queda en el diálogo y la consulta original
+        // sigue: promoverla reabriría la caza de algo ya reunido.
+        const bool greeting_only = st.notebook.empty() && st.episodes.empty();
+        if (greeting_only && message.size() > st.consulta.size() + 8) {
           append("→ Tomo tu mensaje como la consulta principal");
           st.consulta = message;
-          // Esto sí es una tarea nueva de verdad: además de los contadores,
-          // resetea awaiting_edit_confirm/edit_confirmed/etc. y re-baselinea.
+          // Tarea nueva de verdad: resetea flags de flujo y el cupo de explores.
           admin_begin_consulta_budgets(&st);
           mark_snapshot_baseline();
         }

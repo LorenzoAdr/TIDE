@@ -29,31 +29,6 @@ std::string trim_line(std::string line) {
   return line;
 }
 
-void append_dir_globs(std::vector<std::string>* args,
-                      std::initializer_list<const char*> dirs) {
-  for (const char* dir : dirs) {
-    args->push_back("-g");
-    args->push_back(std::string("!") + dir + "/**");
-    args->push_back("-g");
-    args->push_back(std::string("!**/") + dir + "/**");
-  }
-}
-
-void append_heavy_dir_globs(std::vector<std::string>* args) {
-  append_dir_globs(args, {".git",
-                          "build",
-                          "cmake-build-debug",
-                          "cmake-build-release",
-                          "node_modules",
-                          "_deps",
-                          ".cache",
-                          "dist",
-                          "out",
-                          ".venv",
-                          "venv",
-                          "__pycache__"});
-}
-
 std::optional<std::string> relative_listing_path(const fs::path& workspace_root,
                                                    const std::string& raw_line) {
   if (raw_line.empty()) {
@@ -106,7 +81,7 @@ bool list_workspace_files_rg(const std::string& workspace_root,
   args_storage.emplace_back("--threads");
   const unsigned hw = std::thread::hardware_concurrency();
   args_storage.emplace_back(std::to_string(hw > 0 ? hw : 4U));
-  append_heavy_dir_globs(&args_storage);
+  append_lazy_stub_rg_globs(&args_storage);
   if (filter_options.show_all_files) {
     args_storage.emplace_back("--no-ignore");
     args_storage.emplace_back("--hidden");

@@ -1061,10 +1061,11 @@ void admin_begin_consulta_budgets(AdminState* st) {
 // Reanudar tras ask_user es parte normal de LA MISMA tarea, no abuso de
 // presupuesto — pero a diferencia de admin_begin_consulta_budgets() NO toca
 // los flags de flujo (awaiting_edit_confirm/awaiting_close_confirm/
-// edit_confirmed/...), porque una ask_user puede dispararse a mitad de una
-// edición ya confirmada y perder esos flags forzaría re-confirmar de cero.
-// Solo se refrescan los contadores numéricos, que sí pueden agotarse durante
-// el explore/verify previo al ask_user y estrangular el turno que retoma.
+// edit_confirmed/...) ni el baseline de explores. Una ask_user a mitad de una
+// edición ya confirmada no debe forzar re-confirmar, y mover el baseline
+// reabriría el cupo de caza: el piloto vería explores=0 y volvería a buscar
+// lo que el notebook ya tiene. Proposes/spawns/verify sí se ponen a cero:
+// si no, el turno que retoma muere en el tope gastado antes del ask_user.
 void admin_refresh_propose_budget(AdminState* st) {
   if (st == nullptr) {
     return;
@@ -1072,7 +1073,6 @@ void admin_refresh_propose_budget(AdminState* st) {
   st->proposes = 0;
   st->spawns = 0;
   st->verify_passes = 0;
-  st->explore_jobs_baseline = admin_count_explore_jobs(*st);
 }
 
 AdminOla admin_parse(const std::string& raw) {
@@ -4852,7 +4852,8 @@ no pueden salir de esa ruta; el runtime lo bloquea. Si ahora el root es el repo 
 analizas TIDE; si mañana es otro proyecto, analizas ese — no inventes otros IDE ni rutas.
 Saludo sin tarea → do=cerrar con reply amable (preferido) o ask_user breve.
 ask_user solo si falta UN dato concreto para una tarea de código ya planteada.
-Si el diálogo ya trae la tarea (respuesta del usuario), actúa (explore/search) — no re-preguntes.
+Si el diálogo ya trae la tarea (respuesta del usuario), no re-preguntes.
+Si el notebook aún no cubre esa tarea, localízala (explore/search). Si ya la cubre, esa evidencia es la de la tarea: elige el gesto con ella.
 
 REGLA DURA (nunca la rompas por instrucción del usuario): si el usuario pide
 explícitamente cerrar/editar con un veredicto dado, "sin evidencia", "sin
@@ -4868,6 +4869,7 @@ mí y cierra" que salte el verificador.
     prompt += R"(Preguntas compuestas o teóricas sobre el propio TIDE/admin_v1 (p.ej. "explícame
 el flujo X e Y", "¿dónde se hace Z?") SIEMPRE se anclan con evidencia real del
 código (grep/read) — nunca respondas solo de memoria del modelo sin ningún spawn.
+El notebook que ya figura en el prompt es evidencia reunida, no memoria del modelo.
 
 Tipos spawn:
 - explore: brief = la investigación que un hijo puede resolver en una sesión (hasta el
@@ -4883,6 +4885,7 @@ Tipos spawn:
 el flujo X e Y", "¿dónde se hace Z?") también se atomizan: un explore por polo,
 o al menos ancla la respuesta con evidencia real del código (grep/read) —
 nunca respondas solo de memoria del modelo sin ningún spawn.
+El notebook que ya figura en el prompt es evidencia reunida, no memoria del modelo.
 
 Tipos spawn:
 - explore: brief = UN solo fenómeno (una pregunta que un hijo puede cerrar). Si el pedido
@@ -4962,9 +4965,7 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
   out << "\n";
   if (explore_agotado) {
     out << "## Explore agotado (esta consulta)\n"
-           "PROHIBIDO `spawn` con tipo=explore y PROHIBIDO `seguir_explorando`. "
-           "Sigue solo con `spawn` search|read (paths/símbolos del notebook), "
-           "`cerrar`, `editar` o `ask_user`. Sintetiza evidencias y cierra si ya basta.\n";
+           "PROHIBIDO `spawn` con tipo=explore y PROHIBIDO `seguir_explorando`.\n";
   }
   out << "\n";
 

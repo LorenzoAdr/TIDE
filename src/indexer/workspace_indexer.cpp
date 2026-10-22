@@ -175,10 +175,17 @@ void collect_workspace_directories(const fs::path& root, const fs::path& current
       continue;
     }
     const auto name = entry.path().filename().string();
+    const fs::path rel = current_rel.empty() ? fs::path(name) : current_rel / name;
+    // Stub pesado: se anota para poder abrirlo, pero no se recorre.
+    if (is_lazy_stub_dir_name(name)) {
+      if (should_show_lazy_stub(name, options)) {
+        folders->push_back(rel.generic_string());
+      }
+      continue;
+    }
     if (should_skip_dir_name(name, options)) {
       continue;
     }
-    const fs::path rel = current_rel.empty() ? fs::path(name) : current_rel / name;
     folders->push_back(rel.generic_string());
     // El enlace se lista con su nombre; el contenido se carga al expandir (lazy).
     if (entry.is_symlink(ec)) {
@@ -491,17 +498,32 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
       }
 
       if (is_directory) {
-        if ((event->mask & (IN_CREATE | IN_MOVED_TO)) &&
-            !should_skip_dir_name(event->name, filter_options)) {
-          scan_directories_for_watch(inotify_fd, root, entry_path, filter_options, &watch_dirs);
-          FileIndexChange change;
-          change.kind = FileIndexChangeKind::IndexDirectory;
-          change.relative_path = rel_str;
-          change.absolute_path = entry_path.string();
-          change.wake_ui = true;
-          push_change(std::move(change));
-          queued = true;
-          wake_ui = true;
+        if (event->mask & (IN_CREATE | IN_MOVED_TO)) {
+          const std::string name(event->name);
+          if (is_lazy_stub_dir_name(name)) {
+            // install/, build-*/, …: no vigilar ni recorrer. Con "mostrar todo"
+            // solo aparece el stub; el explorador carga un nivel al expandir.
+            if (should_show_lazy_stub(name, filter_options)) {
+              FileIndexChange change;
+              change.kind = FileIndexChangeKind::IndexDirectory;
+              change.relative_path = rel_str;
+              change.absolute_path = entry_path.string();
+              change.wake_ui = true;
+              push_change(std::move(change));
+              queued = true;
+              wake_ui = true;
+            }
+          } else if (!should_skip_dir_name(name, filter_options)) {
+            scan_directories_for_watch(inotify_fd, root, entry_path, filter_options, &watch_dirs);
+            FileIndexChange change;
+            change.kind = FileIndexChangeKind::IndexDirectory;
+            change.relative_path = rel_str;
+            change.absolute_path = entry_path.string();
+            change.wake_ui = true;
+            push_change(std::move(change));
+            queued = true;
+            wake_ui = true;
+          }
         }
         continue;
       }
@@ -1017,6 +1039,22 @@ bool WorkspaceIndexer::index_directory(const std::string& workspace_root,
   };
 
   const fs::path rel_dir = relative_dir.empty() ? fs::path{} : fs::path(relative_dir);
+  const std::string stub_name = rel_dir.filename().string();
+  if (!stub_name.empty() && is_lazy_stub_dir_name(stub_name)) {
+    // La carpeta acaba de aparecer (cmake install, build-wizard, …).
+    // Registrarla no debe leer sus hijos: eso es el pico de CPU.
+    if (should_show_lazy_stub(stub_name, options)) {
+      updated->folders.push_back(rel_dir.generic_string());
+      sort_unique_strings(&updated->folders);
+      rebuild_index_derived_fields(updated.get());
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
+        return false;
+      }
+      snapshot_ = std::move(updated);
+    }
+    return true;
+  }
   walk(absolute, rel_dir);
   if (aborted) {
     return false;

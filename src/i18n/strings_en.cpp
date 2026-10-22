@@ -470,7 +470,7 @@ const StringTable& english_strings() {
       {"settings.general.helix_mode.label", "Helix mode in editor"},
       {"settings.general.helix_mode.description", "Helix-style modal editing: hjkl, normal/insert/select modes, relative line numbers"},
       {"settings.general.show_all_files.label", "Show all workspace files"},
-      {"settings.general.show_all_files.description", "Includes hidden files (.tuide, .clangd, etc.) and gitignored files. Heavy folders (.git, build) appear as stubs and load on expand"},
+      {"settings.general.show_all_files.description", "Includes hidden files (.tuide, .clangd, etc.) and gitignored files. Heavy folders (.git, build, install) appear as stubs and load on expand, one level at a time"},
       {"settings.general.monitor.label", "Internal monitor (hang log)"},
       {"settings.general.monitor.description", "Logs calls to ~/.config/tuide/monitor.log (~1 s) and keeps the last command plus open scopes in monitor.flight. Performance impact"},
       {"settings.general.icons.label", "Nerd Font icons (Auto / Always / Never)"},

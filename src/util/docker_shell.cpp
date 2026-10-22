@@ -7,6 +7,7 @@
 
 #include "build/build_environment_service.hpp"
 #include "util/compile_commands_remap.hpp"
+#include "util/compiler_location.hpp"
 #include "util/shell_utils.hpp"
 
 namespace tuide {
@@ -55,6 +56,30 @@ std::string host_path_to_container_path(const std::string& host_path,
     return mapping.from + host.substr(mapping.to.size());
   }
   return {};
+}
+
+std::string terminal_path_to_host(const std::string& workspace_root, const std::string& path) {
+  if (workspace_root.empty() || path.empty() || path.front() != '/') {
+    return {};
+  }
+
+  const WorkspaceConfig config = WorkspaceConfig::load(workspace_root);
+  std::string container = global_build_environment_service().active_environment().docker_container;
+  if (container.empty()) {
+    container = config.compile_commands.docker_container;
+  }
+
+  std::vector<ContainerHostPrefix> prefixes;
+  prefixes.reserve(config.compile_commands.path_mappings.size());
+  for (const auto& mapping : config.compile_commands.path_mappings) {
+    prefixes.push_back(ContainerHostPrefix{mapping.from, mapping.to});
+  }
+  if (config.compile_commands.docker_detect_mounts && !container.empty()) {
+    for (const auto& mapping : detect_docker_mount_mappings(container)) {
+      prefixes.push_back(ContainerHostPrefix{mapping.from, mapping.to});
+    }
+  }
+  return map_container_compiler_path(path, prefixes);
 }
 
 ShellLaunchConfig resolve_shell_launch_config(const std::string& workspace_root,
