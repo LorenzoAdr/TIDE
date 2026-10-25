@@ -4,6 +4,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -10003,6 +10004,31 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
   tuide::AdminLoopOpts opts;
   opts.workspace_root = admin_root;
   opts.on_line = [](const std::string& line) { std::cout << line << std::endl; };
+  // Contabilidad por rol del MISMO lazo que corre el producto (el panel AI usa
+  // estos mismos callbacks). Sin esto la batería no puede decir en qué se van
+  // las rondas — ver P5 de docs/plans/l2-admin-verify-round-reduction.md.
+  struct CliTally {
+    int calls = 0;
+    int retries = 0;
+    int prompt_tokens = 0;
+    int completion_tokens = 0;
+    int cached_tokens = 0;
+    long ms = 0;
+  };
+  auto tally = std::make_shared<std::map<std::string, CliTally>>();
+  opts.on_llm_call = [tally](const std::string& role, const tuide::L2TokenUsage& usage, long ms,
+                             int attempts, const std::string& error_kind) {
+    CliTally& t = (*tally)[role];
+    t.calls += usage.calls > 0 ? usage.calls : 1;
+    t.retries += attempts > 1 ? attempts - 1 : 0;
+    t.prompt_tokens += usage.prompt_tokens;
+    t.completion_tokens += usage.completion_tokens;
+    t.cached_tokens += usage.cached_prompt_tokens;
+    t.ms += ms;
+    if (!error_kind.empty() && error_kind != "ok") {
+      std::cerr << "  [llm " << role << " error=" << error_kind << "]\n";
+    }
+  };
   if (!script_path.empty()) {
     // Scripted: stub explore (guion no alimenta hijo LLM).
     ops.run_explore = [](const tuide::AdminSpawn& s) { return tuide::admin_explore_stub(s); };
@@ -10014,6 +10040,32 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
     opts.settings = settings.level2;
   }
   const auto res = tuide::run_admin_loop(&st, *brain, ops, opts);
+  {
+    nlohmann::json calls = nlohmann::json::object();
+    int total = 0;
+    int retries = 0;
+    std::ostringstream line;
+    for (const auto& [role, t] : *tally) {
+      total += t.calls;
+      retries += t.retries;
+      line << " " << role << "=" << t.calls;
+      calls[role] = {{"calls", t.calls},
+                     {"retries", t.retries},
+                     {"prompt_tokens", t.prompt_tokens},
+                     {"completion_tokens", t.completion_tokens},
+                     {"cached_prompt_tokens", t.cached_tokens},
+                     {"ms", t.ms}};
+    }
+    std::cout << "· llm_calls=" << total << " (" << line.str() << " )"
+              << " transport_retries=" << retries << std::endl;
+    nlohmann::json summary{{"llm_calls", total},
+                           {"transport_retries", retries},
+                           {"proposes", res.proposes},
+                           {"spawns", res.spawns},
+                           {"roles", std::move(calls)}};
+    std::ofstream out(fs::path(out_dir) / "llm_calls.json");
+    out << summary.dump(2) << '\n';
+  }
   const auto state_json = tuide::admin_state_to_json(st);
   {
     std::ofstream out(fs::path(out_dir) / "admin.json");

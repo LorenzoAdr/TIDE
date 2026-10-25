@@ -62,6 +62,13 @@ class AiController {
   const std::vector<std::string>& lines() const { return lines_; }
 
   void append(const std::string& line);
+  // Streaming del modelo. `stream_text` va escribiendo en una misma fila del
+  // transcript (prosa de razonamiento), `stream_status` sustituye la fila de
+  // estado en vez de acumular filas (progreso vivo), y `end_stream` cierra
+  // ambas para que el siguiente `append` no se pegue al texto en curso.
+  void stream_text(const std::string& chunk);
+  void stream_status(const std::string& line);
+  void end_stream();
   void clear();
   // Reset chat context: wipe L2 session artifacts and optionally clear transcript.
   void clear_ai_session(bool clear_transcript = true);
@@ -169,6 +176,12 @@ class AiController {
   mutable std::mutex lines_mu_;
   std::vector<std::string> lines_;
   static constexpr std::size_t kMaxLines = 4000;
+  // Fila abierta por stream_text / stream_status (ver end_stream).
+  bool stream_text_open_ = false;
+  bool stream_status_open_ = false;
+  // Tope de una fila de streaming antes de partir (el wrap lo hace el render,
+  // pero una fila de 50 KB hace lento el panel entero).
+  static constexpr std::size_t kMaxStreamRowChars = 400;
   // Coalesce streaming wakes (compile logs) so we don't paint every line.
   std::mutex wake_mu_;
   std::chrono::steady_clock::time_point last_stream_wake_{};

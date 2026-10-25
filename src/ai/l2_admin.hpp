@@ -266,6 +266,20 @@ struct AdminLoopOpts {
   int max_grep_total = kAdminExploreMaxGrep;
   int max_read_total = kAdminExploreMaxRead;
   std::function<void(const std::string&)> on_line;
+  // Streaming del modelo (distinto de on_line, que son líneas del relato):
+  //  · on_model_text: prosa de razonamiento, se pinta tal cual;
+  //  · on_model_progress: bytes de `content` recibidos — el content de este
+  //    harness es JSON, así que no se muestra: solo sirve de señal de vida;
+  //  · on_model_done: cierra el tramo de streaming en el panel.
+  std::function<void(const std::string&)> on_model_text;
+  std::function<void(const std::string& role, std::size_t chars, long ms)> on_model_progress;
+  std::function<void()> on_model_done;
+  // Contabilidad por llamada LLM (rol, tokens, ms, intentos, clasificación del
+  // fallo). Implementa el P5 pendiente: sin esto no se sabe en qué se van las
+  // rondas sin lanzar la batería.
+  std::function<void(const std::string& role, const L2TokenUsage& usage, long ms, int attempts,
+                     const std::string& error_kind)>
+      on_llm_call;
   std::atomic<bool>* cancel = nullptr;
 };
 

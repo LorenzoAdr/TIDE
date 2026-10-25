@@ -299,6 +299,48 @@ std::vector<std::string> json_str_array(const nlohmann::json& j, const char* key
   return out;
 }
 
+// Una llamada al modelo con el cableado común de los cuatro roles (piloto,
+// explorador, verificador, refutador): etiqueta de rol (selecciona backend en
+// ai.roles.* y marca la traza), exigencia de JSON parseable, streaming al panel
+// y contabilidad de tokens. Antes cada sitio repetía el mismo pegamento y
+// ninguno reportaba nada.
+L2BrainResult admin_brain_call(L2Brain& brain, L2BrainRequest req, const AdminLoopOpts& opts,
+                              const char* role) {
+  req.role = role;
+  // Las cuatro fases responden JSON; sin esto los reintentos "JSON inválido,
+  // reemite" se pagan como rondas del presupuesto.
+  req.require_json = true;
+  const auto t0 = std::chrono::steady_clock::now();
+  std::size_t content_chars = 0;
+  if (opts.on_model_text) {
+    req.on_reasoning = opts.on_model_text;
+  }
+  if (opts.on_model_progress) {
+    // El `content` de estas fases es JSON: no se pinta, solo se reporta tamaño
+    // y tiempo como señal de vida mientras el modelo escribe.
+    req.on_text = [&opts, role, t0, &content_chars](const std::string& chunk) {
+      content_chars += chunk.size();
+      const long ms = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::steady_clock::now() - t0)
+                                            .count());
+      opts.on_model_progress(role, content_chars, ms);
+    };
+  }
+  L2BrainResult res = brain.propose(req, opts.cancel);
+  if (opts.on_model_done) {
+    opts.on_model_done();
+  }
+  if (res.ms == 0) {
+    res.ms = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - t0)
+                                   .count());
+  }
+  if (opts.on_llm_call) {
+    opts.on_llm_call(role, res.usage, res.ms, res.attempts, res.error_kind);
+  }
+  return res;
+}
+
 void admin_normalize_spawn(AdminSpawn* sp) {
   if (sp == nullptr) {
     return;
@@ -1789,7 +1831,7 @@ AdminJobResult admin_run_explore_lite(const AdminSpawn& spawn, L2Brain& brain,
     req.n_ctx = opts.settings.n_ctx_remote > 0 ? opts.settings.n_ctx_remote : opts.settings.n_ctx;
     req.temperature = 0.1f;
     req.enable_thinking = false;
-    L2BrainResult br = brain.propose(req, opts.cancel);
+    L2BrainResult br = admin_brain_call(brain, req, opts, "explorer");
     if (!br.ok) {
       r.ok = false;
       r.error = br.error.empty() ? "explore brain falló" : br.error;
@@ -4396,7 +4438,7 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
           opts.settings.n_ctx_remote > 0 ? opts.settings.n_ctx_remote : opts.settings.n_ctx;
       rreq.temperature = 0.1f;
       rreq.enable_thinking = false;
-      L2BrainResult rr = brain.propose(rreq, opts.cancel);
+      L2BrainResult rr = admin_brain_call(brain, rreq, opts, "refuter");
       if (rr.ok) {
         const std::string rraw = rr.text.empty() ? rr.raw : rr.text;
         std::string rblob = rraw;
@@ -4481,7 +4523,7 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
     req.n_ctx = opts.settings.n_ctx_remote > 0 ? opts.settings.n_ctx_remote : opts.settings.n_ctx;
     req.temperature = 0.1f;
     req.enable_thinking = false;
-    L2BrainResult br = brain.propose(req, opts.cancel);
+    L2BrainResult br = admin_brain_call(brain, req, opts, "verifier");
     if (!br.ok) {
       out.veredicto = "dudoso";
       out.blocks = true;
@@ -4922,7 +4964,15 @@ Un spawn por turno.)";
 
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
                               const std::string& workspace_root, int max_explores) {
-  std::ostringstream out;
+  // Orden pensado para la caché de prefijo del proveedor: primero lo inmutable
+  // durante la consulta (root, consulta, episodios, diálogo, UI), luego lo que
+  // solo CRECE por el final (notebook, inbox), y al final lo que cambia en cada
+  // turno (presupuesto, do legales, gates de confirmación, último rechazo).
+  // Así dos turnos consecutivos comparten el prefijo más largo posible — se
+  // mide en `cached_prompt_tokens` de la traza `llm_call`. El contenido es el
+  // mismo que antes; solo cambia el orden.
+  std::ostringstream out;  // prefijo estable
+  std::ostringstream vol;  // cola volátil
   if (!workspace_root.empty()) {
     out << "## WORKSPACE_ROOT (perímetro FS — único árbol accesible)\n`" << workspace_root
         << "`\nPaths relativos a este root. Prohibido salir con .. o absolutos ajenos.\n\n";
@@ -4946,87 +4996,6 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
       out << "- Q: " << c.question << "\n  A: " << c.answer << "\n";
     }
     out << "\n";
-  }
-  // Sin pistas runtime: el piloto elige el gesto (mismo criterio que explorer bruto).
-  out << "## Presupuesto\nproposes=" << st.proposes << "/" << max_proposes
-      << " spawns=" << st.spawns << "/" << max_spawns
-      << " explores=" << admin_explores_used_this_consulta(st) << "/" << max_explores;
-  const bool explore_agotado =
-      admin_explores_used_this_consulta(st) >= max_explores;
-  if (explore_agotado) {
-    out << " AGOTADO";
-  }
-  out << "\n";
-  const auto legal = admin_legal_dos(st, max_proposes, max_spawns);
-  out << "do legales:";
-  for (const auto& d : legal) {
-    out << " " << d;
-  }
-  out << "\n";
-  if (explore_agotado) {
-    out << "## Explore agotado (esta consulta)\n"
-           "PROHIBIDO `spawn` con tipo=explore y PROHIBIDO `seguir_explorando`.\n";
-  }
-  out << "\n";
-
-  if (st.awaiting_edit_confirm) {
-    out << "## Confirmación de edición\n"
-           "Has pedido editar. Declara cobertura del pedido del usuario vs el NOTEBOOK "
-           "(no inventes paths no listados).\n"
-           "{\"action\":\"admin_v1\",\"do\":\"confirmar_editar\",\"why\":\"…\","
-           "\"cubre\":\"qué del pedido ya cubre el notebook\","
-           "\"falta\":\"qué falta (o nada)\",\"reply\":\"…\"}\n";
-    if (!explore_agotado) {
-      out << "{\"action\":\"admin_v1\",\"do\":\"seguir_explorando\",\"why\":\"…\","
-             "\"spawn\":{\"tipo\":\"explore\",\"brief\":\"hueco concreto a cazar\"}}\n";
-    } else {
-      out << "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
-             "\"spawn\":{\"tipo\":\"search\",\"arg\":\"símbolo o path del notebook\"}}\n";
-    }
-    out << "{\"action\":\"admin_v1\",\"do\":\"cerrar\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
-  }
-
-  if (st.awaiting_close_confirm) {
-    out << "## Confirmación de cierre\n"
-           "Has pedido cerrar. Declara cobertura del pedido del usuario vs el NOTEBOOK "
-           "(mira veredicto/falta de cada job; un no_encontrado/parcial no es solo "
-           "\"fallo de búsqueda\").\n"
-           "{\"action\":\"admin_v1\",\"do\":\"confirmar_cerrar\",\"why\":\"…\","
-           "\"cubre\":\"qué del pedido ya cubre el notebook\","
-           "\"falta\":\"qué falta (o nada)\",\"reply\":\"mensaje al usuario\"}\n";
-    if (st.last_verify_verdict == "refuta" || st.last_verify_verdict == "dudoso") {
-      out << "PROHIBIDO falta=\"nada\": el último juicio del verificador fue \""
-          << st.last_verify_verdict << "\" — nombra qué del pedido aún no está demostrado.\n";
-    }
-    if (!explore_agotado) {
-      out << "{\"action\":\"admin_v1\",\"do\":\"seguir_explorando\",\"why\":\"…\","
-             "\"spawn\":{\"tipo\":\"explore\",\"brief\":\"hueco concreto a cazar\"}}\n";
-    } else {
-      out << "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
-             "\"spawn\":{\"tipo\":\"search\",\"arg\":\"símbolo o path del notebook\"}}\n";
-    }
-    out << "{\"action\":\"admin_v1\",\"do\":\"editar\",\"why\":\"…\"}\n";
-    out << "{\"action\":\"admin_v1\",\"do\":\"ask_user\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
-  }
-
-  if (!st.awaiting_edit_confirm && !st.awaiting_close_confirm && st.edit_confirmed) {
-    const bool has_edit = admin_has_edit_job(st);
-    out << "## Edición confirmada\n"
-           "confirmar_editar SOLO declara el plan — no toca archivos. Repetir `editar` o "
-           "`confirmar_editar` no aplica nada y no hace falta: `spawn` con `spawn.tipo=\"edit\"` "
-           "ya es legal ahora mismo, sin re-confirmar.\n"
-        << (has_edit
-                ? "Ya se aplicó al menos un edit. Si el plan confirmado cubre MÁS de un archivo "
-                  "(p.ej. dos idiomas), spawnea `edit` OTRA VEZ por cada archivo que falte — no "
-                  "repitas editar/confirmar_editar entre archivo y archivo. Si ya aplicaste TODOS "
-                  "los archivos del plan, ve directo a `cerrar`.\n"
-                : "El siguiente turno DEBE ser `do=\"spawn\"` con `spawn.tipo=\"edit\"` (arg=path "
-                  "ya visto en el notebook, search=texto EXACTO a reemplazar, replace=texto nuevo) "
-                  "para aplicarlo de verdad.\n")
-        << "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
-           "\"spawn\":{\"tipo\":\"edit\",\"arg\":\"path del notebook\","
-           "\"search\":\"texto exacto a reemplazar\",\"replace\":\"texto nuevo\"}}\n"
-           "{\"action\":\"admin_v1\",\"do\":\"cerrar\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
   }
 
   out << "## Sesion UI\n";
@@ -5073,9 +5042,96 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
       }
     }
   }
-  if (!st.last_error.empty()) {
-    out << "\n## Ultimo rechazo\n" << st.last_error << "\n";
+  out << "\n";
+
+  // ---- cola volátil (cambia cada turno) ----
+  // Sin pistas runtime: el piloto elige el gesto (mismo criterio que explorer bruto).
+  vol << "## Presupuesto\nproposes=" << st.proposes << "/" << max_proposes
+      << " spawns=" << st.spawns << "/" << max_spawns
+      << " explores=" << admin_explores_used_this_consulta(st) << "/" << max_explores;
+  const bool explore_agotado =
+      admin_explores_used_this_consulta(st) >= max_explores;
+  if (explore_agotado) {
+    vol << " AGOTADO";
   }
+  vol << "\n";
+  const auto legal = admin_legal_dos(st, max_proposes, max_spawns);
+  vol << "do legales:";
+  for (const auto& d : legal) {
+    vol << " " << d;
+  }
+  vol << "\n";
+  if (explore_agotado) {
+    vol << "## Explore agotado (esta consulta)\n"
+           "PROHIBIDO `spawn` con tipo=explore y PROHIBIDO `seguir_explorando`.\n";
+  }
+  vol << "\n";
+
+  if (st.awaiting_edit_confirm) {
+    vol << "## Confirmación de edición\n"
+           "Has pedido editar. Declara cobertura del pedido del usuario vs el NOTEBOOK "
+           "(no inventes paths no listados).\n"
+           "{\"action\":\"admin_v1\",\"do\":\"confirmar_editar\",\"why\":\"…\","
+           "\"cubre\":\"qué del pedido ya cubre el notebook\","
+           "\"falta\":\"qué falta (o nada)\",\"reply\":\"…\"}\n";
+    if (!explore_agotado) {
+      vol << "{\"action\":\"admin_v1\",\"do\":\"seguir_explorando\",\"why\":\"…\","
+             "\"spawn\":{\"tipo\":\"explore\",\"brief\":\"hueco concreto a cazar\"}}\n";
+    } else {
+      vol << "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
+             "\"spawn\":{\"tipo\":\"search\",\"arg\":\"símbolo o path del notebook\"}}\n";
+    }
+    vol << "{\"action\":\"admin_v1\",\"do\":\"cerrar\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
+  }
+
+  if (st.awaiting_close_confirm) {
+    vol << "## Confirmación de cierre\n"
+           "Has pedido cerrar. Declara cobertura del pedido del usuario vs el NOTEBOOK "
+           "(mira veredicto/falta de cada job; un no_encontrado/parcial no es solo "
+           "\"fallo de búsqueda\").\n"
+           "{\"action\":\"admin_v1\",\"do\":\"confirmar_cerrar\",\"why\":\"…\","
+           "\"cubre\":\"qué del pedido ya cubre el notebook\","
+           "\"falta\":\"qué falta (o nada)\",\"reply\":\"mensaje al usuario\"}\n";
+    if (st.last_verify_verdict == "refuta" || st.last_verify_verdict == "dudoso") {
+      vol << "PROHIBIDO falta=\"nada\": el último juicio del verificador fue \""
+          << st.last_verify_verdict << "\" — nombra qué del pedido aún no está demostrado.\n";
+    }
+    if (!explore_agotado) {
+      vol << "{\"action\":\"admin_v1\",\"do\":\"seguir_explorando\",\"why\":\"…\","
+             "\"spawn\":{\"tipo\":\"explore\",\"brief\":\"hueco concreto a cazar\"}}\n";
+    } else {
+      vol << "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
+             "\"spawn\":{\"tipo\":\"search\",\"arg\":\"símbolo o path del notebook\"}}\n";
+    }
+    vol << "{\"action\":\"admin_v1\",\"do\":\"editar\",\"why\":\"…\"}\n";
+    vol << "{\"action\":\"admin_v1\",\"do\":\"ask_user\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
+  }
+
+  if (!st.awaiting_edit_confirm && !st.awaiting_close_confirm && st.edit_confirmed) {
+    const bool has_edit = admin_has_edit_job(st);
+    vol << "## Edición confirmada\n"
+           "confirmar_editar SOLO declara el plan — no toca archivos. Repetir `editar` o "
+           "`confirmar_editar` no aplica nada y no hace falta: `spawn` con `spawn.tipo=\"edit\"` "
+           "ya es legal ahora mismo, sin re-confirmar.\n"
+        << (has_edit
+                ? "Ya se aplicó al menos un edit. Si el plan confirmado cubre MÁS de un archivo "
+                  "(p.ej. dos idiomas), spawnea `edit` OTRA VEZ por cada archivo que falte — no "
+                  "repitas editar/confirmar_editar entre archivo y archivo. Si ya aplicaste TODOS "
+                  "los archivos del plan, ve directo a `cerrar`.\n"
+                : "El siguiente turno DEBE ser `do=\"spawn\"` con `spawn.tipo=\"edit\"` (arg=path "
+                  "ya visto en el notebook, search=texto EXACTO a reemplazar, replace=texto nuevo) "
+                  "para aplicarlo de verdad.\n")
+        << "{\"action\":\"admin_v1\",\"do\":\"spawn\",\"why\":\"…\","
+           "\"spawn\":{\"tipo\":\"edit\",\"arg\":\"path del notebook\","
+           "\"search\":\"texto exacto a reemplazar\",\"replace\":\"texto nuevo\"}}\n"
+           "{\"action\":\"admin_v1\",\"do\":\"cerrar\",\"why\":\"…\",\"reply\":\"…\"}\n\n";
+  }
+
+  if (!st.last_error.empty()) {
+    vol << "## Ultimo rechazo\n" << st.last_error << "\n";
+  }
+
+  out << vol.str();
   out << "\nResponde SOLO el JSON admin_v1.\n";
   return out.str();
 }
@@ -5118,7 +5174,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
     req.enable_thinking = false;
 
     const auto t0 = std::chrono::steady_clock::now();
-    L2BrainResult br = brain.propose(req, opts.cancel);
+    L2BrainResult br = admin_brain_call(brain, req, opts, "pilot");
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - t0)
                         .count();

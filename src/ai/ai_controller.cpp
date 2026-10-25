@@ -1,9 +1,13 @@
 #include "ai/ai_controller.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -652,6 +656,15 @@ void AiController::append(const std::string& line) {
   std::size_t n = 0;
   {
     std::lock_guard lock(lines_mu_);
+    // Una línea normal cierra cualquier fila de streaming abierta: si no, el
+    // relato del piloto se pegaría al final del texto que estaba llegando. La
+    // fila de ESTADO además se retira: es andamio ("… escribiendo… 320 car"),
+    // no parte del relato.
+    if (stream_status_open_ && !lines_.empty()) {
+      lines_.pop_back();
+    }
+    stream_text_open_ = false;
+    stream_status_open_ = false;
     for (const auto& part : parts) {
       lines_.push_back(part);
     }
@@ -673,9 +686,82 @@ void AiController::append(const std::string& line) {
   wake(false);
 }
 
+void AiController::stream_text(const std::string& chunk) {
+  if (chunk.empty()) {
+    return;
+  }
+  {
+    std::lock_guard lock(lines_mu_);
+    stream_status_open_ = false;
+    auto open_row = [this]() {
+      lines_.push_back("  ");
+      stream_text_open_ = true;
+    };
+    if (!stream_text_open_ || lines_.empty()) {
+      open_row();
+    }
+    for (const char ch : chunk) {
+      if (ch == '\r') {
+        continue;
+      }
+      if (ch == '\n' || lines_.back().size() >= kMaxStreamRowChars) {
+        open_row();
+        if (ch == '\n') {
+          continue;
+        }
+      }
+      lines_.back().push_back(ch);
+    }
+    if (lines_.size() > kMaxLines) {
+      lines_.erase(lines_.begin(),
+                   lines_.begin() + static_cast<std::ptrdiff_t>(lines_.size() - kMaxLines));
+    }
+  }
+  // Sin traza por token: inundaría trace.ndjson. La traza va por llamada LLM.
+  wake(false);
+}
+
+void AiController::stream_status(const std::string& line) {
+  {
+    std::lock_guard lock(lines_mu_);
+    stream_text_open_ = false;
+    if (stream_status_open_ && !lines_.empty()) {
+      lines_.back() = line;  // progreso vivo: sustituye, no acumula
+    } else {
+      lines_.push_back(line);
+      stream_status_open_ = true;
+      if (lines_.size() > kMaxLines) {
+        lines_.erase(lines_.begin(),
+                     lines_.begin() + static_cast<std::ptrdiff_t>(lines_.size() - kMaxLines));
+      }
+    }
+  }
+  wake(false);
+}
+
+void AiController::end_stream() {
+  bool had_status = false;
+  {
+    std::lock_guard lock(lines_mu_);
+    had_status = stream_status_open_;
+    // La fila de estado es andamio: al cerrar el tramo se retira para que el
+    // transcript quede con el relato, no con "pensando… 3.2 s".
+    if (had_status && !lines_.empty()) {
+      lines_.pop_back();
+    }
+    stream_text_open_ = false;
+    stream_status_open_ = false;
+  }
+  if (had_status) {
+    wake(false);
+  }
+}
+
 void AiController::clear() {
   std::lock_guard lock(lines_mu_);
   lines_.clear();
+  stream_text_open_ = false;
+  stream_status_open_ = false;
 }
 
 bool AiController::has_continuable_session() const {
@@ -1156,6 +1242,60 @@ void AiController::run_admin_async(const std::string& message) {
       // Best-effort branch label via git tool if available later; leave empty if unknown.
     }
 
+    // Streaming + contabilidad, definidos aquí porque los comparten el lazo del
+    // piloto (opts) y el explorador, que arma su propio AdminLoopOpts más abajo.
+    // Si solo los llevara el lazo exterior, las llamadas del hijo (≈1 de cada 4
+    // del total) no aparecerían ni en el panel ni en la traza.
+    struct RoleTally {
+      int calls = 0;
+      int retries = 0;
+      int prompt_tokens = 0;
+      int completion_tokens = 0;
+      int cached_tokens = 0;
+      long ms = 0;
+    };
+    auto tally = std::make_shared<std::map<std::string, RoleTally>>();
+    auto tally_mu = std::make_shared<std::mutex>();
+
+    // Prosa de razonamiento tal cual; el `content` (JSON del contrato) solo como
+    // señal de vida, para que el panel no quede mudo mientras el rol responde.
+    const std::function<void(const std::string&)> on_model_text =
+        [this](const std::string& chunk) { stream_text(chunk); };
+    const std::function<void(const std::string&, std::size_t, long)> on_model_progress =
+        [this](const std::string& role, std::size_t chars, long ms) {
+          std::ostringstream line;
+          line << "  · " << role << " escribiendo… " << chars << " car";
+          if (ms >= 1000) {
+            line << " · " << (ms / 1000) << "." << ((ms % 1000) / 100) << " s";
+          }
+          stream_status(line.str());
+        };
+    const std::function<void()> on_model_done = [this]() { end_stream(); };
+    const std::function<void(const std::string&, const L2TokenUsage&, long, int,
+                             const std::string&)>
+        on_llm_call = [this, tally, tally_mu](const std::string& role,
+                                              const L2TokenUsage& usage, long ms, int attempts,
+                                              const std::string& error_kind) {
+          {
+            std::lock_guard<std::mutex> lock(*tally_mu);
+            RoleTally& t = (*tally)[role];
+            t.calls += usage.calls > 0 ? usage.calls : 1;
+            t.retries += attempts > 1 ? attempts - 1 : 0;
+            t.prompt_tokens += usage.prompt_tokens;
+            t.completion_tokens += usage.completion_tokens;
+            t.cached_tokens += usage.cached_prompt_tokens;
+            t.ms += ms;
+          }
+          std::ostringstream ev;
+          ev << "{\"role\":\"" << ai_trace_escape(role) << "\",\"ms\":" << ms
+             << ",\"attempts\":" << attempts << ",\"prompt_tokens\":" << usage.prompt_tokens
+             << ",\"completion_tokens\":" << usage.completion_tokens
+             << ",\"cached_prompt_tokens\":" << usage.cached_prompt_tokens
+             << ",\"reasoning_tokens\":" << usage.reasoning_tokens << ",\"error\":\""
+             << ai_trace_escape(error_kind) << "\"}";
+          ai_trace(AiTraceChannel::L2, "llm_call", ev.str());
+        };
+
     AdminOps ops;
     ops.run_search = [this, root](const AdminSpawn& s) {
       ensure_tools();
@@ -1192,7 +1332,8 @@ void AiController::run_admin_async(const std::string& message) {
       return admin_run_search_rg(s.arg, root);
     };
     auto search_op = ops.run_search;
-    ops.run_explore = [&brain, root, this, search_op](const AdminSpawn& s) {
+    ops.run_explore = [&brain, root, this, search_op, on_model_text, on_model_progress,
+                       on_model_done, on_llm_call](const AdminSpawn& s) {
       AdminLoopOpts eopts;
       eopts.workspace_root = root;
       eopts.settings = settings_.level2;
@@ -1206,6 +1347,10 @@ void AiController::run_admin_async(const std::string& message) {
       eopts.max_grep_total = settings_.harness.max_grep_total;
       eopts.max_read_total = settings_.harness.max_read_total;
       eopts.on_line = [this](const std::string& line) { append(line); };
+      eopts.on_model_text = on_model_text;
+      eopts.on_model_progress = on_model_progress;
+      eopts.on_model_done = on_model_done;
+      eopts.on_llm_call = on_llm_call;
       eopts.cancel = &agent_cancel_;
       AdminGrepFn grep;
       if (search_op) {
@@ -1455,7 +1600,68 @@ void AiController::run_admin_async(const std::string& message) {
     opts.on_line = [this](const std::string& line) { append(line); };
     opts.cancel = &agent_cancel_;
 
+    opts.on_model_text = on_model_text;
+    opts.on_model_progress = on_model_progress;
+    opts.on_model_done = on_model_done;
+    opts.on_llm_call = on_llm_call;
+
     const AdminLoopResult res = run_admin_loop(&st, *brain, ops, opts);
+    end_stream();
+
+    // Resumen legible + registro por consulta cerrada.
+    {
+      std::lock_guard<std::mutex> lock(*tally_mu);
+      int calls = 0;
+      int retries = 0;
+      int prompt_tokens = 0;
+      int completion_tokens = 0;
+      int cached_tokens = 0;
+      std::ostringstream roles_text;
+      std::ostringstream roles_json;
+      bool first = true;
+      for (const auto& [role, t] : *tally) {
+        calls += t.calls;
+        retries += t.retries;
+        prompt_tokens += t.prompt_tokens;
+        completion_tokens += t.completion_tokens;
+        cached_tokens += t.cached_tokens;
+        if (!first) {
+          roles_text << " ";
+          roles_json << ",";
+        }
+        first = false;
+        roles_text << role << "=" << t.calls;
+        roles_json << "\"" << ai_trace_escape(role) << "\":{\"calls\":" << t.calls
+                   << ",\"retries\":" << t.retries << ",\"prompt_tokens\":" << t.prompt_tokens
+                   << ",\"completion_tokens\":" << t.completion_tokens
+                   << ",\"cached_prompt_tokens\":" << t.cached_tokens << ",\"ms\":" << t.ms << "}";
+      }
+      if (calls > 0) {
+        std::ostringstream line;
+        line << "· " << calls << " llamadas al modelo (" << roles_text.str() << ")";
+        if (prompt_tokens > 0 || completion_tokens > 0) {
+          line << " · " << prompt_tokens << " tokens entrada";
+          if (cached_tokens > 0) {
+            line << " (" << (100 * cached_tokens / std::max(1, prompt_tokens)) << "% en caché)";
+          }
+          line << ", " << completion_tokens << " salida";
+        }
+        if (retries > 0) {
+          line << " · " << retries << " reintento(s) de transporte";
+        }
+        append(line.str());
+        std::ostringstream ev;
+        ev << "{\"proposes\":" << res.proposes << ",\"spawns\":" << res.spawns
+           << ",\"llm_calls\":" << calls << ",\"transport_retries\":" << retries
+           << ",\"prompt_tokens\":" << prompt_tokens
+           << ",\"completion_tokens\":" << completion_tokens
+           << ",\"cached_prompt_tokens\":" << cached_tokens << ",\"clarify\":"
+           << (res.clarify ? "true" : "false") << ",\"ok\":" << (res.ok ? "true" : "false")
+           << ",\"verify_verdict\":\"" << ai_trace_escape(st.last_verify_verdict)
+           << "\",\"roles\":{" << roles_json.str() << "}}";
+        ai_trace(AiTraceChannel::L2, "query_summary", ev.str());
+      }
+    }
     if (!res.ok) {
       append("→ No pude terminar: " + (res.error.empty() ? std::string("fallo") : res.error));
     } else if (res.clarify && !res.reply.empty()) {
@@ -1763,6 +1969,21 @@ void AiController::show_model_status() {
            std::string(settings_.level2.api_key.empty() ? "(env TUIDE_L2_API_KEY / none)"
                                                         : "(set in config)"));
     append("n_ctx_remote=" + std::to_string(settings_.level2.n_ctx_remote));
+  }
+  // Qué se le manda de verdad al proveedor (tools nativas, json_schema, GBNF,
+  // streaming…). Si algo no sale aquí, el cliente no lo envía: se ajusta en
+  // ai.caps.* del config. Un rol con api_base propio recalcula sus caps.
+  append("=== caps efectivas por rol ===");
+  for (const char* role : {"pilot", "explorer", "verifier", "edit"}) {
+    const AiResolvedBackend rb = ai_resolve_role_backend(settings_, role);
+    std::string line = std::string(role) + ": " + ai_provider_caps_text(rb.caps);
+    if (rb.api_base != settings_.level2.api_base || rb.api_model != settings_.level2.api_model) {
+      line += " → " + rb.api_model + " @ " + rb.api_base;
+    }
+    if (rb.max_tokens != settings_.level2.max_tokens) {
+      line += " max_tokens=" + std::to_string(rb.max_tokens);
+    }
+    append("  " + line);
   }
   append("max_steps=" + std::to_string(settings_.level2.max_steps) +
          " n_ctx=" + std::to_string(settings_.level2.n_ctx) +
