@@ -192,6 +192,63 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
       doc["models"].contains("cache_dir") && doc["models"]["cache_dir"].is_string()) {
     settings->models_cache_dir = doc["models"]["cache_dir"].get<std::string>();
   }
+  // ai.caps.*: qué sabe hacer el backend (tools nativas, json_schema, GBNF…).
+  // Declarar cualquier campo desactiva la inferencia automática por api_base.
+  if (doc.contains("caps") && doc["caps"].is_object()) {
+    const auto& caps = doc["caps"];
+    auto& out = settings->caps;
+    bool any = false;
+    auto read_bool = [&](const char* key, bool* field) {
+      if (caps.contains(key) && caps[key].is_boolean()) {
+        *field = caps[key].get<bool>();
+        any = true;
+      }
+    };
+    read_bool("tool_calling", &out.tool_calling);
+    read_bool("json_schema", &out.json_schema);
+    read_bool("grammar", &out.grammar);
+    read_bool("streaming", &out.streaming);
+    read_bool("prompt_cache", &out.prompt_cache);
+    read_bool("parallel_tool_calls", &out.parallel_tool_calls);
+    if (caps.contains("context_window") && caps["context_window"].is_number_integer()) {
+      out.context_window = caps["context_window"].get<int>();
+    }
+    if (caps.contains("auto_detect") && caps["auto_detect"].is_boolean()) {
+      out.auto_detect = caps["auto_detect"].get<bool>();
+    } else if (any) {
+      out.auto_detect = false;
+    }
+  }
+  // ai.roles.{pilot,explorer,verifier,edit}: backend por rol del harness.
+  // Lo que se omite hereda de ai.level2 (ver ai_resolve_role_backend).
+  if (doc.contains("roles") && doc["roles"].is_object()) {
+    const auto& roles = doc["roles"];
+    auto read_role = [&roles](const char* name, AiRoleBackend* out) {
+      if (!roles.contains(name) || !roles[name].is_object()) {
+        return;
+      }
+      const auto& r = roles[name];
+      if (r.contains("api_base") && r["api_base"].is_string()) {
+        out->api_base = r["api_base"].get<std::string>();
+      }
+      if (r.contains("api_key") && r["api_key"].is_string()) {
+        out->api_key = r["api_key"].get<std::string>();
+      }
+      if (r.contains("api_model") && r["api_model"].is_string()) {
+        out->api_model = r["api_model"].get<std::string>();
+      }
+      if (r.contains("max_tokens") && r["max_tokens"].is_number_integer()) {
+        out->max_tokens = r["max_tokens"].get<int>();
+      }
+      if (r.contains("timeout_ms") && r["timeout_ms"].is_number_integer()) {
+        out->timeout_ms = r["timeout_ms"].get<int>();
+      }
+    };
+    read_role("pilot", &settings->models.pilot);
+    read_role("explorer", &settings->models.explorer);
+    read_role("verifier", &settings->models.verifier);
+    read_role("edit", &settings->models.edit);
+  }
   if (doc.contains("trace") && doc["trace"].is_object()) {
     const auto& tr = doc["trace"];
     if (tr.contains("enabled") && tr["enabled"].is_boolean()) {
@@ -352,7 +409,49 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
   for (const auto& [name, command] : settings.tasks) {
     tasks[name] = {{"command", command}};
   }
-  return nlohmann::json{
+  // Solo se escriben los roles con algún override: un objeto vacío por rol
+  // ensuciaría el config de todo el mundo sin aportar nada.
+  nlohmann::json roles = nlohmann::json::object();
+  auto put_role = [&roles](const char* name, const AiRoleBackend& role) {
+    nlohmann::json r = nlohmann::json::object();
+    if (!role.api_base.empty()) {
+      r["api_base"] = role.api_base;
+    }
+    if (!role.api_key.empty()) {
+      r["api_key"] = role.api_key;
+    }
+    if (!role.api_model.empty()) {
+      r["api_model"] = role.api_model;
+    }
+    if (role.max_tokens > 0) {
+      r["max_tokens"] = role.max_tokens;
+    }
+    if (role.timeout_ms > 0) {
+      r["timeout_ms"] = role.timeout_ms;
+    }
+    if (!r.empty()) {
+      roles[name] = std::move(r);
+    }
+  };
+  put_role("pilot", settings.models.pilot);
+  put_role("explorer", settings.models.explorer);
+  put_role("verifier", settings.models.verifier);
+  put_role("edit", settings.models.edit);
+
+  nlohmann::json caps = nlohmann::json{{"auto_detect", settings.caps.auto_detect}};
+  if (!settings.caps.auto_detect) {
+    caps["tool_calling"] = settings.caps.tool_calling;
+    caps["json_schema"] = settings.caps.json_schema;
+    caps["grammar"] = settings.caps.grammar;
+    caps["streaming"] = settings.caps.streaming;
+    caps["prompt_cache"] = settings.caps.prompt_cache;
+    caps["parallel_tool_calls"] = settings.caps.parallel_tool_calls;
+  }
+  if (settings.caps.context_window > 0) {
+    caps["context_window"] = settings.caps.context_window;
+  }
+
+  nlohmann::json out = nlohmann::json{
       {"enabled", settings.enabled},
       {"admin_enabled", settings.admin_enabled},
       {"command_whitelist", settings.command_whitelist},
@@ -428,7 +527,12 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
         {"max_read_per_wave", settings.harness.max_read_per_wave},
         {"max_grep_total", settings.harness.max_grep_total},
         {"max_read_total", settings.harness.max_read_total}}},
+      {"caps", std::move(caps)},
   };
+  if (!roles.empty()) {
+    out["roles"] = std::move(roles);
+  }
+  return out;
 }
 
 void parse_env_vars_object(const nlohmann::json& doc, std::map<std::string, std::string>* out) {

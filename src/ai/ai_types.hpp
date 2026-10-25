@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -187,6 +188,42 @@ struct AiLevel2Settings {
   int n_threads = 0;
 };
 
+// Qué sabe hacer el backend de chat. Determina qué se le manda (tools nativas,
+// response_format json_schema, GBNF, stream_options) — mandar algo que el
+// proveedor no entiende suele devolver 400, y no mandarlo cuando sí lo entiende
+// es lo que hoy nos cuesta los reintentos por "JSON inválido".
+struct AiProviderCaps {
+  // true (default) = se infieren de api_base/api_model en cada resolución.
+  // Poner cualquier campo en el config implica auto_detect=false.
+  bool auto_detect = true;
+  bool tool_calling = false;
+  bool json_schema = false;
+  bool grammar = false;  // GBNF en el body (familia llama.cpp)
+  bool streaming = true;
+  bool prompt_cache = false;
+  bool parallel_tool_calls = false;
+  // 0 = desconocido; el presupuesto real sale de level2.n_ctx / n_ctx_remote.
+  int context_window = 0;
+};
+
+// Backend por rol del harness: lo que quede vacío/0 hereda de ai.level2.
+// Permite el reparto que importa: explorador en un modelo barato (o local) y
+// piloto/verificador en el fuerte, sin dos configuraciones paralelas.
+struct AiRoleBackend {
+  std::string api_base;
+  std::string api_key;
+  std::string api_model;
+  int max_tokens = 0;
+  int timeout_ms = 0;
+};
+
+struct AiModelRoles {
+  AiRoleBackend pilot;
+  AiRoleBackend explorer;
+  AiRoleBackend verifier;
+  AiRoleBackend edit;
+};
+
 // Tunables for the single-admin harness (src/ai/l2_admin.*). Defaults mirror the
 // compile-time kAdminMax* constants in l2_admin.hpp — see that file for the
 // safety rationale (fail-closed on verify, budgets renew per consulta).
@@ -261,6 +298,185 @@ struct AiSettings {
   AiLevel0Settings level0;
   AiLevel1Settings level1;
   AiHarnessSettings harness;
+  AiProviderCaps caps;
+  AiModelRoles models;
 };
+
+// ---------------------------------------------------------------- caps
+
+// Tabla deliberadamente corta y documentada: solo lo que sabemos cierto del
+// endpoint OpenAI-compatible. Un proveedor desconocido se trata como "solo
+// streaming" — conservador, nunca manda campos que puedan provocar un 400.
+// Para cualquier otro caso, el usuario fija las caps a mano en el config.
+inline AiProviderCaps ai_infer_provider_caps(const std::string& api_base,
+                                             const std::string& api_model) {
+  (void)api_model;
+  AiProviderCaps caps;
+  caps.auto_detect = true;
+  std::string host = api_base;
+  for (char& c : host) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  const bool plain_http = host.rfind("http://", 0) == 0;
+  auto has = [&host](std::string_view needle) {
+    return host.find(needle) != std::string::npos;
+  };
+  if (plain_http) {
+    // Sin TLS = servidor propio (llama-server, LM Studio, vLLM en LAN).
+    // GBNF y cache_prompt son de la familia llama.cpp; tool-calling con modelos
+    // pequeños es poco fiable, así que se deja apagado hasta que se active a mano.
+    caps.grammar = true;
+    caps.json_schema = true;
+    caps.prompt_cache = true;
+    caps.streaming = true;
+    return caps;
+  }
+  if (has("api.deepseek.com")) {
+    caps.tool_calling = true;
+    caps.json_schema = true;
+    caps.prompt_cache = true;  // caché de prefijo automática
+    caps.streaming = true;
+    return caps;
+  }
+  if (has("api.openai.com")) {
+    caps.tool_calling = true;
+    caps.json_schema = true;
+    caps.prompt_cache = true;
+    caps.parallel_tool_calls = true;
+    caps.streaming = true;
+    return caps;
+  }
+  if (has("openrouter.ai") || has("api.mistral.ai") || has("api.groq.com")) {
+    caps.tool_calling = true;
+    caps.json_schema = true;
+    caps.streaming = true;
+    return caps;
+  }
+  if (has("api.anthropic.com") || has("dashscope")) {
+    // Capa de compatibilidad OpenAI: tools sí, json_schema no garantizado.
+    caps.tool_calling = true;
+    caps.streaming = true;
+    return caps;
+  }
+  caps.streaming = true;
+  return caps;
+}
+
+inline AiProviderCaps ai_resolve_provider_caps(const AiProviderCaps& configured,
+                                               const std::string& api_base,
+                                               const std::string& api_model) {
+  if (!configured.auto_detect) {
+    return configured;
+  }
+  AiProviderCaps caps = ai_infer_provider_caps(api_base, api_model);
+  // El tamaño de contexto es dato del usuario, no inferible: si lo puso, gana.
+  if (configured.context_window > 0) {
+    caps.context_window = configured.context_window;
+  }
+  return caps;
+}
+
+// ---------------------------------------------------------------- roles
+
+struct AiResolvedBackend {
+  std::string api_base;
+  std::string api_key;
+  std::string api_model;
+  AiProviderCaps caps;
+  int max_tokens = 0;
+  int timeout_ms = 0;
+  std::string role;
+  // true = el valor viene de ai.roles.<rol>.max_tokens, no heredado. Los sitios
+  // de llamada fijan su propio max_tokens por fase, así que sin esta marca un
+  // override por rol nunca ganaría.
+  bool max_tokens_explicit = false;
+};
+
+inline const AiRoleBackend* ai_role_backend(const AiSettings& settings, std::string_view role) {
+  if (role == "pilot") {
+    return &settings.models.pilot;
+  }
+  if (role == "explorer") {
+    return &settings.models.explorer;
+  }
+  if (role == "verifier" || role == "refuter") {
+    return &settings.models.verifier;
+  }
+  if (role == "edit") {
+    return &settings.models.edit;
+  }
+  return nullptr;
+}
+
+// Backend efectivo de un rol: override del rol si existe, con herencia de
+// ai.level2 campo a campo, y caps recalculadas para el api_base que acabe
+// usándose (un rol que apunta a un llama-server local no tiene las caps del
+// remoto).
+inline AiResolvedBackend ai_resolve_role_backend(const AiSettings& settings,
+                                                 std::string_view role) {
+  AiResolvedBackend out;
+  out.role = std::string(role);
+  out.api_base = settings.level2.api_base;
+  out.api_key = settings.level2.api_key;
+  out.api_model = settings.level2.api_model;
+  out.max_tokens = settings.level2.max_tokens;
+  out.timeout_ms = 0;
+  const AiRoleBackend* override_role = ai_role_backend(settings, role);
+  bool same_endpoint = true;
+  if (override_role != nullptr) {
+    if (!override_role->api_base.empty()) {
+      same_endpoint = override_role->api_base == settings.level2.api_base;
+      out.api_base = override_role->api_base;
+    }
+    if (!override_role->api_key.empty()) {
+      out.api_key = override_role->api_key;
+    }
+    if (!override_role->api_model.empty()) {
+      out.api_model = override_role->api_model;
+    }
+    if (override_role->max_tokens > 0) {
+      out.max_tokens = override_role->max_tokens;
+      out.max_tokens_explicit = true;
+    }
+    if (override_role->timeout_ms > 0) {
+      out.timeout_ms = override_role->timeout_ms;
+    }
+  }
+  // Caps explícitas del config solo valen para el endpoint de ai.level2; si el
+  // rol apunta a otro sitio, se vuelven a inferir.
+  if (!settings.caps.auto_detect && same_endpoint) {
+    out.caps = settings.caps;
+  } else {
+    out.caps = ai_resolve_provider_caps(settings.caps, out.api_base, out.api_model);
+  }
+  return out;
+}
+
+inline std::string ai_provider_caps_text(const AiProviderCaps& caps) {
+  std::string out;
+  auto add = [&out](const char* name, bool on) {
+    if (!on) {
+      return;
+    }
+    if (!out.empty()) {
+      out += " ";
+    }
+    out += name;
+  };
+  add("tool_calling", caps.tool_calling);
+  add("json_schema", caps.json_schema);
+  add("grammar", caps.grammar);
+  add("streaming", caps.streaming);
+  add("prompt_cache", caps.prompt_cache);
+  add("parallel_tools", caps.parallel_tool_calls);
+  if (out.empty()) {
+    out = "(ninguna)";
+  }
+  if (caps.context_window > 0) {
+    out += " ctx=" + std::to_string(caps.context_window);
+  }
+  out += caps.auto_detect ? " [auto]" : " [config]";
+  return out;
+}
 
 }  // namespace tuide
