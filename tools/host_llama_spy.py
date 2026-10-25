@@ -41,6 +41,10 @@ chat_turn_lock = threading.Lock()
 chat_session_lock = threading.Lock()
 chat_session = chat_mem.ChatSession()
 thinking_inject: Optional[bool] = None
+# None = auto: SSE incremental salvo que --thinking on esté activo (ahí el
+# re-homing tardío de <think> puede mover texto entre canales DESPUÉS de
+# haberlo emitido, así que se conserva el volcado al final).
+stream_live: Optional[bool] = None
 _last_chat_ctx_lock = threading.Lock()
 _last_chat_ctx: Dict[str, int] = {
     "n_tokens": 0,
@@ -717,7 +721,53 @@ def send_raw_response(sock: socket.socket, resp: http.client.HTTPResponse, extra
         sock.sendall(chunk)
 
 
-def chat_body_from_sse(content: str, model: str, reasoning: str = "") -> bytes:
+def usage_from_ctx(ctx: Dict[str, int]) -> Dict[str, Any]:
+    """`usage` estilo OpenAI a partir del snapshot de completion_ctx().
+
+    El upstream llama-server lo da en `usage` o, si no, en `timings`
+    (cache_n/prompt_n/predicted_n) — completion_ctx ya normaliza ambos. Antes se
+    usaba solo para el display de ocupación y se tiraba al reconstruir la
+    respuesta, así que ningún cliente podía contabilizar tokens ni caché.
+    """
+    if not ctx:
+        return {}
+    prompt = int(ctx.get("prompt", 0) or 0)
+    predicted = int(ctx.get("predicted", 0) or 0)
+    cached = int(ctx.get("cached", 0) or 0)
+    if prompt <= 0 and predicted <= 0:
+        return {}
+    usage: Dict[str, Any] = {
+        "prompt_tokens": prompt,
+        "completion_tokens": predicted,
+        "total_tokens": int(ctx.get("n_tokens", prompt + predicted) or (prompt + predicted)),
+    }
+    if cached > 0:
+        usage["prompt_tokens_details"] = {"cached_tokens": cached}
+    return usage
+
+
+def send_sse_open(sock: socket.socket) -> None:
+    """Abre una respuesta SSE sin content-length (el cierre marca el final).
+
+    El Handler atiende una petición por conexión y cierra, así que no hay
+    keep-alive que desincronizar.
+    """
+    lines = [
+        "HTTP/1.1 200 OK",
+        "content-type: text/event-stream",
+        "cache-control: no-cache",
+        "connection: close",
+    ]
+    sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("iso-8859-1"))
+
+
+def sse_event(obj: dict) -> bytes:
+    return ("data: " + json.dumps(obj, ensure_ascii=False) + "\n\n").encode("utf-8")
+
+
+def chat_body_from_sse(
+    content: str, model: str, reasoning: str = "", usage: Optional[Dict[str, Any]] = None
+) -> bytes:
     message = {"role": "assistant", "content": content}
     if reasoning:
         message["reasoning_content"] = reasoning
@@ -731,6 +781,8 @@ def chat_body_from_sse(content: str, model: str, reasoning: str = "") -> bytes:
             }
         ],
     }
+    if usage:
+        payload["usage"] = usage
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
@@ -788,6 +840,35 @@ def handle_chat(
     jsonl_emit(req_ev)
     tok_batch = TokBatch(rid, tag)
     stream_open(tag)
+    # Emisión en vivo hacia el cliente: reenvía cada delta en cuanto llega en
+    # vez de rehacer un SSE mínimo al final. Solo cuando es equivalente al
+    # volcado de siempre (ver `stream_live`).
+    live = bool(
+        reply
+        and sock is not None
+        and client_stream
+        and (stream_live if stream_live is not None else (thinking_inject is not True))
+    )
+    live_sent = False
+    live_broken = False
+
+    def live_emit(content: str, reason: str) -> None:
+        nonlocal live_sent, live_broken
+        if not live or live_broken or (not content and not reason):
+            return
+        try:
+            if not live_sent:
+                send_sse_open(sock)  # type: ignore[arg-type]
+                live_sent = True
+            if reason:
+                sock.sendall(sse_event({"choices": [{"delta": {"reasoning_content": reason}}]}))  # type: ignore[union-attr]
+            if content:
+                sock.sendall(sse_event({"choices": [{"delta": {"content": content}}]}))  # type: ignore[union-attr]
+        except OSError:
+            # El cliente colgó: se deja de emitir, pero la generación sigue para
+            # no dejar el backend a medias ni perder el log.
+            live_broken = True
+
     acc: List[str] = []
     acc_reason: List[str] = []
     stream_phase = ""
@@ -834,6 +915,7 @@ def handle_chat(
             acc.append(content)
             emit_live(content, "answer")
             tok_batch.add(content, "answer")
+        live_emit(content, reason)
         if thinking_inject is not True:
             return
         joined_c = "".join(acc)
@@ -884,7 +966,10 @@ def handle_chat(
                 if cancel_generation.is_set():
                     err = "stopped"
                     break
-                chunk = resp.read(4096)
+                # read1() devuelve lo que YA hay en el socket; read(4096)
+                # bloquea hasta completar 4096 bytes o EOF, que es lo que hacía
+                # llegar el stream entero de golpe (también al log en vivo).
+                chunk = resp.read1(4096) if hasattr(resp, "read1") else resp.read(4096)
                 if not chunk:
                     break
                 leftover += chunk
@@ -950,15 +1035,26 @@ def handle_chat(
     if log_kind:
         done_ev["log_kind"] = log_kind
     jsonl_emit(done_ev)
+    chat_usage = usage_from_ctx(ctx_snap)
     if err:
         log(f"{tag_label(tag)} {paint(DIM, f'done {dt:.1f}s  error')}")
         if reply and sock is not None:
-            send_http(
-                sock,
-                502,
-                {"Content-Type": "text/plain"},
-                f"backend: {err}\n".encode(),
-            )
+            if live_sent:
+                # Cabeceras 200 ya enviadas: el error va como evento SSE, no
+                # como un 502 que el cliente ya no puede leer.
+                if not live_broken:
+                    try:
+                        sock.sendall(sse_event({"error": {"message": f"backend: {err}"}}))
+                        sock.sendall(b"data: [DONE]\n\n")
+                    except OSError:
+                        pass
+            else:
+                send_http(
+                    sock,
+                    502,
+                    {"Content-Type": "text/plain"},
+                    f"backend: {err}\n".encode(),
+                )
         return text, rid, err or ""
     if not sse:
         log(f"{tag_label(tag)} {paint(DIM, f'done {dt:.1f}s  (sin SSE)')}")
@@ -973,8 +1069,22 @@ def handle_chat(
     log(f"{tag_label(tag)} {paint(DIM, f'done {dt:.1f}s  {len(text)} chars')}")
     if not reply or sock is None:
         return text, rid, ""
+    if live_sent:
+        # Ya se fue emitiendo por `live_emit`: solo falta el cierre con el
+        # finish_reason y el usage que el upstream reportó.
+        if not live_broken:
+            try:
+                tail: dict = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+                if chat_usage:
+                    tail["usage"] = chat_usage
+                sock.sendall(sse_event(tail))
+                sock.sendall(b"data: [DONE]\n\n")
+            except OSError:
+                pass
+        return text, rid, ""
     if client_stream:
-        # Rebuild a minimal SSE so a streaming client still works.
+        # Volcado al final (ruta de --thinking on o --stream-live off): mismo
+        # SSE mínimo de siempre, ahora con finish_reason y usage.
         events = []
         if reason_text:
             events.append(
@@ -989,6 +1099,10 @@ def handle_chat(
                 "data: "
                 + json.dumps({"choices": [{"delta": {"content": text}}]}, ensure_ascii=False)
             )
+        tail = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+        if chat_usage:
+            tail["usage"] = chat_usage
+        events.append("data: " + json.dumps(tail, ensure_ascii=False))
         events.append("data: [DONE]")
         body_out = ("\n\n".join(events) + "\n\n").encode("utf-8")
         send_http(sock, 200, {"Content-Type": "text/event-stream"}, body_out)
@@ -997,7 +1111,7 @@ def handle_chat(
         sock,
         200,
         {"Content-Type": "application/json; charset=utf-8"},
-        chat_body_from_sse(text, model, reason_text),
+        chat_body_from_sse(text, model, reason_text, chat_usage),
     )
     return text, rid, ""
 
@@ -2743,6 +2857,12 @@ def main() -> int:
         help="inyecta enable_thinking en /v1/chat/completions (modelos CoT)",
     )
     ap.add_argument(
+        "--stream-live",
+        default="",
+        metavar="on|off",
+        help="reenvía cada delta SSE en cuanto llega (default: auto — on salvo --thinking on)",
+    )
+    ap.add_argument(
         "--web",
         default="",
         metavar="HOST:PORT",
@@ -2757,13 +2877,18 @@ def main() -> int:
     elif args.color:
         configure_color(True)
 
-    global jsonl_path, thinking_inject
+    global jsonl_path, thinking_inject, stream_live
     jsonl_path = args.jsonl or ""
     think = (args.thinking or "").strip().lower()
     if think in ("1", "on", "true", "yes"):
         thinking_inject = True
     elif think in ("0", "off", "false", "no"):
         thinking_inject = False
+    live = (getattr(args, "stream_live", "") or "").strip().lower()
+    if live in ("1", "on", "true", "yes"):
+        stream_live = True
+    elif live in ("0", "off", "false", "no"):
+        stream_live = False
     lh, lp = args.listen.rsplit(":", 1)
     bh, bp = args.backend.rsplit(":", 1)
     Handler.backend_host = bh
