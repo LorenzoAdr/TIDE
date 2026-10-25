@@ -385,6 +385,7 @@ add_executable(tuide
   src/ai/l2_effect_registry.cpp
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
+  src/ai/llm_client.cpp
   src/ai/l2_context_budget.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
@@ -1152,6 +1153,16 @@ target_include_directories(search_replace_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(llm_client_test
+  tests/llm_client_test.cpp
+  src/ai/llm_client.cpp
+)
+target_include_directories(llm_client_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+tuide_link_pthread(llm_client_test)
+
 add_executable(edit_snapshot_test
   tests/edit_snapshot_test.cpp
   src/ai/edit_snapshot.cpp
@@ -1294,6 +1305,7 @@ add_executable(l2_harness_cli
   src/ai/l2_grammar.cpp
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
+  src/ai/llm_client.cpp
   src/ai/llama_backend.cpp
   src/ai/action_json.cpp
   src/ai/get_code_of.cpp
