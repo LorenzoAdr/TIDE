@@ -1,5 +1,6 @@
 #include "ai/l2_brain.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <unistd.h>
 
@@ -86,8 +87,10 @@ bool LocalL2Brain::ensure_ready(const AiSettings& settings,
 L2BrainResult LocalL2Brain::propose(const L2BrainRequest& req, std::atomic<bool>* cancel) {
   L2BrainResult out;
   out.backend = "local";
+  const auto t0 = std::chrono::steady_clock::now();
   if (backend_ == nullptr || !backend_->ready()) {
     out.error = "L2 local backend no ready";
+    out.error_kind = "config";
     return out;
   }
   LlamaCompletionRequest creq;
@@ -106,6 +109,17 @@ L2BrainResult LocalL2Brain::propose(const L2BrainRequest& req, std::atomic<bool>
   out.text = cr.text;
   out.raw = cr.text;
   out.error = cr.error;
+  // El camino local no reintenta ni reporta `usage` (llama-cli/llama-server por
+  // turno); se rellena lo medible para que la telemetría sea uniforme entre
+  // backends y una consulta local no aparezca como "0 llamadas".
+  out.attempts = 1;
+  out.usage.calls = 1;
+  out.ms = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - t0)
+                                 .count());
+  if (!cr.ok && out.error_kind.empty()) {
+    out.error_kind = "bad_response";
+  }
   return out;
 }
 

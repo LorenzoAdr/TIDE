@@ -96,9 +96,17 @@ int main() {
     // root: detecta repo root sea cual sea el cwd del binario (build/ o raíz).
     const std::string root =
         fs::exists("tools/l2_battery/grammars/l2_json.gbnf") ? "." : "..";
+    // M0: ADMIN_JSON_GRAMMAR está PROMOVIDO en
+    // tools/l2_battery/features_promoted.json — las 4 fases admin_v1 van con
+    // JSON constreñido por defecto (en remoto el equivalente es
+    // response_format:{type:json_object}, ver llm_client). Apagarlo explícito
+    // sigue siendo posible con L2_FEAT_ADMIN_JSON_GRAMMAR=0.
     unsetenv("L2_FEAT_ADMIN_JSON_GRAMMAR");
+    expect(!tuide::l2_grammar::resolve_for_phase(root, "admin").empty(),
+           "admin grammar on by default (promoted)");
+    setenv("L2_FEAT_ADMIN_JSON_GRAMMAR", "0", 1);
     expect(tuide::l2_grammar::resolve_for_phase(root, "admin").empty(),
-           "admin grammar off by default");
+           "admin grammar can be turned off explicitly");
     setenv("L2_FEAT_ADMIN_JSON_GRAMMAR", "1", 1);
     const std::string g_admin = tuide::l2_grammar::resolve_for_phase(root, "admin");
     expect(!g_admin.empty() && g_admin.find("l2_json.gbnf") != std::string::npos,
