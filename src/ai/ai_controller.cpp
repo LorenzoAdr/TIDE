@@ -29,6 +29,7 @@
 #include "ai/level2_session.hpp"
 #include "ai/llama_net.hpp"
 #include "ai/ai_memory.hpp"
+#include "ai/ai_mentions.hpp"
 #include "ai/model_store.hpp"
 #include "ai/project_contract.hpp"
 #include "ai/repo_map.hpp"
@@ -1608,6 +1609,17 @@ void AiController::run_admin_async(const std::string& message) {
     opts.on_line = [this](const std::string& line) { append(line); };
     opts.cancel = &agent_cancel_;
 
+    // `@fichero` en la línea del usuario: se resuelve una vez por consulta y
+    // entra como evidencia aportada (no hace falta localizar lo que ya señaló).
+    {
+      const auto mentions = ai_resolve_mentions(message, root);
+      if (!mentions.empty()) {
+        for (const auto& line : ai_mentions_report(mentions)) {
+          append(line);
+        }
+        opts.mentions = ai_mentions_block(mentions);
+      }
+    }
     opts.on_model_text = on_model_text;
     opts.on_model_progress = on_model_progress;
     opts.on_model_done = on_model_done;

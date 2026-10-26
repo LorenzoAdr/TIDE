@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ai/ai_memory.hpp"
+#include "ai/ai_mentions.hpp"
 #include "ai/l2_admin.hpp"
 #include "ai/l2_grammar.hpp"
 
@@ -243,6 +244,73 @@ int main() {
     expect(tuide::admin_resume_session(root.string(), "", &rerr), "reanuda sin id: " + rerr);
     expect(!tuide::admin_resume_session(root.string(), "../fuera", &rerr), "id con .. rechazado");
     expect(!tuide::admin_resume_session(root.string(), "no-existe", &rerr), "id inexistente");
+    fs::remove_all(root, ec);
+  }
+  {
+    // M4.4: menciones `@fichero`.
+    const fs::path root = fs::temp_directory_path() / "tuide_mentions_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "src" / "ui", ec);
+    fs::create_directories(root / ".claude" / "worktrees" / "copia" / "src" / "ui", ec);
+    {
+      std::ofstream out(root / "src" / "ui" / "console_panel.cpp");
+      out << "// panel real\nvoid render() {\n  draw();\n}\n";
+    }
+    {
+      std::ofstream out(root / ".claude" / "worktrees" / "copia" / "src" / "ui" /
+                        "console_panel.cpp");
+      out << "// COPIA RANCIA\n";
+    }
+    {
+      std::ofstream out(root / "src" / "otro.cpp");
+      out << "int x = 1;\n";
+    }
+
+    const auto m = tuide::ai_resolve_mentions("explícame @console_panel.cpp y @otro.cpp",
+                                              root.string());
+    expect(m.size() == 2, "dos menciones, got " + std::to_string(m.size()));
+    if (m.size() == 2) {
+      expect(m[0].path == "src/ui/console_panel.cpp",
+             "resuelve por nombre de fichero: " + m[0].path);
+      expect(m[0].excerpt.find("panel real") != std::string::npos,
+             "adjunta el contenido del fichero real");
+      expect(m[0].excerpt.find("COPIA RANCIA") == std::string::npos,
+             "no resuelve a la copia de .claude/worktrees");
+      expect(m[0].lines > 0, "cuenta líneas");
+      expect(m[1].path == "src/otro.cpp", "segunda mención");
+    }
+    // Sufijo de ruta y ruta exacta.
+    const auto by_suffix = tuide::ai_resolve_mentions("mira @ui/console_panel.cpp", root.string());
+    expect(by_suffix.size() == 1 && by_suffix[0].path == "src/ui/console_panel.cpp",
+           "resuelve por sufijo de ruta");
+    // Lo que no existe se reporta sin inventar.
+    const auto missing = tuide::ai_resolve_mentions("y @no_existe_xyz.cpp", root.string());
+    expect(missing.size() == 1 && missing[0].path.empty(), "mención sin resolver");
+    expect(tuide::ai_mentions_block(missing).empty(), "no genera bloque si no resolvió");
+    expect(!tuide::ai_mentions_report(missing).empty() &&
+               tuide::ai_mentions_report(missing)[0].find("no encontrado") != std::string::npos,
+           "pero lo dice en el informe");
+    // Una @ pegada a texto no es mención (correos, decoradores).
+    expect(tuide::ai_resolve_mentions("escribe a mail@dominio.com", root.string()).empty(),
+           "no confunde un correo con una mención");
+    // Tope de ficheros.
+    const auto capped = tuide::ai_resolve_mentions(
+        "@console_panel.cpp @otro.cpp @console_panel.cpp @otro.cpp", root.string(), 1, 100);
+    expect(capped.size() == 1, "respeta el tope de ficheros");
+
+    // Llega al prompt antes del presupuesto y se declara ya leído.
+    const std::string block = tuide::ai_mentions_block(m);
+    AdminState st;
+    st.consulta = "explícame eso";
+    const std::string prompt =
+        admin_user_prompt(st, kAdminMaxProposes, kAdminMaxSpawns, root.string(),
+                          kAdminMaxExplores, {}, {}, block);
+    expect(prompt.find("señaló con @") != std::string::npos, "las menciones llegan al prompt");
+    expect(prompt.find("NO los vuelvas a buscar") != std::string::npos,
+           "y se le dice que no los re-busque");
+    expect(prompt.find("señaló con @") < prompt.find("## Presupuesto"),
+           "menciones en el prefijo inmutable");
     fs::remove_all(root, ec);
   }
   {

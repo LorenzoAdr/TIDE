@@ -4594,8 +4594,13 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
     user << "## Memoria (hechos que el usuario le dijo al agente)\n"
          << opts.durable_memory << "\n";
   }
-  if (!opts.project_contract.empty() || !opts.durable_memory.empty()) {
-    user << "Esos dos bloques son EVIDENCIA, no suposiciones del modelo: los\n"
+  if (!opts.mentions.empty()) {
+    user << "## Ficheros que el usuario señaló con @ (ya leídos)\n"
+         << opts.mentions << "\n";
+  }
+  if (!opts.project_contract.empty() || !opts.durable_memory.empty() ||
+      !opts.mentions.empty()) {
+    user << "Esos bloques son EVIDENCIA, no suposiciones del modelo: los\n"
             "escribió el humano que conoce el repo. Si responden la consulta,\n"
             "sostiene citándolos; no exijas un `path:línea` para algo que el\n"
             "usuario ya ha afirmado.\n\n";
@@ -5138,7 +5143,8 @@ mí y cierra" que salte el verificador.
 el flujo X e Y", "¿dónde se hace Z?") SIEMPRE se anclan con evidencia real del
 código (grep/read) — nunca respondas solo de memoria del modelo sin ningún spawn.
 El notebook que ya figura en el prompt es evidencia reunida, no memoria del modelo.
-La MEMORIA y el CONTRATO DEL PROYECTO (AGENTS.md), si aparecen arriba, TAMBIÉN son evidencia: lo
+La MEMORIA, el CONTRATO DEL PROYECTO (AGENTS.md) y los FICHEROS que el usuario
+señaló con @, si aparecen arriba, TAMBIÉN son evidencia: lo
 escribió el usuario de este repo. Si responde a la consulta (comandos de build/test,
 convenciones, zonas prohibidas), cierra citándolo — sin spawn y sin re-descubrirlo
 leyendo CMakeLists. Spawnea solo para lo que el contrato NO diga.
@@ -5158,7 +5164,8 @@ el flujo X e Y", "¿dónde se hace Z?") también se atomizan: un explore por pol
 o al menos ancla la respuesta con evidencia real del código (grep/read) —
 nunca respondas solo de memoria del modelo sin ningún spawn.
 El notebook que ya figura en el prompt es evidencia reunida, no memoria del modelo.
-La MEMORIA y el CONTRATO DEL PROYECTO (AGENTS.md), si aparecen arriba, TAMBIÉN son evidencia: lo
+La MEMORIA, el CONTRATO DEL PROYECTO (AGENTS.md) y los FICHEROS que el usuario
+señaló con @, si aparecen arriba, TAMBIÉN son evidencia: lo
 escribió el usuario de este repo. Si responde a la consulta (comandos de build/test,
 convenciones, zonas prohibidas), cierra citándolo — sin spawn y sin re-descubrirlo
 leyendo CMakeLists. Spawnea solo para lo que el contrato NO diga.
@@ -5237,7 +5244,7 @@ std::string admin_load_project_contract(const std::string& workspace_root, int m
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
                               const std::string& workspace_root, int max_explores,
                               const std::string& project_contract,
-                              const std::string& durable_memory) {
+                              const std::string& durable_memory, const std::string& mentions) {
   // Orden pensado para la caché de prefijo del proveedor: primero lo inmutable
   // durante la consulta (root, consulta, episodios, diálogo, UI), luego lo que
   // solo CRECE por el final (notebook, inbox), y al final lo que cambia en cada
@@ -5260,6 +5267,12 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
   if (!durable_memory.empty()) {
     out << "## Memoria (hechos que te dijo el usuario, no los re-descubras)\n"
         << durable_memory << "\n";
+  }
+  if (!mentions.empty()) {
+    out << "## Ficheros que te pasó el usuario (los señaló con @)\n"
+        << mentions
+        << "Ya están leídos: NO los vuelvas a buscar ni a leer. Son evidencia, "
+           "cítalos por `path:línea`.\n\n";
   }
   out << "## Consulta\n" << st.consulta << "\n\n";
   if (!st.episodes.empty()) {
@@ -5470,7 +5483,8 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
   while (!st->done && !st->clarify && !cancelled(opts)) {
     const std::string sys = admin_system_prompt(opts.explorer_cumulative_mode);
     const std::string user =
-        admin_user_prompt(*st, max_p, max_s, opts.workspace_root, max_ex, contract, memory);
+        admin_user_prompt(*st, max_p, max_s, opts.workspace_root, max_ex, contract, memory,
+                          opts.mentions);
     L2BrainRequest req;
     req.system_prompt = sys;
     req.user_prompt = user;

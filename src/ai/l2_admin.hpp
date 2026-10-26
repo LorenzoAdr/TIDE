@@ -274,6 +274,9 @@ struct AdminLoopOpts {
   std::string project_contract;
   // Memoria durable ya cargada (ai/ai_memory.hpp). Vacío = se lee del disco.
   std::string durable_memory;
+  // Ficheros que el usuario señaló con `@` en su línea (ai/ai_mentions.hpp).
+  // Lo resuelve el llamante: aquí llega ya como bloque de prompt.
+  std::string mentions;
   std::function<void(const std::string&)> on_line;
   // Streaming del modelo (distinto de on_line, que son líneas del relato):
   //  · on_model_text: prosa de razonamiento, se pinta tal cual;
@@ -485,7 +488,8 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
                               const std::string& workspace_root = {},
                               int max_explores = kAdminMaxExplores,
                               const std::string& project_contract = {},
-                              const std::string& durable_memory = {});
+                              const std::string& durable_memory = {},
+                              const std::string& mentions = {});
 
 AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& ops,
                                const AdminLoopOpts& opts);

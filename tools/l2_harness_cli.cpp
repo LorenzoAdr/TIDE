@@ -28,6 +28,7 @@
 #include "ai/l2_wave.hpp"
 #include "ai/l2_wave_bosquejo.hpp"
 #include "ai/ai_memory.hpp"
+#include "ai/ai_mentions.hpp"
 #include "ai/l2_admin.hpp"
 #include "ai/l2_catalog.hpp"
 #include "ai/level2_autonomous_loop.hpp"
@@ -10053,6 +10054,13 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
   // reducción de vueltas.
   opts.project_contract = tuide::admin_load_project_contract(workspace_root);
   opts.durable_memory = tuide::ai_memory_load(workspace_root);
+  {
+    const auto mentions = tuide::ai_resolve_mentions(prompt, workspace_root);
+    for (const auto& line : tuide::ai_mentions_report(mentions)) {
+      std::cout << line << std::endl;
+    }
+    opts.mentions = tuide::ai_mentions_block(mentions);
+  }
   opts.on_line = [](const std::string& line) { std::cout << line << std::endl; };
   // Contabilidad por rol del MISMO lazo que corre el producto (el panel AI usa
   // estos mismos callbacks). Sin esto la batería no puede decir en qué se van
