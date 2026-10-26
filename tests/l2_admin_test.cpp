@@ -122,6 +122,48 @@ int main() {
     unsetenv("L2_FEAT_ADMIN_JSON_GRAMMAR");
   }
   {
+    // M4.1: contrato del proyecto (AGENTS.md) en el prefijo inmutable.
+    const fs::path root = fs::temp_directory_path() / "tuide_contract_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+    expect(tuide::admin_load_project_contract(root.string()).empty(),
+           "sin AGENTS.md el contrato está vacío");
+    {
+      std::ofstream out(root / "AGENTS.md");
+      out << "# Contrato\n- build: ./tools/compile.sh\n- no tocar third_party/\n";
+    }
+    const std::string contract = tuide::admin_load_project_contract(root.string());
+    expect(contract.find("./tools/compile.sh") != std::string::npos,
+           "el contrato trae el comando de build");
+    expect(contract.find("proyecto: AGENTS.md") != std::string::npos,
+           "marca de procedencia del contrato");
+
+    AdminState st;
+    st.consulta = "compila el proyecto";
+    const std::string prompt =
+        admin_user_prompt(st, kAdminMaxProposes, kAdminMaxSpawns, root.string(),
+                          kAdminMaxExplores, contract);
+    const auto pos_contract = prompt.find("Contrato del proyecto");
+    const auto pos_consulta = prompt.find("## Consulta");
+    const auto pos_budget = prompt.find("## Presupuesto");
+    expect(pos_contract != std::string::npos, "el contrato llega al prompt");
+    expect(pos_contract < pos_consulta && pos_consulta < pos_budget,
+           "contrato antes de la consulta y del presupuesto (prefijo cacheable)");
+    expect(prompt.find("./tools/compile.sh") != std::string::npos,
+           "el comando de build llega al prompt");
+
+    // Recorte: un contrato gigante no se cuela entero en cada llamada.
+    {
+      std::ofstream out(root / "AGENTS.md");
+      out << std::string(20000, 'x');
+    }
+    const std::string big = tuide::admin_load_project_contract(root.string(), 500);
+    expect(big.size() <= 700 && big.find("recortado") != std::string::npos,
+           "contrato recortado con marca, got " + std::to_string(big.size()));
+    fs::remove_all(root, ec);
+  }
+  {
     // Modelo confunde action/do: pone el gesto en action.
     const auto ola = admin_parse(
         R"({"action":"ask_user","why":"saludo sin tarea","reply":"¡Hola! ¿En qué ayudo?"})");

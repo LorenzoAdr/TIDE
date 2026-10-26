@@ -51,6 +51,10 @@ inline constexpr int kAdminNotebookFactChars = 240;
 inline constexpr int kAdminUiSelectionChars = 400;
 inline constexpr int kAdminReadMaxChars = 3000;
 inline constexpr int kAdminShellDefaultTimeoutMs = 120000;  // 2 min: comando suelto del explorador
+// Contrato del proyecto (AGENTS.md). Va en el prefijo inmutable del prompt, así
+// que cuenta en cada llamada: suficiente para comandos de build/test y
+// convenciones, no para un manual.
+inline constexpr int kAdminContractChars = 6000;
 
 enum class AdminDo {
   Invalid,
@@ -265,6 +269,9 @@ struct AdminLoopOpts {
   int max_read_per_wave = kAdminExploreMaxReadPerWave;
   int max_grep_total = kAdminExploreMaxGrep;
   int max_read_total = kAdminExploreMaxRead;
+  // Contrato del proyecto ya cargado. Vacío = run_admin_loop lo lee del disco
+  // una vez por consulta (ver admin_load_project_contract).
+  std::string project_contract;
   std::function<void(const std::string&)> on_line;
   // Streaming del modelo (distinto de on_line, que son líneas del relato):
   //  · on_model_text: prosa de razonamiento, se pinta tal cual;
@@ -435,10 +442,21 @@ void admin_append_job(AdminState* st, AdminSpawnTipo tipo, const AdminJobResult&
 
 // cumulative_explorer: ver AdminLoopOpts::explorer_cumulative_mode.
 std::string admin_system_prompt(bool cumulative_explorer = false);
+
+// Contrato del proyecto: `<root>/AGENTS.md` precedido del global del usuario
+// (`$XDG_CONFIG_HOME/tuide/AGENTS.md`, o `~/.config/tuide/AGENTS.md`). Vacío si
+// no hay ninguno. Es lo que hoy el agente redescubre en cada consulta: cómo se
+// compila, cómo se testea, qué no tocar.
+std::string admin_load_project_contract(const std::string& workspace_root,
+                                        int max_chars = kAdminContractChars);
+
 // workspace_root: proyecto abierto (perímetro FS). Vacío solo en tests sin cwd.
+// project_contract: ver admin_load_project_contract (run_admin_loop lo carga una
+// vez por consulta y lo pasa aquí).
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
                               const std::string& workspace_root = {},
-                              int max_explores = kAdminMaxExplores);
+                              int max_explores = kAdminMaxExplores,
+                              const std::string& project_contract = {});
 
 AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& ops,
                                const AdminLoopOpts& opts);

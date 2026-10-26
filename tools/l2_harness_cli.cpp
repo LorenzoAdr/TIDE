@@ -10045,6 +10045,12 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
 
   tuide::AdminLoopOpts opts;
   opts.workspace_root = admin_root;
+  // `admin_root` es el directorio de sesión (--out), no el proyecto: el
+  // contrato se carga del workspace de verdad y se pasa explícito. Sin esto el
+  // harness corría sin AGENTS.md mientras el producto sí lo tenía — la misma
+  // clase de divergencia harness/producción que documenta §0bis del plan de
+  // reducción de vueltas.
+  opts.project_contract = tuide::admin_load_project_contract(workspace_root);
   opts.on_line = [](const std::string& line) { std::cout << line << std::endl; };
   // Contabilidad por rol del MISMO lazo que corre el producto (el panel AI usa
   // estos mismos callbacks). Sin esto la batería no puede decir en qué se van
