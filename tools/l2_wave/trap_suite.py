@@ -101,10 +101,14 @@ def build_queue(traps: list[dict], others: list[dict], arms: list[str], max_reps
             for arm in arms:  # intercalado: un corte deja pares completos
                 queue.append((c["id"], arm, rep))
 
+    # Orden medido: un run de trampa con gate pasa de 400 s, así que en 10 h
+    # entran ~100 runs. Con ese techo vale más tener las DOS dimensiones de la
+    # decisión (miente / cuánta fricción quita) que dos repeticiones de una:
+    # trampas r1 → muestra normal r1 → repeticiones.
     add(traps, 1)
+    add(sample, 1)
     if max_reps >= 2:
         add(traps, 2)
-    add(sample, 1)
     for rep in range(3, max_reps + 1):
         add(traps, rep)
     if max_reps >= 2:
@@ -349,7 +353,7 @@ def main() -> int:
     ap.add_argument("--budget-hours", type=float, default=10.0)
     ap.add_argument("--case-timeout", type=int, default=900)
     ap.add_argument("--reps", type=int, default=3)
-    ap.add_argument("--nontrap-sample", type=int, default=24)
+    ap.add_argument("--nontrap-sample", type=int, default=20)
     ap.add_argument("--arms", default="on,off")
     ap.add_argument("--only", choices=["trap", "false_friend", "all"], default="trap")
     ap.add_argument("--resume", action="store_true")
