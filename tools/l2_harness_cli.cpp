@@ -595,6 +595,48 @@ AiSettings load_ai_settings(const std::string& root) {
       s.level2.api_model = l2.value("api_model", s.level2.api_model);
       s.level2.n_ctx_remote = l2.value("n_ctx_remote", s.level2.n_ctx_remote);
     }
+    // ai.caps.* y ai.roles.*: sin esto una batería no puede medir el enrutado
+    // por rol, que es justo lo que decide dónde se va la latencia.
+    if (ai.contains("caps") && ai["caps"].is_object()) {
+      const auto& caps = ai["caps"];
+      bool any = false;
+      auto rb = [&](const char* k, bool* f) {
+        if (caps.contains(k) && caps[k].is_boolean()) {
+          *f = caps[k].get<bool>();
+          any = true;
+        }
+      };
+      rb("tool_calling", &s.caps.tool_calling);
+      rb("json_schema", &s.caps.json_schema);
+      rb("grammar", &s.caps.grammar);
+      rb("streaming", &s.caps.streaming);
+      rb("prompt_cache", &s.caps.prompt_cache);
+      rb("parallel_tool_calls", &s.caps.parallel_tool_calls);
+      s.caps.context_window = caps.value("context_window", s.caps.context_window);
+      if (caps.contains("auto_detect") && caps["auto_detect"].is_boolean()) {
+        s.caps.auto_detect = caps["auto_detect"].get<bool>();
+      } else if (any) {
+        s.caps.auto_detect = false;
+      }
+    }
+    if (ai.contains("roles") && ai["roles"].is_object()) {
+      const auto& roles = ai["roles"];
+      auto role = [&roles](const char* name, tuide::AiRoleBackend* out) {
+        if (!roles.contains(name) || !roles[name].is_object()) {
+          return;
+        }
+        const auto& r = roles[name];
+        out->api_base = r.value("api_base", out->api_base);
+        out->api_key = r.value("api_key", out->api_key);
+        out->api_model = r.value("api_model", out->api_model);
+        out->max_tokens = r.value("max_tokens", out->max_tokens);
+        out->timeout_ms = r.value("timeout_ms", out->timeout_ms);
+      };
+      role("pilot", &s.models.pilot);
+      role("explorer", &s.models.explorer);
+      role("verifier", &s.models.verifier);
+      role("edit", &s.models.edit);
+    }
     if (ai.contains("level0") && ai["level0"].is_object() &&
         ai["level0"].contains("embeddings") && ai["level0"]["embeddings"].is_object()) {
       const auto& emb = ai["level0"]["embeddings"];

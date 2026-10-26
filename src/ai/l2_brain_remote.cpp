@@ -82,6 +82,41 @@ bool RemoteL2Brain::ensure_ready(const AiSettings& settings,
   }
   // Los servidores OpenAI-compatibles locales suelen no pedir clave; la nube sí.
   (void)resolve_api_key(cfg_.api_key);
+  // Un rol apuntado a otro endpoint (p.ej. explorador en un modelo pequeño) se
+  // comprueba aquí: si no hay nada escuchando, se retira el override y se avisa,
+  // en vez de que cada llamada de ese rol falle y se lleve la consulta por
+  // delante. Solo abre un socket; no gasta una llamada al modelo.
+  {
+    struct RoleSlot {
+      const char* name;
+      AiRoleBackend* backend;
+    };
+    const RoleSlot slots[] = {{"pilot", &all_.models.pilot},
+                              {"explorer", &all_.models.explorer},
+                              {"verifier", &all_.models.verifier},
+                              {"edit", &all_.models.edit}};
+    for (const auto& slot : slots) {
+      std::string base = trim_trailing_slash(slot.backend->api_base);
+      if (base.empty() || base == cfg_.api_base) {
+        continue;
+      }
+      std::string perr;
+      if (llm_probe_endpoint(base, 2000, &perr)) {
+        if (on_progress) {
+          on_progress(std::string("L2 rol ") + slot.name + ": " +
+                      (slot.backend->api_model.empty() ? cfg_.api_model
+                                                       : slot.backend->api_model) +
+                      " @ " + base);
+        }
+        continue;
+      }
+      if (on_progress) {
+        on_progress(std::string("L2 rol ") + slot.name + ": " + base +
+                    " no responde (" + perr + ") — ese rol usa el modelo base");
+      }
+      *slot.backend = AiRoleBackend{};
+    }
+  }
   if (on_progress) {
     const AiProviderCaps caps =
         ai_resolve_provider_caps(all_.caps, cfg_.api_base, cfg_.api_model);

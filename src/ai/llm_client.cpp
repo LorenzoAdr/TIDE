@@ -1085,6 +1085,24 @@ bool llm_parse_url(const std::string& url, LlmUrl* out, std::string* err) {
   return true;
 }
 
+bool llm_probe_endpoint(const std::string& api_base, int timeout_ms, std::string* err) {
+  LlmUrl url;
+  if (!llm_parse_url(api_base, &url, err)) {
+    return false;
+  }
+  std::string cerr_msg;
+  const int fd = connect_with_timeout(url.host, url.port, timeout_ms > 0 ? timeout_ms : 2000,
+                                      &cerr_msg);
+  if (fd < 0) {
+    if (err) {
+      *err = cerr_msg;
+    }
+    return false;
+  }
+  ::close(fd);
+  return true;
+}
+
 nlohmann::json llm_build_chat_body(const LlmEndpoint& endpoint, const LlmRequest& req,
                                    bool stream) {
   nlohmann::json messages = nlohmann::json::array();

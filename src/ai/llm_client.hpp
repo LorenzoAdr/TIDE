@@ -126,6 +126,10 @@ struct LlmUrl {
   std::string path;  // prefijo sin barra final ("/v1"); vacío si la URL no traía path
 };
 bool llm_parse_url(const std::string& url, LlmUrl* out, std::string* err);
+// ¿Hay algo escuchando en ese api_base? Solo abre y cierra un socket (ni TLS ni
+// HTTP), para validar al arrancar un endpoint por rol sin esperar a la primera
+// llamada del agente.
+bool llm_probe_endpoint(const std::string& api_base, int timeout_ms, std::string* err);
 
 // ------------------------------------------------------------- streaming
 

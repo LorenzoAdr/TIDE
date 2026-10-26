@@ -219,11 +219,27 @@ Estimaciones en semanas de trabajo enfocado (1 persona + asistencia IA).
 >
 > Lo que estos números deciden, y antes no se podía argumentar:
 > **el explorador se come 110 s de los 227 s en 5 llamadas que solo eligen
-> "grep esto / lee aquí"** → `ai.roles.explorer` apuntando a un modelo pequeño
-> es la mitad de la latencia de una consulta sin tocar piloto ni verificador
-> (M0.7, ya implementado, pendiente de configurar). Y el 47 % de caché del
-> piloto es la línea base contra la que medir cualquier cambio futuro del
-> prompt.
+> "grep esto / lee aquí"**. Y el 47 % de caché del piloto es la línea base
+> contra la que medir cualquier cambio futuro del prompt.
+>
+> **Corrección medida (no asumir que un explorador pequeño sale gratis).** El
+> enrutado por rol funciona —`ai.roles.explorer` apuntado a otro endpoint bajó
+> el coste del explorador de 110 s a **0,37 s en 4 llamadas**— pero con un
+> explorador *malo* (stub con respuesta enlatada) la consulta entera salió
+> **peor**: el piloto pasó de 3 a 10 turnos y de 1 a 6 spawns, y entró el
+> verificador. Total ~454 s frente a 227 s.
+>
+> Es decir: **la calidad del explorador fija el número de rondas del piloto**,
+> así que un modelo pequeño ahí solo gana si cierra la caza. El criterio no es
+> "pon el explorador en el modelo más barato" sino "baja de modelo mientras el
+> veredicto siga siendo `encontrado` con evidencia; si empieza a devolver
+> `no_encontrado`/`parcial`, lo que ahorras en el hijo lo pagas multiplicado en
+> el piloto". Medible ya con la telemetría de M0: `roles.explorer.calls` y
+> `proposes` en el mismo `llm_calls.json`.
+>
+> Un endpoint de rol caído no rompe la sesión: `ensure_ready` lo sondea con un
+> socket, avisa (`L2 rol explorer: … no responde — ese rol usa el modelo base`)
+> y retira el override.
 
 Plan original del hito, para referencia:
 
