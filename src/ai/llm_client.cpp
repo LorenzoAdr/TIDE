@@ -1605,7 +1605,13 @@ LlmResponse LlmClient::attempt(const LlmRequest& req, const std::string& payload
   if (stream) {
     LlmResponse parsed = parser.take();
     out.emitted = parsed.emitted;
-    const bool empty = parsed.content.empty() && parsed.tool_calls.empty();
+    // `reasoning` cuenta como contenido: un modelo que agota max_tokens
+    // pensando, o que escribe su JSON dentro del bloque de razonamiento (visto
+    // con GBNF + thinking), devuelve content vacío y reasoning lleno. El camino
+    // no-streaming ya lo acepta (llm_parse_chat_json); este debe hacer lo mismo
+    // o se tira una respuesta buena.
+    const bool empty =
+        parsed.content.empty() && parsed.tool_calls.empty() && parsed.reasoning.empty();
     if (empty && !parser.looks_like_sse()) {
       // El proveedor ignoró `stream` y devolvió el JSON completo de una pieza.
       std::string perr;

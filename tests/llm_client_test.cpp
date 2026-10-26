@@ -287,6 +287,17 @@ int main() {
     expect(parsed.content == "entero", "fallback content");
   }
   {
+    // Solo reasoning, content vacío: es una respuesta válida (el modelo gastó
+    // los tokens pensando, o metió el JSON en el bloque de razonamiento).
+    LlmStreamParser p;
+    p.feed("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"{\\\"do\\\":\\\"cerrar\\\"}\"}}]}\n\n");
+    p.feed("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
+    p.finish();
+    const LlmResponse r = p.take();
+    expect(r.content.empty() && !r.reasoning.empty(), "solo reasoning: content vacío");
+    expect(r.finish_reason == "stop", "solo reasoning: finish_reason llega");
+  }
+  {
     // Stream cortado sin [DONE] ni finish_reason.
     LlmStreamParser p;
     p.feed("data: {\"choices\":[{\"delta\":{\"content\":\"a medi\"}}]}\n\n");
