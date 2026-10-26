@@ -425,6 +425,13 @@ def main() -> int:
     }
     (out / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False),
                                    encoding="utf-8")
+    # El contrato y la memoria entran en CADA prompt: sin guardarlos, mañana el
+    # informe no es interpretable ni reproducible.
+    ctx = out / "context"
+    ctx.mkdir(exist_ok=True)
+    for src in (agents, memory):
+        if src.exists():
+            (ctx / src.name).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
     sys.stderr.write(f"[trap-suite] {len(queue)} runs en cola · presupuesto "
                      f"{args.budget_hours} h · salida {out}\n")
 
@@ -433,6 +440,10 @@ def main() -> int:
     budget_s = args.budget_hours * 3600.0
     t_start = time.monotonic()
     est = 180.0  # estimación inicial por run; se ajusta con lo medido
+    # Si el host muere a las 3 de la mañana, cada run siguiente falla en
+    # segundos y la cola se consumiría entera con filas inútiles. Cinco fallos
+    # rápidos seguidos = algo se cayó: parar y decirlo.
+    fast_failures = 0
 
     for case_id, arm, rep in queue:
         if stop_requested:
@@ -449,6 +460,15 @@ def main() -> int:
         rows.append(row)
         with jsonl.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        if row.get("terminal_code") == "T_crash" and (row.get("wall_sec_measured") or 0) < 60:
+            fast_failures += 1
+        else:
+            fast_failures = 0
+        if fast_failures >= 5:
+            sys.stderr.write("[trap-suite] 5 fallos rápidos seguidos: el backend parece caído. "
+                             "Paro para no quemar la cola; reanuda con --resume --out "
+                             f"{out}\n")
+            break
         walls = [r.get("wall_sec_measured") or 0 for r in rows[-12:]]
         if walls:
             est = max(30.0, statistics.fmean(walls))

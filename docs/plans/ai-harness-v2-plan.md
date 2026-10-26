@@ -473,11 +473,51 @@ antes de seguir.
 
 ### M6 — Evaluación que cierra el lazo (≈1 semana)
 
+> **Suite de trampas implementada (2026-10-26)** — `tools/l2_wave/trap_suite.py`.
+> Es el prerequisito de la decisión "¿gate apagado por defecto en `strong`?":
+> convierte una opinión en un dato.
+>
+> Lo que no existía y hubo que construir:
+> - `admin_battery.py` corre siempre con `--script` (cerebro de guion): mide
+>   despacho y legalidad, **no puede medir si el modelo miente**.
+> - `probe_admin_pilot.py` sí usa modelo real, pero reimplementa el lazo en
+>   Python con otra dieta (§0bis).
+> - `admin-run` **no tenía interruptor** para el verificador, así que el A/B era
+>   imposible. Ahora: `--verifier on|off`, `--refuter on|off`.
+> - El binario emite `summary.json` con lo que `admin_session_metrics.
+>   score_session` consume (gesto de cierre, veredictos tipados, juicios del
+>   gate, terminal, llamadas por rol). Una sola implementación del criterio.
+>
+> El scorer ya traía el arreglo de negación (P10) hecho: `_phrase_negated_at`
+> mira antes y después de la frase, con la excepción de "no obstante".
+>
+> ```bash
+> # Tirada nocturna (10 h): decide primero lo que decide la pregunta.
+> python3 tools/l2_wave/trap_suite.py --budget-hours 10
+> # Reanudar una tirada cortada:
+> python3 tools/l2_wave/trap_suite.py --resume --out .tuide/ai/evals/trap_suite_<id>
+> ```
+>
+> Orden de la cola: 28 trampas × 2 brazos × rep 1 → rep 2 → muestra repartida de
+> 24 casos normales (mide la **fricción** que quita el gate: `ask_user`,
+> llamadas) → rep 3. Brazos intercalados por caso, así que un corte deja pares
+> completos. Reanudable (`runs.jsonl`), informe reescrito tras cada run,
+> cortocircuito si el backend se cae (5 fallos rápidos seguidos), y un run
+> cortado por timeout se reconstruye desde el `state.json`/`turns/` que el
+> binario persiste — un corte sigue diciendo "no cerró", que es justo la señal
+> de fricción.
+>
+> Secuencial a propósito: medido en vivo, dos `admin-run` simultáneos se pelean
+> por el único modelo del host y los tiempos dejan de ser comparables.
+>
+> Guarda `AGENTS.md` y `memory.md` en `context/` porque entran en cada prompt:
+> sin eso el informe no es reproducible.
+
 | Suite | Contenido | Objetivo de tiempo | Cuándo |
 |---|---|---|---|
 | **Rápida** | 20 casos de localización/respuesta, modelo barato, paralelo, fixtures deterministas | **< 10 min** | cada cambio |
 | **Edición** (nueva, la que importa) | 15-25 tareas en repo fixture con **compile + test como oráculo**: crear archivo, editar 2 archivos, arreglar un build roto, añadir un test | < 40 min | cada cambio del camino de edición |
-| **Honestidad** | las 20 trampas `false_friend` + casos `wrong_model` | < 15 min | cada cambio de política |
+| **Honestidad** | las 20 trampas `false_friend` + 8 `wrong_layer` (`tools/l2_wave/trap_suite.py`) | nocturna hoy; < 15 min cuando haya modelo pequeño | cada cambio de política |
 | **Nocturna** | los 100 casos, contra el binario de producción | sin límite | antes de cada release |
 
 Salida en `.tuide/ai/evals/<fecha>/` (JSON + markdown), con `llm_calls`,
