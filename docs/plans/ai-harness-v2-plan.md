@@ -240,6 +240,27 @@ Estimaciones en semanas de trabajo enfocado (1 persona + asistencia IA).
 > Un endpoint de rol caído no rompe la sesión: `ensure_ready` lo sondea con un
 > socket, avisa (`L2 rol explorer: … no responde — ese rol usa el modelo base`)
 > y retira el override.
+>
+> **APARCADO: medir un explorador pequeño de verdad.** El host sirve un solo
+> modelo a la vez (27B) y no hay GGUF pequeño levantado, así que la comparación
+> real queda pendiente. Cuando haya uno, es un comando y una consulta:
+>
+> ```bash
+> # en el host (puertos propios; el backend se deriva a CHAT_PORT+10000)
+> TUIDE_HOST_CHAT_PORT=8081 ./tools/run_host_llama.sh --llm 7b \
+>   --no-embed --no-web --foreground
+> ```
+>
+> ```json
+> // .tuide/config.json → ai.roles
+> {"explorer": {"api_base": "http://192.168.64.1:8081/v1",
+>               "api_model": "qwen2.5-7b-instruct-q4_k_m"}}
+> ```
+>
+> Y comparar en el mismo `llm_calls.json` de `l2_harness_cli admin-run`:
+> `roles.explorer.ms` (lo que ahorras) contra `proposes` y `spawns` (lo que
+> puedes pagar arriba). Candidato recomendado el 7B, no el 1.5B/3B, por la
+> corrección de arriba.
 
 Plan original del hito, para referencia:
 
@@ -341,9 +362,36 @@ antes de seguir.
 
 ### M4 — Contrato de proyecto, memoria y sesiones (≈1 semana)
 
+> **M4.1 implementado y medido (2026-10-26).** Consulta *"¿con qué comando
+> compilo este proyecto y desde dónde debo correr los tests?"* contra el 27B:
+>
+> | | Sin contrato | Con contrato |
+> |---|---|---|
+> | Llamadas LLM | 5+ (cortado por timeout de 560 s) | **2** |
+> | Spawns | 4 (explore, 2×read, search) | **0** |
+> | Resultado | veredicto `dudoso`, **sin respuesta** | respuesta correcta en **104 s** |
+>
+> Dos hallazgos del camino, los dos sobre el contrato de prompts y no sobre la
+> feature:
+>
+> 1. **Inyectar el fichero no basta.** El system prompt del piloto prohíbe
+>    responder sin un spawn ("nunca respondas solo de memoria del modelo"), y un
+>    fichero que da el usuario encaja en esa prohibición: el piloto exploró,
+>    leyó `CMakeLists.txt`, buscó `ctest`, se llevó un `dudoso` y solo entonces
+>    decidió leer el `AGENTS.md` que ya tenía en el prompt. Hubo que declarar
+>    explícitamente que el contrato **es evidencia**. Es la misma patología que
+>    §1.1: la regla anti-alucinación hace rehacer trabajo ya hecho.
+> 2. **El harness corría sin contrato mientras el producto lo tenía**, porque su
+>    `opts.workspace_root` es el directorio de sesión y no el proyecto. Otra
+>    divergencia harness/producción de la familia de §0bis; ahora se pasa
+>    explícito.
+>
+> Pendiente de M4: `/init` (4.2), sesiones navegables (4.3), `@file` (4.4),
+> memoria durable (4.5).
+
 | # | Trabajo | Aceptación |
 |---|---|---|
-| 4.1 | Ingerir **`AGENTS.md`** (raíz + por directorio + `~/.tuide/AGENTS.md`) en el prefijo inmutable: comandos de build/test, convenciones, zonas prohibidas | el agente compila con el comando del proyecto sin que se lo digas |
+| 4.1 | ✅ **HECHO** — `AGENTS.md` (raíz + global del usuario) en el prefijo inmutable: comandos de build/test, convenciones, zonas prohibidas | el agente compila con el comando del proyecto sin que se lo digas |
 | 4.2 | `/init` que genera un `AGENTS.md` inicial autodetectando build/test (ya hay detección en `src/build/`) | proyecto nuevo → contrato útil en un comando |
 | 4.3 | Sesiones: `/sessions`, `/resume`, branch; **no borrar al arrancar** (hoy `admin_clear_session` en boot) | reabrir la app y continuar la investigación de ayer |
 | 4.4 | `@file` / `@símbolo` en el input (ya existen fuzzy matcher e índice de símbolos) | adjuntar contexto sin describirlo en prosa |
