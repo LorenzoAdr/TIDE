@@ -141,6 +141,10 @@ class AiController {
   void show_model_status();
   // `/init`: borrador de AGENTS.md a partir del árbol (ai/project_contract.hpp).
   void run_project_init(bool force);
+  // `/memory` | `/remember` | `/forget` (ai/ai_memory.hpp).
+  void run_memory_command(const std::string& arg);
+  // `/sessions` | `/resume` sobre el archivo de `.tuide/ai/sessions/`.
+  void run_sessions_command(const std::string& arg);
   void download_models(const std::string& what);
   bool ensure_backend_ready();
   // prompt_if_missing: only for user-driven AI input (never background warm).

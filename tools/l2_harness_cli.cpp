@@ -27,6 +27,7 @@
 #include "ai/l2_think.hpp"
 #include "ai/l2_wave.hpp"
 #include "ai/l2_wave_bosquejo.hpp"
+#include "ai/ai_memory.hpp"
 #include "ai/l2_admin.hpp"
 #include "ai/l2_catalog.hpp"
 #include "ai/level2_autonomous_loop.hpp"
@@ -10051,6 +10052,7 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
   // clase de divergencia harness/producción que documenta §0bis del plan de
   // reducción de vueltas.
   opts.project_contract = tuide::admin_load_project_contract(workspace_root);
+  opts.durable_memory = tuide::ai_memory_load(workspace_root);
   opts.on_line = [](const std::string& line) { std::cout << line << std::endl; };
   // Contabilidad por rol del MISMO lazo que corre el producto (el panel AI usa
   // estos mismos callbacks). Sin esto la batería no puede decir en qué se van

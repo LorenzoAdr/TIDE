@@ -642,6 +642,39 @@ AiRouteResult route_level0(const std::string& raw_input, const std::string& prev
       r.kind = AiRouteKind::Help;
       return r;
     }
+    if (cmd == "remember" || cmd == "recuerda") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Memory;
+      if (arg.empty()) {
+        r.kind = AiRouteKind::Error;
+        r.message = "uso: /remember <hecho que no quieres repetir>";
+        return r;
+      }
+      r.arg = "add " + arg;
+      return r;
+    }
+    if (cmd == "memory" || cmd == "memoria") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Memory;
+      return r;
+    }
+    if (cmd == "forget" || cmd == "olvida") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Memory;
+      r.arg = "forget " + arg;
+      return r;
+    }
+    if (cmd == "sessions" || cmd == "sesiones") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Sessions;
+      return r;
+    }
+    if (cmd == "resume" || cmd == "reanuda") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Sessions;
+      r.arg = "resume " + arg;
+      return r;
+    }
     if (cmd == "init") {
       AiRouteResult r;
       r.kind = AiRouteKind::ProjectInit;

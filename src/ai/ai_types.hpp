@@ -107,6 +107,10 @@ enum class AiRouteKind {
   Level2Harness,
   // `/init`: genera el borrador de AGENTS.md que el piloto lee en cada consulta.
   ProjectInit,
+  // `/memory` | `/remember <x>` | `/forget <n>` — memoria durable del agente.
+  Memory,
+  // `/sessions` | `/resume [id]` — historial de investigaciones.
+  Sessions,
 };
 
 struct AiRouteResult {

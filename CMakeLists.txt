@@ -387,6 +387,7 @@ add_executable(tuide
   src/ai/l2_brain_remote.cpp
   src/ai/llm_client.cpp
   src/ai/project_contract.cpp
+  src/ai/ai_memory.cpp
   src/ai/l2_context_budget.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
@@ -1208,6 +1209,7 @@ target_include_directories(l2_wave_test PRIVATE
 add_executable(l2_admin_test
   tests/l2_admin_test.cpp
   src/ai/l2_admin.cpp
+  src/ai/ai_memory.cpp
   src/ai/action_json.cpp
   src/ai/search_replace.cpp
   src/ai/l2_grammar.cpp
@@ -1316,6 +1318,7 @@ add_executable(l2_harness_cli
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
   src/ai/llm_client.cpp
+  src/ai/ai_memory.cpp
   src/ai/llama_backend.cpp
   src/ai/action_json.cpp
   src/ai/get_code_of.cpp
