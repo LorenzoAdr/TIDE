@@ -63,3 +63,14 @@ son **legado fuera del hot path** (solo con `ai.admin_enabled=false`). No
 inviertas ahí sin leer `docs/plans/ai-harness-v2-plan.md`.
 
 Los planes vivos están en `docs/plans/`; los specs en `docs/ai/`.
+
+## Lo que el agente lee de ti
+
+- Este `AGENTS.md` (lo genera `/init`, lo corriges tú).
+- `.tuide/ai/memory.md` — hechos que no quieres repetir: `/remember`, `/memory`,
+  `/forget <n>`.
+- `@fichero` en la línea del panel AI: adjunta ese archivo ya leído y el agente
+  se salta la fase de localización.
+
+Las sesiones no se borran: se archivan en `.tuide/ai/sessions/`. `/sessions` y
+`/resume [id]`.

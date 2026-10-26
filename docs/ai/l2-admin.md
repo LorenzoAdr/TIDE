@@ -31,13 +31,16 @@ Sustituye el hot path L0→L1→L2 del tab AI. El código legacy permanece compi
 - `ask_user`: el piloto pregunta; el lazo **pausa** y muestra la pregunta en el panel AI.
   La siguiente línea NL del usuario es la respuesta: se guarda en el diálogo, se reabre el
   lazo con la **consulta original** intacta y el notebook previo.
-- Al **arrancar** la app se limpia `.tuide/ai/l2_admin/` (salvo `ask_user` pendiente),
-  para no arrastrar la investigación de la ejecución anterior. Durante la misma
-  ejecución **no** se limpia al cambiar de consulta: notebook + episodios se
-  conservan, pero el **presupuesto** (proposes/spawns/explores/verify) se renueva
-  por consulta. Si el cupo de explore se agota mid-consulta, el runtime degrada
-  nuevos `explore` a `search` y el prompt prohíbe más exploradores. Solo un
-  Reset/borrar del panel AI (o `/new`) limpia a mano.
+- Al **arrancar** la app, la investigación anterior se **archiva** en
+  `.tuide/ai/sessions/<timestamp>/` (salvo `ask_user` pendiente, que se conserva
+  activo). Antes se borraba con `remove_all`. `/sessions` las lista y
+  `/resume [id]` continúa una; reanudar **copia**, así que la archivada sigue ahí
+  y recuperar una vieja no cuesta la actual. Durante la misma ejecución **no** se
+  archiva al cambiar de consulta: notebook + episodios se conservan, pero el
+  **presupuesto** (proposes/spawns/explores/verify) se renueva por consulta. Si
+  el cupo de explore se agota mid-consulta, el runtime degrada nuevos `explore` a
+  `search` y el prompt prohíbe más exploradores. `/new` archiva y abre una
+  sesión limpia.
 - Abrir el panel AI **no** arranca mapa de símbolos ni embeds de stems (eso era L0/L1).
   Con `ai.admin_enabled=false` vuelve el warm legacy.
 
@@ -49,6 +52,35 @@ Estado en `.tuide/ai/l2_admin/`:
 |-----------|-----|
 | `state.json` | consulta, jobs, notebook, episodios, UI snapshot, reply |
 | `notebook.md` | evidencias legibles (paths, facts) |
+| `turns/N.json` | el JSON crudo de cada turno del piloto |
+
+Y fuera de la sesión activa:
+
+| Artefacto | Rol |
+|-----------|-----|
+| `.tuide/ai/sessions/<ts>/` | sesiones archivadas (`/sessions`, `/resume`) |
+| `.tuide/ai/memory.md` | memoria durable (`/remember`, `/memory`, `/forget`) |
+| `<root>/AGENTS.md` | contrato del proyecto (`/init` lo genera) |
+
+## Fuentes de verdad que aporta el humano
+
+Tres bloques entran en el **prefijo inmutable** del prompt (antes de la consulta
+y de todo lo volátil, para no romper la caché de prefijo):
+
+| Bloque | De dónde | Tope |
+|--------|----------|------|
+| Contrato del proyecto | `AGENTS.md` (raíz) + global del usuario | `kAdminContractChars` (6000) |
+| Memoria durable | `.tuide/ai/memory.md` | `kAiMemoryPromptChars` (2000) |
+| Ficheros `@mencionados` | la línea del usuario, resueltos contra el árbol | 4 × 2500 |
+
+**Regla aprendida a base de perder rondas:** una fuente de verdad nueva hay que
+declararla evidencia en **tres** sitios — el prompt del piloto, el prompt del
+verificador y el harness que mide. Si falta en el del piloto, re-descubre lo que
+ya tiene (el piloto leyó `CMakeLists.txt` teniendo el `AGENTS.md` delante). Si
+falta en el del verificador, cualquier cierre apoyado en ella es indemostrable y
+acaba en `dudoso` eterno. Si falta en el harness, las baterías miden otra cosa
+que el producto. Las tres variantes ocurrieron de verdad; ver
+`docs/plans/ai-harness-v2-plan.md`, M4.
 
 UI capturada al entrar: `active_path`, `cursor_line`, selección (clip). Continuable si hay
 `clarify`, sesión abierta, notebook o episodios. Follow-up NL conserva notebook + episodios
@@ -70,9 +102,17 @@ el modelo no debe asumir “soy el código de TIDE”, sino “analizo lo que ha
 ## Uso en la app
 
 1. `/backend remote` (o `local`) si el mode legacy es `dry_run`.
-2. Escribe NL en el tab AI → relato de investigación (`→ Piloto…`, `· buscar/leer…`).
-3. `/build`, `/git`, `/cancel`, `/new` siguen como atajos.
-4. Spawns reales: search/read (tools o `rg`/FS), diagnostics/test (tools/TaskRunner), edit (`apply_hunk_to_workspace_file`), git/build/shell como antes.
+2. `/init` una vez por proyecto: deja el borrador de `AGENTS.md` con los comandos
+   de build/test detectados y TODO para lo que solo sabe el humano.
+3. Escribe NL en el tab AI → relato de investigación (`→ Piloto…`, `· buscar/leer…`).
+   `@fichero` en la línea adjunta ese archivo ya leído y se salta la localización.
+4. `/build`, `/git`, `/cancel`, `/new` siguen como atajos. Nuevos:
+   `/init [--force]`, `/remember <hecho>`, `/memory`, `/forget <n>`,
+   `/sessions`, `/resume [id]`.
+5. Spawns reales: search/read (tools o `rg`/FS), diagnostics/test (tools/TaskRunner), edit (`apply_hunk_to_workspace_file`), git/build/shell como antes.
+6. Transporte: `src/ai/llm_client.*` (SSE, reintentos, `usage`, caps por
+   proveedor). Backend por rol en `ai.roles.{pilot,explorer,verifier,edit}` y
+   capacidades en `ai.caps.*`; `/model` imprime las caps efectivas por rol.
 
 `ai.admin_enabled=false` restaura L0→L1→L2.
 
