@@ -105,6 +105,8 @@ enum class AiRouteKind {
   Help,
   Error,
   Level2Harness,
+  // `/init`: genera el borrador de AGENTS.md que el piloto lee en cada consulta.
+  ProjectInit,
 };
 
 struct AiRouteResult {

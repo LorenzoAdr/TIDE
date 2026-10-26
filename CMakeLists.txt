@@ -386,6 +386,7 @@ add_executable(tuide
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
   src/ai/llm_client.cpp
+  src/ai/project_contract.cpp
   src/ai/l2_context_budget.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
@@ -1149,6 +1150,15 @@ add_executable(search_replace_test
   src/ai/search_replace.cpp
 )
 target_include_directories(search_replace_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(project_contract_test
+  tests/project_contract_test.cpp
+  src/ai/project_contract.cpp
+)
+target_include_directories(project_contract_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )

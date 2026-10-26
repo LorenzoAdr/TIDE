@@ -139,6 +139,8 @@ class AiController {
   bool level2_mode_is_autonomous() const;
   std::string build_git_context_seed(const std::string& query) const;
   void show_model_status();
+  // `/init`: borrador de AGENTS.md a partir del árbol (ai/project_contract.hpp).
+  void run_project_init(bool force);
   void download_models(const std::string& what);
   bool ensure_backend_ready();
   // prompt_if_missing: only for user-driven AI input (never background warm).

@@ -642,6 +642,12 @@ AiRouteResult route_level0(const std::string& raw_input, const std::string& prev
       r.kind = AiRouteKind::Help;
       return r;
     }
+    if (cmd == "init") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::ProjectInit;
+      r.arg = to_lower(arg);  // "--force" | ""
+      return r;
+    }
     if (cmd == "build" || cmd == "compile") {
       return task("compile");
     }

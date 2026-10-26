@@ -29,6 +29,7 @@
 #include "ai/level2_session.hpp"
 #include "ai/llama_net.hpp"
 #include "ai/model_store.hpp"
+#include "ai/project_contract.hpp"
 #include "ai/repo_map.hpp"
 #include "ai/search_replace.hpp"
 #include "git/git_command.hpp"
@@ -1924,6 +1925,45 @@ void AiController::run_insert_async(const std::string& user_message, AiInsertAnc
   });
 }
 
+void AiController::run_project_init(bool force) {
+  const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+  if (root.empty()) {
+    append("✗ /init: no hay workspace abierto");
+    return;
+  }
+  const ProjectProbe probe = project_probe(root);
+  const std::string body = project_contract_template(probe);
+  std::string path;
+  std::string err;
+  if (!project_contract_write(root, body, force, &path, &err)) {
+    append("✗ /init: " + err);
+    return;
+  }
+  append("AGENTS.md escrito en " + path);
+  if (!probe.kinds.empty()) {
+    std::string kinds;
+    for (const auto& k : probe.kinds) {
+      kinds += (kinds.empty() ? "" : ", ") + k;
+    }
+    append("  build detectado: " + kinds);
+  }
+  for (const auto& c : probe.build_cmds) {
+    append("  build: " + c);
+  }
+  for (const auto& c : probe.test_cmds) {
+    append("  test:  " + c);
+  }
+  if (probe.indent_tabs) {
+    append("  indentación medida: tabuladores");
+  } else if (probe.indent_width > 0) {
+    append("  indentación medida: " + std::to_string(probe.indent_width) + " espacios");
+  }
+  if (probe.style_file_disagrees) {
+    append("  ojo: " + probe.style_file + " no coincide con lo que usan las fuentes");
+  }
+  append("Rellena los TODO: es lo que el agente no puede deducir y lo que más le ahorra.");
+}
+
 void AiController::show_model_status() {
   ModelStore store(settings_.models_cache_dir.empty() ? ModelStore::default_cache_dir()
                                                       : settings_.models_cache_dir);
@@ -2430,6 +2470,9 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
       case AiRouteKind::Level2Harness:
         kind = "l2_harness";
         break;
+      case AiRouteKind::ProjectInit:
+        kind = "project_init";
+        break;
     }
     ai_trace(AiTraceChannel::L0, "dispatch",
              std::string("{\"kind\":\"") + kind + "\",\"tool\":\"" +
@@ -2444,6 +2487,7 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
       append("  NL → Administrador (investiga con explorar/buscar/leer; cierra o pregunta)");
       append("  /help  /build|/compile  /launch  /search <q>  /diag  /git [status|pull|branch|log]");
       append("  /read <path>  /ls [filter]  /symbols <q>  /hover [path:line:col]");
+      append("  /init [--force]  genera AGENTS.md (contrato que el piloto lee cada consulta)");
       append("  /model […]  /backend local|remote  /trace …  /cancel  /new|/reset");
       append("Legacy L0/L1/L2 (desactivado en hot path; ai.admin_enabled=false para reactivar):");
       append("  /l1 /explain /l2_* /mode agent|ask|plan|git");
@@ -2468,6 +2512,9 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
     case AiRouteKind::ForceLevel1:
       append("L0 → force L1");
       run_level1_async(route.arg.empty() ? original : route.arg);
+      break;
+    case AiRouteKind::ProjectInit:
+      run_project_init(route.arg.find("force") != std::string::npos);
       break;
     case AiRouteKind::CancelAgent:
       cancel_current();
