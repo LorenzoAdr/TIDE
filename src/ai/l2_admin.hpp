@@ -295,6 +295,17 @@ struct AdminLoopOpts {
   std::atomic<bool>* cancel = nullptr;
 };
 
+// Un juicio del gate tal como ocurrió, para que una batería pueda puntuarlo sin
+// re-derivarlo del relato en castellano del panel.
+struct AdminVerifyRecord {
+  std::string trigger;    // "editar" | "cerrar"
+  std::string veredicto;  // sostiene | refuta | dudoso
+  bool blocks = false;
+  bool shortcut = false;  // determinista, sin gastar llamada LLM
+  bool omit_gate = false; // se superó el tope: NO absuelve
+  std::string why;
+};
+
 struct AdminLoopResult {
   bool ok = false;
   bool clarify = false;
@@ -302,6 +313,14 @@ struct AdminLoopResult {
   std::string error;
   int proposes = 0;
   int spawns = 0;
+  // Gesto terminal (el `do` del último turno aceptado) y su justificación.
+  std::string last_do;
+  std::string last_why;
+  // Rechazos por formato y por confirmación ilegal: contabilidad que antes solo
+  // existía en el harness de Python.
+  int parse_rejects = 0;
+  int confirm_rejects = 0;
+  std::vector<AdminVerifyRecord> verify_reports;
 };
 
 const char* admin_do_name(AdminDo d);

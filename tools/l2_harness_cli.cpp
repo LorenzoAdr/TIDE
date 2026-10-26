@@ -9956,6 +9956,10 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
   std::string out_dir;
   std::string prompt;
   std::string script_path;
+  // A/B del gate: `AdminLoopOpts` ya tenía los campos, faltaba exponerlos para
+  // poder medir la decisión "verificador por defecto" en vez de argumentarla.
+  bool verifier_on = true;
+  bool refuter_on = true;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
     if ((a == "--out" || a == "-o") && i + 1 < argc) {
@@ -9964,9 +9968,17 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
       prompt = argv[++i];
     } else if (a == "--script" && i + 1 < argc) {
       script_path = argv[++i];
+    } else if (a == "--verifier" && i + 1 < argc) {
+      const std::string v = argv[++i];
+      verifier_on = !(v == "off" || v == "0" || v == "false" || v == "no");
+    } else if (a == "--refuter" && i + 1 < argc) {
+      const std::string v = argv[++i];
+      refuter_on = !(v == "off" || v == "0" || v == "false" || v == "no");
     } else if (a == "--help" || a == "-h") {
-      std::cerr << "admin-run --out DIR --prompt TEXT [--script FILE]\n"
+      std::cerr << "admin-run --out DIR --prompt TEXT [--script FILE]"
+                   " [--verifier on|off] [--refuter on|off]\n"
                 << "  Script: one admin_v1 JSON per line (Cursor/T0 stub). Sin --script usa L2 brain.\n"
+                << "  Escribe summary.json (admin_session_metrics) y llm_calls.json.\n"
                 << "  No modifica wave-explore ni .tuide/ai/l2_wave/.\n";
       return 2;
     }
@@ -10053,6 +10065,8 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
   // clase de divergencia harness/producción que documenta §0bis del plan de
   // reducción de vueltas.
   opts.project_contract = tuide::admin_load_project_contract(workspace_root);
+  opts.verifier_enabled = verifier_on;
+  opts.refuter_enabled = refuter_on;
   opts.durable_memory = tuide::ai_memory_load(workspace_root);
   {
     const auto mentions = tuide::ai_resolve_mentions(prompt, workspace_root);
@@ -10123,6 +10137,83 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
                            {"roles", std::move(calls)}};
     std::ofstream out(fs::path(out_dir) / "llm_calls.json");
     out << summary.dump(2) << '\n';
+  }
+  {
+    // `summary.json`: exactamente lo que admin_session_metrics.score_session
+    // necesita, emitido por el binario de producción. Sin esto una batería
+    // tendría que re-derivar el veredicto del relato en castellano del panel,
+    // es decir reimplementar el criterio — justo lo que queremos evitar.
+    nlohmann::json jobs = nlohmann::json::array();
+    for (const auto& j : st.jobs) {
+      jobs.push_back({{"tipo", j.tipo},
+                      {"ok", j.ok},
+                      {"veredicto", j.veredicto},
+                      {"summary_head", j.summary.substr(0, std::min<std::size_t>(300, j.summary.size()))},
+                      {"simbolos", j.simbolos},
+                      {"evidencia", j.evidencia}});
+    }
+    nlohmann::json reports = nlohmann::json::array();
+    bool omit_any = false;
+    for (const auto& r : res.verify_reports) {
+      omit_any = omit_any || r.omit_gate;
+      reports.push_back({{"trigger", r.trigger},
+                         {"veredicto", r.veredicto},
+                         {"blocks", r.blocks},
+                         {"skipped", r.shortcut},
+                         {"omit_gate", r.omit_gate},
+                         {"why", r.why.substr(0, std::min<std::size_t>(200, r.why.size()))}});
+    }
+    std::string terminal = "T_incomplete";
+    if (st.clarify) {
+      terminal = "T_ask";
+    } else if (st.done) {
+      bool edited = false;
+      for (const auto& j : st.jobs) {
+        if (j.tipo == "edit" && j.ok) {
+          edited = true;
+          break;
+        }
+      }
+      terminal = edited ? "T_edit" : "T_close";
+    } else if (!res.error.empty()) {
+      terminal = "T_crash";
+    }
+    nlohmann::json closed = nlohmann::json::object();
+    if (st.done || st.clarify) {
+      closed = {{"do", res.last_do},
+                {"why", res.last_why},
+                {"reply", st.clarify ? st.pending_question : st.reply},
+                {"cubre", st.edit_cubre},
+                {"falta", st.edit_falta}};
+    }
+    nlohmann::json llm = nlohmann::json::object();
+    {
+      int total = 0;
+      for (const auto& [role, t] : *tally) {
+        llm[role] = t.calls;
+        total += t.calls;
+      }
+      llm["total"] = total;
+    }
+    const nlohmann::json summary{
+        {"prompt_head", prompt.substr(0, std::min<std::size_t>(300, prompt.size()))},
+        {"closed", closed},
+        {"jobs", std::move(jobs)},
+        {"verify_reports", std::move(reports)},
+        {"crash", res.error},
+        {"verifier_enabled", verifier_on},
+        {"refuter_enabled", refuter_on},
+        {"session",
+         {{"terminal_code", terminal},
+          {"n_explore", tuide::admin_count_explore_jobs(st)},
+          {"n_pilot_turns", res.proposes},
+          {"n_parse_reject", res.parse_rejects},
+          {"n_confirm_reject", res.confirm_rejects},
+          {"max_turns_hit", !st.done && !st.clarify},
+          {"omit_gate", omit_any},
+          {"llm_calls", std::move(llm)}}}};
+    std::ofstream sout(fs::path(out_dir) / "summary.json");
+    sout << summary.dump(2) << '\n';
   }
   const auto state_json = tuide::admin_state_to_json(st);
   {

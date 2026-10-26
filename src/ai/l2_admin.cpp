@@ -5568,6 +5568,11 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
       // degenerado (p.ej. el modelo escribiendo razonamiento en prosa en vez
       // de JSON) no tumbe una sesión que iba bien encaminada.
       const bool format_failure = !ola.ok;
+      if (format_failure) {
+        ++result.parse_rejects;
+      } else {
+        ++result.confirm_rejects;
+      }
       const bool within_format_grace =
           format_failure && st->format_reject_streak < kAdminMaxFormatRejectStreak;
       if (within_format_grace) {
@@ -5621,6 +5626,8 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
     explore_cap_rejects = 0;
     st->format_reject_streak = 0;
     ++st->proposes;
+    result.last_do = admin_do_name(ola.do_kind);
+    result.last_why = ola.why;
 
     // Verificador adversarial antes de aceptar editar/cerrar (si hay notebook).
     // Saltar con brain scripted (baterías/unit) — no consumir el guion. También se
@@ -5639,6 +5646,14 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
           }
           note << ")";
           ui_note(opts, note.str());
+        }
+        {
+          AdminVerifyRecord rec;
+          rec.trigger = ola.do_kind == AdminDo::Editar ? "editar" : "cerrar";
+          rec.veredicto = st->last_verify_verdict.empty() ? "dudoso" : st->last_verify_verdict;
+          rec.omit_gate = true;
+          rec.why = "tope de pases; se omite el gate (NO absuelve)";
+          result.verify_reports.push_back(std::move(rec));
         }
         if (st->last_verify_verdict == "refuta" || st->last_verify_verdict == "dudoso") {
           std::ostringstream warn;
@@ -5661,6 +5676,15 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
         }
         st->last_verify_verdict = vr.veredicto;
         st->last_verify_why = vr.why;
+        {
+          AdminVerifyRecord rec;
+          rec.trigger = ola.do_kind == AdminDo::Editar ? "editar" : "cerrar";
+          rec.veredicto = vr.veredicto;
+          rec.blocks = vr.blocks;
+          rec.shortcut = vr.shortcut;
+          rec.why = vr.why;
+          result.verify_reports.push_back(std::move(rec));
+        }
         {
           std::ostringstream line;
           line << "→ Veredicto: " << verdicto_verify_ui(vr.veredicto);
