@@ -402,15 +402,45 @@ antes de seguir.
 > `./compile.sh`, el patrón de binarios de test sueltos (sin `ctest` que
 > invocar) y `.claude/` entre los árboles excluidos.
 >
-> Pendiente de M4: sesiones navegables (4.3), `@file` (4.4), memoria durable (4.5).
+> **M4.3 implementado.** `admin_clear_session` era un `remove_all` y corría en
+> cada arranque en frío, en `/new` y al abrir una consulta que no continuaba la
+> anterior: el notebook de ayer desaparecía sin preguntar. Ahora la sesión se
+> mueve a `.tuide/ai/sessions/<timestamp>/`, con `/sessions` para listarlas y
+> `/resume [id]` para seguir una. **Reanudar copia, no mueve**, así que
+> ramificar sale gratis: recuperar una investigación vieja no te cuesta la
+> actual (se archiva antes). Una sesión sin consulta ni evidencia se descarta en
+> vez de ensuciar el historial, y se poda a 20.
+>
+> **M4.5 implementado.** `.tuide/ai/memory.md` + `/remember`, `/memory`,
+> `/forget <n>`, cargado en el prefijo inmutable junto al contrato. Lo escribe
+> el usuario, no el agente: M4.1 mostró que lo que paga es el hecho escrito por
+> quien conoce el repo, y una memoria autoescrita necesita un filtro de calidad
+> que no existe.
+>
+> **Tercer hallazgo de la misma familia (y el más caro de los tres).** Inyectar
+> tampoco bastó aquí, una capa más abajo: **el verificador solo ve el notebook
+> tipado**, así que una afirmación apoyada en el contrato o en la memoria es
+> indemostrable por construcción. Preguntado *"¿los tests de l2_wave que fallan
+> son una regresión de mi trabajo?"* —con la respuesta en la memoria— el piloto
+> se pasó 10 turnos persiguiendo stubs de git y murió en el tope de verificación
+> con `dudoso`, dos veces. Con el verificador recibiendo ambos bloques: **2
+> llamadas** y responde desde la memoria. Sigue prefiriendo `ask_user` a cerrar
+> (bucket P11), lo cual para una atribución causal es defendible.
+>
+> Patrón a retener para M1/M3: **cada vez que se añade una fuente de verdad
+> nueva, hay que declararla evidencia en los tres sitios** (prompt del piloto,
+> prompt del verificador, y el harness que mide). Olvidar uno no da un error:
+> da rondas de más.
+>
+> Pendiente de M4: `@file` (4.4).
 
 | # | Trabajo | Aceptación |
 |---|---|---|
 | 4.1 | ✅ **HECHO** — `AGENTS.md` (raíz + global del usuario) en el prefijo inmutable: comandos de build/test, convenciones, zonas prohibidas | el agente compila con el comando del proyecto sin que se lo digas |
 | 4.2 | ✅ **HECHO** — `/init` genera el `AGENTS.md` inicial desde el árbol (`src/ai/project_contract.*`) | proyecto nuevo → contrato útil en un comando |
-| 4.3 | Sesiones: `/sessions`, `/resume`, branch; **no borrar al arrancar** (hoy `admin_clear_session` en boot) | reabrir la app y continuar la investigación de ayer |
+| 4.3 | ✅ **HECHO** — sesiones archivadas en `.tuide/ai/sessions/`, `/sessions`, `/resume [id]`; el arranque y `/new` archivan en vez de borrar | reabrir la app y continuar la investigación de ayer |
 | 4.4 | `@file` / `@símbolo` en el input (ya existen fuzzy matcher e índice de símbolos) | adjuntar contexto sin describirlo en prosa |
-| 4.5 | Memoria durable `.tuide/ai/memory.md` + tool `remember` | "usa siempre `tools/compile.sh`" persiste entre sesiones |
+| 4.5 | ✅ **HECHO** — memoria durable `.tuide/ai/memory.md` + `/remember`, `/memory`, `/forget` | "usa siempre `./compile.sh`" persiste entre sesiones |
 
 ### M5 — Amputación del lastre (≈1 semana) · *hace baratos los demás hitos*
 
