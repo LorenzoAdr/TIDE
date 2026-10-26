@@ -367,6 +367,23 @@ resolve_token() {
       matches+=("${path}")
     fi
   done <<<"${rows}"
+  # Un token de tamaño ("3b", "7b") no puede colar por el medio de otro nombre:
+  # "A3B" de Qwen3-Coder-Next-80B-A3B contiene "3b", así que `--llm 3b` elegía
+  # en silencio un modelo de 80B. Si hay coincidencias en frontera de palabra,
+  # solo esas valen.
+  if [[ "${lower}" =~ ^[0-9]+b$ && "${#matches[@]}" -gt 0 ]]; then
+    local strict=() m mbase
+    for m in "${matches[@]}"; do
+      mbase="$(basename "${m}" | tr '[:upper:]' '[:lower:]')"
+      if [[ "${mbase}" =~ (^|[^a-z0-9])${lower}([^a-z0-9]|$) ]]; then
+        strict+=("${m}")
+      fi
+    done
+    if [[ "${#strict[@]}" -eq 0 ]]; then
+      die "no hay GGUF ${kind} de tamaño '${token}' (descartado por coincidencia parcial: ${matches[*]})"
+    fi
+    matches=("${strict[@]}")
+  fi
   if [[ "${#matches[@]}" -eq 1 ]]; then
     printf '%s\n' "${matches[0]}"
     return 0
