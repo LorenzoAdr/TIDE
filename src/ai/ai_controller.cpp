@@ -28,6 +28,7 @@
 #include "ai/level2_debrief.hpp"
 #include "ai/level2_session.hpp"
 #include "ai/llama_net.hpp"
+#include "ai/ai_memory.hpp"
 #include "ai/model_store.hpp"
 #include "ai/project_contract.hpp"
 #include "ai/repo_map.hpp"
@@ -411,7 +412,10 @@ void AiController::set_deps(AiControllerDeps deps) {
       AdminState st;
       std::string err;
       if (admin_load_state(root, &st, &err) && !st.clarify) {
-        (void)admin_clear_session(root, nullptr);
+        // Arranque en frío: la investigación anterior se ARCHIVA, no se borra
+        // (/sessions, /resume). Antes `remove_all` se llevaba por delante el
+        // notebook de ayer sin preguntar.
+        (void)admin_archive_session(root, nullptr, nullptr);
       }
     }
   }
@@ -783,8 +787,11 @@ void AiController::clear_ai_session(bool clear_transcript) {
   clear_pending_insert();
   if (!root.empty()) {
     std::string err;
-    if (!admin_clear_session(root, &err) && !err.empty()) {
-      append("Reset: no se pudo limpiar sesión admin — " + err);
+    std::string archived;
+    if (!admin_archive_session(root, &archived, &err) && !err.empty()) {
+      append("Reset: no se pudo archivar la sesión admin — " + err);
+    } else if (!archived.empty()) {
+      append("Sesión anterior archivada como " + archived + " (/sessions para verla)");
     }
     err.clear();
     if (!Level2Session::clear_session(root, &err)) {
@@ -1224,7 +1231,7 @@ void AiController::run_admin_async(const std::string& message) {
         mark_snapshot_baseline();
       }
     } else {
-      (void)admin_clear_session(root, nullptr);
+      (void)admin_archive_session(root, nullptr, nullptr);
       st.consulta = message;
       mark_snapshot_baseline();
     }
@@ -1925,6 +1932,105 @@ void AiController::run_insert_async(const std::string& user_message, AiInsertAnc
   });
 }
 
+void AiController::run_memory_command(const std::string& arg) {
+  const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+  if (root.empty()) {
+    append("✗ no hay workspace abierto");
+    return;
+  }
+  std::string err;
+  if (arg.rfind("add ", 0) == 0) {
+    const std::string fact = arg.substr(4);
+    if (!ai_memory_add(root, fact, &err)) {
+      append("✗ /remember: " + err);
+      return;
+    }
+    append("Recordado. Va en el prompt de cada consulta, como el contrato.");
+    append("  " + ai_memory_path(root));
+    return;
+  }
+  if (arg.rfind("forget ", 0) == 0) {
+    const std::string which = arg.substr(7);
+    const int idx = std::atoi(which.c_str());
+    if (idx <= 0) {
+      append("uso: /forget <nº de /memory>");
+      return;
+    }
+    if (!ai_memory_remove(root, idx, &err)) {
+      append("✗ /forget: " + err);
+      return;
+    }
+    append("Olvidado el hecho " + std::to_string(idx) + ".");
+    return;
+  }
+  const auto items = ai_memory_items(root);
+  if (items.empty()) {
+    append("Memoria vacía. `/remember <hecho>` para añadir algo que no quieras repetir.");
+    return;
+  }
+  append("=== memoria (" + std::to_string(items.size()) + ") ===");
+  for (std::size_t i = 0; i < items.size(); ++i) {
+    append("  " + std::to_string(i + 1) + ". " + items[i]);
+  }
+  append("/forget <n> para quitar uno.");
+}
+
+void AiController::run_sessions_command(const std::string& arg) {
+  const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+  if (root.empty()) {
+    append("✗ no hay workspace abierto");
+    return;
+  }
+  if (arg.rfind("resume", 0) == 0) {
+    const std::string id = arg.size() > 6 ? arg.substr(7) : std::string{};
+    std::string err;
+    if (!admin_resume_session(root, id, &err)) {
+      append("✗ /resume: " + err);
+      return;
+    }
+    AdminState st;
+    std::string load_err;
+    (void)admin_load_state(root, &st, &load_err);
+    append("Sesión reanudada" + (id.empty() ? std::string(" (la más reciente)") : (" " + id)) +
+           ".");
+    if (!st.consulta.empty()) {
+      append("  última consulta: " + st.consulta);
+    }
+    append("  notebook: " + std::to_string(st.notebook.size()) + " evidencias · episodios: " +
+           std::to_string(st.episodes.size()));
+    if (st.clarify && !st.pending_question.empty()) {
+      append("  quedó esperando tu respuesta: " + st.pending_question);
+    }
+    append("La copia archivada sigue ahí: reanudar ramifica, no mueve.");
+    return;
+  }
+  const auto all = admin_list_sessions(root);
+  if (all.empty()) {
+    append("No hay sesiones archivadas todavía.");
+    append("Se archivan al arrancar y con /new; antes se borraban.");
+    return;
+  }
+  append("=== sesiones (" + std::to_string(all.size()) + ") ===");
+  for (const auto& s : all) {
+    std::string line = "  " + s.id;
+    if (!s.consulta.empty()) {
+      std::string q = s.consulta;
+      if (q.size() > 70) {
+        q.resize(70);
+        q += "…";
+      }
+      line += "  " + q;
+    }
+    line += "  [" + std::to_string(s.notebook) + " ev · " + std::to_string(s.episodes) + " ep";
+    if (s.clarify) {
+      line += " · esperando respuesta";
+    }
+    line += "]";
+    append(line);
+  }
+  append("/resume <id> para continuar una (la actual se archiva antes).");
+}
+
 void AiController::run_project_init(bool force) {
   const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
   if (root.empty()) {
@@ -2473,6 +2579,12 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
       case AiRouteKind::ProjectInit:
         kind = "project_init";
         break;
+      case AiRouteKind::Memory:
+        kind = "memory";
+        break;
+      case AiRouteKind::Sessions:
+        kind = "sessions";
+        break;
     }
     ai_trace(AiTraceChannel::L0, "dispatch",
              std::string("{\"kind\":\"") + kind + "\",\"tool\":\"" +
@@ -2488,6 +2600,8 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
       append("  /help  /build|/compile  /launch  /search <q>  /diag  /git [status|pull|branch|log]");
       append("  /read <path>  /ls [filter]  /symbols <q>  /hover [path:line:col]");
       append("  /init [--force]  genera AGENTS.md (contrato que el piloto lee cada consulta)");
+      append("  /remember <hecho>  /memory  /forget <n>   memoria durable del agente");
+      append("  /sessions  /resume [id]   investigaciones anteriores (ya no se borran)");
       append("  /model […]  /backend local|remote  /trace …  /cancel  /new|/reset");
       append("Legacy L0/L1/L2 (desactivado en hot path; ai.admin_enabled=false para reactivar):");
       append("  /l1 /explain /l2_* /mode agent|ask|plan|git");
@@ -2515,6 +2629,12 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
       break;
     case AiRouteKind::ProjectInit:
       run_project_init(route.arg.find("force") != std::string::npos);
+      break;
+    case AiRouteKind::Memory:
+      run_memory_command(route.arg);
+      break;
+    case AiRouteKind::Sessions:
+      run_sessions_command(route.arg);
       break;
     case AiRouteKind::CancelAgent:
       cancel_current();

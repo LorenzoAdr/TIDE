@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "ai/ai_memory.hpp"
 #include "ai/l2_admin.hpp"
 #include "ai/l2_grammar.hpp"
 
@@ -161,6 +162,135 @@ int main() {
     const std::string big = tuide::admin_load_project_contract(root.string(), 500);
     expect(big.size() <= 700 && big.find("recortado") != std::string::npos,
            "contrato recortado con marca, got " + std::to_string(big.size()));
+    fs::remove_all(root, ec);
+  }
+  {
+    // M4.3: archivar en vez de destruir → /sessions, /resume, ramificación.
+    const fs::path root = fs::temp_directory_path() / "tuide_sessions_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+
+    // Sesión vacía: no merece entrada en el historial.
+    {
+      AdminState empty;
+      expect(tuide::admin_save_state(root.string(), empty, nullptr), "guarda sesión vacía");
+      std::string id;
+      expect(tuide::admin_archive_session(root.string(), &id, nullptr), "archiva vacía ok");
+      expect(id.empty(), "una sesión sin consulta ni evidencia no se archiva");
+      expect(tuide::admin_list_sessions(root.string()).empty(), "historial sigue vacío");
+    }
+
+    // Sesión con trabajo: se archiva y el slot activo queda libre.
+    AdminState first;
+    first.consulta = "dónde está el gutter";
+    first.reply = "en editor_gutter.cpp";
+    {
+      AdminJob j;
+      j.id = 1;
+      j.tipo = "explore";
+      j.ok = true;
+      j.veredicto = "encontrado";
+      j.summary = "gutter en editor_gutter.cpp:120";
+      AdminJobResult jr;
+      jr.ok = true;
+      jr.summary = j.summary;
+      jr.paths.push_back("src/ui/editor_gutter.cpp");
+      tuide::admin_notebook_append(&first, j, jr);
+      first.jobs.push_back(j);
+    }
+    expect(tuide::admin_save_state(root.string(), first, nullptr), "guarda sesión con trabajo");
+    std::string id1;
+    expect(tuide::admin_archive_session(root.string(), &id1, nullptr), "archiva con trabajo");
+    expect(!id1.empty(), "devuelve el id de archivo");
+    expect(!fs::exists(fs::path(tuide::admin_dir(root.string())) / "state.json"),
+           "el slot activo queda libre tras archivar");
+    {
+      const auto all = tuide::admin_list_sessions(root.string());
+      expect(all.size() == 1, "una sesión archivada, got " + std::to_string(all.size()));
+      if (!all.empty()) {
+        expect(all[0].consulta == "dónde está el gutter", "el listado trae la consulta");
+        expect(all[0].notebook == 1 && all[0].jobs == 1, "y el recuento de evidencia");
+      }
+    }
+
+    // Reanudar: copia al slot activo y NO borra la archivada (ramificar).
+    AdminState second;
+    second.consulta = "otra cosa";
+    second.jobs.push_back(AdminJob{});
+    expect(tuide::admin_save_state(root.string(), second, nullptr), "guarda segunda sesión");
+    std::string rerr;
+    expect(tuide::admin_resume_session(root.string(), id1, &rerr), "reanuda por id: " + rerr);
+    {
+      AdminState loaded;
+      std::string lerr;
+      expect(tuide::admin_load_state(root.string(), &loaded, &lerr), "carga la reanudada");
+      expect(loaded.consulta == "dónde está el gutter", "el slot activo es la reanudada");
+      expect(loaded.notebook.size() == 1, "con su notebook");
+      const auto all = tuide::admin_list_sessions(root.string());
+      expect(all.size() == 2, "la segunda se archivó al reanudar, got " +
+                                  std::to_string(all.size()));
+      bool still_there = false;
+      for (const auto& s2 : all) {
+        if (s2.id == id1) {
+          still_there = true;
+        }
+      }
+      expect(still_there, "la archivada reanudada sigue en el historial (ramifica, no mueve)");
+    }
+
+    // /resume sin id → la más reciente. Ids ilegales rechazados.
+    expect(tuide::admin_resume_session(root.string(), "", &rerr), "reanuda sin id: " + rerr);
+    expect(!tuide::admin_resume_session(root.string(), "../fuera", &rerr), "id con .. rechazado");
+    expect(!tuide::admin_resume_session(root.string(), "no-existe", &rerr), "id inexistente");
+    fs::remove_all(root, ec);
+  }
+  {
+    // M4.5: memoria durable.
+    const fs::path root = fs::temp_directory_path() / "tuide_memory_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root, ec);
+    std::string err;
+    expect(tuide::ai_memory_load(root.string()).empty(), "sin memoria el bloque está vacío");
+    expect(tuide::ai_memory_add(root.string(), "usa siempre ./compile.sh", &err),
+           "añade un hecho: " + err);
+    expect(!tuide::ai_memory_add(root.string(), "usa siempre ./compile.sh", &err),
+           "no duplica el mismo hecho");
+    expect(tuide::ai_memory_add(root.string(), "el panel AI vive en console_panel.cpp", &err),
+           "añade otro");
+    {
+      const auto items = tuide::ai_memory_items(root.string());
+      expect(items.size() == 2, "dos hechos, got " + std::to_string(items.size()));
+      expect(items[0] == "usa siempre ./compile.sh", "orden de escritura preservado");
+    }
+    const std::string block = tuide::ai_memory_load(root.string());
+    expect(block.find("compile.sh") != std::string::npos, "el bloque trae los hechos");
+
+    // Llega al prompt y antes del presupuesto (prefijo cacheable).
+    AdminState st;
+    st.consulta = "compila";
+    const std::string prompt = admin_user_prompt(st, kAdminMaxProposes, kAdminMaxSpawns,
+                                                 root.string(), kAdminMaxExplores, {}, block);
+    expect(prompt.find("## Memoria") != std::string::npos, "la memoria llega al prompt");
+    expect(prompt.find("## Memoria") < prompt.find("## Presupuesto"),
+           "memoria en el prefijo inmutable");
+
+    // Recorte por el principio: se pierde la memoria vieja, no la nueva.
+    for (int i = 0; i < 20; ++i) {
+      (void)tuide::ai_memory_add(root.string(), "hecho relleno número " + std::to_string(i), &err);
+    }
+    const std::string capped = tuide::ai_memory_load(root.string(), 200);
+    expect(capped.size() <= 220, "respeta el tope, got " + std::to_string(capped.size()));
+    expect(capped.find("número 19") != std::string::npos, "conserva el más reciente");
+    expect(capped.find("compile.sh") == std::string::npos, "y suelta el más antiguo");
+
+    expect(tuide::ai_memory_remove(root.string(), 1, &err), "borra por índice: " + err);
+    expect(!tuide::ai_memory_remove(root.string(), 999, &err), "índice fuera de rango");
+    {
+      const auto items = tuide::ai_memory_items(root.string());
+      expect(!items.empty() && items[0] != "usa siempre ./compile.sh", "el borrado fue el 1");
+    }
     fs::remove_all(root, ec);
   }
   {

@@ -272,6 +272,8 @@ struct AdminLoopOpts {
   // Contrato del proyecto ya cargado. Vacío = run_admin_loop lo lee del disco
   // una vez por consulta (ver admin_load_project_contract).
   std::string project_contract;
+  // Memoria durable ya cargada (ai/ai_memory.hpp). Vacío = se lee del disco.
+  std::string durable_memory;
   std::function<void(const std::string&)> on_line;
   // Streaming del modelo (distinto de on_line, que son líneas del relato):
   //  · on_model_text: prosa de razonamiento, se pinta tal cual;
@@ -304,6 +306,32 @@ const char* admin_spawn_tipo_name(AdminSpawnTipo t);
 AdminSpawnTipo admin_spawn_tipo_parse(const std::string& s);
 
 std::string admin_dir(const std::string& workspace_root);
+// Sesiones archivadas: `.tuide/ai/sessions/<id>/`. El arranque y `/new` ya no
+// destruyen la investigación anterior, la mueven aquí.
+std::string admin_sessions_dir(const std::string& workspace_root);
+// Tope de sesiones guardadas; al pasarlo se borran las más antiguas.
+inline constexpr int kAdminMaxArchivedSessions = 20;
+
+struct AdminSessionInfo {
+  std::string id;        // "20261026-193012"
+  std::string consulta;  // última consulta de esa sesión
+  std::string reply;     // recorte de la respuesta final
+  int episodes = 0;
+  int jobs = 0;
+  int notebook = 0;
+  bool clarify = false;  // quedó esperando respuesta del usuario
+};
+
+// Mueve la sesión activa a `sessions/<id>/`. No-op (true, id vacío) si no hay
+// nada que guardar: una sesión sin consulta ni evidencia no merece entrada.
+bool admin_archive_session(const std::string& workspace_root, std::string* id_out,
+                           std::string* err);
+// Archivadas, de más reciente a más antigua.
+std::vector<AdminSessionInfo> admin_list_sessions(const std::string& workspace_root);
+// Copia una archivada al slot activo (archivando primero lo que hubiera). La
+// archivada NO se borra: reanudar es ramificar, no mover.
+bool admin_resume_session(const std::string& workspace_root, const std::string& id,
+                          std::string* err);
 std::string admin_state_path(const std::string& workspace_root);
 std::string admin_notebook_path(const std::string& workspace_root);
 bool admin_is_continuable(const std::string& workspace_root);
@@ -456,7 +484,8 @@ std::string admin_load_project_contract(const std::string& workspace_root,
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
                               const std::string& workspace_root = {},
                               int max_explores = kAdminMaxExplores,
-                              const std::string& project_contract = {});
+                              const std::string& project_contract = {},
+                              const std::string& durable_memory = {});
 
 AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& ops,
                                const AdminLoopOpts& opts);

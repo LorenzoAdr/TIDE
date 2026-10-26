@@ -1,10 +1,13 @@
 #include "ai/l2_admin.hpp"
 
+#include "ai/ai_memory.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
+#include <iomanip>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -654,6 +657,207 @@ bool admin_is_continuable(const std::string& workspace_root) {
 bool admin_should_keep_session(const AdminState& /*st*/, const std::string& /*message*/) {
   // La sesión mid-run nunca se descarta por heurística de tema: solo limpia el
   // arranque de la app (AiController::set_deps) o un Reset/borrar explícito.
+  return true;
+}
+
+std::string admin_sessions_dir(const std::string& workspace_root) {
+  return (fs::path(workspace_root) / ".tuide" / "ai" / "sessions").string();
+}
+
+namespace {
+
+// Resumen legible de un state.json archivado, sin cargar el AdminState entero.
+AdminSessionInfo session_info_from(const fs::path& dir) {
+  AdminSessionInfo info;
+  info.id = dir.filename().string();
+  const std::string body = read_file(dir / "state.json");
+  if (body.empty()) {
+    return info;
+  }
+  try {
+    const auto j = nlohmann::json::parse(body);
+    info.consulta = json_str(j, "consulta");
+    info.reply = json_str(j, "reply");
+    utf8_resize(&info.reply, 160);
+    if (j.contains("episodes") && j["episodes"].is_array()) {
+      info.episodes = static_cast<int>(j["episodes"].size());
+    }
+    if (j.contains("jobs") && j["jobs"].is_array()) {
+      info.jobs = static_cast<int>(j["jobs"].size());
+    }
+    if (j.contains("notebook") && j["notebook"].is_array()) {
+      info.notebook = static_cast<int>(j["notebook"].size());
+    }
+    if (j.contains("clarify") && j["clarify"].is_boolean()) {
+      info.clarify = j["clarify"].get<bool>();
+    }
+  } catch (...) {
+  }
+  return info;
+}
+
+bool session_worth_keeping(const fs::path& dir) {
+  const AdminSessionInfo info = session_info_from(dir);
+  return !info.consulta.empty() || info.jobs > 0 || info.notebook > 0 || info.episodes > 0;
+}
+
+void prune_sessions(const fs::path& root_dir, int keep) {
+  std::vector<fs::path> dirs;
+  std::error_code ec;
+  for (const auto& e : fs::directory_iterator(root_dir, ec)) {
+    if (e.is_directory(ec)) {
+      dirs.push_back(e.path());
+    }
+  }
+  if (static_cast<int>(dirs.size()) <= keep) {
+    return;
+  }
+  // El id es un timestamp: ordenar por nombre ordena por fecha.
+  std::sort(dirs.begin(), dirs.end());
+  const std::size_t drop = dirs.size() - static_cast<std::size_t>(keep);
+  for (std::size_t i = 0; i < drop; ++i) {
+    std::error_code rm;
+    fs::remove_all(dirs[i], rm);
+  }
+}
+
+std::string session_stamp() {
+  const auto now = std::chrono::system_clock::now();
+  const std::time_t t = std::chrono::system_clock::to_time_t(now);
+  std::tm tm{};
+  ::localtime_r(&t, &tm);
+  std::ostringstream out;
+  out << std::put_time(&tm, "%Y%m%d-%H%M%S");
+  return out.str();
+}
+
+}  // namespace
+
+bool admin_archive_session(const std::string& workspace_root, std::string* id_out,
+                           std::string* err) {
+  if (id_out) {
+    id_out->clear();
+  }
+  if (workspace_root.empty()) {
+    if (err) {
+      *err = "sin workspace";
+    }
+    return false;
+  }
+  const fs::path active = admin_dir(workspace_root);
+  std::error_code ec;
+  if (!fs::exists(active, ec)) {
+    return true;  // nada que archivar
+  }
+  if (!session_worth_keeping(active)) {
+    // Sesión vacía (se abrió el panel y no se preguntó nada): se descarta en
+    // vez de dejar una entrada inútil en el historial.
+    fs::remove_all(active, ec);
+    return true;
+  }
+  const fs::path store = admin_sessions_dir(workspace_root);
+  fs::create_directories(store, ec);
+  std::string id = session_stamp();
+  fs::path dest = store / id;
+  for (int suffix = 2; fs::exists(dest, ec) && suffix < 100; ++suffix) {
+    id = session_stamp() + "-" + std::to_string(suffix);
+    dest = store / id;
+  }
+  fs::rename(active, dest, ec);
+  if (ec) {
+    // Cruzar sistemas de ficheros: copiar y borrar.
+    std::error_code cp;
+    fs::copy(active, dest, fs::copy_options::recursive, cp);
+    if (cp) {
+      if (err) {
+        *err = cp.message();
+      }
+      return false;
+    }
+    fs::remove_all(active, cp);
+  }
+  prune_sessions(store, kAdminMaxArchivedSessions);
+  if (id_out) {
+    *id_out = id;
+  }
+  return true;
+}
+
+std::vector<AdminSessionInfo> admin_list_sessions(const std::string& workspace_root) {
+  std::vector<AdminSessionInfo> out;
+  if (workspace_root.empty()) {
+    return out;
+  }
+  std::error_code ec;
+  const fs::path store = admin_sessions_dir(workspace_root);
+  if (!fs::exists(store, ec)) {
+    return out;
+  }
+  std::vector<fs::path> dirs;
+  for (const auto& e : fs::directory_iterator(store, ec)) {
+    if (e.is_directory(ec)) {
+      dirs.push_back(e.path());
+    }
+  }
+  std::sort(dirs.begin(), dirs.end(), std::greater<fs::path>());
+  out.reserve(dirs.size());
+  for (const auto& d : dirs) {
+    out.push_back(session_info_from(d));
+  }
+  return out;
+}
+
+bool admin_resume_session(const std::string& workspace_root, const std::string& id,
+                          std::string* err) {
+  if (workspace_root.empty()) {
+    if (err) {
+      *err = "sin workspace";
+    }
+    return false;
+  }
+  std::string wanted = trim_copy(id);
+  if (wanted.empty()) {
+    const auto all = admin_list_sessions(workspace_root);
+    if (all.empty()) {
+      if (err) {
+        *err = "no hay sesiones archivadas";
+      }
+      return false;
+    }
+    wanted = all.front().id;
+  }
+  // Un id no puede escapar del almacén.
+  if (wanted.find('/') != std::string::npos || wanted.find("..") != std::string::npos) {
+    if (err) {
+      *err = "id de sesión inválido: " + wanted;
+    }
+    return false;
+  }
+  std::error_code ec;
+  const fs::path src = fs::path(admin_sessions_dir(workspace_root)) / wanted;
+  if (!fs::is_directory(src, ec)) {
+    if (err) {
+      *err = "no existe la sesión " + wanted;
+    }
+    return false;
+  }
+  std::string archive_err;
+  if (!admin_archive_session(workspace_root, nullptr, &archive_err)) {
+    if (err) {
+      *err = "no se pudo guardar la sesión actual: " + archive_err;
+    }
+    return false;
+  }
+  const fs::path active = admin_dir(workspace_root);
+  fs::create_directories(active.parent_path(), ec);
+  // Copia, no mueve: la archivada sigue ahí, así que reanudar es ramificar.
+  fs::copy(src, active, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+  if (ec) {
+    if (err) {
+      *err = ec.message();
+    }
+    return false;
+  }
   return true;
 }
 
@@ -4382,6 +4586,20 @@ AdminVerifyResult admin_run_verify(AdminState* st, L2Brain& brain, const std::st
 
   std::ostringstream user;
   user << "## Consulta del usuario\n" << st->consulta << "\n\n";
+  if (!opts.project_contract.empty()) {
+    user << "## Contrato del proyecto (lo escribió el usuario de este repo)\n"
+         << opts.project_contract << "\n";
+  }
+  if (!opts.durable_memory.empty()) {
+    user << "## Memoria (hechos que el usuario le dijo al agente)\n"
+         << opts.durable_memory << "\n";
+  }
+  if (!opts.project_contract.empty() || !opts.durable_memory.empty()) {
+    user << "Esos dos bloques son EVIDENCIA, no suposiciones del modelo: los\n"
+            "escribió el humano que conoce el repo. Si responden la consulta,\n"
+            "sostiene citándolos; no exijas un `path:línea` para algo que el\n"
+            "usuario ya ha afirmado.\n\n";
+  }
   user << facts_blob << "\n";
   const int verify_max_steps =
       opts.verify_max_steps > 0 ? opts.verify_max_steps : kAdminVerifyMaxSteps;
@@ -4920,7 +5138,7 @@ mí y cierra" que salte el verificador.
 el flujo X e Y", "¿dónde se hace Z?") SIEMPRE se anclan con evidencia real del
 código (grep/read) — nunca respondas solo de memoria del modelo sin ningún spawn.
 El notebook que ya figura en el prompt es evidencia reunida, no memoria del modelo.
-El CONTRATO DEL PROYECTO (AGENTS.md), si aparece arriba, TAMBIÉN es evidencia: lo
+La MEMORIA y el CONTRATO DEL PROYECTO (AGENTS.md), si aparecen arriba, TAMBIÉN son evidencia: lo
 escribió el usuario de este repo. Si responde a la consulta (comandos de build/test,
 convenciones, zonas prohibidas), cierra citándolo — sin spawn y sin re-descubrirlo
 leyendo CMakeLists. Spawnea solo para lo que el contrato NO diga.
@@ -4940,7 +5158,7 @@ el flujo X e Y", "¿dónde se hace Z?") también se atomizan: un explore por pol
 o al menos ancla la respuesta con evidencia real del código (grep/read) —
 nunca respondas solo de memoria del modelo sin ningún spawn.
 El notebook que ya figura en el prompt es evidencia reunida, no memoria del modelo.
-El CONTRATO DEL PROYECTO (AGENTS.md), si aparece arriba, TAMBIÉN es evidencia: lo
+La MEMORIA y el CONTRATO DEL PROYECTO (AGENTS.md), si aparecen arriba, TAMBIÉN son evidencia: lo
 escribió el usuario de este repo. Si responde a la consulta (comandos de build/test,
 convenciones, zonas prohibidas), cierra citándolo — sin spawn y sin re-descubrirlo
 leyendo CMakeLists. Spawnea solo para lo que el contrato NO diga.
@@ -5018,7 +5236,8 @@ std::string admin_load_project_contract(const std::string& workspace_root, int m
 
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
                               const std::string& workspace_root, int max_explores,
-                              const std::string& project_contract) {
+                              const std::string& project_contract,
+                              const std::string& durable_memory) {
   // Orden pensado para la caché de prefijo del proveedor: primero lo inmutable
   // durante la consulta (root, consulta, episodios, diálogo, UI), luego lo que
   // solo CRECE por el final (notebook, inbox), y al final lo que cambia en cada
@@ -5037,6 +5256,10 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
         << project_contract
         << "\nManda sobre tus suposiciones: comandos, convenciones y zonas "
            "prohibidas salen de aquí, no de lo que suele hacerse.\n\n";
+  }
+  if (!durable_memory.empty()) {
+    out << "## Memoria (hechos que te dijo el usuario, no los re-descubras)\n"
+        << durable_memory << "\n";
   }
   out << "## Consulta\n" << st.consulta << "\n\n";
   if (!st.episodes.empty()) {
@@ -5227,11 +5450,27 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
   if (!contract.empty()) {
     ui_note(opts, "→ Contrato del proyecto cargado (AGENTS.md)");
   }
+  const std::string memory = !opts.durable_memory.empty()
+                                 ? opts.durable_memory
+                                 : ai_memory_load(opts.workspace_root);
+  if (!memory.empty()) {
+    // Contar sobre el bloque ya cargado: `opts.workspace_root` puede no ser el
+    // proyecto (en el harness es el directorio de sesión) y daría 0 hechos.
+    const int n_facts =
+        static_cast<int>(std::count(memory.begin(), memory.end(), '\n'));
+    ui_note(opts, "→ Memoria cargada (" + std::to_string(n_facts) + " hechos)");
+  }
+  // Copia con contrato y memoria resueltos: el verificador también los necesita
+  // (si no, cualquier afirmación apoyada en ellos es indemostrable y acaba en
+  // `dudoso` eterno — visto en vivo con una pregunta que la memoria respondía).
+  AdminLoopOpts eff = opts;
+  eff.project_contract = contract;
+  eff.durable_memory = memory;
   int explore_cap_rejects = 0;
   while (!st->done && !st->clarify && !cancelled(opts)) {
     const std::string sys = admin_system_prompt(opts.explorer_cumulative_mode);
     const std::string user =
-        admin_user_prompt(*st, max_p, max_s, opts.workspace_root, max_ex, contract);
+        admin_user_prompt(*st, max_p, max_s, opts.workspace_root, max_ex, contract, memory);
     L2BrainRequest req;
     req.system_prompt = sys;
     req.user_prompt = user;
@@ -5399,7 +5638,7 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
         st->verify_reject_pending = false;
       } else {
         AdminVerifyResult vr =
-            admin_run_verify(st, brain, ola.why, opts.workspace_root, opts,
+            admin_run_verify(st, brain, ola.why, opts.workspace_root, eff,
                              ola.do_kind == AdminDo::Editar);
         // P2bis: los shortcuts deterministas no gastan llamada LLM — no
         // deben consumir el presupuesto de kAdminMaxVerifyPasses.
