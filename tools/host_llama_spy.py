@@ -41,9 +41,9 @@ chat_turn_lock = threading.Lock()
 chat_session_lock = threading.Lock()
 chat_session = chat_mem.ChatSession()
 thinking_inject: Optional[bool] = None
-# None = auto: SSE incremental salvo que --thinking on esté activo (ahí el
-# re-homing tardío de <think> puede mover texto entre canales DESPUÉS de
-# haberlo emitido, así que se conserva el volcado al final).
+# None = auto (incremental). El re-homing tardío solo puede mover texto DESDE
+# content HACIA reasoning cuando aparece un </think> en el canal de contenido,
+# así que live_emit retiene únicamente ese tramo y emite el resto en vivo.
 stream_live: Optional[bool] = None
 _last_chat_ctx_lock = threading.Lock()
 _last_chat_ctx: Dict[str, int] = {
@@ -847,27 +847,68 @@ def handle_chat(
         reply
         and sock is not None
         and client_stream
-        and (stream_live if stream_live is not None else (thinking_inject is not True))
+        and (stream_live if stream_live is not None else True)
     )
     live_sent = False
     live_broken = False
+    live_pending: List[str] = []
+    # rehome_think recorta el salto de línea que sigue a </think>; si ese salto
+    # llega en un delta posterior, hay que recortarlo también en vivo para que
+    # el texto emitido coincida carácter a carácter con el volcado del final.
+    live_strip_nl = False
 
-    def live_emit(content: str, reason: str) -> None:
+    def live_write(obj: dict) -> None:
         nonlocal live_sent, live_broken
-        if not live or live_broken or (not content and not reason):
+        if live_broken:
             return
         try:
             if not live_sent:
                 send_sse_open(sock)  # type: ignore[arg-type]
                 live_sent = True
-            if reason:
-                sock.sendall(sse_event({"choices": [{"delta": {"reasoning_content": reason}}]}))  # type: ignore[union-attr]
-            if content:
-                sock.sendall(sse_event({"choices": [{"delta": {"content": content}}]}))  # type: ignore[union-attr]
+            sock.sendall(sse_event(obj))  # type: ignore[union-attr]
         except OSError:
             # El cliente colgó: se deja de emitir, pero la generación sigue para
             # no dejar el backend a medias ni perder el log.
             live_broken = True
+
+    def live_flush(final: bool = False) -> None:
+        """Suelta el contenido retenido, partiendo el bloque <think> si cerró.
+
+        Mientras hay un <think> abierto en el canal de content no se emite nada:
+        es el único texto que el rehome del final puede reclasificar como
+        reasoning. Al cerrar (o al terminar el stream) se emite ya en su canal
+        definitivo, así que el cliente nunca ve un delta en el canal erróneo.
+        """
+        if not live_pending:
+            return
+        buf = "".join(live_pending)
+        joined = "".join(acc)
+        if not final and THINK_OPEN in joined and THINK_CLOSE not in joined:
+            return
+        nonlocal live_strip_nl
+        live_pending.clear()
+        if THINK_CLOSE in buf and THINK_OPEN in buf:
+            moved, answer = rehome_think("", buf)
+            if moved:
+                live_write({"choices": [{"delta": {"reasoning_content": moved}}]})
+            buf = answer
+            live_strip_nl = not buf
+        elif live_strip_nl:
+            buf = _strip_leading_nl(buf)
+            if buf:
+                live_strip_nl = False
+        if buf:
+            live_write({"choices": [{"delta": {"content": buf}}]})
+
+    def live_emit(content: str, reason: str) -> None:
+        if not live or live_broken or (not content and not reason):
+            return
+        # El rehome solo AÑADE a reasoning, nunca le quita: es seguro en vivo.
+        if reason:
+            live_write({"choices": [{"delta": {"reasoning_content": reason}}]})
+        if content:
+            live_pending.append(content)
+        live_flush()
 
     acc: List[str] = []
     acc_reason: List[str] = []
@@ -1069,6 +1110,8 @@ def handle_chat(
     log(f"{tag_label(tag)} {paint(DIM, f'done {dt:.1f}s  {len(text)} chars')}")
     if not reply or sock is None:
         return text, rid, ""
+    if live:
+        live_flush(final=True)
     if live_sent:
         # Ya se fue emitiendo por `live_emit`: solo falta el cierre con el
         # finish_reason y el usage que el upstream reportó.
@@ -2860,7 +2903,7 @@ def main() -> int:
         "--stream-live",
         default="",
         metavar="on|off",
-        help="reenvía cada delta SSE en cuanto llega (default: auto — on salvo --thinking on)",
+        help="reenvía cada delta SSE en cuanto llega (default: on; off = volcado al final)",
     )
     ap.add_argument(
         "--web",
