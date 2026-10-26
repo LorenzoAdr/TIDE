@@ -190,6 +190,41 @@ Estimaciones en semanas de trabajo enfocado (1 persona + asistencia IA).
 > | Prompt reordenado para caché de prefijo | `admin_user_prompt` en `src/ai/l2_admin.cpp` |
 > | GBNF del piloto activado | `tools/l2_battery/features_promoted.json` |
 
+> **Validado en vivo (2026-10-26)** contra el host real
+> (`qwen3.6-27b-q8_0` vía `host_llama_spy` → llama-server), tras arreglar el
+> proxy:
+>
+> | Medida | Antes de M0 | Ahora |
+> |---|---|---|
+> | Eventos SSE en una generación de 48 tokens | 2 (todo al final) | **49**, 47 deltas de contenido |
+> | Primer delta | al 99 % del total (424/428 ms) | **al 12 %** (616 ms de 5342) |
+> | Cadencia de llegada | ráfaga única | un delta cada ~100 ms, el ritmo real del modelo |
+> | `usage` | ausente | `prompt_tokens` / `completion_tokens` reales |
+> | Caché de prefijo | no medible | **explorer 55 %, pilot 47 %** de los tokens de entrada |
+> | Rechazos por formato | 28/100 casos (batería) | **0** en las tres consultas reales |
+> | Reintentos de transporte | n/a | 0 |
+>
+> Primera medición real del lazo de producción (consulta
+> "explícame cómo el explorador decide entre grep y read", veredicto
+> `sostiene`, respuesta correcta citando el bloque de routing):
+>
+> ```json
+> {"llm_calls": 8, "proposes": 3, "spawns": 1, "transport_retries": 0,
+>  "roles": {
+>    "explorer": {"calls": 5, "prompt_tokens": 14239, "cached_prompt_tokens": 7830,
+>                 "completion_tokens": 441, "ms": 110536},
+>    "pilot":    {"calls": 3, "prompt_tokens": 4978,  "cached_prompt_tokens": 2341,
+>                 "completion_tokens": 850, "ms": 116707}}}
+> ```
+>
+> Lo que estos números deciden, y antes no se podía argumentar:
+> **el explorador se come 110 s de los 227 s en 5 llamadas que solo eligen
+> "grep esto / lee aquí"** → `ai.roles.explorer` apuntando a un modelo pequeño
+> es la mitad de la latencia de una consulta sin tocar piloto ni verificador
+> (M0.7, ya implementado, pendiente de configurar). Y el 47 % de caché del
+> piloto es la línea base contra la que medir cualquier cambio futuro del
+> prompt.
+
 Plan original del hito, para referencia:
 
 
