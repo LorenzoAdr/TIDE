@@ -432,14 +432,34 @@ antes de seguir.
 > prompt del verificador, y el harness que mide). Olvidar uno no da un error:
 > da rondas de más.
 >
-> Pendiente de M4: `@file` (4.4).
+> **M4.4 implementado — M4 completo.** `@fichero` se resuelve contra el árbol
+> (basta un sufijo o el nombre; prefiere ruta exacta > sufijo > nombre >
+> subcadena, y a igualdad la ruta más corta), adjunta un extracto y entra como
+> evidencia en el prefijo inmutable, declarada en los dos prompts. Salta los
+> mismos directorios que la búsqueda, así que **no resuelve a la copia de
+> `.claude/worktrees`**. Una `@` pegada a texto no es mención (los correos
+> sobreviven) y lo que no resuelve se reporta en vez de desaparecer.
+>
+> Solo ficheros: `@símbolo` tendría que adivinar entre fichero y símbolo del
+> mismo nombre, y para símbolos ya está el explorador.
+>
+> Medido contra el host real: el recorrido cuesta **67 ms** una vez por consulta,
+> y *"¿qué transportes soporta @llm_client.hpp?"* se respondió en **2 llamadas
+> sin spawns**, citando el fichero y cruzándolo con la memoria durable para
+> nombrar el endpoint realmente en uso. Las tres fuentes humanas (contrato,
+> memoria, mención) operando juntas.
+>
+> **Estado de la suite tras M4:** 12 tests en rojo, los 11 preexistentes más
+> `llama_host_comm_test`, que es una sonda de entorno y falla porque el servidor
+> de embeddings del host (`:18765`) está caído; no enlaza ningún fichero de este
+> trabajo.
 
 | # | Trabajo | Aceptación |
 |---|---|---|
 | 4.1 | ✅ **HECHO** — `AGENTS.md` (raíz + global del usuario) en el prefijo inmutable: comandos de build/test, convenciones, zonas prohibidas | el agente compila con el comando del proyecto sin que se lo digas |
 | 4.2 | ✅ **HECHO** — `/init` genera el `AGENTS.md` inicial desde el árbol (`src/ai/project_contract.*`) | proyecto nuevo → contrato útil en un comando |
 | 4.3 | ✅ **HECHO** — sesiones archivadas en `.tuide/ai/sessions/`, `/sessions`, `/resume [id]`; el arranque y `/new` archivan en vez de borrar | reabrir la app y continuar la investigación de ayer |
-| 4.4 | `@file` / `@símbolo` en el input (ya existen fuzzy matcher e índice de símbolos) | adjuntar contexto sin describirlo en prosa |
+| 4.4 | ✅ **HECHO** — `@fichero` en el input (`src/ai/ai_mentions.*`); `@símbolo` descartado a propósito | adjuntar contexto sin describirlo en prosa |
 | 4.5 | ✅ **HECHO** — memoria durable `.tuide/ai/memory.md` + `/remember`, `/memory`, `/forget` | "usa siempre `./compile.sh`" persiste entre sesiones |
 
 ### M5 — Amputación del lastre (≈1 semana) · *hace baratos los demás hitos*
