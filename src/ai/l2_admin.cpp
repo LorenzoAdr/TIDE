@@ -58,6 +58,14 @@ bool admin_path_is_noise(const std::string& path) {
       path.rfind("./.tuide/", 0) == 0) {
     return true;
   }
+  // `.claude/worktrees/*` son copias completas del propio repo (una por rama en
+  // vuelo). Medido en este árbol: 16 de 21 hits de un grep venían de ahí, con
+  // 14 duplicados por nombre — ruido que se come el presupuesto del explorador
+  // (≤4 greps, ≤3 reads) y que puede anclar un `read` en una copia rancia.
+  if (path.find("/.claude/") != std::string::npos || path.rfind(".claude/", 0) == 0 ||
+      path.rfind("./.claude/", 0) == 0) {
+    return true;
+  }
   if (path.find("/build/") != std::string::npos || path.rfind("build/", 0) == 0 ||
       path.rfind("./build/", 0) == 0) {
     return true;
@@ -2902,7 +2910,7 @@ AdminJobResult admin_run_search_rg(const std::string& query, const std::string& 
 
   auto is_skip_dir = [](const std::string& name) {
     return name == ".tuide" || name == "build" || name == ".git" || name == "node_modules" ||
-           name == ".cache" || name == "CMakeFiles";
+           name == ".cache" || name == "CMakeFiles" || name == ".claude";
   };
   auto is_code_ext = [](const fs::path& p) {
     const std::string e = p.extension().string();
@@ -4912,6 +4920,10 @@ mí y cierra" que salte el verificador.
 el flujo X e Y", "¿dónde se hace Z?") SIEMPRE se anclan con evidencia real del
 código (grep/read) — nunca respondas solo de memoria del modelo sin ningún spawn.
 El notebook que ya figura en el prompt es evidencia reunida, no memoria del modelo.
+El CONTRATO DEL PROYECTO (AGENTS.md), si aparece arriba, TAMBIÉN es evidencia: lo
+escribió el usuario de este repo. Si responde a la consulta (comandos de build/test,
+convenciones, zonas prohibidas), cierra citándolo — sin spawn y sin re-descubrirlo
+leyendo CMakeLists. Spawnea solo para lo que el contrato NO diga.
 
 Tipos spawn:
 - explore: brief = la investigación que un hijo puede resolver en una sesión (hasta el
@@ -4928,6 +4940,10 @@ el flujo X e Y", "¿dónde se hace Z?") también se atomizan: un explore por pol
 o al menos ancla la respuesta con evidencia real del código (grep/read) —
 nunca respondas solo de memoria del modelo sin ningún spawn.
 El notebook que ya figura en el prompt es evidencia reunida, no memoria del modelo.
+El CONTRATO DEL PROYECTO (AGENTS.md), si aparece arriba, TAMBIÉN es evidencia: lo
+escribió el usuario de este repo. Si responde a la consulta (comandos de build/test,
+convenciones, zonas prohibidas), cierra citándolo — sin spawn y sin re-descubrirlo
+leyendo CMakeLists. Spawnea solo para lo que el contrato NO diga.
 
 Tipos spawn:
 - explore: brief = UN solo fenómeno (una pregunta que un hijo puede cerrar). Si el pedido
@@ -4962,8 +4978,47 @@ Un spawn por turno.)";
   return prompt;
 }
 
+std::string admin_load_project_contract(const std::string& workspace_root, int max_chars) {
+  std::vector<std::pair<std::string, fs::path>> sources;
+  // Global del usuario primero: el del proyecto manda, así que va después.
+  {
+    const char* xdg = std::getenv("XDG_CONFIG_HOME");
+    const char* home = std::getenv("HOME");
+    if (xdg != nullptr && xdg[0] != '\0') {
+      sources.push_back({"global", fs::path(xdg) / "tuide" / "AGENTS.md"});
+    } else if (home != nullptr && home[0] != '\0') {
+      sources.push_back({"global", fs::path(home) / ".config" / "tuide" / "AGENTS.md"});
+    }
+  }
+  if (!workspace_root.empty()) {
+    sources.push_back({"proyecto", fs::path(workspace_root) / "AGENTS.md"});
+  }
+  std::string out;
+  for (const auto& [label, path] : sources) {
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) {
+      continue;
+    }
+    std::string body = trim_copy(read_file(path));
+    if (body.empty()) {
+      continue;
+    }
+    if (!out.empty()) {
+      out += "\n\n";
+    }
+    out += "<!-- " + label + ": " + path.filename().string() + " -->\n" + body;
+  }
+  const std::size_t cap = max_chars > 0 ? static_cast<std::size_t>(max_chars) : 0;
+  if (cap > 0 && out.size() > cap) {
+    utf8_resize(&out, cap);
+    out += "\n…(contrato recortado; usa secciones cortas)";
+  }
+  return out;
+}
+
 std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_spawns,
-                              const std::string& workspace_root, int max_explores) {
+                              const std::string& workspace_root, int max_explores,
+                              const std::string& project_contract) {
   // Orden pensado para la caché de prefijo del proveedor: primero lo inmutable
   // durante la consulta (root, consulta, episodios, diálogo, UI), luego lo que
   // solo CRECE por el final (notebook, inbox), y al final lo que cambia en cada
@@ -4976,6 +5031,12 @@ std::string admin_user_prompt(const AdminState& st, int max_proposes, int max_sp
   if (!workspace_root.empty()) {
     out << "## WORKSPACE_ROOT (perímetro FS — único árbol accesible)\n`" << workspace_root
         << "`\nPaths relativos a este root. Prohibido salir con .. o absolutos ajenos.\n\n";
+  }
+  if (!project_contract.empty()) {
+    out << "## Contrato del proyecto (AGENTS.md — lo escribió el usuario)\n"
+        << project_contract
+        << "\nManda sobre tus suposiciones: comandos, convenciones y zonas "
+           "prohibidas salen de aquí, no de lo que suele hacerse.\n\n";
   }
   out << "## Consulta\n" << st.consulta << "\n\n";
   if (!st.episodes.empty()) {
@@ -5159,10 +5220,18 @@ AdminLoopResult run_admin_loop(AdminState* st, L2Brain& brain, const AdminOps& o
   } else {
     ui_note(opts, "→ Sigo con la evidencia ya reunida…");
   }
+  // Una lectura por consulta, no por turno: el contrato no cambia a mitad.
+  const std::string contract = !opts.project_contract.empty()
+                                   ? opts.project_contract
+                                   : admin_load_project_contract(opts.workspace_root);
+  if (!contract.empty()) {
+    ui_note(opts, "→ Contrato del proyecto cargado (AGENTS.md)");
+  }
   int explore_cap_rejects = 0;
   while (!st->done && !st->clarify && !cancelled(opts)) {
     const std::string sys = admin_system_prompt(opts.explorer_cumulative_mode);
-    const std::string user = admin_user_prompt(*st, max_p, max_s, opts.workspace_root, max_ex);
+    const std::string user =
+        admin_user_prompt(*st, max_p, max_s, opts.workspace_root, max_ex, contract);
     L2BrainRequest req;
     req.system_prompt = sys;
     req.user_prompt = user;
