@@ -386,13 +386,28 @@ antes de seguir.
 >    divergencia harness/producción de la familia de §0bis; ahora se pasa
 >    explícito.
 >
-> Pendiente de M4: `/init` (4.2), sesiones navegables (4.3), `@file` (4.4),
-> memoria durable (4.5).
+> **M4.2 implementado.** `/init` inspecciona el árbol (sin ejecutar nada) y deja
+> el borrador: sistema de build por marcador, comando de test, de run, lenguajes
+> dominantes, directorios que no son fuente, e **indentación medida en las
+> fuentes**. Lo que no puede saber queda como TODO en vez de inventado.
+>
+> Dos reglas que sigue: un script envoltorio en la raíz o una tarea de
+> `.tuide/config.json` manda sobre el comando genérico del sistema de build (un
+> `cmake --build build` pelado sería correcto y a la vez inútil aquí); y nunca
+> pisa un `AGENTS.md` existente sin `--force`.
+>
+> Compara además la indentación medida con `.clang-format` y lo dice cuando no
+> coinciden — un fichero de estilo desfasado es peor que ninguno, porque el
+> agente lo obedece y rompe el estilo real. En este repo detecta justo eso, más
+> `./compile.sh`, el patrón de binarios de test sueltos (sin `ctest` que
+> invocar) y `.claude/` entre los árboles excluidos.
+>
+> Pendiente de M4: sesiones navegables (4.3), `@file` (4.4), memoria durable (4.5).
 
 | # | Trabajo | Aceptación |
 |---|---|---|
 | 4.1 | ✅ **HECHO** — `AGENTS.md` (raíz + global del usuario) en el prefijo inmutable: comandos de build/test, convenciones, zonas prohibidas | el agente compila con el comando del proyecto sin que se lo digas |
-| 4.2 | `/init` que genera un `AGENTS.md` inicial autodetectando build/test (ya hay detección en `src/build/`) | proyecto nuevo → contrato útil en un comando |
+| 4.2 | ✅ **HECHO** — `/init` genera el `AGENTS.md` inicial desde el árbol (`src/ai/project_contract.*`) | proyecto nuevo → contrato útil en un comando |
 | 4.3 | Sesiones: `/sessions`, `/resume`, branch; **no borrar al arrancar** (hoy `admin_clear_session` en boot) | reabrir la app y continuar la investigación de ayer |
 | 4.4 | `@file` / `@símbolo` en el input (ya existen fuzzy matcher e índice de símbolos) | adjuntar contexto sin describirlo en prosa |
 | 4.5 | Memoria durable `.tuide/ai/memory.md` + tool `remember` | "usa siempre `tools/compile.sh`" persiste entre sesiones |
