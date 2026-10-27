@@ -28,7 +28,7 @@ CACHE_TYPE="${TUIDE_HOST_CACHE_TYPE:-q8_0}"
 CHAT_NP="${TUIDE_HOST_NP:-1}"
 DRAFT_N_MAX="${TUIDE_HOST_DRAFT_N_MAX:-16}"
 DRAFT_MODE="${TUIDE_HOST_DRAFT:-auto}"
-THINKING="${TUIDE_HOST_THINKING:-on}"
+THINKING="${TUIDE_HOST_THINKING:-deepseek}"
 
 CACHE_ROOT="${XDG_CACHE_HOME:-${HOME}/.cache}/tuide/models"
 L1_DIR="${CACHE_ROOT}/l1"
@@ -596,6 +596,7 @@ CHAT_NP=$(printf '%q' "${CHAT_NP}")
 THREADS=$(printf '%q' "${THREADS}")
 DRAFT_GGUF=$(printf '%q' "${DRAFT_GGUF}")
 DRAFT_N_MAX=$(printf '%q' "${DRAFT_N_MAX}")
+THINKING=$(printf '%q' "${THINKING}")
 LOG_DIR=$(printf '%q' "${LOG_DIR}")
 ADVERTISE=$(printf '%q' "${advertise}")
 SPY_PY=$(printf '%q' "${spy_py}")
@@ -664,6 +665,17 @@ if [[ -n "\${CHAT_GGUF}" ]]; then
   else
     printf '[host-llama] chat sin draft (descarga Qwen2.5 1.5B L1 para speculative decoding)\\n'
   fi
+  CHAT_NAME=\$(basename "\${CHAT_GGUF}" | tr '[:upper:]' '[:lower:]')
+  case "\${CHAT_NAME}" in
+    *qwen3*|*qwen-3*|*qwq*|*deepseek-r1*|*deepseek_r1*|*r1-distill*|*r1_distill*|*gpt-oss*|*gpt_oss*|*magistral*|*glm-4.5*|*glm4.5*|*glm-4.6*|*glm4.6*|*glm-4.7*|*glm4.7*|*phi-4-reasoning*|*phi4-reasoning*|*hunyuan*|*seed-oss*|*kimi-k1*|*kimi_k1*)
+      CHAT_EXTRA+=(--jinja)
+      case "\${THINKING}" in
+        raw|none|content|tags) CHAT_EXTRA+=(--reasoning-format none) ;;
+        *) CHAT_EXTRA+=(--reasoning-format deepseek) ;;
+      esac
+      printf '[host-llama] chat thinking %s\\n' "\${THINKING}"
+      ;;
+  esac
   printf '[host-llama] chat llama-server %s:%s  %s\\n' "\${CHAT_BIND_HOST}" "\${CHAT_BIND_PORT}" "\${CHAT_GGUF}"
   "\${SERVER}" -m "\${CHAT_GGUF}" --host "\${CHAT_BIND_HOST}" --port "\${CHAT_BIND_PORT}" \\
     -ngl "\${NGL}" -c "\${CHAT_CTX}" --alias "\${CHAT_ALIAS}" --metrics "\${CHAT_EXTRA[@]}" \\
@@ -698,7 +710,12 @@ if [[ "\${SPY_ON}" == "1" ]]; then
   fi
   if [[ -n "\${CHAT_GGUF}" ]]; then
     wait_http "http://127.0.0.1:\${CHAT_BACKEND}/health" || printf '[host-llama] chat /health aún no lista\\n'
-    "\${PYTHON}" "\${SPY_PY}" --listen "0.0.0.0:\${CHAT_PORT}" --backend "127.0.0.1:\${CHAT_BACKEND}" --tag chat --jsonl "\${SPY_JSONL}" \${CHAT_WEB} &
+    CHAT_THINK_SPY=()
+    case "\${THINKING}" in
+      0|off|false|no) CHAT_THINK_SPY=(--thinking off) ;;
+      *) CHAT_THINK_SPY=(--thinking on) ;;
+    esac
+    "\${PYTHON}" "\${SPY_PY}" --listen "0.0.0.0:\${CHAT_PORT}" --backend "127.0.0.1:\${CHAT_BACKEND}" --tag chat --jsonl "\${SPY_JSONL}" "\${CHAT_THINK_SPY[@]}" \${CHAT_WEB} &
     SPY_CHAT_PID=\$!
   fi
   if [[ -n "\${EMBED_GGUF}" ]]; then

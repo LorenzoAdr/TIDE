@@ -192,6 +192,29 @@ def parse_on_off_auto(value: str, default: str = "auto") -> str:
     return raw
 
 
+# Reasoning modes for CoT GGUFs (Qwen3, DeepSeek-R1, …).
+# "on" is accepted as an alias of "deepseek" for older env / UI state.
+REASONING_MODES = ("off", "deepseek", "raw")
+
+
+def normalize_reasoning_mode(value: str, default: str = "deepseek") -> str:
+    """Map UI/env aliases to off | deepseek | raw.
+
+    deepseek — split CoT into reasoning_content (best with tools / agents).
+    raw — leave <think> tags in content (--reasoning-format none).
+    off — disable enable_thinking via spy inject.
+    """
+    raw = (value if value is not None else default) or default
+    raw = str(raw).strip().lower()
+    if raw in ("0", "off", "false", "no"):
+        return "off"
+    if raw in ("raw", "none", "content", "tags"):
+        return "raw"
+    if raw in ("1", "on", "true", "yes", "deepseek", ""):
+        return "deepseek"
+    return ""
+
+
 def detect_performance_cores() -> int:
     if platform.system() == "Darwin":
         try:
@@ -982,8 +1005,16 @@ def model_supports_thinking(path: str) -> bool:
     return any(marker in name for marker in THINKING_MARKERS)
 
 
+def reasoning_mode() -> str:
+    mode = normalize_reasoning_mode(
+        opt_or_env("thinking", "TUIDE_HOST_THINKING", "deepseek"),
+        "deepseek",
+    )
+    return mode or "deepseek"
+
+
 def thinking_wanted() -> bool:
-    return parse_on_off_auto(opt_or_env("thinking", "TUIDE_HOST_THINKING", "on"), "on") != "off"
+    return reasoning_mode() != "off"
 
 
 _llama_help: Dict[str, str] = {}
@@ -1008,11 +1039,13 @@ def llama_server_help(server: str) -> str:
 
 
 def thinking_llama_argv(server: str, model: str) -> List[str]:
-    """Jinja + reasoning split for CoT models; no-op for Llama / Qwen2.5 / etc.
+    """Jinja + reasoning-format for CoT models; no-op for Llama / Qwen2.5 / etc.
 
-    The Lanzamiento checkbox does not put --reasoning-budget or enable_thinking
-    on the server CLI (that would override TIDE per-request profiles). Compose
-    injects thinking via the spy; the agent sends kwargs on each POST.
+    Does not put --reasoning-budget or enable_thinking on the server CLI
+    (that would override TIDE per-request profiles). Compose / agents set
+    enable_thinking via the spy or per-POST kwargs. Format:
+      deepseek|off → --reasoning-format deepseek
+      raw → --reasoning-format none
     """
     if not model_supports_thinking(model):
         return []
@@ -1021,11 +1054,13 @@ def thinking_llama_argv(server: str, model: str) -> List[str]:
     def has(flag: str) -> bool:
         return True if not help_text else flag in help_text
 
+    mode = reasoning_mode()
+    fmt = "none" if mode == "raw" else "deepseek"
     flags: List[str] = []
     if has("--jinja"):
         flags.append("--jinja")
     if has("--reasoning-format"):
-        flags += ["--reasoning-format", "deepseek"]
+        flags += ["--reasoning-format", fmt]
     return flags
 
 
@@ -1085,7 +1120,7 @@ def perf_summary(role: str = "chat") -> str:
     ]
     draft = find_draft_gguf()
     bits.append("draft=" + (Path(draft).name if draft else "off"))
-    bits.append("think=" + ("on" if thinking_wanted() else "off"))
+    bits.append("think=" + reasoning_mode())
     if role == "embed":
         return f"ngl={embed_ngl()}"
     return " ".join(bits)
@@ -1104,7 +1139,7 @@ def _record_perf(role: str, cmd: List[str]) -> None:
             "summary": (
                 f"fa={flash_attn_mode()} kv={cache_type_k_v() or 'f16'} "
                 f"t={performance_core_count()} np={chat_slot_count()} "
-                f"draft={draft or 'off'} think={'on' if thinking_wanted() else 'off'}"
+                f"draft={draft or 'off'} think={reasoning_mode()}"
             ),
         }
         return
@@ -1114,6 +1149,7 @@ def _record_perf(role: str, cmd: List[str]) -> None:
 def default_launch_opts() -> Dict[str, str]:
     threads_env = env_trimmed("TUIDE_HOST_THREADS")
     threads = threads_env if threads_env.isdigit() and int(threads_env) > 0 else str(detect_performance_cores())
+    think_raw = env_trimmed("TUIDE_HOST_THINKING", "deepseek") or "deepseek"
     return {
         "flash_attn": env_trimmed("TUIDE_HOST_FLASH_ATTN", "on") or "on",
         "cache_type": env_trimmed("TUIDE_HOST_CACHE_TYPE", "q8_0") or "q8_0",
@@ -1127,7 +1163,7 @@ def default_launch_opts() -> Dict[str, str]:
         "draft": env_trimmed("TUIDE_HOST_DRAFT", "auto") or "auto",
         "draft_n_max": env_trimmed("TUIDE_HOST_DRAFT_N_MAX", "16") or "16",
         "draft_gguf": env_trimmed("TUIDE_HOST_DRAFT_GGUF"),
-        "thinking": env_trimmed("TUIDE_HOST_THINKING", "on") or "on",
+        "thinking": normalize_reasoning_mode(think_raw, "deepseek") or "deepseek",
     }
 
 
@@ -1200,9 +1236,9 @@ def apply_launch_opts(obj: Optional[Dict[str, Any]]) -> str:
         else:
             updates["draft_gguf"] = ""
     if "thinking" in obj:
-        mode = parse_on_off_auto(str(obj.get("thinking") or ""), "on")
-        if mode not in ("on", "off"):
-            return "thinking debe ser on u off"
+        mode = normalize_reasoning_mode(str(obj.get("thinking") or ""), "deepseek")
+        if mode not in REASONING_MODES:
+            return "thinking debe ser off, deepseek o raw"
         updates["thinking"] = mode
     if not updates:
         return ""
@@ -1517,10 +1553,13 @@ def start_role(role: str, entry: Dict[str, Any]) -> str:
             else:
                 log("chat sin draft: modelo pequeño, mismo GGUF o RAM justa (TUIDE_HOST_DRAFT=1 fuerza)")
     if role == "chat" and model_supports_thinking(str(path)):
-        log(
-            "chat thinking "
-            + ("on (CoT en Inspección)" if thinking_wanted() else "off")
-        )
+        mode = reasoning_mode()
+        labels = {
+            "deepseek": "deepseek (CoT separado)",
+            "raw": "raw (<think> en contenido)",
+            "off": "off",
+        }
+        log("chat thinking " + labels.get(mode, mode))
     logf = open(log_dir() / f"{role}.log", "ab")
     proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, env=env)
     health = f"http://127.0.0.1:{backend_port}/health"
@@ -1835,14 +1874,14 @@ pre.vm { background:#0c0d10; border:1px solid var(--line); border-radius:8px; pa
         <select id="opt-draft-gguf">
           <option value="">automático (1.5B L1)</option>
         </select></label>
+      <label><span>Razonamiento</span>
+        <select id="opt-thinking">
+          <option value="deepseek" selected>deepseek — CoT separado</option>
+          <option value="raw">raw — &lt;think&gt; en texto</option>
+          <option value="off">off — sin pensamiento</option>
+        </select></label>
     </div>
-    <label class="check-row" for="opt-thinking">
-      <input id="opt-thinking" type="checkbox" checked>
-      <span class="check-copy">
-        <strong>Pensamiento en vivo</strong>
-        Muestra la cadena de pensamiento en Inspección (Qwen3, DeepSeek-R1, gpt-oss, Magistral, GLM-4.5…). En Llama 70B / Qwen2.5 no aplica. Desactívalo para responder antes, sin CoT.
-      </span>
-    </label>
+    <p class="meta" style="margin:-4px 0 12px">Qwen3 / DeepSeek-R1 / gpt-oss / Magistral / GLM… (no aplica a Llama 70B ni Qwen2.5). <em>deepseek</em> = reasoning_content (mejor con tools); <em>raw</em> = etiquetas en content; <em>off</em> = sin CoT.</p>
     <div class="row" style="margin-bottom:12px">
       <button type="button" id="opt-reset">Restaurar defaults</button>
     </div>
@@ -1959,7 +1998,7 @@ function readLaunch() {
     draft: document.getElementById("opt-draft").value,
     draft_n_max: document.getElementById("opt-draft-n").value,
     draft_gguf: document.getElementById("opt-draft-gguf").value,
-    thinking: document.getElementById("opt-thinking").checked ? "on" : "off",
+    thinking: document.getElementById("opt-thinking").value || "deepseek",
   };
 }
 function fillSelect(id, value, allowed) {
@@ -1998,7 +2037,11 @@ function applyLaunchForm(o, drafts) {
   fillSelect("opt-draft", o.draft, ["auto", "on", "off"]);
   document.getElementById("opt-draft-n").value = o.draft_n_max || "16";
   syncDraftSelect(drafts == null ? lastDrafts : drafts, o.draft_gguf || "");
-  document.getElementById("opt-thinking").checked = (o.thinking || "on") !== "off";
+  const think = (o.thinking || "deepseek");
+  const thinkNorm = (think === "on" || think === "true" || think === "1") ? "deepseek"
+    : (think === "none" || think === "content" || think === "tags") ? "raw"
+    : think;
+  fillSelect("opt-thinking", thinkNorm, ["deepseek", "raw", "off"]);
 }
 function tierBadge(m) {
   if (m.tier === "tide-l2") return '<span class="badge l2">TIDE L2</span>';
@@ -2107,7 +2150,7 @@ document.getElementById("opt-reset").onclick = () => {
   const d = launchDefaults || {
     flash_attn: "on", cache_type: "q8_0", threads: "8", np: "1", ngl: "99",
     chat_ctx: "32768", embed_ngl: "0", draft: "auto", draft_n_max: "16", draft_gguf: "",
-    thinking: "on"
+    thinking: "deepseek"
   };
   applyLaunchForm(d, lastDrafts);
 };

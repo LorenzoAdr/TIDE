@@ -654,15 +654,21 @@ def extract_delta(obj: dict) -> str:
 
 
 def apply_thinking_payload(payload: dict, src: str = "direct") -> dict:
-    """Inject enable_thinking for the personal Inspection compose only.
+    """Inject enable_thinking according to --thinking on|off.
 
-    TIDE (src=vm) owns chat_template_kwargs / budget; never overwrite those.
+    - direct (Inspección): always inject.
+    - vm (TIDE / dsh / LAN): inject only when the client did not set
+      enable_thinking itself, so agents that omit kwargs still get the
+      hub-selected mode; TIDE profiles that set kwargs keep ownership.
     """
     if thinking_inject is None or not isinstance(payload, dict):
         return payload
-    if src != "direct":
-        return payload
     kwargs = payload.get("chat_template_kwargs")
+    has_client = isinstance(kwargs, dict) and "enable_thinking" in kwargs
+    if src == "vm" and has_client:
+        return payload
+    if src not in ("direct", "vm"):
+        return payload
     merged = dict(kwargs) if isinstance(kwargs, dict) else {}
     merged["enable_thinking"] = bool(thinking_inject)
     payload["chat_template_kwargs"] = merged

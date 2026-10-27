@@ -150,11 +150,17 @@ class ThinkingPayloadTest(unittest.TestCase):
         self.assertEqual(out["thinking_budget_tokens"], 1536)
         self.assertEqual(out["reasoning_budget_tokens"], 1536)
 
-    def test_vm_does_not_inject(self) -> None:
+    def test_vm_injects_when_no_kwargs(self) -> None:
         spy.thinking_inject = True
         payload = {"messages": []}
         out = spy.apply_thinking_payload(payload, src="vm")
-        self.assertNotIn("chat_template_kwargs", out)
+        self.assertTrue(out["chat_template_kwargs"]["enable_thinking"])
+
+    def test_vm_injects_off_when_no_kwargs(self) -> None:
+        spy.thinking_inject = False
+        payload = {"messages": []}
+        out = spy.apply_thinking_payload(payload, src="vm")
+        self.assertFalse(out["chat_template_kwargs"]["enable_thinking"])
 
     def test_no_inject_leaves_payload(self) -> None:
         spy.thinking_inject = None

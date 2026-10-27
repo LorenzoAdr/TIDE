@@ -144,7 +144,7 @@ class HostLlamaPerfTest(unittest.TestCase):
     def test_thinking_flags_on_qwen3(self) -> None:
         hub._llama_help.clear()
         hub._llama_help["llama-server"] = ""
-        with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="on"), clear=False):
+        with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="deepseek"), clear=False):
             cmd = hub.chat_llama_argv(
                 "llama-server", "/tmp/qwen3.6-27b-q8_0.gguf", "127.0.0.1", 8080, "a"
             )
@@ -152,6 +152,26 @@ class HostLlamaPerfTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--reasoning-format") + 1], "deepseek")
         self.assertNotIn("--chat-template-kwargs", cmd)
         self.assertNotIn("--reasoning-budget", cmd)
+
+    def test_thinking_on_alias_maps_to_deepseek(self) -> None:
+        hub._llama_help.clear()
+        hub._llama_help["llama-server"] = ""
+        with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="on"), clear=False):
+            self.assertEqual(hub.reasoning_mode(), "deepseek")
+            cmd = hub.chat_llama_argv(
+                "llama-server", "/tmp/qwen3.6-27b-q8_0.gguf", "127.0.0.1", 8080, "a"
+            )
+        self.assertEqual(cmd[cmd.index("--reasoning-format") + 1], "deepseek")
+
+    def test_thinking_raw_uses_format_none(self) -> None:
+        hub._llama_help.clear()
+        hub._llama_help["llama-server"] = ""
+        with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="raw"), clear=False):
+            cmd = hub.chat_llama_argv(
+                "llama-server", "/tmp/qwen3.6-27b-q8_0.gguf", "127.0.0.1", 8080, "a"
+            )
+        self.assertIn("--jinja", cmd)
+        self.assertEqual(cmd[cmd.index("--reasoning-format") + 1], "none")
 
     def test_thinking_off_keeps_jinja_no_cli_budget(self) -> None:
         hub._llama_help.clear()
@@ -167,7 +187,7 @@ class HostLlamaPerfTest(unittest.TestCase):
 
     def test_thinking_skipped_for_llama70(self) -> None:
         hub._llama_help.clear()
-        with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="on"), clear=False):
+        with mock.patch.dict(os.environ, self._env(TUIDE_HOST_THINKING="deepseek"), clear=False):
             cmd = hub.chat_llama_argv(
                 "llama-server",
                 "/tmp/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
@@ -182,7 +202,17 @@ class HostLlamaPerfTest(unittest.TestCase):
     def test_apply_thinking_opt(self) -> None:
         self.assertEqual(hub.apply_launch_opts({"thinking": "off"}), "")
         self.assertEqual(hub.effective_launch_opts()["thinking"], "off")
+        self.assertEqual(hub.apply_launch_opts({"thinking": "raw"}), "")
+        self.assertEqual(hub.effective_launch_opts()["thinking"], "raw")
+        self.assertEqual(hub.apply_launch_opts({"thinking": "on"}), "")
+        self.assertEqual(hub.effective_launch_opts()["thinking"], "deepseek")
         self.assertIn("thinking", hub.apply_launch_opts({"thinking": "maybe"}))
+
+    def test_normalize_reasoning_mode(self) -> None:
+        self.assertEqual(hub.normalize_reasoning_mode("on"), "deepseek")
+        self.assertEqual(hub.normalize_reasoning_mode("none"), "raw")
+        self.assertEqual(hub.normalize_reasoning_mode("off"), "off")
+        self.assertEqual(hub.normalize_reasoning_mode("bogus"), "")
 
     def test_parse_on_off_auto(self) -> None:
         self.assertEqual(hub.parse_on_off_auto("0"), "off")
@@ -221,7 +251,7 @@ class HostLlamaPerfTest(unittest.TestCase):
             "TUIDE_HOST_NP": "1",
             "TUIDE_HOST_EMBED_NGL": "0",
             "TUIDE_HOST_DRAFT": "auto",
-            "TUIDE_HOST_THINKING": "on",
+            "TUIDE_HOST_THINKING": "deepseek",
         }
         with mock.patch.dict(os.environ, env, clear=False):
             opts = hub.default_launch_opts()
@@ -231,7 +261,7 @@ class HostLlamaPerfTest(unittest.TestCase):
         self.assertEqual(opts["np"], "1")
         self.assertEqual(opts["embed_ngl"], "0")
         self.assertEqual(opts["draft"], "auto")
-        self.assertEqual(opts["thinking"], "on")
+        self.assertEqual(opts["thinking"], "deepseek")
         self.assertIn("launch", payload)
         self.assertIn("drafts", payload)
         self.assertIn("launch_defaults", payload)
