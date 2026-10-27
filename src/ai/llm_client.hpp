@@ -114,8 +114,23 @@ struct LlmEndpoint {
   std::string api_key;
   std::string model;
   LlmProviderCaps caps;
+  // Presupuesto de la llamada COMPLETA, reintentos incluidos. Antes era por
+  // intento, así que con `max_retries=2` una petición atascada se comía
+  // 3×300 s en silencio: medido en la suite de trampas, 1500 s de un caso
+  // gastados en una sola llamada del explorador. Un IDE necesita poder
+  // prometer "o contesta o falla, pero antes de esto".
   int timeout_ms = 300000;
   int connect_timeout_ms = 15000;
+  // Silencio máximo ENTRE bytes una vez que el stream ya empezó a llegar. El
+  // deadline total no distingue "el modelo está generando una respuesta larga"
+  // de "el servidor se quedó mudo", y lo segundo no mejora esperando. Solo
+  // cuenta tras el primer byte: antes de él el servidor está procesando el
+  // prompt, que con un contexto grande tarda de verdad. 0 = desactivado.
+  //
+  // Solo en el transporte de socket (`http://`). `curl` únicamente sabe
+  // `--speed-time`, que cuenta desde que arranca la transferencia y abortaría
+  // un primer byte legítimamente lento; para `https://` queda el deadline.
+  int stall_timeout_ms = 60000;
   int max_retries = 2;
 };
 
@@ -254,8 +269,11 @@ class LlmClient {
   std::string last_attempts_text() const;
 
  private:
+  // `budget_ms` es lo que queda del presupuesto de la llamada, no el de un
+  // intento: así los reintentos no pueden multiplicar el tiempo de pared.
   LlmResponse attempt(const LlmRequest& req, const std::string& payload, bool stream,
-                      std::atomic<bool>* cancel, const LlmDeltaFn& on_delta, int* retry_after_ms);
+                      int budget_ms, std::atomic<bool>* cancel, const LlmDeltaFn& on_delta,
+                      int* retry_after_ms);
 
   LlmEndpoint endpoint_;
   mutable std::mutex mu_;

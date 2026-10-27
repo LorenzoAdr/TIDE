@@ -243,6 +243,9 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
       if (r.contains("timeout_ms") && r["timeout_ms"].is_number_integer()) {
         out->timeout_ms = r["timeout_ms"].get<int>();
       }
+      if (r.contains("stall_timeout_ms") && r["stall_timeout_ms"].is_number_integer()) {
+        out->stall_timeout_ms = r["stall_timeout_ms"].get<int>();
+      }
     };
     read_role("pilot", &settings->models.pilot);
     read_role("explorer", &settings->models.explorer);
@@ -428,6 +431,9 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
     }
     if (role.timeout_ms > 0) {
       r["timeout_ms"] = role.timeout_ms;
+    }
+    if (role.stall_timeout_ms > 0) {
+      r["stall_timeout_ms"] = role.stall_timeout_ms;
     }
     if (!r.empty()) {
       roles[name] = std::move(r);

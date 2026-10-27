@@ -467,8 +467,9 @@ int connect_with_timeout(const std::string& host, int port, int connect_timeout_
 
 // Transporte http:// — socket crudo con keep-alive entre llamadas.
 HttpOutcome socket_post(const LlmUrl& url, const std::string& api_key, const std::string& payload,
-                        bool want_sse, int timeout_ms, int connect_timeout_ms,
-                        std::atomic<bool>* cancel, const BodySink& sink, int* keep_fd) {
+                        bool want_sse, int timeout_ms, int stall_timeout_ms,
+                        int connect_timeout_ms, std::atomic<bool>* cancel, const BodySink& sink,
+                        int* keep_fd) {
   HttpOutcome out;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   const std::string head = build_request_head(url, api_key, payload, want_sse);
@@ -517,6 +518,10 @@ HttpOutcome socket_post(const LlmUrl& url, const std::string& api_key, const std
     std::array<char, 8192> buf{};
     bool peer_closed = false;
     bool stale_socket = false;
+    // El reloj de silencio solo arranca con el primer byte: antes de él el
+    // servidor está procesando el prompt y callar es lo normal.
+    auto last_rx = std::chrono::steady_clock::now();
+    bool got_any = false;
     while (!router.body_complete()) {
       if (cancelled(cancel)) {
         drop();
@@ -524,10 +529,19 @@ HttpOutcome socket_post(const LlmUrl& url, const std::string& api_key, const std
         out.error = "cancelado";
         return out;
       }
-      if (std::chrono::steady_clock::now() > deadline) {
+      const auto now = std::chrono::steady_clock::now();
+      if (now > deadline) {
         drop();
         out.kind = LlmErrorKind::Timeout;
         out.error = "timeout tras " + std::to_string(timeout_ms / 1000) + "s";
+        return out;
+      }
+      if (got_any && stall_timeout_ms > 0 &&
+          now - last_rx > std::chrono::milliseconds(stall_timeout_ms)) {
+        drop();
+        out.kind = LlmErrorKind::Timeout;
+        out.error = "sin datos durante " + std::to_string(stall_timeout_ms / 1000) +
+                    "s a media respuesta";
         return out;
       }
       const ssize_t r = ::recv(fd, buf.data(), buf.size(), 0);
@@ -552,6 +566,8 @@ HttpOutcome socket_post(const LlmUrl& url, const std::string& api_key, const std
         peer_closed = true;
         break;
       }
+      last_rx = std::chrono::steady_clock::now();
+      got_any = true;
       if (!router.push(buf.data(), static_cast<std::size_t>(r), &route_err)) {
         drop();
         out.kind = LlmErrorKind::BadResponse;
@@ -1555,8 +1571,8 @@ std::string LlmClient::last_attempts_text() const {
 }
 
 LlmResponse LlmClient::attempt(const LlmRequest& req, const std::string& payload, bool stream,
-                               std::atomic<bool>* cancel, const LlmDeltaFn& on_delta,
-                               int* retry_after_ms) {
+                               int budget_ms, std::atomic<bool>* cancel,
+                               const LlmDeltaFn& on_delta, int* retry_after_ms) {
   LlmResponse out;
   LlmUrl url;
   std::string url_err;
@@ -1565,7 +1581,9 @@ LlmResponse LlmClient::attempt(const LlmRequest& req, const std::string& payload
     out.error = url_err;
     return out;
   }
-  const int timeout_ms = req.timeout_ms > 0 ? req.timeout_ms : endpoint_.timeout_ms;
+  const int timeout_ms = budget_ms;
+  // Abrir el socket tampoco puede pasarse del presupuesto que queda.
+  const int connect_ms = std::max(1, std::min(endpoint_.connect_timeout_ms, budget_ms));
 
   LlmStreamParser parser(on_delta);
   std::string plain;
@@ -1582,12 +1600,12 @@ LlmResponse LlmClient::attempt(const LlmRequest& req, const std::string& payload
 
   HttpOutcome http;
   if (url.https) {
-    http = curl_post(url, endpoint_.api_key, payload, stream, timeout_ms,
-                     endpoint_.connect_timeout_ms, cancel, sink);
+    http = curl_post(url, endpoint_.api_key, payload, stream, timeout_ms, connect_ms, cancel,
+                     sink);
   } else {
     int fd = keep_fd_;
     http = socket_post(url, endpoint_.api_key, payload, stream, timeout_ms,
-                       endpoint_.connect_timeout_ms, cancel, sink, &fd);
+                       endpoint_.stall_timeout_ms, connect_ms, cancel, sink, &fd);
     keep_fd_ = fd;
   }
   if (stream) {
@@ -1736,13 +1754,25 @@ LlmResponse LlmClient::chat(const LlmRequest& req, std::atomic<bool>* cancel,
   }
 
   const int max_retries = req.max_retries >= 0 ? req.max_retries : endpoint_.max_retries;
+  const int budget_ms = req.timeout_ms > 0 ? req.timeout_ms : endpoint_.timeout_ms;
+  // El presupuesto cubre la llamada entera. Cada intento recibe lo que queda,
+  // así que un fallo rápido (conexión rechazada, 503, socket rancio) deja sitio
+  // para reintentar, y uno que agotó el presupuesto no deja ninguno: es
+  // exactamente la política que queremos, sin un segundo mando que ajustar.
+  const auto budget_end = t0 + std::chrono::milliseconds(budget_ms);
+  const auto remaining_ms = [&budget_end]() {
+    return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                budget_end - std::chrono::steady_clock::now())
+                                .count());
+  };
   std::mt19937 rng(static_cast<unsigned>(
       std::chrono::steady_clock::now().time_since_epoch().count() & 0xffffffff));
 
   for (int attempt_no = 1;; ++attempt_no) {
     int retry_after_ms = 0;
     const auto a0 = std::chrono::steady_clock::now();
-    out = attempt(req, payload, stream, cancel, on_delta, &retry_after_ms);
+    out = attempt(req, payload, stream, std::max(1, remaining_ms()), cancel, on_delta,
+                  &retry_after_ms);
     const long a_ms = static_cast<long>(
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - a0)
             .count());
@@ -1774,6 +1804,16 @@ LlmResponse LlmClient::chat(const LlmRequest& req, std::atomic<bool>* cancel,
     }
     int wait_ms = std::min(8000, 400 * (1 << std::min(4, attempt_no - 1)));
     wait_ms += static_cast<int>(rng() % 250);
+    // Sin sitio para el backoff y algo de intento, reintentar solo retrasa el
+    // error que ya sabemos dar. El intento en sí se recorta a lo que quede, así
+    // que el suelo no necesita cubrir un `connect_timeout_ms` entero.
+    const int min_room_ms = wait_ms + 500;
+    if (remaining_ms() < min_room_ms) {
+      out.error += " (sin presupuesto para reintentar: " + std::to_string(budget_ms / 1000) +
+                   "s agotados en " + std::to_string(attempt_no) + " intento" +
+                   (attempt_no == 1 ? ")" : "s)");
+      return out;
+    }
     if (retry_after_ms > 0) {
       if (retry_after_ms > kRetryAfterCapMs) {
         out.error += " (Retry-After " + std::to_string(retry_after_ms / 1000) + "s: no espero)";

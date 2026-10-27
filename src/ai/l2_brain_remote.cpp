@@ -151,6 +151,9 @@ L2BrainResult RemoteL2Brain::propose(const L2BrainRequest& req, std::atomic<bool
   endpoint.caps.parallel_tool_calls = backend.caps.parallel_tool_calls;
   endpoint.caps.context_window = backend.caps.context_window;
   endpoint.timeout_ms = backend.timeout_ms > 0 ? backend.timeout_ms : 300000;
+  if (backend.stall_timeout_ms > 0) {
+    endpoint.stall_timeout_ms = backend.stall_timeout_ms;
+  }
 
   // Un cliente por endpoint: reutilizar el objeto conserva el socket entre
   // llamadas del mismo rol (y entre roles si comparten api_base).

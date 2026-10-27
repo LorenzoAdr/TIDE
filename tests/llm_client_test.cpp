@@ -2,8 +2,17 @@
 // acumulador SSE (incluido el caso de línea partida entre dos trozos, que es lo
 // normal con sockets) y clasificación/reintento de errores.
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <chrono>
+#include <functional>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "ai/ai_types.hpp"
@@ -27,6 +36,95 @@ static void expect(bool cond, const std::string& msg) {
     std::cerr << "FAIL: " << msg << '\n';
     ++failures;
   }
+}
+
+// Servidor de un solo hilo sobre un puerto efímero de loopback. Hace falta red
+// de verdad (no simulada) para probar los relojes del transporte: lo que se
+// mide aquí es cuánto tarda en rendirse, y eso no se puede falsear.
+class FakeServer {
+ public:
+  using Handler = std::function<void(int fd, int conn_no, const std::atomic<bool>&)>;
+
+  explicit FakeServer(Handler h, int conns = 1) : handler_(std::move(h)) {
+    listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    int yes = 1;
+    ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;  // que el kernel elija
+    ::bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    ::listen(listen_fd_, 4);
+    sockaddr_in got{};
+    socklen_t len = sizeof(got);
+    ::getsockname(listen_fd_, reinterpret_cast<sockaddr*>(&got), &len);
+    port_ = ::ntohs(got.sin_port);
+    thread_ = std::thread([this, conns] {
+      for (int i = 0; i < conns && !stop_.load(); ++i) {
+        const int fd = ::accept(listen_fd_, nullptr, nullptr);
+        if (fd < 0) {
+          return;
+        }
+        handler_(fd, i, stop_);
+        ::close(fd);
+      }
+    });
+  }
+
+  ~FakeServer() {
+    stop_.store(true);
+    ::shutdown(listen_fd_, SHUT_RDWR);
+    ::close(listen_fd_);
+    if (thread_.joinable()) {
+      thread_.join();
+    }
+  }
+
+  std::string api_base() const { return "http://127.0.0.1:" + std::to_string(port_) + "/v1"; }
+
+ private:
+  Handler handler_;
+  int listen_fd_ = -1;
+  int port_ = 0;
+  std::atomic<bool> stop_{false};
+  std::thread thread_;
+};
+
+// Lee la petición hasta el final de cabeceras y descarta el cuerpo: sin esto el
+// cliente se bloquearía escribiendo en un socket que nadie vacía.
+static void drain_request(int fd) {
+  char buf[4096];
+  for (int i = 0; i < 64; ++i) {
+    const ssize_t r = ::recv(fd, buf, sizeof(buf), 0);
+    if (r <= 0 || static_cast<std::size_t>(r) < sizeof(buf)) {
+      return;
+    }
+  }
+}
+
+// Se queda mudo pero mirando el flag, para que cerrar el servidor no cueste
+// el sueño entero.
+static void hang_until_stop(const std::atomic<bool>& stop) {
+  for (int i = 0; i < 300 && !stop.load(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+}
+
+static void send_all(int fd, const std::string& s) {
+  std::size_t sent = 0;
+  while (sent < s.size()) {
+    const ssize_t w = ::send(fd, s.data() + sent, s.size() - sent, MSG_NOSIGNAL);
+    if (w <= 0) {
+      return;
+    }
+    sent += static_cast<std::size_t>(w);
+  }
+}
+
+static long ms_since(const std::chrono::steady_clock::time_point& t0) {
+  return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - t0)
+                               .count());
 }
 
 static LlmEndpoint full_caps_endpoint() {
@@ -424,6 +522,102 @@ int main() {
     req.messages.push_back(LlmMessage::user_msg("x"));
     const LlmResponse r = client.chat(req, &cancel);
     expect(!r.ok && r.kind == LlmErrorKind::Cancelled, "cancel previo → Cancelled");
+  }
+
+  // --- relojes del transporte -------------------------------------------
+  // El presupuesto es de la llamada, no del intento: un servidor que acepta y
+  // calla no puede costar `max_retries+1` veces el timeout. Es el fallo que se
+  // comió 1500 s de un caso de la suite de trampas en una sola llamada.
+  {
+    FakeServer srv([](int fd, int, const std::atomic<bool>& stop) {
+      drain_request(fd);
+      hang_until_stop(stop);  // mudo a propósito
+    });
+    LlmEndpoint ep;
+    ep.api_base = srv.api_base();
+    ep.model = "m";
+    ep.timeout_ms = 1200;
+    ep.max_retries = 3;
+    ep.connect_timeout_ms = 400;
+    tuide::LlmClient client(ep);
+    LlmRequest req;
+    req.messages.push_back(LlmMessage::user_msg("x"));
+    req.stream = false;
+    const auto t0 = std::chrono::steady_clock::now();
+    const LlmResponse r = client.chat(req);
+    const long took = ms_since(t0);
+    expect(!r.ok && r.kind == LlmErrorKind::Timeout, "servidor mudo → Timeout");
+    expect(took < 2400, "el presupuesto cubre los reintentos: " + std::to_string(took) +
+                            "ms debería quedarse cerca de 1200, no multiplicarlo");
+    expect(r.error.find("sin presupuesto para reintentar") != std::string::npos ||
+               r.attempts == 1,
+           "o no reintentó, o dijo por qué dejó de hacerlo: " + r.error);
+  }
+
+  // Un stream que arranca y se queda mudo se corta por el reloj de silencio, no
+  // por el deadline: esperar los 5 min completos no lo arregla.
+  {
+    FakeServer srv([](int fd, int, const std::atomic<bool>& stop) {
+      drain_request(fd);
+      send_all(fd,
+               "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+               "Connection: close\r\n\r\n"
+               "data: {\"choices\":[{\"delta\":{\"content\":\"hola\"}}]}\n\n");
+      hang_until_stop(stop);  // y aquí se atasca
+    });
+    LlmEndpoint ep;
+    ep.api_base = srv.api_base();
+    ep.model = "m";
+    ep.caps.streaming = true;
+    ep.timeout_ms = 20000;
+    ep.stall_timeout_ms = 700;
+    ep.max_retries = 2;
+    tuide::LlmClient client(ep);
+    LlmRequest req;
+    req.messages.push_back(LlmMessage::user_msg("x"));
+    req.stream = true;
+    std::string got;
+    const auto t0 = std::chrono::steady_clock::now();
+    const LlmResponse r =
+        client.chat(req, nullptr, [&got](const LlmDelta& d) { got += d.text; });
+    const long took = ms_since(t0);
+    expect(got == "hola", "el trozo que sí llegó se entregó: '" + got + "'");
+    expect(!r.ok && r.kind == LlmErrorKind::Timeout, "stream atascado → Timeout");
+    expect(r.error.find("sin datos durante") != std::string::npos,
+           "el error dice que fue silencio, no deadline: " + r.error);
+    expect(took < 3000, "cortó por silencio (" + std::to_string(took) +
+                            "ms), no esperó los 20000 del deadline");
+  }
+
+  // Lo contrario: un fallo rápido sigue mereciendo reintento, y le queda
+  // presupuesto de sobra para que funcione.
+  {
+    const std::string body =
+        "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"}}]}";
+    FakeServer srv(
+        [&body](int fd, int conn_no, const std::atomic<bool>&) {
+          drain_request(fd);
+          if (conn_no == 0) {
+            return;  // cuelga el teléfono sin contestar
+          }
+          send_all(fd, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                       "Content-Length: " + std::to_string(body.size()) +
+                       "\r\nConnection: close\r\n\r\n" + body);
+        },
+        2);
+    LlmEndpoint ep;
+    ep.api_base = srv.api_base();
+    ep.model = "m";
+    ep.timeout_ms = 8000;
+    ep.max_retries = 2;
+    tuide::LlmClient client(ep);
+    LlmRequest req;
+    req.messages.push_back(LlmMessage::user_msg("x"));
+    req.stream = false;
+    const LlmResponse r = client.chat(req);
+    expect(r.ok, "fallo rápido reintentado con éxito: " + r.error);
+    expect(r.content == "ok", "contenido del segundo intento: '" + r.content + "'");
+    expect(r.attempts == 2, "hicieron falta 2 intentos, hubo " + std::to_string(r.attempts));
   }
 
   if (failures) {

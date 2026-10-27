@@ -221,6 +221,9 @@ struct AiRoleBackend {
   std::string api_model;
   int max_tokens = 0;
   int timeout_ms = 0;
+  // Silencio tolerado a media respuesta. 0 = el del transporte (60 s). Se puede
+  // subir para un proveedor que calle durante la fase de razonamiento.
+  int stall_timeout_ms = 0;
 };
 
 struct AiModelRoles {
@@ -391,6 +394,7 @@ struct AiResolvedBackend {
   AiProviderCaps caps;
   int max_tokens = 0;
   int timeout_ms = 0;
+  int stall_timeout_ms = 0;
   std::string role;
   // true = el valor viene de ai.roles.<rol>.max_tokens, no heredado. Los sitios
   // de llamada fijan su propio max_tokens por fase, así que sin esta marca un
@@ -446,6 +450,9 @@ inline AiResolvedBackend ai_resolve_role_backend(const AiSettings& settings,
     }
     if (override_role->timeout_ms > 0) {
       out.timeout_ms = override_role->timeout_ms;
+    }
+    if (override_role->stall_timeout_ms > 0) {
+      out.stall_timeout_ms = override_role->stall_timeout_ms;
     }
   }
   // Caps explícitas del config solo valen para el endpoint de ai.level2; si el
