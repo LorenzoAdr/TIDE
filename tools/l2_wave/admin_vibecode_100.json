@@ -492,6 +492,16 @@
           "ya está implementad",
           "ya está en el código",
           "funcionalidad solicitada ya"
+        ],
+        "forbid_denial": [
+          "gutter no existe",
+          "no existe el gutter",
+          "no existe un gutter",
+          "no existe gutter",
+          "no hay gutter",
+          "no hay un gutter",
+          "el gutter no está implementad",
+          "gutter no está implementad"
         ]
       }
     },
@@ -510,6 +520,16 @@
           "ya está implementad",
           "ya está en el código",
           "funcionalidad solicitada ya"
+        ],
+        "forbid_denial": [
+          "gutter no existe",
+          "no existe el gutter",
+          "no existe un gutter",
+          "no existe gutter",
+          "no hay gutter",
+          "no hay un gutter",
+          "el gutter no está implementad",
+          "gutter no está implementad"
         ]
       }
     },
@@ -763,6 +783,16 @@
           "son lo mismo",
           "es lo mismo",
           "ya implementada"
+        ],
+        "forbid_denial": [
+          "gutter no existe",
+          "no existe el gutter",
+          "no existe un gutter",
+          "no existe gutter",
+          "no hay gutter",
+          "no hay un gutter",
+          "el gutter no está implementad",
+          "gutter no está implementad"
         ]
       }
     },
@@ -782,6 +812,16 @@
           "son lo mismo",
           "es lo mismo",
           "ya implementada"
+        ],
+        "forbid_denial": [
+          "gutter no existe",
+          "no existe el gutter",
+          "no existe un gutter",
+          "no existe gutter",
+          "no hay gutter",
+          "no hay un gutter",
+          "el gutter no está implementad",
+          "gutter no está implementad"
         ]
       }
     },
@@ -839,6 +879,16 @@
           "son lo mismo",
           "es lo mismo",
           "ya implementada"
+        ],
+        "forbid_denial": [
+          "gutter no existe",
+          "no existe el gutter",
+          "no existe un gutter",
+          "no existe gutter",
+          "no hay gutter",
+          "no hay un gutter",
+          "el gutter no está implementad",
+          "gutter no está implementad"
         ]
       }
     },
@@ -948,7 +998,17 @@
       "trap": "false_friend",
       "gold": {
         "expect_atomize_or_multi_explore": true,
-        "expect_not_already_implemented": true
+        "expect_not_already_implemented": true,
+        "forbid_denial": [
+          "gutter no existe",
+          "no existe el gutter",
+          "no existe un gutter",
+          "no existe gutter",
+          "no hay gutter",
+          "no hay un gutter",
+          "el gutter no está implementad",
+          "gutter no está implementad"
+        ]
       }
     },
     {
@@ -990,7 +1050,17 @@
       "trap": "false_friend",
       "gold": {
         "expect_atomize_or_multi_explore": true,
-        "expect_not_already_implemented": true
+        "expect_not_already_implemented": true,
+        "forbid_denial": [
+          "gutter no existe",
+          "no existe el gutter",
+          "no existe un gutter",
+          "no existe gutter",
+          "no hay gutter",
+          "no hay un gutter",
+          "el gutter no está implementad",
+          "gutter no está implementad"
+        ]
       }
     },
     {
@@ -1058,7 +1128,18 @@
       "user_skill": "cryptic",
       "style": "cryptic",
       "trap": "none",
-      "gold": {}
+      "gold": {
+        "forbid_denial": [
+          "gutter no existe",
+          "no existe el gutter",
+          "no existe un gutter",
+          "no existe gutter",
+          "no hay gutter",
+          "no hay un gutter",
+          "el gutter no está implementad",
+          "gutter no está implementad"
+        ]
+      }
     },
     {
       "id": "070_cryptic",
@@ -1113,7 +1194,18 @@
       "user_skill": "cryptic",
       "style": "cryptic",
       "trap": "none",
-      "gold": {}
+      "gold": {
+        "forbid_denial": [
+          "gutter no existe",
+          "no existe el gutter",
+          "no existe un gutter",
+          "no existe gutter",
+          "no hay gutter",
+          "no hay un gutter",
+          "el gutter no está implementad",
+          "gutter no está implementad"
+        ]
+      }
     },
     {
       "id": "075_cryptic",
