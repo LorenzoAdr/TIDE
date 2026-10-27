@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import signal
 import statistics
 import subprocess
@@ -222,6 +223,12 @@ def _dump(path: Path, blob: Any) -> None:
 
 def run_one(cli: Path, out_dir: Path, case: dict, arm: str, timeout_s: int,
             env: dict[str, str]) -> dict:
+    # Un run que se cortó deja sus `turns/N.json` detrás. Al reanudar, el
+    # binario arranca con estado limpio pero no borra el directorio, así que
+    # los turnos viejos sobrevivirían y `partial_summary` leería el turno de
+    # otro intento. Cada run empieza en un directorio vacío.
+    if out_dir.exists():
+        shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         str(cli), "admin-run",
