@@ -576,10 +576,17 @@ seguir.
 > El producto no estaba afectado: `l2_admin.cpp` ya usa
 > `error_handler_t::replace`.
 >
-> Pendiente, no bloqueante: un timeout del transporte (300 s) es reintentable,
-> así que una llamada atascada se come 15 minutos en silencio. En un IDE eso
-> es mal trato al usuario. No se tocó durante la tirada para no cambiar lo que
-> se estaba midiendo.
+> **Arreglado tras la tirada** (`acd050f`): un timeout del transporte era
+> reintentable con el presupuesto entero por intento, así que una llamada
+> atascada se comía 3×300 s en silencio. Ahora `timeout_ms` acota la **llamada
+> completa** y cada intento recibe lo que queda — un fallo rápido sigue
+> reintentándose, uno que agotó el presupuesto ya no. Más un reloj de silencio
+> (`stall_timeout_ms`, 60 s, configurable por rol) que corta un stream que
+> arrancó y se quedó mudo, contando desde el primer byte porque antes de él el
+> servidor está procesando el prompt. Solo en el transporte de socket: `curl`
+> únicamente sabe `--speed-time`, que abortaría un primer byte lento.
+>
+> No se tocó *durante* la tirada, para no cambiar lo que se estaba midiendo.
 
 | Suite | Contenido | Objetivo de tiempo | Cuándo |
 |---|---|---|---|
