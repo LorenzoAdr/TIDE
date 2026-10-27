@@ -134,7 +134,10 @@ def partial_summary(out_dir: Path, err: str | None) -> dict | None:
         st = json.loads(state_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
-    turns = sorted(admin_dir.glob("turns/*.json"))
+    # Orden numérico: por nombre, turns/10.json va antes que turns/2.json y el
+    # "último turno" sería el equivocado en cuanto un run pasa de nueve.
+    turns = sorted(admin_dir.glob("turns/*.json"),
+                   key=lambda q: (len(q.stem), q.stem))
     last_do = last_why = ""
     if turns:
         try:
@@ -195,6 +198,28 @@ def partial_summary(out_dir: Path, err: str | None) -> dict | None:
     }
 
 
+def _as_text(blob: Any) -> str:
+    """`TimeoutExpired` entrega la salida SIN decodificar aunque el run fuese
+    `text=True`. Escribirla tal cual lanzaba `TypeError` y mataba la suite
+    entera en el primer timeout: una noche de cola perdida por el primer corte.
+    """
+    if blob is None:
+        return ""
+    if isinstance(blob, (bytes, bytearray)):
+        return bytes(blob).decode("utf-8", "replace")
+    return str(blob)
+
+
+def _dump(path: Path, blob: Any) -> None:
+    text = _as_text(blob)
+    if not text:
+        return
+    try:
+        path.write_text(text, encoding="utf-8", errors="replace")
+    except OSError:
+        pass  # guardar la traza nunca vale un run
+
+
 def run_one(cli: Path, out_dir: Path, case: dict, arm: str, timeout_s: int,
             env: dict[str, str]) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -210,14 +235,17 @@ def run_one(cli: Path, out_dir: Path, case: dict, arm: str, timeout_s: int,
     try:
         proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
                               timeout=timeout_s, env=env)
-        (out_dir / "stdout.txt").write_text(proc.stdout, encoding="utf-8")
-        if proc.stderr:
-            (out_dir / "stderr.txt").write_text(proc.stderr, encoding="utf-8")
+        _dump(out_dir / "stdout.txt", proc.stdout)
+        _dump(out_dir / "stderr.txt", proc.stderr)
         rc = proc.returncode
     except subprocess.TimeoutExpired as ex:
         err = f"timeout_{timeout_s}s"
         rc = -9
-        (out_dir / "stdout.txt").write_text(ex.stdout or "", encoding="utf-8")
+        _dump(out_dir / "stdout.txt", ex.stdout)
+        _dump(out_dir / "stderr.txt", ex.stderr)
+    except OSError as ex:
+        err = f"lanzamiento_fallido: {ex}"
+        rc = -1
     wall = round(time.monotonic() - t0, 1)
 
     summary = None
@@ -351,7 +379,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--cli", type=Path, default=ROOT / "build/l2_harness_cli")
     ap.add_argument("--budget-hours", type=float, default=10.0)
-    ap.add_argument("--case-timeout", type=int, default=900)
+    # Medido: un caso duro son ~750 s (99% tiempo de modelo). Con el tope en
+    # 900 s se cortaban runs sanos; 1500 s solo caza al que de verdad se cuelga.
+    ap.add_argument("--case-timeout", type=int, default=1500)
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--nontrap-sample", type=int, default=20)
     ap.add_argument("--arms", default="on,off")
@@ -436,14 +466,18 @@ def main() -> int:
     for src in (agents, memory):
         if src.exists():
             (ctx / src.name).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    sys.stderr.write(f"[trap-suite] {len(queue)} runs en cola · presupuesto "
-                     f"{args.budget_hours} h · salida {out}\n")
+    # La cola es una lista de prioridades, no una promesa: a ~750 s por run
+    # entran unos pocos. Decir cuántos evita leer "352 en cola" como "352 runs".
+    fits = int(args.budget_hours * 3600 / 700)
+    sys.stderr.write(f"[trap-suite] {len(queue)} runs en cola, ~{fits} caben en "
+                     f"{args.budget_hours} h (≈700 s/run) · tope por run "
+                     f"{args.case_timeout}s · salida {out}\n")
 
     env = dict(os.environ)
     env["TUIDE_ROOT"] = str(ROOT)
     budget_s = args.budget_hours * 3600.0
     t_start = time.monotonic()
-    est = 180.0  # estimación inicial por run; se ajusta con lo medido
+    est = 700.0  # medido ~750 s/run; se reajusta con la media de los últimos 12
     # Si el host muere a las 3 de la mañana, cada run siguiente falla en
     # segundos y la cola se consumiría entera con filas inútiles. Cinco fallos
     # rápidos seguidos = algo se cayó: parar y decirlo.
@@ -459,7 +493,16 @@ def main() -> int:
             break
         case = by_id[case_id]
         run_dir = runs_dir / f"{case_id}_{arm}_r{rep}"
-        row = run_one(args.cli, run_dir, case, arm, args.case_timeout, env)
+        try:
+            row = run_one(args.cli, run_dir, case, arm, args.case_timeout, env)
+        except Exception as ex:  # noqa: BLE001
+            # Una noche entera se perdió porque una excepción de un run salía
+            # hasta `main`. Ningún run puede volver a tumbar la cola.
+            sys.stderr.write(f"[trap-suite] {case_id}/{arm}: run descartado "
+                             f"({type(ex).__name__}: {ex})\n")
+            row = {"id": case_id, "arm": arm, "terminal_code": "T_crash",
+                   "err": f"runner_{type(ex).__name__}", "wall_sec_measured": 0.0,
+                   "ok": False, "lie": False, "run_dir": run_dir.name}
         row["rep"] = rep
         rows.append(row)
         with jsonl.open("a", encoding="utf-8") as fh:
