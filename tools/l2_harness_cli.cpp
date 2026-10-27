@@ -10136,7 +10136,7 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
                            {"spawns", res.spawns},
                            {"roles", std::move(calls)}};
     std::ofstream out(fs::path(out_dir) / "llm_calls.json");
-    out << summary.dump(2) << '\n';
+    out << json_dump_safe(summary) << '\n';
   }
   {
     // `summary.json`: exactamente lo que admin_session_metrics.score_session
@@ -10212,15 +10212,18 @@ int run_admin_run(const std::string& workspace_root, int argc, char** argv) {
           {"max_turns_hit", !st.done && !st.clarify},
           {"omit_gate", omit_any},
           {"llm_calls", std::move(llm)}}}};
+    // `dump` lanza type_error.316 si una cadena quedó cortada a mitad de un
+    // carácter multibyte, y en admin-run eso mataba el proceso DESPUÉS de
+    // haber producido la respuesta: run perdido y cero diagnóstico.
     std::ofstream sout(fs::path(out_dir) / "summary.json");
-    sout << summary.dump(2) << '\n';
+    sout << json_dump_safe(summary) << '\n';
   }
   const auto state_json = tuide::admin_state_to_json(st);
   {
     std::ofstream out(fs::path(out_dir) / "admin.json");
-    out << state_json.dump(2) << '\n';
+    out << json_dump_safe(state_json) << '\n';
   }
-  std::cout << state_json.dump(2) << '\n';
+  std::cout << json_dump_safe(state_json) << '\n';
   return res.ok ? 0 : 1;
 }
 
