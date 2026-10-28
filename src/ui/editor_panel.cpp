@@ -5791,7 +5791,8 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event_is_ctrl_v(event) || event == Event::Insert) {
-    paste_text(buffer, read_clipboard_for_paste());
+    // Pass empty string to allow paste_at_primary to read multi-text clipboard
+    paste_at_primary(buffer, "");
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     mark_paste_input();

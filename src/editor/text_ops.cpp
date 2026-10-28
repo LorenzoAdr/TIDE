@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include "editor/bracket_match.hpp"
+#include "editor/clipboard.hpp"
 #include "editor/editor_buffer_source.hpp"
 #include "editor/editor_folds.hpp"
 #include "editor/indent_guides.hpp"
@@ -1258,12 +1259,39 @@ void newline(EditorBuffer* buffer, bool smart_indent) {
 }
 
 void paste_at_primary(EditorBuffer* buffer, const std::string& text) {
-  if (text.empty()) {
-    return;
+  // Get the texts to paste: use provided text or read from multi-text clipboard
+  std::vector<std::string> texts_to_paste;
+  
+  if (!text.empty()) {
+    // Explicit text provided (legacy behavior or from system clipboard)
+    texts_to_paste = {text};
+  } else {
+    // Read from multi-text clipboard
+    texts_to_paste = read_all_clipboard_texts();
+    // If clipboard is empty, nothing to paste
+    if (texts_to_paste.empty() || (texts_to_paste.size() == 1 && texts_to_paste[0].empty())) {
+      return;
+    }
   }
+  
   commit_undo_group(buffer);
   push_undo(buffer);
   clamp_all_cursors(buffer);
+  
+  // For multi-cursor paste with matching texts, save positions BEFORE deleting selections
+  // to preserve the mapping between cursors and their corresponding texts
+  std::vector<std::pair<CursorPos, size_t>> positions_with_index;
+  bool multi_text_paste = (texts_to_paste.size() == static_cast<size_t>(buffer->cursors.size()) && 
+                           texts_to_paste.size() > 1);
+  
+  if (multi_text_paste) {
+    // Save positions with their original indices before any modifications
+    positions_with_index.reserve(buffer->cursors.size());
+    for (size_t i = 0; i < buffer->cursors.size(); ++i) {
+      positions_with_index.push_back(std::make_pair(buffer->cursors[i].head, i));
+    }
+  }
+  
   if (any_cursor_has_selection(*buffer)) {
     delete_all_selections(buffer);
   } else {
@@ -1272,21 +1300,51 @@ void paste_at_primary(EditorBuffer* buffer, const std::string& text) {
     }
   }
 
-  std::vector<CursorPos> positions;
-  positions.reserve(buffer->cursors.size());
-  for (const auto& cursor : buffer->cursors) {
-    positions.push_back(cursor.head);
-  }
-  std::sort(positions.begin(), positions.end(), [](const CursorPos& a, const CursorPos& b) {
-    if (a.line != b.line) {
-      return a.line > b.line;
+  // Paste: if we have multiple texts matching the number of cursors, paste each text at its corresponding cursor
+  // Otherwise, paste the same text at all cursors (legacy behavior)
+  if (multi_text_paste) {
+    // Multi-cursor paste: each cursor gets its own text
+    // To avoid position shifts affecting subsequent pastes, process from bottom-right to top-left
+    // Sort by position (bottom-to-top, right-to-left) to preserve positions
+    std::sort(positions_with_index.begin(), positions_with_index.end(),
+              [](const std::pair<CursorPos, size_t>& a, const std::pair<CursorPos, size_t>& b) {
+                if (a.first.line != b.first.line) {
+                  return a.first.line > b.first.line;
+                }
+                return a.first.col > b.first.col;
+              });
+    
+    // Paste each text at its corresponding cursor position
+    for (const auto& item : positions_with_index) {
+      const CursorPos& pos = item.first;
+      size_t text_index = item.second;
+      const std::string& paste_text = texts_to_paste[text_index];
+      if (!paste_text.empty()) {
+        paste_string_at(buffer, pos.line, pos.col, paste_text);
+      }
     }
-    return a.col > b.col;
-  });
-
-  for (const auto& pos : positions) {
-    paste_string_at(buffer, pos.line, pos.col, text);
+  } else {
+    // Legacy behavior: paste the same text (first text) at all cursors
+    const std::string& paste_text = texts_to_paste.empty() ? "" : texts_to_paste[0];
+    if (!paste_text.empty()) {
+      std::vector<CursorPos> positions;
+      positions.reserve(buffer->cursors.size());
+      for (const auto& cursor : buffer->cursors) {
+        positions.push_back(cursor.head);
+      }
+      // Sort to avoid position shifts
+      std::sort(positions.begin(), positions.end(), [](const CursorPos& a, const CursorPos& b) {
+        if (a.line != b.line) {
+          return a.line > b.line;
+        }
+        return a.col > b.col;
+      });
+      for (const auto& pos : positions) {
+        paste_string_at(buffer, pos.line, pos.col, paste_text);
+      }
+    }
   }
+  
   for (auto& cursor : buffer->cursors) {
     cursor.collapse_to_head();
   }
